@@ -55,9 +55,10 @@ export class CertificateChain {
     const tcbHex = report.reportedTcb.toString(16).padStart(16, '0');
     const cacheKey = `VCEK_${report.productName}_${chipHex}_${tcbHex}`;
 
-    // Try to get from cache first (browser localStorage)
+    // Try to get from cache first (browser localStorage only)
     let vcekDer: Uint8Array;
-    if (typeof localStorage !== 'undefined' && typeof localStorage.getItem === 'function') {
+    const isBrowser = typeof window !== 'undefined' && typeof window.localStorage !== 'undefined';
+    if (isBrowser) {
       const cached = localStorage.getItem(cacheKey);
       if (cached) {
         try {
