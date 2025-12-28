@@ -57,7 +57,7 @@ export class CertificateChain {
 
     // Try to get from cache first (browser localStorage)
     let vcekDer: Uint8Array;
-    if (typeof localStorage !== 'undefined') {
+    if (typeof localStorage !== 'undefined' && typeof localStorage.getItem === 'function') {
       const cached = localStorage.getItem(cacheKey);
       if (cached) {
         try {
