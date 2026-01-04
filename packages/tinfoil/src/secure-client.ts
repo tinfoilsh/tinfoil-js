@@ -4,25 +4,30 @@ import { TINFOIL_CONFIG } from "./config.js";
 import { createSecureFetch } from "./secure-fetch.js";
 import { fetchRouter } from "./router.js";
 
+export type TransportMode = 'auto' | 'ehbp' | 'tls';
+
 interface SecureClientOptions {
   baseURL?: string;
   enclaveURL?: string;
   configRepo?: string;
+  transport?: TransportMode;
 }
 
 export class SecureClient {
   private initPromise: Promise<void> | null = null;
   private verificationDocument: VerificationDocument | null = null;
   private _fetch: typeof fetch | null = null;
-  
+
   private baseURL?: string;
   private enclaveURL?: string;
   private readonly configRepo?: string;
+  private readonly transport: TransportMode;
 
   constructor(options: SecureClientOptions = {}) {
     this.baseURL = options.baseURL;
     this.enclaveURL = options.enclaveURL;
     this.configRepo = options.configRepo || TINFOIL_CONFIG.INFERENCE_PROXY_REPO;
+    this.transport = options.transport || 'auto';
   }
 
   public async ready(): Promise<void> {
@@ -66,8 +71,22 @@ export class SecureClient {
       // Extract keys from the verification document
       const { hpkePublicKey, tlsPublicKeyFingerprint } = this.verificationDocument.enclaveMeasurement;
 
+      // Determine which keys to use based on transport mode
+      let effectiveHpkeKey: string | undefined;
+      let effectiveTlsFingerprint: string | undefined;
+
+      if (this.transport === 'tls') {
+        effectiveTlsFingerprint = tlsPublicKeyFingerprint;
+      } else if (this.transport === 'ehbp') {
+        effectiveHpkeKey = hpkePublicKey;
+      } else {
+        // 'auto' mode: prefer EHBP if available
+        effectiveHpkeKey = hpkePublicKey;
+        effectiveTlsFingerprint = tlsPublicKeyFingerprint;
+      }
+
       try {
-        this._fetch = createSecureFetch(this.baseURL, this.enclaveURL, hpkePublicKey, tlsPublicKeyFingerprint);
+        this._fetch = createSecureFetch(this.baseURL, this.enclaveURL, effectiveHpkeKey, effectiveTlsFingerprint);
       } catch (transportError) {
         this.verificationDocument.steps.createTransport = {
           status: 'failed',
