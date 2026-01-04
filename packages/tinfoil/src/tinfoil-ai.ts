@@ -11,7 +11,7 @@ import type {
   Moderations,
   Responses,
 } from "openai/resources";
-import { SecureClient } from "./secure-client.js";
+import { SecureClient, type TransportMode } from "./secure-client.js";
 import type { VerificationDocument } from "./verifier.js";
 import { TINFOIL_CONFIG } from "./config.js";
 import { isRealBrowser } from "./env.js";
@@ -46,6 +46,7 @@ interface TinfoilAIOptions {
   baseURL?: string;
   enclaveURL?: string;
   configRepo?: string;
+  transport?: TransportMode;
   [key: string]: any; // Allow other OpenAI client options
 }
 
@@ -90,6 +91,7 @@ export class TinfoilAI {
       baseURL: this.baseURL,
       enclaveURL: this.enclaveURL,
       configRepo: this.configRepo,
+      transport: options.transport,
     });
 
     this.clientPromise = this.createOpenAIClient(openAIOptions);
