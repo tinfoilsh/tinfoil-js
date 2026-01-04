@@ -17,6 +17,8 @@ export class SecureClient {
   private initPromise: Promise<void> | null = null;
   private verificationDocument: VerificationDocument | null = null;
   private _fetch: typeof fetch | null = null;
+  private _didFallbackToTls = false;
+  private _tlsPublicKeyFingerprint?: string;
 
   private baseURL?: string;
   private enclaveURL?: string;
@@ -71,22 +73,8 @@ export class SecureClient {
       // Extract keys from the verification document
       const { hpkePublicKey, tlsPublicKeyFingerprint } = this.verificationDocument.enclaveMeasurement;
 
-      // Determine which keys to use based on transport mode
-      let effectiveHpkeKey: string | undefined;
-      let effectiveTlsFingerprint: string | undefined;
-
-      if (this.transport === 'tls') {
-        effectiveTlsFingerprint = tlsPublicKeyFingerprint;
-      } else if (this.transport === 'ehbp') {
-        effectiveHpkeKey = hpkePublicKey;
-      } else {
-        // 'auto' mode: prefer EHBP if available
-        effectiveHpkeKey = hpkePublicKey;
-        effectiveTlsFingerprint = tlsPublicKeyFingerprint;
-      }
-
       try {
-        this._fetch = createSecureFetch(this.baseURL, this.enclaveURL, effectiveHpkeKey, effectiveTlsFingerprint);
+        this._fetch = this.createTransport(hpkePublicKey, tlsPublicKeyFingerprint);
       } catch (transportError) {
         this.verificationDocument.steps.createTransport = {
           status: 'failed',
@@ -145,6 +133,27 @@ export class SecureClient {
     return this.baseURL;
   }
 
+  private createTransport(hpkePublicKey?: string, tlsPublicKeyFingerprint?: string): typeof fetch {
+    if (this.transport === 'tls') {
+      return createSecureFetch(this.baseURL!, this.enclaveURL!, undefined, tlsPublicKeyFingerprint);
+    }
+
+    if (this.transport === 'ehbp') {
+      return createSecureFetch(this.baseURL!, this.enclaveURL!, hpkePublicKey, undefined);
+    }
+
+    // 'auto' mode: use EHBP, store TLS fingerprint for lazy fallback if needed
+    this._tlsPublicKeyFingerprint = tlsPublicKeyFingerprint;
+    return createSecureFetch(this.baseURL!, this.enclaveURL!, hpkePublicKey, undefined);
+  }
+
+  private isNotSupportedError(error: unknown): boolean {
+    return error instanceof Error &&
+      (error.name === 'NotSupportedError' ||
+       error.message.includes('NotSupportedError') ||
+       error.message.includes('unsupported'));
+  }
+
   get fetch(): typeof fetch {
     return async (input: RequestInfo | URL, init?: RequestInit) => {
       await this.ready();
@@ -152,6 +161,13 @@ export class SecureClient {
       try {
         return await this._fetch!(input, init);
       } catch (error) {
+        // In 'auto' mode, fall back to TLS on NotSupportedError (e.g., X25519 not available)
+        if (this.transport === 'auto' && !this._didFallbackToTls && this._tlsPublicKeyFingerprint && this.isNotSupportedError(error)) {
+          this._didFallbackToTls = true;
+          this._fetch = createSecureFetch(this.baseURL!, this.enclaveURL!, undefined, this._tlsPublicKeyFingerprint);
+          return await this._fetch(input, init);
+        }
+
         if (this.verificationDocument) {
           const errorMessage = (error as Error).message;
 
