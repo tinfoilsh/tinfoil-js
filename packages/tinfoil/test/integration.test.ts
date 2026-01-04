@@ -174,4 +174,85 @@ describe("Examples Integration Tests", () => {
       expect(transcription.text.trim().startsWith("I want to start off by saying")).toBe(true);
     });
   });
+
+  describe("Transport Mode Options", () => {
+    it.skipIf(!RUN_INTEGRATION)("should work with transport: 'auto' (default)", async () => {
+      const { SecureClient } = await import("../src/secure-client");
+
+      const client = new SecureClient({ transport: 'auto' });
+      await client.ready();
+
+      const response = await client.fetch("/v1/chat/completions", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          model: "gpt-oss-120b-free",
+          messages: [{ role: "user", content: "Hello!" }],
+        }),
+      });
+
+      expect(response.status).toBe(200);
+      const body = await response.json();
+      expect(body.choices.length).toBeGreaterThan(0);
+    });
+
+    it.skipIf(!RUN_INTEGRATION)("should work with transport: 'ehbp'", async () => {
+      const { SecureClient } = await import("../src/secure-client");
+
+      const client = new SecureClient({ transport: 'ehbp' });
+      await client.ready();
+
+      const response = await client.fetch("/v1/chat/completions", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          model: "gpt-oss-120b-free",
+          messages: [{ role: "user", content: "Hello!" }],
+        }),
+      });
+
+      expect(response.status).toBe(200);
+      const body = await response.json();
+      expect(body.choices.length).toBeGreaterThan(0);
+    });
+
+    it.skipIf(!RUN_INTEGRATION)("should work with transport: 'tls'", async () => {
+      const { SecureClient } = await import("../src/secure-client");
+
+      const client = new SecureClient({ transport: 'tls' });
+      await client.ready();
+
+      const response = await client.fetch("/v1/chat/completions", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          model: "gpt-oss-120b-free",
+          messages: [{ role: "user", content: "Hello!" }],
+        }),
+      });
+
+      expect(response.status).toBe(200);
+      const body = await response.json();
+      expect(body.choices.length).toBeGreaterThan(0);
+    });
+
+    it.skipIf(!RUN_INTEGRATION)("TinfoilAI should work with transport: 'tls'", async () => {
+      const { TinfoilAI } = await import("../src/tinfoil-ai");
+
+      const client = new TinfoilAI({
+        apiKey: "tinfoil",
+        transport: 'tls',
+      });
+
+      await client.ready();
+
+      const completion = await client.chat.completions.create({
+        messages: [{ role: "user", content: "Hello!" }],
+        model: "gpt-oss-120b-free",
+      });
+
+      expect(completion.choices.length).toBeGreaterThan(0);
+      expect(completion.choices[0].message.content?.length).toBeGreaterThan(0);
+    });
+  });
 });
