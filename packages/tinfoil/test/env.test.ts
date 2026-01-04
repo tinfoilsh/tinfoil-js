@@ -32,6 +32,13 @@ describe('isRealBrowser', () => {
       vi.stubGlobal('window', undefined);
       expect(isRealBrowser()).toBe(false);
     });
+
+    it('should return false for Electron (has node + window/document)', () => {
+      vi.stubGlobal('process', { versions: { node: '20.0.0', electron: '28.0.0' } });
+      vi.stubGlobal('window', { document: {} });
+      vi.stubGlobal('navigator', { userAgent: 'Mozilla/5.0 (Macintosh) Electron/28.0.0' });
+      expect(isRealBrowser()).toBe(false);
+    });
   });
 
   describe('edge runtimes', () => {
