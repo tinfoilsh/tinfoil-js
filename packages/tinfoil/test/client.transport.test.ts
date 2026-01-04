@@ -68,12 +68,13 @@ describe("Secure transport integration", () => {
     await client.ready();
 
     expect(verifyMock).toHaveBeenCalledTimes(1);
+    // In 'auto' mode, only EHBP transport is created initially (TLS created lazily on fallback)
     expect(createSecureFetchMock).toHaveBeenCalledTimes(1);
     expect(createSecureFetchMock).toHaveBeenCalledWith(
       testBaseURL,
       testEnclaveURL,
       "mock-hpke-public-key",
-      "fingerprint"
+      undefined
     );
   });
 
