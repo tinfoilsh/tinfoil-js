@@ -25,6 +25,11 @@ function createCheckServerIdentity(expectedFingerprintHex: string): (host: strin
 async function createBunPinnedTlsFetch(baseURL: string, expectedFingerprintHex: string): Promise<typeof fetch> {
   const checkServerIdentity = createCheckServerIdentity(expectedFingerprintHex);
 
+  const parsedBase = new URL(baseURL);
+  if (parsedBase.protocol !== "https:") {
+    throw new Error(`HTTP connections are not allowed. Use HTTPS. URL: ${baseURL}`);
+  }
+
   return (async (input: RequestInfo | URL, init?: RequestInit) => {
     const makeURL = (value: RequestInfo | URL): URL => {
       if (typeof value === "string") return new URL(value, baseURL);
@@ -39,6 +44,7 @@ async function createBunPinnedTlsFetch(baseURL: string, expectedFingerprintHex: 
 
     const fetchInit: RequestInit & { tls?: { checkServerIdentity: typeof checkServerIdentity } } = {
       ...init,
+      // @ts-ignore - Bun-specific option
       tls: { checkServerIdentity },
     };
 
