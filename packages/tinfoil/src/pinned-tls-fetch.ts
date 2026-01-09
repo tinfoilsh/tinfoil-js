@@ -1,10 +1,59 @@
-import https from "https";
-import tls, { checkServerIdentity as tlsCheckServerIdentity } from "tls";
 import { X509Certificate, createHash } from "crypto";
-import { Readable } from "stream";
-import { ReadableStream as NodeReadableStream } from "stream/web";
 
-export function createPinnedTlsFetch(baseURL: string, expectedFingerprintHex: string): typeof fetch {
+function isBun(): boolean {
+  return typeof process !== "undefined" &&
+    (process as any).versions &&
+    (process as any).versions.bun;
+}
+
+function createCheckServerIdentity(expectedFingerprintHex: string): (host: string, cert: any) => Error | undefined {
+  return (host: string, cert: any): Error | undefined => {
+    const raw = cert?.raw as Buffer | undefined;
+    if (!raw) {
+      return new Error("Certificate raw bytes are unavailable for pinning");
+    }
+    const x509 = new X509Certificate(raw);
+    const publicKeyDer = x509.publicKey.export({ type: "spki", format: "der" });
+    const fp = createHash("sha256").update(publicKeyDer).digest("hex");
+    if (fp !== expectedFingerprintHex) {
+      return new Error(`Certificate public key fingerprint mismatch. Expected: ${expectedFingerprintHex}, Got: ${fp}`);
+    }
+    return undefined;
+  };
+}
+
+async function createBunPinnedTlsFetch(baseURL: string, expectedFingerprintHex: string): Promise<typeof fetch> {
+  const checkServerIdentity = createCheckServerIdentity(expectedFingerprintHex);
+
+  return (async (input: RequestInfo | URL, init?: RequestInit) => {
+    const makeURL = (value: RequestInfo | URL): URL => {
+      if (typeof value === "string") return new URL(value, baseURL);
+      if (value instanceof URL) return value;
+      return new URL((value as Request).url, baseURL);
+    };
+
+    const url = makeURL(input);
+    if (url.protocol !== "https:") {
+      throw new Error(`HTTP connections are not allowed. Use HTTPS. URL: ${url.toString()}`);
+    }
+
+    const fetchInit: RequestInit & { tls?: { checkServerIdentity: typeof checkServerIdentity } } = {
+      ...init,
+      tls: { checkServerIdentity },
+    };
+
+    return fetch(url.toString(), fetchInit);
+  }) as typeof fetch;
+}
+
+async function createNodePinnedTlsFetch(baseURL: string, expectedFingerprintHex: string): Promise<typeof fetch> {
+  const https = await import("https");
+  const tls = await import("tls");
+  const { Readable } = await import("stream");
+  const { ReadableStream: NodeReadableStream } = await import("stream/web");
+
+  const checkServerIdentity = createCheckServerIdentity(expectedFingerprintHex);
+
   return (async (input: RequestInfo | URL, init?: RequestInit) => {
     // Normalize URL with base URL support
     const makeURL = (value: RequestInfo | URL): URL => {
@@ -37,7 +86,7 @@ export function createPinnedTlsFetch(baseURL: string, expectedFingerprintHex: st
     }
     // Convert web streams to Node streams if needed
     if (body && typeof (body as any).getReader === "function") {
-      body = Readable.fromWeb(body as unknown as NodeReadableStream);
+      body = Readable.fromWeb(body as unknown as InstanceType<typeof NodeReadableStream>);
     }
     if (body instanceof ArrayBuffer) {
       body = Buffer.from(body);
@@ -46,25 +95,17 @@ export function createPinnedTlsFetch(baseURL: string, expectedFingerprintHex: st
       body = Buffer.from(body.buffer, body.byteOffset, body.byteLength);
     }
 
-    const requestOptions: https.RequestOptions & tls.ConnectionOptions = {
+    const requestOptions: import("https").RequestOptions & import("tls").ConnectionOptions = {
       protocol: url.protocol,
       hostname: url.hostname,
       port: url.port ? Number(url.port) : 443,
       path: `${url.pathname}${url.search}`,
       method,
       headers: headerObj,
-      checkServerIdentity: (host, cert): Error | undefined => {
-        const raw = (cert as any).raw as Buffer | undefined;
-        if (!raw) {
-          return new Error("Certificate raw bytes are unavailable for pinning");
-        }
-        const x509 = new X509Certificate(raw);
-        const publicKeyDer = x509.publicKey.export({ type: "spki", format: "der" });
-        const fp = createHash("sha256").update(publicKeyDer).digest("hex");
-        if (fp !== expectedFingerprintHex) {
-          return new Error(`Certificate public key fingerprint mismatch. Expected: ${expectedFingerprintHex}, Got: ${fp}`);
-        }
-        return tlsCheckServerIdentity(host, cert);
+      checkServerIdentity: (host, cert) => {
+        const result = checkServerIdentity(host, cert);
+        if (result) return result;
+        return tls.checkServerIdentity(host, cert);
       },
     };
 
@@ -109,4 +150,11 @@ export function createPinnedTlsFetch(baseURL: string, expectedFingerprintHex: st
       headers: responseHeaders,
     });
   }) as typeof fetch;
+}
+
+export async function createPinnedTlsFetch(baseURL: string, expectedFingerprintHex: string): Promise<typeof fetch> {
+  if (isBun()) {
+    return createBunPinnedTlsFetch(baseURL, expectedFingerprintHex);
+  }
+  return createNodePinnedTlsFetch(baseURL, expectedFingerprintHex);
 }

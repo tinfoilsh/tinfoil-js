@@ -74,7 +74,7 @@ export class SecureClient {
       const { hpkePublicKey, tlsPublicKeyFingerprint } = this.verificationDocument.enclaveMeasurement;
 
       try {
-        this._fetch = this.createTransport(hpkePublicKey, tlsPublicKeyFingerprint);
+        this._fetch = await this.createTransport(hpkePublicKey, tlsPublicKeyFingerprint);
       } catch (transportError) {
         this.verificationDocument.steps.createTransport = {
           status: 'failed',
@@ -133,18 +133,18 @@ export class SecureClient {
     return this.baseURL;
   }
 
-  private createTransport(hpkePublicKey?: string, tlsPublicKeyFingerprint?: string): typeof fetch {
+  private async createTransport(hpkePublicKey?: string, tlsPublicKeyFingerprint?: string): Promise<typeof fetch> {
     if (this.transport === 'tls') {
-      return createSecureFetch(this.baseURL!, this.enclaveURL!, undefined, tlsPublicKeyFingerprint);
+      return await createSecureFetch(this.baseURL!, this.enclaveURL!, undefined, tlsPublicKeyFingerprint);
     }
 
     if (this.transport === 'ehbp') {
-      return createSecureFetch(this.baseURL!, this.enclaveURL!, hpkePublicKey, undefined);
+      return await createSecureFetch(this.baseURL!, this.enclaveURL!, hpkePublicKey, undefined);
     }
 
     // 'auto' mode: use EHBP, store TLS fingerprint for lazy fallback if needed
     this._tlsPublicKeyFingerprint = tlsPublicKeyFingerprint;
-    return createSecureFetch(this.baseURL!, this.enclaveURL!, hpkePublicKey, undefined);
+    return await createSecureFetch(this.baseURL!, this.enclaveURL!, hpkePublicKey, undefined);
   }
 
   private isNotSupportedError(error: unknown): boolean {
@@ -164,7 +164,7 @@ export class SecureClient {
         // In 'auto' mode, fall back to TLS on NotSupportedError (e.g., X25519 not available)
         if (this.transport === 'auto' && !this._didFallbackToTls && this._tlsPublicKeyFingerprint && this.isNotSupportedError(error)) {
           this._didFallbackToTls = true;
-          this._fetch = createSecureFetch(this.baseURL!, this.enclaveURL!, undefined, this._tlsPublicKeyFingerprint);
+          this._fetch = await createSecureFetch(this.baseURL!, this.enclaveURL!, undefined, this._tlsPublicKeyFingerprint);
           return await this._fetch(input, init);
         }
 
