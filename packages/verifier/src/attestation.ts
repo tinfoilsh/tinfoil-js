@@ -132,12 +132,19 @@ function base64ToBytes(base64: string): Uint8Array {
 }
 
 async function decompressGzip(data: Uint8Array): Promise<Uint8Array> {
-  const stream = new Response(data.buffer as ArrayBuffer).body;
-  if (!stream) {
-    throw new Error('Failed to create stream from data');
+  // Use DecompressionStream if available (browsers, Node.js 18+)
+  if (typeof DecompressionStream !== 'undefined') {
+    const stream = new Response(data.buffer as ArrayBuffer).body;
+    if (!stream) {
+      throw new Error('Failed to create stream from data');
+    }
+
+    const decompressedStream = stream.pipeThrough(new DecompressionStream('gzip'));
+    const decompressed = await new Response(decompressedStream).arrayBuffer();
+    return new Uint8Array(decompressed);
   }
 
-  const decompressedStream = stream.pipeThrough(new DecompressionStream('gzip'));
-  const decompressed = await new Response(decompressedStream).arrayBuffer();
-  return new Uint8Array(decompressed);
+  // Fallback to Node.js/Bun zlib
+  const { gunzipSync } = await import('zlib');
+  return new Uint8Array(gunzipSync(data));
 }
