@@ -12,7 +12,7 @@ Secure OpenAI-compatible client for the Tinfoil API. This SDK verifies enclave a
 npm install tinfoil
 ```
 
-Requires Node 20+. Works in browsers with ES2022 support.
+Requires Node 20+. Works in browsers with ES2022 support. Bun is supported via TLS pinning fallback (see [Bun Support](#bun-support)).
 
 ## Quick Start
 
@@ -128,6 +128,30 @@ npm run clean
 - [TinfoilAI SDK Documentation](https://docs.tinfoil.sh/sdk/node-sdk)
 - [OpenAI Client Reference](https://github.com/openai/openai-node) (API is compatible)
 - [Examples](https://github.com/tinfoilsh/tinfoil-js/blob/main/packages/tinfoil/examples/README.md)
+
+## Bun Support
+
+Bun is supported with automatic fallback to TLS certificate pinning. Since Bun doesn't yet support X25519 in WebCrypto's `crypto.subtle` API, the EHBP encrypted transport is not available. Instead, the SDK automatically falls back to TLS pinning, which still provides verified secure connections to the enclave.
+
+```typescript
+import { TinfoilAI } from "tinfoil";
+
+const client = new TinfoilAI({
+  apiKey: "<YOUR_API_KEY>",
+});
+
+// Works the same as Node.js - TLS fallback is automatic
+const completion = await client.chat.completions.create({
+  messages: [{ role: "user", content: "Hello!" }],
+  model: "llama3-3-70b",
+});
+```
+
+To run the Bun-specific tests:
+
+```bash
+npm run test:bun -w tinfoil
+```
 
 ## Reporting Vulnerabilities
 
