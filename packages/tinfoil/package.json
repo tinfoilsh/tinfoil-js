@@ -52,6 +52,7 @@
     "build": "tsc",
     "test": "vitest run",
     "test:integration": "RUN_TINFOIL_INTEGRATION=true npm test",
+    "test:bun": "bun test ./test/bun-compat.bun.ts",
     "test:browser": "vitest run --config vite.config.browser.ts",
     "test:browser:integration": "vitest run --config vite.config.browser-test.ts",
     "lint": "eslint src/**/*.ts",
