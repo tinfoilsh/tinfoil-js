@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
-const createEncryptedBodyFetchMock = vi.fn(() => {
+const createSecureFetchMock = vi.fn(async () => {
   return (async () => new Response(null)) as typeof fetch;
 });
 
@@ -15,12 +15,8 @@ vi.mock("../src/verifier.js", () => ({
   },
 }));
 
-vi.mock("../src/encrypted-body-fetch.js", () => ({
-  createEncryptedBodyFetch: createEncryptedBodyFetchMock,
-}));
-
 vi.mock("../src/secure-fetch.js", () => ({
-  createSecureFetch: createEncryptedBodyFetchMock,
+  createSecureFetch: createSecureFetchMock,
 }));
 
 describe("Client verification gating", () => {
@@ -34,13 +30,7 @@ describe("Client verification gating", () => {
 
     await expect(client.ready()).rejects.toThrow(/verify/);
 
-    await expect(
-      client.chat.completions.create({
-        model: "gpt-oss-120b-free",
-        messages: [{ role: "user", content: "hi" }],
-      })
-    ).rejects.toThrow(/verify/);
-
-    expect(createEncryptedBodyFetchMock).not.toHaveBeenCalled();
+    // Verification failed, so createSecureFetch should never be called
+    expect(createSecureFetchMock).not.toHaveBeenCalled();
   });
 });

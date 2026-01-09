@@ -33,7 +33,7 @@ const verifyMock = vi.fn(async () => ({
 
 const mockFetch = vi.fn(async () => new Response(JSON.stringify({ message: "success" })));
 const createSecureFetchMock = vi.fn(
-  (_baseURL: string, _enclaveURL: string | undefined, hpkePublicKey: string | undefined) => {
+  async (_baseURL: string, _enclaveURL: string | undefined, hpkePublicKey: string | undefined) => {
     if (hpkePublicKey) {
       return mockFetch;
     }
