@@ -23,7 +23,8 @@ function createCheckServerIdentity(expectedFingerprintHex: string): (host: strin
 }
 
 async function createBunPinnedTlsFetch(baseURL: string, expectedFingerprintHex: string): Promise<typeof fetch> {
-  const checkServerIdentity = createCheckServerIdentity(expectedFingerprintHex);
+  const tls = await import("tls");
+  const fingerprintCheck = createCheckServerIdentity(expectedFingerprintHex);
 
   const parsedBase = new URL(baseURL);
   if (parsedBase.protocol !== "https:") {
@@ -42,10 +43,16 @@ async function createBunPinnedTlsFetch(baseURL: string, expectedFingerprintHex: 
       throw new Error(`HTTP connections are not allowed. Use HTTPS. URL: ${url.toString()}`);
     }
 
-    const fetchInit: RequestInit & { tls?: { checkServerIdentity: typeof checkServerIdentity } } = {
+    const fetchInit: RequestInit & { tls?: { checkServerIdentity: (host: string, cert: any) => Error | undefined } } = {
       ...init,
       // @ts-ignore - Bun-specific option
-      tls: { checkServerIdentity },
+      tls: {
+        checkServerIdentity: (host: string, cert: any) => {
+          const result = fingerprintCheck(host, cert);
+          if (result) return result;
+          return tls.checkServerIdentity(host, cert);
+        },
+      },
     };
 
     return fetch(url.toString(), fetchInit);
