@@ -67,7 +67,7 @@ export class SecureClient {
       const { hpkePublicKey, tlsPublicKeyFingerprint } = this.verificationDocument.enclaveMeasurement;
 
       try {
-        this._fetch = createSecureFetch(this.baseURL, this.enclaveURL, hpkePublicKey, tlsPublicKeyFingerprint);
+        this._fetch = await createSecureFetch(this.baseURL, this.enclaveURL, hpkePublicKey, tlsPublicKeyFingerprint);
       } catch (transportError) {
         this.verificationDocument.steps.createTransport = {
           status: 'failed',

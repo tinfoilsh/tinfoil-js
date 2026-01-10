@@ -1,7 +1,7 @@
-import { createEncryptedBodyFetch } from "./encrypted-body-fetch.js";
-
-export function createSecureFetch(baseURL: string, enclaveURL?: string, hpkePublicKey?: string, tlsPublicKeyFingerprint?: string): typeof fetch {
+export async function createSecureFetch(baseURL: string, enclaveURL?: string, hpkePublicKey?: string, tlsPublicKeyFingerprint?: string): Promise<typeof fetch> {
     if (hpkePublicKey) {
+        // Dynamic import to avoid loading ehbp/hpke at module load time
+        const { createEncryptedBodyFetch } = await import("./encrypted-body-fetch.js");
         return createEncryptedBodyFetch(baseURL, hpkePublicKey, enclaveURL);
     } else {
         throw new Error(
