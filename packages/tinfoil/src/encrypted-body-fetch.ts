@@ -1,11 +1,25 @@
-import type { Transport as EhbpTransport } from "ehbp";
-import { Identity, Transport, PROTOCOL } from "ehbp";
+// Types are imported separately - type imports don't cause runtime loading
+import type { Transport as EhbpTransport, Identity as EhbpIdentity } from "ehbp";
+
+// Lazy-loaded ehbp module - cache the promise to prevent duplicate imports on concurrent calls
+let ehbpModulePromise: Promise<typeof import("ehbp")> | null = null;
+
+function getEhbp(): Promise<typeof import("ehbp")> {
+  if (!ehbpModulePromise) {
+    ehbpModulePromise = import("ehbp").catch((err) => {
+      ehbpModulePromise = null;
+      throw err;
+    });
+  }
+  return ehbpModulePromise;
+}
 
 /**
  * Fetch and parse server identity from the HPKE keys endpoint.
  * Returns the server Identity which can be used to create a Transport.
  */
-export async function getServerIdentity(enclaveURL: string): Promise<Identity> {
+export async function getServerIdentity(enclaveURL: string): Promise<EhbpIdentity> {
+  const { Identity, PROTOCOL } = await getEhbp();
   const keysURL = new URL(PROTOCOL.KEYS_PATH, enclaveURL);
 
   if (keysURL.protocol !== 'https:') {
@@ -143,6 +157,7 @@ export async function getTransportForOrigin(origin: string, keyOrigin: string): 
     }
   }
 
+  const { Transport } = await getEhbp();
   const serverIdentity = await getServerIdentity(keyOrigin);
   const requestHost = new URL(origin).host;
   return new Transport(serverIdentity, requestHost);
