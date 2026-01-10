@@ -1,4 +1,3 @@
-import { createEncryptedBodyFetch } from "./encrypted-body-fetch.js";
 import { fetchRouter } from "./router.js";
 
 interface UnverifiedClientOptions {
@@ -54,6 +53,8 @@ export class UnverifiedClient {
       }
     }
 
+    // Dynamically import to avoid loading ehbp/hpke modules at module load time
+    const { createEncryptedBodyFetch } = await import("./encrypted-body-fetch.js");
     this._fetch = createEncryptedBodyFetch(this.baseURL, undefined, this.enclaveURL);
   }
 
