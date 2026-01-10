@@ -1,9 +1,12 @@
-import { createEncryptedBodyFetch } from "./encrypted-body-fetch.js";
 import { createPinnedTlsFetch } from "./pinned-tls-fetch.js";
 import { isRealBrowser } from "./env.js";
 
 export async function createSecureFetch(baseURL: string, enclaveURL?: string, hpkePublicKey?: string, tlsPublicKeyFingerprint?: string): Promise<typeof fetch> {
   if (hpkePublicKey) {
+    // Dynamically import encrypted-body-fetch to avoid loading ehbp/hpke modules
+    // when using TLS-only mode. This prevents WebCrypto X25519 errors in runtimes
+    // that don't support it (like Bun).
+    const { createEncryptedBodyFetch } = await import("./encrypted-body-fetch.js");
     return createEncryptedBodyFetch(baseURL, hpkePublicKey, enclaveURL);
   }
 
