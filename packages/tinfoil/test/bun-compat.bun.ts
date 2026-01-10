@@ -14,6 +14,38 @@ import { createPinnedTlsFetch } from "../src/pinned-tls-fetch.js";
 
 const isBun = typeof process !== "undefined" && (process as any).versions?.bun;
 
+/**
+ * Test that module imports don't trigger X25519 errors at load time.
+ * This catches regressions where static imports of encrypted-body-fetch
+ * cause immediate failures in Bun (which doesn't support X25519 deriveBits).
+ */
+describe("Module imports (no X25519 errors at load time)", () => {
+  it("should import index.js without X25519 errors", async () => {
+    if (!isBun) return;
+    // This should not throw - encrypted-body-fetch should be lazy loaded
+    const module = await import("../src/index.js");
+    expect(module).toBeDefined();
+  });
+
+  it("should import secure-fetch.js without X25519 errors", async () => {
+    if (!isBun) return;
+    const module = await import("../src/secure-fetch.js");
+    expect(module.createSecureFetch).toBeDefined();
+  });
+
+  it("should import secure-client.js without X25519 errors", async () => {
+    if (!isBun) return;
+    const module = await import("../src/secure-client.js");
+    expect(module).toBeDefined();
+  });
+
+  it("should import unverified-client.js without X25519 errors", async () => {
+    if (!isBun) return;
+    const module = await import("../src/unverified-client.js");
+    expect(module.UnverifiedClient).toBeDefined();
+  });
+});
+
 describe("Bun compatibility", () => {
   beforeAll(() => {
     if (!isBun) {
