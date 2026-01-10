@@ -133,6 +133,8 @@ npm run clean
 
 Bun is supported with automatic fallback to TLS certificate pinning. Since Bun doesn't yet support X25519 in WebCrypto's `crypto.subtle` API, the EHBP encrypted transport is not available. Instead, the SDK automatically falls back to TLS pinning, which still provides verified secure connections to the enclave.
 
+> **Note:** EHBP provides additional features relative to TLS pinning, including [encrypted request proxying](https://docs.tinfoil.sh/guides/proxy-server) which keeps requests encrypted even through infrastructure proxies. These features will become available in Bun once X25519 WebCrypto support is added.
+
 ```typescript
 import { TinfoilAI } from "tinfoil";
 
