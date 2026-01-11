@@ -12,6 +12,8 @@
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
+      "bun": "./dist/index.js",
+      "electron": "./dist/index.js",
       "browser": "./dist/index.browser.js",
       "import": "./dist/index.js",
       "default": "./dist/index.js"
@@ -43,6 +45,8 @@
     },
     "./secure-fetch": {
       "types": "./dist/secure-fetch.d.ts",
+      "bun": "./dist/secure-fetch.js",
+      "electron": "./dist/secure-fetch.js",
       "browser": "./dist/secure-fetch.browser.js",
       "import": "./dist/secure-fetch.js",
       "default": "./dist/secure-fetch.js"
