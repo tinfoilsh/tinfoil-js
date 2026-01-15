@@ -15,9 +15,7 @@ export default defineConfig({
   },
   resolve: {
     alias: {
-      'tinfoil/secure-fetch': resolve(__dirname, 'src/secure-fetch.browser.ts'),
       'tinfoil': resolve(__dirname, 'src/index.browser.ts'),
-      './secure-fetch.js': resolve(__dirname, 'src/secure-fetch.browser.ts'),
     },
   },
 });
