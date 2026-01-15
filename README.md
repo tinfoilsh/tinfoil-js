@@ -89,6 +89,22 @@ console.log(doc.securityVerified);
 console.log(doc.steps); // fetchDigest, verifyCode, verifyEnclave, compareMeasurements
 ```
 
+## How Verification Works
+
+Verification happens **automatically** when you create a `TinfoilAI` or `SecureClient`:
+
+1. **Enclave Attestation**: Fetches AMD SEV-SNP attestation from the enclave
+2. **Code Verification**: Verifies the running code matches the signed release via Sigstore
+3. **Measurement Comparison**: Compares hardware measurements against expected values
+4. **Secure Transport**: Establishes HPKE-encrypted connection (or TLS-pinned for Bun)
+
+The `Verifier` class is for advanced use cases where you want to verify an enclave **before** creating a client, or verify arbitrary enclaves independently.
+
+### Transport Modes
+
+- **HPKE (default)**: End-to-end encrypted via RFC 9180, works through proxies
+- **TLS Pinning**: Fallback for Bun (no X25519 WebCrypto support yet)
+
 ## Project Structure
 
 This is a monorepo with two packages:
@@ -98,7 +114,7 @@ This is a monorepo with two packages:
 | `packages/tinfoil` | Main SDK (published as `tinfoil`) |
 | `packages/verifier` | Attestation verifier (published as `@tinfoilsh/verifier`) |
 
-Browser builds use `*.browser.ts` files selected via conditional exports.
+Browser builds use a separate entry point (`index.browser.ts`) selected via conditional exports. Runtime environment detection handles differences between Node.js, Bun, and browsers.
 
 ## Development
 
@@ -112,6 +128,9 @@ npm run build
 # Run all unit tests
 npm test
 
+# Run all tests (unit + integration + browser)
+npm run test:all
+
 # Run browser unit tests
 npm run test:browser
 
@@ -119,13 +138,17 @@ npm run test:browser
 npm run test:integration
 npm run test:browser:integration
 
+# Run Bun tests
+npm run test:bun -w tinfoil
+npm run test:bun:integration -w tinfoil
+
 # Clean build artifacts
 npm run clean
 ```
 
 ## Documentation
 
-- [TinfoilAI SDK Documentation](https://docs.tinfoil.sh/sdk/node-sdk)
+- [TinfoilAI SDK Documentation](https://docs.tinfoil.sh/sdk/javascript-sdk)
 - [OpenAI Client Reference](https://github.com/openai/openai-node) (API is compatible)
 - [Examples](https://github.com/tinfoilsh/tinfoil-js/blob/main/packages/tinfoil/examples/README.md)
 
