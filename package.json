@@ -10,6 +10,7 @@
     "test:integration": "npm run test:integration -ws --if-present",
     "test:browser": "npm run test:browser -ws --if-present",
     "test:browser:integration": "npm run test:browser:integration -ws --if-present",
+    "test:all": "npm run test && npm run test:integration && npm run test:browser && npm run test:browser:integration",
     "clean": "npm run clean -ws --if-present",
     "sync": "syncpack fix-mismatches",
     "postinstall": "syncpack fix-mismatches",
