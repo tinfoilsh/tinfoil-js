@@ -12,44 +12,9 @@
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
-      "bun": "./dist/index.js",
-      "electron": "./dist/index.js",
       "browser": "./dist/index.browser.js",
       "import": "./dist/index.js",
       "default": "./dist/index.js"
-    },
-    "./client": {
-      "types": "./dist/client.d.ts",
-      "import": "./dist/client.js",
-      "default": "./dist/client.js"
-    },
-    "./ai-sdk-provider": {
-      "types": "./dist/ai-sdk-provider.d.ts",
-      "import": "./dist/ai-sdk-provider.js",
-      "default": "./dist/ai-sdk-provider.js"
-    },
-    "./verifier": {
-      "types": "./dist/verifier.d.ts",
-      "import": "./dist/verifier.js",
-      "default": "./dist/verifier.js"
-    },
-    "./config": {
-      "types": "./dist/config.d.ts",
-      "import": "./dist/config.js",
-      "default": "./dist/config.js"
-    },
-    "./secure-client": {
-      "types": "./dist/secure-client.d.ts",
-      "import": "./dist/secure-client.js",
-      "default": "./dist/secure-client.js"
-    },
-    "./secure-fetch": {
-      "types": "./dist/secure-fetch.d.ts",
-      "bun": "./dist/secure-fetch.js",
-      "electron": "./dist/secure-fetch.js",
-      "browser": "./dist/secure-fetch.browser.js",
-      "import": "./dist/secure-fetch.js",
-      "default": "./dist/secure-fetch.js"
     }
   },
   "scripts": {
@@ -86,7 +51,7 @@
   "dependencies": {
     "@ai-sdk/openai-compatible": "^1.0.10",
     "@freedomofpress/sigstore-browser": "^0.1.11",
-    "@tinfoilsh/verifier": "0.12.0",
+    "@tinfoilsh/verifier": "^1.0.0",
     "ehbp": "^0.1.2",
     "openai": "^5.13.1"
   },

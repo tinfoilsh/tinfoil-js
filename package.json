@@ -12,7 +12,11 @@
     "test:browser:integration": "npm run test:browser:integration -ws --if-present",
     "clean": "npm run clean -ws --if-present",
     "sync": "syncpack fix-mismatches",
-    "postinstall": "syncpack fix-mismatches"
+    "postinstall": "syncpack fix-mismatches",
+    "version:verifier": "npm version -w @tinfoilsh/verifier",
+    "version:tinfoil": "npm version -w tinfoil",
+    "publish:verifier": "npm run build -w @tinfoilsh/verifier && npm publish -w @tinfoilsh/verifier --access public",
+    "publish:tinfoil": "npm run build -w tinfoil && npm publish -w tinfoil --access public"
   },
   "devDependencies": {
     "syncpack": "^13.0.4",
