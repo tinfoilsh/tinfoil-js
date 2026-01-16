@@ -199,6 +199,7 @@ export class TinfoilAI {
 }
 
 // Namespace declaration merge to add OpenAI types to TinfoilAI
+// eslint-disable-next-line @typescript-eslint/no-namespace
 export namespace TinfoilAI {
   export import Chat = OpenAI.Chat;
   export import Audio = OpenAI.Audio;

@@ -1,4 +1,5 @@
 import { X509Certificate, createHash } from "crypto";
+import type { ReadableStream as NodeWebReadableStream } from "stream/web";
 
 function isBun(): boolean {
   return typeof process !== "undefined" &&
@@ -45,7 +46,7 @@ async function createBunPinnedTlsFetch(baseURL: string, expectedFingerprintHex: 
 
     const fetchInit: RequestInit & { tls?: { checkServerIdentity: (host: string, cert: any) => Error | undefined } } = {
       ...init,
-      // @ts-ignore - Bun-specific option
+      // @ts-expect-error - Bun-specific option
       tls: {
         checkServerIdentity: (host: string, cert: any) => {
           const result = fingerprintCheck(host, cert);
@@ -63,7 +64,6 @@ async function createNodePinnedTlsFetch(baseURL: string, expectedFingerprintHex:
   const https = await import("https");
   const tls = await import("tls");
   const { Readable } = await import("stream");
-  const { ReadableStream: NodeReadableStream } = await import("stream/web");
 
   const checkServerIdentity = createCheckServerIdentity(expectedFingerprintHex);
 
@@ -99,7 +99,7 @@ async function createNodePinnedTlsFetch(baseURL: string, expectedFingerprintHex:
     }
     // Convert web streams to Node streams if needed
     if (body && typeof (body as any).getReader === "function") {
-      body = Readable.fromWeb(body as unknown as InstanceType<typeof NodeReadableStream>);
+      body = Readable.fromWeb(body as unknown as NodeWebReadableStream);
     }
     if (body instanceof ArrayBuffer) {
       body = Buffer.from(body);
