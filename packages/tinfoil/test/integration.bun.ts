@@ -4,7 +4,6 @@
  * 
  * These tests require:
  * - RUN_TINFOIL_INTEGRATION=true environment variable
- * - TINFOIL_API_KEY environment variable with valid API key
  */
 import { describe, it, expect, beforeAll } from "bun:test";
 
@@ -21,7 +20,7 @@ describe("Bun Integration", () => {
     if (!isBun || !RUN_INTEGRATION) return;
     
     const { TinfoilAI } = await import("../src/index.js");
-    const client = new TinfoilAI({ apiKey: process.env.TINFOIL_API_KEY });
+    const client = new TinfoilAI({ apiKey: "tinfoil" });
     await client.ready();
     
     const doc = await client.getVerificationDocument();
@@ -32,12 +31,11 @@ describe("Bun Integration", () => {
     if (!isBun || !RUN_INTEGRATION) return;
     
     const { TinfoilAI } = await import("../src/index.js");
-    const client = new TinfoilAI({ apiKey: process.env.TINFOIL_API_KEY });
+    const client = new TinfoilAI({ apiKey: "tinfoil" });
     
     const completion = await client.chat.completions.create({
-      model: "llama3-3-70b",
-      messages: [{ role: "user", content: "Say 'test'" }],
-      max_tokens: 10,
+      model: "gpt-oss-120b-free",
+      messages: [{ role: "user", content: "Hello!" }],
     });
     
     expect(completion.choices[0].message.content).toBeDefined();
