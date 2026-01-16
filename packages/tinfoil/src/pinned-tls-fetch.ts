@@ -46,7 +46,8 @@ async function createBunPinnedTlsFetch(baseURL: string, expectedFingerprintHex: 
 
     const fetchInit: RequestInit & { tls?: { checkServerIdentity: (host: string, cert: any) => Error | undefined } } = {
       ...init,
-      // @ts-expect-error - Bun-specific option
+      // eslint-disable-next-line @typescript-eslint/ban-ts-comment
+      // @ts-ignore - Bun-specific option
       tls: {
         checkServerIdentity: (host: string, cert: any) => {
           const result = fingerprintCheck(host, cert);
