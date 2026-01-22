@@ -2,7 +2,7 @@ import { Verifier } from "./verifier.js";
 import type { VerificationDocument } from "./verifier.js";
 import { TINFOIL_CONFIG } from "./config.js";
 import { createSecureFetch } from "./secure-fetch.js";
-import { fetchRouter } from "./router.js";
+import { fetchRouter } from "./atc.js";
 
 export type TransportMode = 'auto' | 'ehbp' | 'tls';
 
@@ -28,7 +28,7 @@ export class SecureClient {
   constructor(options: SecureClientOptions = {}) {
     this.baseURL = options.baseURL;
     this.enclaveURL = options.enclaveURL;
-    this.configRepo = options.configRepo || TINFOIL_CONFIG.INFERENCE_PROXY_REPO;
+    this.configRepo = options.configRepo || TINFOIL_CONFIG.DEFAULT_ROUTER_REPO;
     this.transport = options.transport || 'auto';
   }
 

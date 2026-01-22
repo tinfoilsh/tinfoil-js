@@ -1,4 +1,4 @@
-import { fetchRouter } from "./router.js";
+import { fetchRouter } from "./atc.js";
 
 interface UnverifiedClientOptions {
   baseURL?: string;

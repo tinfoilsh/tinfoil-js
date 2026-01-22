@@ -3,12 +3,12 @@
  */
 export const TINFOIL_CONFIG = {
   /**
-   * The GitHub repository for code attestation verification
+   * Base URL for the ATC (Air Traffic Control) service
    */
-  INFERENCE_PROXY_REPO: "tinfoilsh/confidential-model-router",
+  ATC_BASE_URL: "https://atc.tinfoil.sh",
 
   /**
-   * The ATC (Attestation and Trust Center) API URL for fetching available routers
+   * The GitHub repository for the router code attestation
    */
-  ATC_API_URL: "https://atc.tinfoil.sh/routers?platform=snp",
+  DEFAULT_ROUTER_REPO: "tinfoilsh/confidential-model-router",
 } as const;

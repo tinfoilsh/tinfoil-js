@@ -85,7 +85,7 @@ export class TinfoilAI {
     this.apiKey = options.apiKey;
     this.baseURL = options.baseURL;
     this.enclaveURL = options.enclaveURL;
-    this.configRepo = options.configRepo || TINFOIL_CONFIG.INFERENCE_PROXY_REPO;
+    this.configRepo = options.configRepo || TINFOIL_CONFIG.DEFAULT_ROUTER_REPO;
 
     this.secureClient = new SecureClient({
       baseURL: this.baseURL,
