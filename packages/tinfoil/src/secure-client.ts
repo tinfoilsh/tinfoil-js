@@ -10,6 +10,7 @@ interface SecureClientOptions {
   enclaveURL?: string;
   configRepo?: string;
   transport?: TransportMode;
+  bundleURL?: string;
 }
 
 export class SecureClient {
@@ -23,12 +24,14 @@ export class SecureClient {
   private enclaveURL?: string;
   private readonly configRepo?: string;
   private readonly transport: TransportMode;
+  private readonly bundleURL?: string;
 
   constructor(options: SecureClientOptions = {}) {
     this.baseURL = options.baseURL;
     this.enclaveURL = options.enclaveURL;
     this.configRepo = options.configRepo || TINFOIL_CONFIG.DEFAULT_ROUTER_REPO;
     this.transport = options.transport || 'auto';
+    this.bundleURL = options.bundleURL;
   }
 
   public async ready(): Promise<void> {
@@ -39,10 +42,10 @@ export class SecureClient {
   }
 
   private async initSecureClient(): Promise<void> {
-    // If no enclave specified, fetch bundle from ATC (includes router selection)
+    // If no enclave specified, fetch attestation bundle for a router
     let bundle: AttestationBundle | undefined;
     if (!this.enclaveURL) {
-      bundle = await fetchBundle();
+      bundle = await fetchBundle(this.bundleURL);
       this.enclaveURL = `https://${bundle.domain}`;
     }
 
