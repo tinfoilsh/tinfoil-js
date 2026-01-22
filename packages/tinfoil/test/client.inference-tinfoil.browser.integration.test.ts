@@ -17,7 +17,7 @@ describe("TinfoilAI - enclaveURL integration", () => {
     const verificationDoc = await client.getVerificationDocument();
 
     expect(verificationDoc).toBeTruthy();
-    expect(verificationDoc.configRepo).toBe(TINFOIL_CONFIG.INFERENCE_PROXY_REPO);
+    expect(verificationDoc.configRepo).toBe(TINFOIL_CONFIG.DEFAULT_ROUTER_REPO);
     expect(verificationDoc.securityVerified).toBe(true);
     expect(verificationDoc.enclaveHost).toBe("inference.tinfoil.sh");
     expect(verificationDoc.enclaveMeasurement.tlsPublicKeyFingerprint).toBeTruthy();
@@ -34,7 +34,7 @@ describe("TinfoilAI - enclaveURL integration", () => {
     const verificationDoc = await client.getVerificationDocument();
 
     expect(verificationDoc).toBeTruthy();
-    expect(verificationDoc.configRepo).toBe(TINFOIL_CONFIG.INFERENCE_PROXY_REPO);
+    expect(verificationDoc.configRepo).toBe(TINFOIL_CONFIG.DEFAULT_ROUTER_REPO);
     expect(verificationDoc.securityVerified).toBe(true);
     expect(verificationDoc.enclaveHost).toBe("inference.tinfoil.sh");
   }, 60000);
@@ -53,7 +53,7 @@ describe("SecureClient - enclaveURL integration", () => {
     const verificationDoc = await client.getVerificationDocument();
 
     expect(verificationDoc).toBeTruthy();
-    expect(verificationDoc.configRepo).toBe(TINFOIL_CONFIG.INFERENCE_PROXY_REPO);
+    expect(verificationDoc.configRepo).toBe(TINFOIL_CONFIG.DEFAULT_ROUTER_REPO);
     expect(verificationDoc.securityVerified).toBe(true);
     expect(verificationDoc.enclaveHost).toBe("inference.tinfoil.sh");
     expect(verificationDoc.enclaveMeasurement.tlsPublicKeyFingerprint).toBeTruthy();
@@ -69,7 +69,7 @@ describe("SecureClient - enclaveURL integration", () => {
     const verificationDoc = await client.getVerificationDocument();
 
     expect(verificationDoc).toBeTruthy();
-    expect(verificationDoc.configRepo).toBe(TINFOIL_CONFIG.INFERENCE_PROXY_REPO);
+    expect(verificationDoc.configRepo).toBe(TINFOIL_CONFIG.DEFAULT_ROUTER_REPO);
     expect(verificationDoc.securityVerified).toBe(true);
     expect(verificationDoc.enclaveHost).toBe("inference.tinfoil.sh");
   }, 60000);
