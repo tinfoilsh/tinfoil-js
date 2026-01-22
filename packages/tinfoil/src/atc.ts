@@ -9,7 +9,7 @@ import type { AttestationBundle } from "@tinfoilsh/verifier";
  * @returns The complete attestation bundle
  * @throws Error if the request fails
  */
-export async function fetchBundle(atcBaseUrl: string = TINFOIL_CONFIG.ATC_BASE_URL): Promise<AttestationBundle> {
+export async function fetchAttestationBundle(atcBaseUrl: string = TINFOIL_CONFIG.ATC_BASE_URL): Promise<AttestationBundle> {
   const url = `${atcBaseUrl}/attestation`;
   const response = await fetch(url);
 

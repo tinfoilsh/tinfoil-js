@@ -54,7 +54,7 @@ vi.mock("../src/secure-fetch.js", () => ({
 }));
 
 vi.mock("../src/atc.js", () => ({
-  fetchBundle: vi.fn(async () => ({
+  fetchAttestationBundle: vi.fn(async () => ({
     domain: "test-router.tinfoil.sh",
     enclaveAttestationReport: { format: "test", body: "test" },
     digest: "test-digest",

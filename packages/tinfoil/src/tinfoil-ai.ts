@@ -47,7 +47,7 @@ interface TinfoilAIOptions {
   enclaveURL?: string;
   configRepo?: string;
   transport?: TransportMode;
-  bundleURL?: string;
+  attestationBundleURL?: string;
   [key: string]: any; // Allow other OpenAI client options
 }
 
@@ -93,7 +93,7 @@ export class TinfoilAI {
       enclaveURL: this.enclaveURL,
       configRepo: this.configRepo,
       transport: options.transport,
-      bundleURL: options.bundleURL,
+      attestationBundleURL: options.attestationBundleURL,
     });
 
     this.clientPromise = this.createOpenAIClient(openAIOptions);

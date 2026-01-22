@@ -4,11 +4,11 @@ import { X509Certificate } from "@freedomofpress/sigstore-browser";
 const RUN_INTEGRATION = process.env.RUN_TINFOIL_INTEGRATION === "true";
 
 describe("ATC API", () => {
-  describe("fetchBundle", () => {
+  describe("fetchAttestationBundle", () => {
     it.skipIf(!RUN_INTEGRATION)("should fetch a complete attestation bundle from production ATC", async () => {
-      const { fetchBundle } = await import("../src/atc");
+      const { fetchAttestationBundle } = await import("../src/atc");
 
-      const bundle = await fetchBundle();
+      const bundle = await fetchAttestationBundle();
 
       // Verify bundle structure
       expect(bundle).toBeDefined();
@@ -79,19 +79,19 @@ describe("ATC API", () => {
     });
 
     it.skipIf(!RUN_INTEGRATION)("should accept custom ATC URL", async () => {
-      const { fetchBundle } = await import("../src/atc");
+      const { fetchAttestationBundle } = await import("../src/atc");
 
       // Using production URL explicitly to test custom URL parameter
-      const bundle = await fetchBundle("https://atc.tinfoil.sh");
+      const bundle = await fetchAttestationBundle("https://atc.tinfoil.sh");
 
       expect(bundle).toBeDefined();
       expect(bundle.domain).toBeDefined();
     });
 
     it("should throw on invalid ATC URL", async () => {
-      const { fetchBundle } = await import("../src/atc");
+      const { fetchAttestationBundle } = await import("../src/atc");
 
-      await expect(fetchBundle("https://invalid.example.com")).rejects.toThrow();
+      await expect(fetchAttestationBundle("https://invalid.example.com")).rejects.toThrow();
     });
   });
 

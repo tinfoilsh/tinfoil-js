@@ -1,7 +1,7 @@
 import { Verifier, type AttestationBundle, type VerificationDocument } from "./verifier.js";
 import { TINFOIL_CONFIG } from "./config.js";
 import { createSecureFetch } from "./secure-fetch.js";
-import { fetchBundle } from "./atc.js";
+import { fetchAttestationBundle } from "./atc.js";
 
 export type TransportMode = 'auto' | 'ehbp' | 'tls';
 
@@ -10,7 +10,7 @@ interface SecureClientOptions {
   enclaveURL?: string;
   configRepo?: string;
   transport?: TransportMode;
-  bundleURL?: string;
+  attestationBundleURL?: string;
 }
 
 export class SecureClient {
@@ -24,14 +24,14 @@ export class SecureClient {
   private enclaveURL?: string;
   private readonly configRepo?: string;
   private readonly transport: TransportMode;
-  private readonly bundleURL?: string;
+  private readonly attestationBundleURL?: string;
 
   constructor(options: SecureClientOptions = {}) {
     this.baseURL = options.baseURL;
     this.enclaveURL = options.enclaveURL;
     this.configRepo = options.configRepo || TINFOIL_CONFIG.DEFAULT_ROUTER_REPO;
     this.transport = options.transport || 'auto';
-    this.bundleURL = options.bundleURL;
+    this.attestationBundleURL = options.attestationBundleURL;
   }
 
   public async ready(): Promise<void> {
@@ -45,7 +45,7 @@ export class SecureClient {
     // If no enclave specified, fetch attestation bundle for a router
     let bundle: AttestationBundle | undefined;
     if (!this.enclaveURL) {
-      bundle = await fetchBundle(this.bundleURL);
+      bundle = await fetchAttestationBundle(this.attestationBundleURL);
       this.enclaveURL = `https://${bundle.domain}`;
     }
 

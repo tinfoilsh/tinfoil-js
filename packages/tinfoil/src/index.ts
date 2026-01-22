@@ -8,7 +8,7 @@ export * from "./ai-sdk-provider.js";
 export * from "./config.js";
 export { SecureClient, type TransportMode } from "./secure-client.js";
 export { UnverifiedClient } from "./unverified-client.js";
-export { fetchRouter, fetchBundle } from "./atc.js";
+export { fetchRouter, fetchAttestationBundle } from "./atc.js";
 
 // Re-export OpenAI utility types and classes that users might need
 // Using public exports from the main OpenAI package instead of deep imports

@@ -6,7 +6,7 @@ interface CreateTinfoilAIOptions {
   baseURL?: string;
   enclaveURL?: string;
   configRepo?: string;
-  bundleURL?: string;
+  attestationBundleURL?: string;
 }
 
 export async function createTinfoilAI(apiKey: string, options: CreateTinfoilAIOptions = {}) {
@@ -18,7 +18,7 @@ export async function createTinfoilAI(apiKey: string, options: CreateTinfoilAIOp
     baseURL,
     enclaveURL,
     configRepo,
-    bundleURL: options.bundleURL,
+    attestationBundleURL: options.attestationBundleURL,
   });
 
   await secureClient.ready();
