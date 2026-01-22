@@ -1,6 +1,7 @@
 import { verifyAttestation as verifyAmdAttestation, fetchAttestation } from './attestation.js';
 import { fetchLatestDigest, fetchAttestationBundle } from './github.js';
 import { verifyAttestation as verifySigstoreAttestation } from './sigstore.js';
+import { verifyCertificate, CertificateVerificationError } from './cert-verify.js';
 import { compareMeasurements, FormatMismatchError, MeasurementMismatchError, measurementFingerprint } from './types.js';
 import type { AttestationDocument, AttestationMeasurement, AttestationResponse, VerificationDocument, AttestationBundle } from './types.js';
 
@@ -39,7 +40,8 @@ export class Verifier {
       bundle.vcek,
       bundle.digest,
       bundle.sigstoreBundle,
-      bundle.domain
+      bundle.domain,
+      bundle.enclaveCert
     );
   }
 
@@ -48,13 +50,15 @@ export class Verifier {
     vcek: string | undefined,
     digest: string,
     sigstoreBundle: unknown,
-    domain: string
+    domain: string,
+    enclaveCert?: string
   ): Promise<AttestationResponse> {
     const steps: VerificationDocument['steps'] = {
       fetchDigest: { status: 'success' }, // Already fetched by caller
       verifyCode: { status: 'pending' },
       verifyEnclave: { status: 'pending' },
       compareMeasurements: { status: 'pending' },
+      verifyCertificate: enclaveCert ? { status: 'pending' } : undefined,
     };
 
     this.enclave = domain;
@@ -96,6 +100,27 @@ export class Verifier {
         }
         this.saveFailedVerificationDocument(steps);
         throw error;
+      }
+
+      // Step 4: Verify certificate (if provided)
+      if (enclaveCert) {
+        try {
+          await verifyCertificate(
+            enclaveCert,
+            domain,
+            attestationDoc,
+            amdVerification.hpkePublicKey || ''
+          );
+          steps.verifyCertificate = { status: 'success' };
+        } catch (error) {
+          if (error instanceof CertificateVerificationError) {
+            steps.verifyCertificate = { status: 'failed', error: error.message };
+          } else {
+            steps.verifyCertificate = { status: 'failed', error: (error as Error).message };
+          }
+          this.saveFailedVerificationDocument(steps);
+          throw error;
+        }
       }
 
       // Build successful verification document

@@ -23,6 +23,8 @@ export interface AttestationBundle {
   sigstoreBundle: unknown;
   /** Base64-encoded VCEK certificate (DER format) */
   vcek: string;
+  /** PEM-encoded enclave TLS certificate (contains HPKE key and attestation hash in SANs) */
+  enclaveCert: string;
 }
 
 export interface AttestationMeasurement {
@@ -104,6 +106,18 @@ export async function measurementFingerprint(m: AttestationMeasurement): Promise
   return Array.from(hashArray).map(b => b.toString(16).padStart(2, '0')).join('');
 }
 
+/**
+ * Computes the SHA-256 hash of an attestation document.
+ * This matches the Go implementation: sha256(format + body)
+ */
+export async function hashAttestationDocument(doc: AttestationDocument): Promise<string> {
+  const data = doc.format + doc.body;
+  const encoder = new TextEncoder();
+  const hashBuffer = await crypto.subtle.digest('SHA-256', encoder.encode(data));
+  const hashArray = new Uint8Array(hashBuffer);
+  return Array.from(hashArray).map(b => b.toString(16).padStart(2, '0')).join('');
+}
+
 export interface VerificationStepState {
   status: 'pending' | 'success' | 'failed';
   error?: string;
@@ -133,6 +147,7 @@ export interface VerificationDocument {
     verifyCode: VerificationStepState;
     verifyEnclave: VerificationStepState;
     compareMeasurements: VerificationStepState;
+    verifyCertificate?: VerificationStepState;
     createTransport?: VerificationStepState;
     verifyHPKEKey?: VerificationStepState;
     otherError?: VerificationStepState;
