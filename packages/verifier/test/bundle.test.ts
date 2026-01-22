@@ -44,6 +44,40 @@ describe('Bundle Verification', () => {
     expect(doc!.steps.verifyCode.status).toBe('success');
     expect(doc!.steps.verifyEnclave.status).toBe('success');
     expect(doc!.steps.compareMeasurements.status).toBe('success');
+    expect(doc!.steps.verifyCertificate?.status).toBe('success');
+  });
+
+  it('should verify certificate containing HPKE key and attestation hash', async () => {
+    const verifier = new Verifier({
+      serverURL: `https://${bundle.domain}`,
+      configRepo: 'tinfoilsh/confidential-model-router',
+    });
+
+    const result = await verifier.verifyBundle(bundle);
+    const doc = verifier.getVerificationDocument();
+
+    // Certificate verification should have run and succeeded
+    expect(doc!.steps.verifyCertificate).toBeDefined();
+    expect(doc!.steps.verifyCertificate!.status).toBe('success');
+
+    // HPKE key from attestation should match what's in the certificate
+    expect(result.hpkePublicKey).toBeDefined();
+    expect(result.hpkePublicKey!.length).toBeGreaterThan(0);
+  });
+
+  it('should fail verification with tampered certificate', async () => {
+    const tamperedBundle: AttestationBundle = {
+      ...bundle,
+      // Replace certificate with a different one (wrong HPKE key/attestation hash)
+      enclaveCert: bundle.enclaveCert.replace('MII', 'XXX'),
+    };
+
+    const verifier = new Verifier({
+      serverURL: `https://${tamperedBundle.domain}`,
+      configRepo: 'tinfoilsh/confidential-model-router',
+    });
+
+    await expect(verifier.verifyBundle(tamperedBundle)).rejects.toThrow();
   });
 
   it('should return TLS and HPKE public keys from bundle verification', async () => {

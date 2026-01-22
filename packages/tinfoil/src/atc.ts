@@ -28,6 +28,7 @@ export async function fetchAttestationBundle(atcBaseUrl: string = TINFOIL_CONFIG
     digest: bundle.digest,
     sigstoreBundle: bundle.sigstoreBundle,
     vcek: bundle.vcek,
+    enclaveCert: bundle.enclaveCert,
   };
 }
 
