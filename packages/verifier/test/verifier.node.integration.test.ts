@@ -7,7 +7,8 @@ describe('Node.js Integration Tests', () => {
   describe('Verifier against inference.tinfoil.sh', () => {
     it.skipIf(!RUN_INTEGRATION)('should verify enclave with serverURL set to inference.tinfoil.sh', async () => {
       const verifier = new Verifier({
-        serverURL: 'https://inference.tinfoil.sh'
+        serverURL: 'https://inference.tinfoil.sh',
+        configRepo: 'tinfoilsh/confidential-model-router',
       });
 
       const result = await verifier.verify();
@@ -30,7 +31,8 @@ describe('Node.js Integration Tests', () => {
 
     it.skipIf(!RUN_INTEGRATION)('should return TLS public key fingerprint', async () => {
       const verifier = new Verifier({
-        serverURL: 'https://inference.tinfoil.sh'
+        serverURL: 'https://inference.tinfoil.sh',
+        configRepo: 'tinfoilsh/confidential-model-router',
       });
 
       const result = await verifier.verify();
@@ -41,7 +43,8 @@ describe('Node.js Integration Tests', () => {
 
     it.skipIf(!RUN_INTEGRATION)('should return HPKE public key', async () => {
       const verifier = new Verifier({
-        serverURL: 'https://inference.tinfoil.sh'
+        serverURL: 'https://inference.tinfoil.sh',
+        configRepo: 'tinfoilsh/confidential-model-router',
       });
 
       const result = await verifier.verify();
@@ -52,7 +55,8 @@ describe('Node.js Integration Tests', () => {
 
     it.skipIf(!RUN_INTEGRATION)('should populate verification document fingerprints', async () => {
       const verifier = new Verifier({
-        serverURL: 'https://inference.tinfoil.sh'
+        serverURL: 'https://inference.tinfoil.sh',
+        configRepo: 'tinfoilsh/confidential-model-router',
       });
 
       await verifier.verify();
@@ -64,9 +68,10 @@ describe('Node.js Integration Tests', () => {
       expect(doc!.tlsPublicKey).toBeTruthy();
     }, 60000);
 
-    it.skipIf(!RUN_INTEGRATION)('should use default config repo', async () => {
+    it.skipIf(!RUN_INTEGRATION)('should use provided config repo', async () => {
       const verifier = new Verifier({
-        serverURL: 'https://inference.tinfoil.sh'
+        serverURL: 'https://inference.tinfoil.sh',
+        configRepo: 'tinfoilsh/confidential-model-router',
       });
 
       await verifier.verify();

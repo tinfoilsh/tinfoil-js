@@ -46,6 +46,9 @@ vi.mock("../src/verifier.js", () => ({
     verify() {
       return verifyMock();
     }
+    verifyBundle() {
+      return verifyMock();
+    }
     getVerificationDocument() {
       return mockVerificationDocument;
     }

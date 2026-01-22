@@ -9,6 +9,9 @@ vi.mock("../src/verifier.js", () => ({
     verify() {
       throw new Error("verify failed");
     }
+    verifyBundle() {
+      throw new Error("verify failed");
+    }
     getVerificationDocument() {
       return undefined;
     }
