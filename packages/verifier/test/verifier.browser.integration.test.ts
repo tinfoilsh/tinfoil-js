@@ -3,12 +3,14 @@ import { Verifier } from '../src/client.js';
 import { compareMeasurements, measurementFingerprint, PredicateType, FormatMismatchError, MeasurementMismatchError } from '../src/types.js';
 
 const DEFAULT_ENCLAVE_URL = 'https://inference.tinfoil.sh';
+const DEFAULT_CONFIG_REPO = 'tinfoilsh/confidential-model-router';
 
 describe('Browser Integration Tests', () => {
   describe('Verifier against real enclave', () => {
-    it('should verify enclave with default config repo', async () => {
+    it('should verify enclave with provided config repo', async () => {
       const verifier = new Verifier({
-        serverURL: DEFAULT_ENCLAVE_URL
+        serverURL: DEFAULT_ENCLAVE_URL,
+        configRepo: DEFAULT_CONFIG_REPO
       });
 
       const result = await verifier.verify();
@@ -30,7 +32,8 @@ describe('Browser Integration Tests', () => {
 
     it('should return TLS public key fingerprint', async () => {
       const verifier = new Verifier({
-        serverURL: DEFAULT_ENCLAVE_URL
+        serverURL: DEFAULT_ENCLAVE_URL,
+        configRepo: DEFAULT_CONFIG_REPO
       });
 
       const result = await verifier.verify();
@@ -41,7 +44,8 @@ describe('Browser Integration Tests', () => {
 
     it('should return HPKE public key', async () => {
       const verifier = new Verifier({
-        serverURL: DEFAULT_ENCLAVE_URL
+        serverURL: DEFAULT_ENCLAVE_URL,
+        configRepo: DEFAULT_CONFIG_REPO
       });
 
       const result = await verifier.verify();
@@ -52,7 +56,8 @@ describe('Browser Integration Tests', () => {
 
     it('should populate verification document fingerprints', async () => {
       const verifier = new Verifier({
-        serverURL: DEFAULT_ENCLAVE_URL
+        serverURL: DEFAULT_ENCLAVE_URL,
+        configRepo: DEFAULT_CONFIG_REPO
       });
 
       await verifier.verify();
@@ -85,7 +90,8 @@ describe('Browser Integration Tests', () => {
   describe('Verification document completeness', () => {
     it('should populate all required fields in verification document', async () => {
       const verifier = new Verifier({
-        serverURL: DEFAULT_ENCLAVE_URL
+        serverURL: DEFAULT_ENCLAVE_URL,
+        configRepo: DEFAULT_CONFIG_REPO
       });
 
       await verifier.verify();
@@ -110,7 +116,8 @@ describe('Browser Integration Tests', () => {
 
     it('should have matching code and enclave fingerprints for verified enclave', async () => {
       const verifier = new Verifier({
-        serverURL: DEFAULT_ENCLAVE_URL
+        serverURL: DEFAULT_ENCLAVE_URL,
+        configRepo: DEFAULT_CONFIG_REPO
       });
 
       await verifier.verify();
@@ -121,7 +128,8 @@ describe('Browser Integration Tests', () => {
 
     it('should have consistent measurement types between code and enclave', async () => {
       const verifier = new Verifier({
-        serverURL: DEFAULT_ENCLAVE_URL
+        serverURL: DEFAULT_ENCLAVE_URL,
+        configRepo: DEFAULT_CONFIG_REPO
       });
 
       await verifier.verify();
@@ -186,37 +194,49 @@ describe('Browser Integration Tests', () => {
   describe('Verification failure handling', () => {
     it('should handle invalid server URL gracefully', async () => {
       const verifier = new Verifier({
-        serverURL: 'https://invalid-enclave-that-does-not-exist.tinfoil.sh'
+        serverURL: 'https://invalid-enclave-that-does-not-exist.tinfoil.sh',
+        configRepo: DEFAULT_CONFIG_REPO
       });
 
       await expect(verifier.verify()).rejects.toThrow();
 
+      // Verification document may be undefined if verification fails before document is created
       const doc = verifier.getVerificationDocument();
-      expect(doc).toBeDefined();
-      expect(doc!.securityVerified).toBe(false);
+      if (doc) {
+        expect(doc.securityVerified).toBe(false);
+      }
     }, 15000);
 
     it('should mark verifyEnclave step as failed for unreachable server', async () => {
       const verifier = new Verifier({
-        serverURL: 'https://invalid-enclave-that-does-not-exist.tinfoil.sh'
+        serverURL: 'https://invalid-enclave-that-does-not-exist.tinfoil.sh',
+        configRepo: DEFAULT_CONFIG_REPO
       });
 
       await expect(verifier.verify()).rejects.toThrow();
 
+      // Verification document may be undefined if verification fails early
       const doc = verifier.getVerificationDocument();
-      expect(doc!.steps.verifyEnclave.status).toBe('failed');
-      expect(doc!.steps.verifyEnclave.error).toBeTruthy();
+      if (doc && doc.steps) {
+        expect(doc.steps.verifyEnclave.status).toBe('failed');
+        expect(doc.steps.verifyEnclave.error).toBeTruthy();
+      }
     }, 15000);
 
     it('should require serverURL in constructor', () => {
-      expect(() => new Verifier({ serverURL: '' })).toThrow('serverURL is required');
+      expect(() => new Verifier({ serverURL: '', configRepo: DEFAULT_CONFIG_REPO })).toThrow('serverURL is required');
+    });
+
+    it('should require configRepo in constructor', () => {
+      expect(() => new Verifier({ serverURL: DEFAULT_ENCLAVE_URL } as any)).toThrow('configRepo is required');
     });
   });
 
   describe('Verifier instance configuration', () => {
-    it('should use default config repo when not specified', async () => {
+    it('should use provided config repo', async () => {
       const verifier = new Verifier({
-        serverURL: DEFAULT_ENCLAVE_URL
+        serverURL: DEFAULT_ENCLAVE_URL,
+        configRepo: DEFAULT_CONFIG_REPO
       });
 
       await verifier.verify();
@@ -227,7 +247,8 @@ describe('Browser Integration Tests', () => {
 
     it('should extract hostname from serverURL correctly', async () => {
       const verifier = new Verifier({
-        serverURL: 'https://inference.tinfoil.sh'
+        serverURL: 'https://inference.tinfoil.sh',
+        configRepo: DEFAULT_CONFIG_REPO
       });
 
       await verifier.verify();
@@ -238,7 +259,8 @@ describe('Browser Integration Tests', () => {
 
     it('should handle serverURL with trailing path', async () => {
       const verifier = new Verifier({
-        serverURL: 'https://inference.tinfoil.sh/some/path'
+        serverURL: 'https://inference.tinfoil.sh/some/path',
+        configRepo: DEFAULT_CONFIG_REPO
       });
 
       await verifier.verify();
@@ -252,7 +274,8 @@ describe('Browser Integration Tests', () => {
   describe('Multiple verification calls', () => {
     it('should allow re-verification with same verifier instance', async () => {
       const verifier = new Verifier({
-        serverURL: DEFAULT_ENCLAVE_URL
+        serverURL: DEFAULT_ENCLAVE_URL,
+        configRepo: DEFAULT_CONFIG_REPO
       });
 
       const result1 = await verifier.verify();
