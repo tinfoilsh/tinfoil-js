@@ -1,8 +1,7 @@
-import { Verifier } from "./verifier.js";
-import type { VerificationDocument } from "./verifier.js";
+import { Verifier, type AttestationBundle, type VerificationDocument } from "./verifier.js";
 import { TINFOIL_CONFIG } from "./config.js";
 import { createSecureFetch } from "./secure-fetch.js";
-import { fetchRouter } from "./atc.js";
+import { fetchBundle } from "./atc.js";
 
 export type TransportMode = 'auto' | 'ehbp' | 'tls';
 
@@ -40,18 +39,14 @@ export class SecureClient {
   }
 
   private async initSecureClient(): Promise<void> {
-    // Fetch router address if enclaveURL is not provided
+    // If no enclave specified, fetch bundle from ATC (includes router selection)
+    let bundle: AttestationBundle | undefined;
     if (!this.enclaveURL) {
-      const routerAddress = await fetchRouter();
-      this.enclaveURL = `https://${routerAddress}`;
-
-      // Only set baseURL from router if not already provided
-      if (!this.baseURL) {
-        this.baseURL = `https://${routerAddress}/v1/`;
-      }
+      bundle = await fetchBundle();
+      this.enclaveURL = `https://${bundle.domain}`;
     }
 
-    // If baseURL still not set, derive from enclaveURL
+    // Derive baseURL if not set
     if (!this.baseURL) {
       const enclaveUrl = new URL(this.enclaveURL);
       this.baseURL = `${enclaveUrl.origin}/v1/`;
@@ -59,11 +54,16 @@ export class SecureClient {
 
     const verifier = new Verifier({
       serverURL: this.enclaveURL,
-      configRepo: this.configRepo,
+      configRepo: this.configRepo!,
     });
 
     try {
-      await verifier.verify();
+      if (bundle) {
+        await verifier.verifyBundle(bundle);
+      } else {
+        await verifier.verify();
+      }
+
       const doc = verifier.getVerificationDocument();
       if (!doc) {
         throw new Error("Verification document not available after successful verification");
