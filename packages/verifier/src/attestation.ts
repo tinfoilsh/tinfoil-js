@@ -36,12 +36,14 @@ export async function fetchAttestation(host: string): Promise<AttestationDocumen
  * and returns the inner measurements.
  *
  * @param doc - The attestation document to verify
+ * @param vcekBase64 - Optional pre-fetched VCEK certificate in base64-encoded DER format
  * @returns The verification result
  * @throws Error if verification fails or format is unsupported
  */
-export async function verifyAttestation(doc: AttestationDocument): Promise<AttestationResponse> {
+export async function verifyAttestation(doc: AttestationDocument, vcekBase64?: string): Promise<AttestationResponse> {
   if (doc.format === PredicateType.SevGuestV2) {
-    return verifySevAttestationV2(doc.body);
+    const vcekDer = vcekBase64 ? base64ToBytes(vcekBase64) : undefined;
+    return verifySevAttestationV2(doc.body, vcekDer);
   } else {
     throw new Error(`Unsupported attestation format: ${doc.format}`);
   }
@@ -51,11 +53,12 @@ export async function verifyAttestation(doc: AttestationDocument): Promise<Attes
  * Verify SEV attestation document and return verification result.
  *
  * @param attestationDoc - Base64 encoded attestation document
+ * @param vcekDer - Optional pre-fetched VCEK certificate in DER format
  * @returns Verification result
  * @throws Error if verification fails
  */
-async function verifySevAttestationV2(attestationDoc: string): Promise<AttestationResponse> {
-  const report = await verifySevReport(attestationDoc, true);
+async function verifySevAttestationV2(attestationDoc: string, vcekDer?: Uint8Array): Promise<AttestationResponse> {
+  const report = await verifySevReport(attestationDoc, true, vcekDer);
 
   const measurement = {
     type: PredicateType.SevGuestV2,
@@ -78,10 +81,11 @@ async function verifySevAttestationV2(attestationDoc: string): Promise<Attestati
  *
  * @param attestationDoc - Base64 encoded attestation document
  * @param isCompressed - Whether the document is gzip compressed
+ * @param vcekDer - Optional pre-fetched VCEK certificate in DER format
  * @returns The parsed and verified report
  * @throws Error if verification fails
  */
-async function verifySevReport(attestationDoc: string, isCompressed: boolean): Promise<Report> {
+async function verifySevReport(attestationDoc: string, isCompressed: boolean, vcekDer?: Uint8Array): Promise<Report> {
   let attDocBytes: Uint8Array;
   try {
     attDocBytes = base64ToBytes(attestationDoc);
@@ -100,7 +104,7 @@ async function verifySevReport(attestationDoc: string, isCompressed: boolean): P
     throw new Error('Failed to parse report', { cause: e });
   }
 
-  const chain = await CertificateChain.fromReport(report);
+  const chain = await CertificateChain.fromReport(report, vcekDer);
 
   let res: boolean;
   try {

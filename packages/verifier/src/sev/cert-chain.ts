@@ -38,7 +38,8 @@ export class CertificateChain {
     public vcek: X509Certificate
   ) {}
 
-  static async fromReport(report: Report): Promise<CertificateChain> {
+  static async fromReport(report: Report, vcekDer?: Uint8Array): Promise<CertificateChain> {
+    // Validate report
     if (report.productName !== 'Genoa') {
       throw new Error('This implementation only supports Genoa processors');
     }
@@ -47,39 +48,33 @@ export class CertificateChain {
       throw new Error('This implementation only supports VCEK signed reports');
     }
 
+    // Fetch VCEK if not provided
+    const vcek = vcekDer ?? await this.fetchVcekForReport(report);
+
     const ark = X509Certificate.parse(ARK_CERT);
     const ask = X509Certificate.parse(ASK_CERT);
+    const vcekCert = X509Certificate.parse(vcek);
 
-    // Build cache key for VCEK
-    const chipHex = bytesToHex(report.chipId);
-    const tcbHex = report.reportedTcb.toString(16).padStart(16, '0');
-    const cacheKey = `VCEK_${report.productName}_${chipHex}_${tcbHex}`;
+    return new CertificateChain(ark, ask, vcekCert);
+  }
 
-    // Try to get from cache first (browser localStorage only)
-    let vcekDer: Uint8Array;
+  private static async fetchVcekForReport(report: Report): Promise<Uint8Array> {
+    const vcekUrl = buildVCEKUrl(report.productName, report.chipId, report.reportedTcb);
+
     const isBrowser = typeof window !== 'undefined' && typeof window.localStorage !== 'undefined';
-    if (isBrowser) {
-      const cached = localStorage.getItem(cacheKey);
+    if (isBrowser) { // Browser supports local caching
+      const cached = localStorage.getItem(vcekUrl);
       if (cached) {
-        try {
-          // Decode from base64 stored in cache
-          vcekDer = Uint8Array.from(atob(cached), c => c.charCodeAt(0));
-        } catch {
-          // Invalid cache, remove it and re-fetch
-          localStorage.removeItem(cacheKey);
-          vcekDer = await fetchAndCacheVCEK(report.productName, report.chipId, report.reportedTcb, cacheKey);
+        try { // Base64 decode and return as Uint8Array
+          return Uint8Array.from(atob(cached), c => c.charCodeAt(0));
+        } catch { // Base64 decode failed, remove from cache
+          localStorage.removeItem(vcekUrl);
         }
-      } else {
-        vcekDer = await fetchAndCacheVCEK(report.productName, report.chipId, report.reportedTcb, cacheKey);
       }
-    } else {
-      // No cache available, just fetch
-      const vcekUrl = buildVCEKUrl(report.productName, report.chipId, report.reportedTcb);
-      vcekDer = await fetchVCEK(vcekUrl);
+      return fetchAndCacheVCEK(vcekUrl);
     }
 
-    const vcek = X509Certificate.parse(vcekDer);
-    return new CertificateChain(ark, ask, vcek);
+    return fetchVCEK(vcekUrl);
   }
 
   async verifyChain(): Promise<boolean> {
@@ -323,21 +318,14 @@ export class CertificateChain {
   }
 }
 
-async function fetchAndCacheVCEK(
-  productName: string,
-  chipId: Uint8Array,
-  reportedTcb: bigint,
-  cacheKey: string
-): Promise<Uint8Array> {
-  const vcekUrl = buildVCEKUrl(productName, chipId, reportedTcb);
+async function fetchAndCacheVCEK(vcekUrl: string): Promise<Uint8Array> {
   const vcekDer = await fetchVCEK(vcekUrl);
 
-  // Cache for future use
+  // Cache for future use (URL serves as cache key)
   if (typeof localStorage !== 'undefined') {
     try {
-      // Store as base64 in cache
       const base64 = btoa(String.fromCharCode(...vcekDer));
-      localStorage.setItem(cacheKey, base64);
+      localStorage.setItem(vcekUrl, base64);
     } catch {
       // Cache storage failed (quota exceeded, etc), continue anyway
     }
