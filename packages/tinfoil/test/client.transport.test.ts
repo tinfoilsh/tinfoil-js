@@ -53,6 +53,17 @@ vi.mock("../src/secure-fetch.js", () => ({
   createSecureFetch: createSecureFetchMock,
 }));
 
+vi.mock("../src/atc.js", () => ({
+  fetchBundle: vi.fn(async () => ({
+    domain: "test-router.tinfoil.sh",
+    enclaveAttestationReport: { format: "test", body: "test" },
+    digest: "test-digest",
+    sigstoreBundle: {},
+    vcek: "test-vcek",
+  })),
+  fetchRouter: vi.fn(async () => "test-router.tinfoil.sh"),
+}));
+
 describe("Secure transport integration", () => {
   beforeEach(() => {
     vi.clearAllMocks();
