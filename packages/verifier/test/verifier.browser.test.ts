@@ -64,16 +64,23 @@ describe('Report Parsing in Browser', () => {
 });
 
 describe('Verifier Class in Browser', () => {
-  it('creates verifier instance with serverURL', () => {
-    const verifier = new Verifier({ serverURL: 'https://enclave.example.com' });
+  it('creates verifier instance with serverURL and configRepo', () => {
+    const verifier = new Verifier({
+      serverURL: 'https://enclave.example.com',
+      configRepo: 'tinfoilsh/confidential-model-router'
+    });
     expect(verifier).toBeDefined();
   });
 
   it('throws error when serverURL is missing', () => {
-    expect(() => new Verifier({ serverURL: '' })).toThrow('serverURL is required');
+    expect(() => new Verifier({ serverURL: '', configRepo: 'org/repo' })).toThrow('serverURL is required');
   });
 
-  it('accepts optional configRepo', () => {
+  it('throws error when configRepo is missing', () => {
+    expect(() => new Verifier({ serverURL: 'https://enclave.example.com' } as any)).toThrow('configRepo is required');
+  });
+
+  it('accepts custom configRepo', () => {
     const verifier = new Verifier({
       serverURL: 'https://enclave.example.com',
       configRepo: 'org/custom-repo'
