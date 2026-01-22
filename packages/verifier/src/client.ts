@@ -2,14 +2,11 @@ import { verifyAttestation as verifyAmdAttestation, fetchAttestation } from './a
 import { fetchLatestDigest, fetchAttestationBundle } from './github.js';
 import { verifyAttestation as verifySigstoreAttestation } from './sigstore.js';
 import { compareMeasurements, FormatMismatchError, MeasurementMismatchError, measurementFingerprint } from './types.js';
-import type { AttestationDocument, AttestationMeasurement, AttestationResponse, VerificationDocument } from './types.js';
-import { getRouterAddress } from './router.js';
-
-const DEFAULT_CONFIG_REPO = 'tinfoilsh/confidential-model-router';
+import type { AttestationDocument, AttestationMeasurement, AttestationResponse, VerificationDocument, AttestationBundle } from './types.js';
 
 export interface VerifierOptions {
   serverURL: string;
-  configRepo?: string;
+  configRepo: string;
 }
 
 export class Verifier {
@@ -21,29 +18,52 @@ export class Verifier {
     if (!options.serverURL) {
       throw new Error("serverURL is required for Verifier");
     }
+    if (!options.configRepo) {
+      throw new Error("configRepo is required for Verifier");
+    }
     this.enclave = new URL(options.serverURL).hostname;
-    this.configRepo = options.configRepo || DEFAULT_CONFIG_REPO;
+    this.configRepo = options.configRepo;
   }
 
   async verify(): Promise<AttestationResponse> {
+    const attestationDoc = await fetchAttestation(this.enclave);
+    const digest = await fetchLatestDigest(this.configRepo);
+    const sigstoreBundle = await fetchAttestationBundle(this.configRepo, digest);
+
+    return this.performVerification(attestationDoc, undefined, digest, sigstoreBundle, this.enclave);
+  }
+
+  async verifyBundle(bundle: AttestationBundle): Promise<AttestationResponse> {
+    return this.performVerification(
+      bundle.enclaveAttestationReport,
+      bundle.vcek,
+      bundle.digest,
+      bundle.sigstoreBundle,
+      bundle.domain
+    );
+  }
+
+  private async performVerification(
+    attestationDoc: AttestationDocument,
+    vcek: string | undefined,
+    digest: string,
+    sigstoreBundle: unknown,
+    domain: string
+  ): Promise<AttestationResponse> {
     const steps: VerificationDocument['steps'] = {
-      fetchDigest: { status: 'pending' },
+      fetchDigest: { status: 'success' }, // Already fetched by caller
       verifyCode: { status: 'pending' },
       verifyEnclave: { status: 'pending' },
       compareMeasurements: { status: 'pending' },
     };
 
-    try {
-      if (!this.enclave) {
-        this.enclave = await getRouterAddress();
-      }
+    this.enclave = domain;
 
-      // Step 1: Verify Enclave
-      let attestationDoc: AttestationDocument;
+    try {
+      // Step 1: Verify enclave attestation
       let amdVerification: AttestationResponse;
       try {
-        attestationDoc = await fetchAttestation(this.enclave);
-        amdVerification = await verifyAmdAttestation(attestationDoc);
+        amdVerification = await verifyAmdAttestation(attestationDoc, vcek);
         steps.verifyEnclave = { status: 'success' };
       } catch (error) {
         steps.verifyEnclave = { status: 'failed', error: (error as Error).message };
@@ -51,21 +71,9 @@ export class Verifier {
         throw error;
       }
 
-      // Step 2: Fetch Digest
-      let digest: string;
-      try {
-        digest = await fetchLatestDigest(this.configRepo);
-        steps.fetchDigest = { status: 'success' };
-      } catch (error) {
-        steps.fetchDigest = { status: 'failed', error: (error as Error).message };
-        this.saveFailedVerificationDocument(steps);
-        throw error;
-      }
-
-      // Step 3: Verify Code
+      // Step 2: Verify code attestation (Sigstore)
       let codeMeasurements: AttestationMeasurement;
       try {
-        const sigstoreBundle = await fetchAttestationBundle(this.configRepo, digest);
         codeMeasurements = await verifySigstoreAttestation(sigstoreBundle, digest, this.configRepo);
         steps.verifyCode = { status: 'success' };
       } catch (error) {
@@ -74,7 +82,7 @@ export class Verifier {
         throw error;
       }
 
-      // Step 4: Compare Measurements
+      // Step 3: Compare measurements
       try {
         compareMeasurements(codeMeasurements, amdVerification.measurement);
         steps.compareMeasurements = { status: 'success' };
@@ -93,7 +101,7 @@ export class Verifier {
       // Build successful verification document
       this.verificationDocument = {
         configRepo: this.configRepo,
-        enclaveHost: this.enclave,
+        enclaveHost: domain,
         releaseDigest: digest,
         codeMeasurement: codeMeasurements,
         enclaveMeasurement: amdVerification,
@@ -101,7 +109,7 @@ export class Verifier {
         hpkePublicKey: amdVerification.hpkePublicKey || '',
         codeFingerprint: await measurementFingerprint(codeMeasurements),
         enclaveFingerprint: await measurementFingerprint(amdVerification.measurement),
-        selectedRouterEndpoint: this.enclave,
+        selectedRouterEndpoint: domain,
         securityVerified: true,
         steps
       };

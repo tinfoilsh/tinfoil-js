@@ -9,6 +9,22 @@ export interface AttestationDocument {
   body: string;
 }
 
+/**
+ * Complete attestation bundle from single-request verification.
+ */
+export interface AttestationBundle {
+  /** Selected enclave domain hostname */
+  domain: string;
+  /** Enclave attestation report (from router's /.well-known/tinfoil-attestation) */
+  enclaveAttestationReport: AttestationDocument;
+  /** SHA256 digest of the release */
+  digest: string;
+  /** Sigstore bundle for code provenance verification */
+  sigstoreBundle: unknown;
+  /** Base64-encoded VCEK certificate (DER format) */
+  vcek: string;
+}
+
 export interface AttestationMeasurement {
   type: string;
   registers: string[];
