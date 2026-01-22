@@ -11,7 +11,7 @@ interface CreateTinfoilAIOptions {
 export async function createTinfoilAI(apiKey: string, options: CreateTinfoilAIOptions = {}) {
   const baseURL = options.baseURL;
   const enclaveURL = options.enclaveURL;
-  const configRepo = options.configRepo || TINFOIL_CONFIG.INFERENCE_PROXY_REPO;
+  const configRepo = options.configRepo || TINFOIL_CONFIG.DEFAULT_ROUTER_REPO;
 
   const secureClient = new SecureClient({
     baseURL,
