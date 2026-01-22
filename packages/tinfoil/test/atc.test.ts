@@ -81,8 +81,8 @@ describe("ATC API", () => {
     it.skipIf(!RUN_INTEGRATION)("should accept custom ATC URL", async () => {
       const { fetchBundle } = await import("../src/atc");
 
-      // Using production URL explicitly
-      const bundle = await fetchBundle();
+      // Using production URL explicitly to test custom URL parameter
+      const bundle = await fetchBundle("https://atc.tinfoil.sh");
 
       expect(bundle).toBeDefined();
       expect(bundle.domain).toBeDefined();
@@ -109,7 +109,8 @@ describe("ATC API", () => {
     it.skipIf(!RUN_INTEGRATION)("should accept custom ATC URL", async () => {
       const { fetchRouter } = await import("../src/atc");
 
-      const router = await fetchRouter();
+      // Using production URL explicitly to test custom URL parameter
+      const router = await fetchRouter("https://atc.tinfoil.sh");
 
       expect(router).toBeDefined();
       expect(typeof router).toBe("string");
