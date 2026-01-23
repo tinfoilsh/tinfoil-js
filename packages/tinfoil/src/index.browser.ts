@@ -8,3 +8,4 @@ export * from "./ai-sdk-provider.js";
 export * from "./config.js";
 export { SecureClient, type TransportMode } from "./secure-client.js";
 export { UnverifiedClient } from "./unverified-client.js";
+export { fetchRouter, fetchAttestationBundle } from "./atc.js";

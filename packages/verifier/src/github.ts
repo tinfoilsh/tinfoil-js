@@ -61,7 +61,7 @@ export async function fetchLatestDigest(repo: string): Promise<string> {
  * @returns The sigstore bundle JSON object
  * @throws Error if there's any error fetching or parsing the data
  */
-export async function fetchAttestationBundle(repo: string, digest: string): Promise<unknown> {
+export async function fetchGithubAttestationBundle(repo: string, digest: string): Promise<unknown> {
   const url = `https://api-github-proxy.tinfoil.sh/repos/${repo}/attestations/sha256:${digest}`;
 
   let bundleResponse;
