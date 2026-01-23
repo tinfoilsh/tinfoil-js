@@ -24,7 +24,10 @@ npm install @tinfoilsh/verifier
 ```typescript
 import { Verifier } from '@tinfoilsh/verifier';
 
-const verifier = new Verifier({ serverURL: 'https://enclave.example.com' });
+const verifier = new Verifier({
+  serverURL: 'https://enclave.example.com',
+  configRepo: 'tinfoilsh/confidential-model-router',
+});
 const attestation = await verifier.verify();
 
 console.log(attestation.measurement);

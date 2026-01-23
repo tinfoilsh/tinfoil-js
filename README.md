@@ -170,7 +170,10 @@ The `Verifier` class is for advanced use cases where you want to verify an encla
 ```typescript
 import { Verifier } from "tinfoil";
 
-const verifier = new Verifier({ serverURL: "https://enclave.host.com" });
+const verifier = new Verifier({
+  serverURL: "https://enclave.host.com",
+  configRepo: "tinfoilsh/confidential-model-router",
+});
 
 const attestation = await verifier.verify();
 console.log(attestation.tlsPublicKeyFingerprint);
