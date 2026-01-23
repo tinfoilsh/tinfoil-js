@@ -40,17 +40,88 @@ function createAsyncProxy<T extends object>(promise: Promise<T>): T {
   });
 }
 
-interface TinfoilAIOptions {
+/**
+ * Configuration options for TinfoilAI client.
+ * 
+ * @example
+ * ```typescript
+ * // Server-side with API key
+ * const client = new TinfoilAI({ apiKey: "your-api-key" });
+ * 
+ * // Browser with bearer token (from your auth system)
+ * const client = new TinfoilAI({ bearerToken: "your-jwt-token" });
+ * 
+ * // With custom transport mode
+ * const client = new TinfoilAI({ apiKey: "key", transport: "tls" });
+ * ```
+ */
+export interface TinfoilAIOptions {
+  /** 
+   * Tinfoil API key. Get one at https://docs.tinfoil.sh/get-api-key
+   * In Node.js, defaults to TINFOIL_API_KEY environment variable.
+   * Never use in browser code - use bearerToken instead.
+   */
   apiKey?: string;
+  
+  /** 
+   * Bearer token for browser authentication (e.g., JWT from your auth system).
+   * Automatically enables browser usage without dangerouslyAllowBrowser.
+   */
   bearerToken?: string;
+  
+  /** 
+   * Override the base URL for API requests. 
+   * Useful for proxying requests through your own backend.
+   * @see https://docs.tinfoil.sh/guides/proxy-server
+   */
   baseURL?: string;
+  
+  /** 
+   * Override the enclave URL for verification and key fetching.
+   * When using a proxy, this should point to the actual enclave.
+   */
   enclaveURL?: string;
+  
+  /** GitHub repo for release verification. Defaults to tinfoilsh/confidential-model-router. */
   configRepo?: string;
+  
+  /** 
+   * Transport mode for secure communication.
+   * - 'auto': Automatically select best available (default)
+   * - 'ehbp': Force HPKE encryption via EHBP protocol
+   * - 'tls': Force TLS certificate pinning
+   * @default 'auto'
+   */
   transport?: TransportMode;
   attestationBundleURL?: string;
-  [key: string]: any; // Allow other OpenAI client options
+  
+  /** Additional OpenAI client options (passed through to underlying client) */
+  [key: string]: any;
 }
 
+/**
+ * Secure OpenAI-compatible client for Tinfoil's verifiably private AI inference.
+ * 
+ * TinfoilAI automatically verifies you're connected to a genuine secure enclave
+ * and encrypts all requests end-to-end. The API is fully compatible with OpenAI's client.
+ * 
+ * @example
+ * ```typescript
+ * import { TinfoilAI } from "tinfoil";
+ * 
+ * const client = new TinfoilAI({
+ *   apiKey: "your-api-key", // or use TINFOIL_API_KEY env var
+ * });
+ * 
+ * const completion = await client.chat.completions.create({
+ *   messages: [{ role: "user", content: "Hello!" }],
+ *   model: "llama3-3-70b",
+ * });
+ * ```
+ * 
+ * @see https://docs.tinfoil.sh/sdk/javascript-sdk - Full documentation
+ * @see https://docs.tinfoil.sh/cc/how-it-works - How verification works
+ */
 export class TinfoilAI {
   private client?: OpenAI;
   private clientPromise: Promise<OpenAI>;
@@ -99,6 +170,19 @@ export class TinfoilAI {
     this.clientPromise = this.createOpenAIClient(openAIOptions);
   }
 
+  /**
+   * Wait for the client to complete verification and be ready for requests.
+   * 
+   * Most methods automatically wait for ready(), but you can call this explicitly
+   * in browsers to show loading state during verification.
+   * 
+   * @example
+   * ```typescript
+   * const client = new TinfoilAI({ bearerToken: jwt });
+   * await client.ready(); // Wait for verification
+   * // Now make requests
+   * ```
+   */
   public async ready(): Promise<void> {
     if (!this.readyPromise) {
       this.readyPromise = (async () => {
@@ -143,6 +227,24 @@ export class TinfoilAI {
     return this.client!;
   }
 
+  /**
+   * Get the verification document containing attestation details.
+   * 
+   * The document includes information about the enclave, code measurements,
+   * and the status of each verification step.
+   * 
+   * @returns The verification document with attestation results
+   * @throws Error if verification has not completed
+   * 
+   * @example
+   * ```typescript
+   * const doc = await client.getVerificationDocument();
+   * console.log(doc.securityVerified); // true if all checks passed
+   * console.log(doc.steps); // { fetchDigest, verifyCode, verifyEnclave, compareMeasurements }
+   * ```
+   * 
+   * @see https://docs.tinfoil.sh/verification/attestation-architecture
+   */
   public async getVerificationDocument(): Promise<VerificationDocument> {
     await this.ready();
     if (!this.verificationDocument) {
