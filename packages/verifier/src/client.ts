@@ -1,6 +1,6 @@
 import { verifyAttestation as verifyAmdAttestation, fetchAttestation } from './attestation.js';
 import { fetchLatestDigest, fetchGithubAttestationBundle } from './github.js';
-import { verifyAttestation as verifySigstoreAttestation } from './sigstore.js';
+import { verifySigstoreAttestation } from './sigstore.js';
 import { verifyCertificate, CertificateVerificationError } from './cert-verify.js';
 import { compareMeasurements, FormatMismatchError, MeasurementMismatchError, measurementFingerprint } from './types.js';
 import type { AttestationDocument, AttestationMeasurement, AttestationResponse, VerificationDocument, AttestationBundle } from './types.js';
