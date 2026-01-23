@@ -9,23 +9,16 @@ import { generateText, streamText } from "ai";
  * 
  * Prerequisites:
  * - Install the AI SDK: npm install ai
- * - Set TINFOIL_API_KEY environment variable
  * 
  * Related docs:
  * - Tool Calling: https://docs.tinfoil.sh/guides/tool-calling
  * - Structured Outputs: https://docs.tinfoil.sh/guides/structured-outputs
  */
 async function main() {
-  const apiKey = process.env.TINFOIL_API_KEY;
-  if (!apiKey) {
-    console.error("Please set TINFOIL_API_KEY environment variable");
-    process.exit(1);
-  }
-
   try {
     // Create a Tinfoil provider for the AI SDK
     // This performs enclave verification automatically
-    const tinfoil = await createTinfoilAI(apiKey);
+    const tinfoil = await createTinfoilAI();
 
     // Example 1: Simple text generation
     console.log("=== Text Generation ===\n");
