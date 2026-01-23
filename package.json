@@ -6,6 +6,7 @@
   ],
   "scripts": {
     "build": "npm run build -w @tinfoilsh/verifier && npm run build -w tinfoil",
+    "lint": "npm run lint -w tinfoil",
     "test": "npm run test -ws --if-present",
     "test:integration": "npm run test:integration -ws --if-present",
     "test:browser": "npm run test:browser -ws --if-present",
