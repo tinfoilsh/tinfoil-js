@@ -19,6 +19,13 @@ export interface CreateTinfoilAIOptions {
   
   /** GitHub repo for release verification. */
   configRepo?: string;
+  /**
+   * Optional URL to fetch a precomputed attestation bundle from.
+   *
+   * This is primarily useful when you want verification to use an externally
+   * produced bundle (e.g., fetched via your own routing layer) instead of
+   * letting the client fetch it from the default router flow.
+   */
   attestationBundleURL?: string;
 }
 
