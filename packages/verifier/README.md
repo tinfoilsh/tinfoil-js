@@ -32,6 +32,34 @@ console.log(attestation.tlsPublicKeyFingerprint);
 console.log(attestation.hpkePublicKey);
 ```
 
+## Verifying a Pre-Fetched Bundle
+
+If you already have a complete attestation bundle (for example, fetched via the
+`tinfoil` SDK’s `fetchAttestationBundle()` helper), you can verify it directly:
+
+```typescript
+import { Verifier } from '@tinfoilsh/verifier';
+import type { AttestationBundle } from '@tinfoilsh/verifier';
+
+const verifier = new Verifier({
+  serverURL: 'https://enclave.example.com',
+  configRepo: 'tinfoilsh/confidential-model-router',
+});
+
+const bundle: AttestationBundle = /* fetch bundle from your source */;
+await verifier.verifyBundle(bundle);
+
+const doc = verifier.getVerificationDocument();
+console.log(doc.securityVerified);
+```
+
+## Error Handling
+
+For callers that want structured error handling, these errors are part of the public API:
+
+- `AttestationError` (and `FormatMismatchError`, `MeasurementMismatchError`) — measurement/format validation
+- `CertificateVerificationError` — enclave TLS certificate SAN validation for HPKE key + attestation hash
+
 ## Inspecting Verification Results
 
 The verification document contains detailed information about each step:
@@ -68,6 +96,12 @@ The `Verifier` performs a multi-step verification:
 - Sigstore code provenance verification (Fulcio + Rekor)
 - TUF-based trusted root updates
 - Works in Node.js and browsers (uses Web Crypto API)
+
+## GitHub Proxy Dependency
+
+This package fetches GitHub release metadata and attestation bundles via Tinfoil-hosted
+GitHub proxy endpoints (to avoid rate-limits/CORS issues). If your environment cannot
+reach these endpoints, verification that depends on GitHub release attestations will fail.
 
 ## Relationship to `tinfoil` Package
 

@@ -33,7 +33,7 @@ class GitHubWorkflowRefPattern implements VerificationPolicy {
  * @returns The verified measurement data
  * @throws Error if verification fails or digests don't match
  */
-export async function verifyAttestation(
+export async function verifySigstoreAttestation(
   bundleJson: unknown,
   digest: string,
   repo: string
