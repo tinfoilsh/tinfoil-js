@@ -6,7 +6,7 @@
 
 A TypeScript client for verifiably private AI inference with the [Tinfoil API](https://docs.tinfoil.sh/introduction). Supports the [OpenAI API format](https://platform.openai.com/docs/api-reference) and the [Vercel AI SDK](https://sdk.vercel.ai/).
 
-Tinfoil runs LLMs inside [secure enclaves](https://docs.tinfoil.sh/cc/how-it-works)—isolated environments on hardware where even Tinfoil cannot access your data. This SDK encrypts your requests using [HPKE](https://docs.tinfoil.sh/resources/ehbp) (RFC 9180) via the [EHBP](https://github.com/tinfoilsh/encrypted-http-body-protocol) protocol, so that only the verified enclave can decrypt them.
+Tinfoil runs LLMs inside [secure enclaves](https://docs.tinfoil.sh/cc/how-it-works)—isolated environments on hardware where even Tinfoil cannot access your data. This SDK encrypts your requests using [HPKE (RFC 9180)](https://www.rfc-editor.org/rfc/rfc9180.html) via the [EHBP](https://github.com/tinfoilsh/encrypted-http-body-protocol) protocol, so that only the verified enclave can decrypt them.
 
 
 It also supports TLS certificate pinning as a fallback mode, where all connections are encrypted and terminated to a verified secure enclave.
