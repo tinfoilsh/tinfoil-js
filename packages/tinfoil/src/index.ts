@@ -1,6 +1,7 @@
 // Re-export the TinfoilAI class
 export { TinfoilAI } from "./tinfoil-ai.js";
 export { TinfoilAI as default } from "./tinfoil-ai.js";
+export type { TinfoilAIOptions } from "./tinfoil-ai.js";
 
 // Export verifier
 export * from "./verifier.js";
