@@ -1,5 +1,5 @@
 import { verifyAttestation as verifyAmdAttestation, fetchAttestation } from './attestation.js';
-import { fetchLatestDigest, fetchAttestationBundle } from './github.js';
+import { fetchLatestDigest, fetchGithubAttestationBundle } from './github.js';
 import { verifyAttestation as verifySigstoreAttestation } from './sigstore.js';
 import { verifyCertificate, CertificateVerificationError } from './cert-verify.js';
 import { compareMeasurements, FormatMismatchError, MeasurementMismatchError, measurementFingerprint } from './types.js';
@@ -29,7 +29,7 @@ export class Verifier {
   async verify(): Promise<AttestationResponse> {
     const attestationDoc = await fetchAttestation(this.enclave);
     const digest = await fetchLatestDigest(this.configRepo);
-    const sigstoreBundle = await fetchAttestationBundle(this.configRepo, digest);
+    const sigstoreBundle = await fetchGithubAttestationBundle(this.configRepo, digest);
 
     return this.performVerification(attestationDoc, undefined, digest, sigstoreBundle, this.enclave);
   }
