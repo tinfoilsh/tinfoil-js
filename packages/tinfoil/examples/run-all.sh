@@ -18,6 +18,8 @@ echo "======================"
 
 EXAMPLES=(
   "chat"
+  "streaming"
+  "ai-sdk"
   "secure_client"
   "unverified_client"
 )

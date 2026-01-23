@@ -1,3 +1,15 @@
+/**
+ * UnverifiedClient Example - Development/Testing Only
+ *
+ * WARNING: UnverifiedClient skips enclave verification. Use only for:
+ * - Local development against mock endpoints
+ * - Testing when verification is not required
+ * - Debugging transport issues
+ *
+ * For production, always use TinfoilAI or SecureClient which verify the enclave.
+ *
+ * Run: npx ts-node main.ts
+ */
 import { UnverifiedClient } from "tinfoil";
 
 async function main() {
@@ -15,10 +27,8 @@ async function main() {
       }),
     });
 
-    console.log(response);
-
-    const responseBody = await response.text();
-    console.log("Response Body:", responseBody);
+    const data = await response.json();
+    console.log("Response:", data.choices[0]?.message?.content);
   } catch (error) {
     console.error("Error:", error);
     process.exit(1);

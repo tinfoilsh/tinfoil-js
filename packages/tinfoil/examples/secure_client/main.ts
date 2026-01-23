@@ -1,3 +1,15 @@
+/**
+ * SecureClient Example - Low-level Verified Fetch
+ *
+ * SecureClient provides a fetch-compatible API with automatic enclave verification
+ * and end-to-end encryption. Use this when you need more control than TinfoilAI,
+ * or when integrating with non-OpenAI-compatible endpoints.
+ *
+ * Prerequisites:
+ * - Set TINFOIL_API_KEY environment variable, or pass apiKey to constructor
+ *
+ * Run: npx ts-node main.ts
+ */
 import { SecureClient } from "tinfoil";
 
 async function main() {
@@ -15,10 +27,8 @@ async function main() {
       }),
     });
 
-    console.log(response);
-    
-    const responseBody = await response.text();
-    console.log("Response Body:", responseBody);
+    const data = await response.json();
+    console.log("Response:", data.choices[0]?.message?.content);
   } catch (error) {
     console.error("Error:", error);
     process.exit(1);
