@@ -3,16 +3,85 @@ import { TINFOIL_CONFIG } from "./config.js";
 import { createSecureFetch } from "./secure-fetch.js";
 import { fetchAttestationBundle } from "./atc.js";
 
+/**
+ * Transport mode for secure communication with the enclave.
+ * 
+ * - `'auto'` - Automatically select the best available transport (default).
+ *   Uses HPKE/EHBP when available, falls back to TLS pinning if not.
+ * - `'ehbp'` - Force HPKE encryption via the Encrypted HTTP Body Protocol.
+ *   End-to-end encrypted, works through proxies. Requires X25519 WebCrypto support.
+ * - `'tls'` - Force TLS certificate pinning. Direct connection to enclave only.
+ *   Used automatically in Bun (which lacks X25519 WebCrypto).
+ * 
+ * @see https://docs.tinfoil.sh/resources/ehbp - EHBP Protocol specification
+ */
 export type TransportMode = 'auto' | 'ehbp' | 'tls';
 
-interface SecureClientOptions {
+/**
+ * Configuration options for SecureClient.
+ */
+export interface SecureClientOptions {
+  /** 
+   * Override the base URL for API requests. 
+   * Useful for proxying requests through your own backend.
+   * @see https://docs.tinfoil.sh/guides/proxy-server
+   */
   baseURL?: string;
+  
+  /** 
+   * Override the enclave URL for verification and key fetching.
+   * When using a proxy, this should point to the actual enclave.
+   */
   enclaveURL?: string;
+  
+  /** GitHub repo for release verification. Defaults to tinfoilsh/confidential-model-router. */
   configRepo?: string;
+  
+  /** 
+   * Transport mode for secure communication.
+   * @default 'auto'
+   */
   transport?: TransportMode;
   attestationBundleURL?: string;
 }
 
+/**
+ * Low-level secure client providing a verified fetch function for custom HTTP requests.
+ * 
+ * SecureClient performs enclave attestation verification and provides a `fetch` function
+ * that encrypts all request bodies end-to-end. Use this when you need direct control
+ * over HTTP requests or want to use a different OpenAI client.
+ * 
+ * For most use cases, prefer {@link TinfoilAI} which wraps this with an OpenAI-compatible API.
+ * 
+ * @example
+ * ```typescript
+ * import { SecureClient } from "tinfoil";
+ * 
+ * const client = new SecureClient();
+ * await client.ready();
+ * 
+ * // Use with OpenAI SDK
+ * const openai = new OpenAI({
+ *   apiKey: "your-key",
+ *   baseURL: client.getBaseURL(),
+ *   fetch: client.fetch,
+ * });
+ * ```
+ * 
+ * @example
+ * ```typescript
+ * // Direct fetch for custom requests
+ * const response = await client.fetch("/v1/chat/completions", {
+ *   method: "POST",
+ *   headers: { "Content-Type": "application/json" },
+ *   body: JSON.stringify({ model: "llama3-3-70b", messages: [...] }),
+ * });
+ * ```
+ * 
+ * @see https://docs.tinfoil.sh/sdk/javascript-sdk
+ * @see https://docs.tinfoil.sh/guides/proxy-server - Proxy server setup
+ */
 export class SecureClient {
   private initPromise: Promise<void> | null = null;
   private verificationDocument: VerificationDocument | null = null;
@@ -34,6 +103,14 @@ export class SecureClient {
     this.attestationBundleURL = options.attestationBundleURL;
   }
 
+  /**
+   * Wait for the client to complete verification and be ready for requests.
+   * 
+   * This performs enclave attestation, code verification, and establishes
+   * the secure transport. Must be called before using `fetch`.
+   * 
+   * @throws Error if verification fails
+   */
   public async ready(): Promise<void> {
     if (!this.initPromise) {
       this.initPromise = this.initSecureClient();
@@ -119,6 +196,13 @@ export class SecureClient {
     }
   }
 
+  /**
+   * Get the verification document containing attestation details.
+   * 
+   * @returns The verification document with attestation results
+   * @throws Error if verification has not completed
+   * @see https://docs.tinfoil.sh/verification/attestation-architecture
+   */
   public async getVerificationDocument(): Promise<VerificationDocument> {
     if (!this.initPromise) {
       await this.ready();
@@ -132,6 +216,11 @@ export class SecureClient {
     return this.verificationDocument;
   }
 
+  /**
+   * Get the base URL for API requests.
+   * 
+   * @returns The base URL (e.g., "https://enclave.example.com/v1/")
+   */
   public getBaseURL(): string | undefined {
     return this.baseURL;
   }
@@ -157,6 +246,22 @@ export class SecureClient {
        error.message.includes('unsupported'));
   }
 
+  /**
+   * Secure fetch function that encrypts request bodies end-to-end.
+   * 
+   * Use this as a drop-in replacement for global `fetch`. Request bodies are
+   * encrypted using HPKE (or TLS pinning as fallback) so only the verified
+   * enclave can decrypt them.
+   * 
+   * @example
+   * ```typescript
+   * const response = await client.fetch("/v1/chat/completions", {
+   *   method: "POST",
+   *   headers: { "Content-Type": "application/json" },
+   *   body: JSON.stringify({ model: "llama3-3-70b", messages: [...] }),
+   * });
+   * ```
+   */
   get fetch(): typeof fetch {
     return async (input: RequestInfo | URL, init?: RequestInit) => {
       await this.ready();
