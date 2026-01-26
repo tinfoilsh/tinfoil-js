@@ -15,12 +15,12 @@
 
 import { useChat } from "@ai-sdk/react";
 import { useEffect, useState } from "react";
-import type { DefaultChatTransport } from "ai";
+import type { DefaultChatTransport, UIMessage } from "ai";
 import { getTinfoilTransport } from "../lib/tinfoil";
 
 export function Chat() {
   // Transport state - null until initialization completes
-  const [transport, setTransport] = useState<DefaultChatTransport | null>(null);
+  const [transport, setTransport] = useState<DefaultChatTransport<UIMessage> | null>(null);
   const [initError, setInitError] = useState<Error | null>(null);
 
   // Initialize transport on mount
@@ -166,10 +166,10 @@ export function Chat() {
 
 import { createContext, useContext, type ReactNode } from "react";
 
-const TinfoilContext = createContext<DefaultChatTransport | null>(null);
+const TinfoilContext = createContext<DefaultChatTransport<UIMessage> | null>(null);
 
 export function TinfoilProvider({ children }: { children: ReactNode }) {
-  const [transport, setTransport] = useState<DefaultChatTransport | null>(null);
+  const [transport, setTransport] = useState<DefaultChatTransport<UIMessage> | null>(null);
   const [error, setError] = useState<Error | null>(null);
 
   useEffect(() => {
@@ -201,7 +201,7 @@ export function TinfoilProvider({ children }: { children: ReactNode }) {
   );
 }
 
-export function useTinfoilTransport(): DefaultChatTransport {
+export function useTinfoilTransport(): DefaultChatTransport<UIMessage> {
   const transport = useContext(TinfoilContext);
   if (!transport) {
     throw new Error("useTinfoilTransport must be used within TinfoilProvider");

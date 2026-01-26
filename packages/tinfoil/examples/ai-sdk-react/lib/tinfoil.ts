@@ -7,10 +7,10 @@
  */
 
 import { SecureClient } from "tinfoil";
-import { DefaultChatTransport } from "ai";
+import { DefaultChatTransport, UIMessage } from "ai";
 
 // Singleton promise - initialized once, reused everywhere
-let transportPromise: Promise<DefaultChatTransport> | null = null;
+let transportPromise: Promise<DefaultChatTransport<UIMessage>> | null = null;
 
 /**
  * Get or create the Tinfoil transport singleton.
@@ -32,14 +32,14 @@ let transportPromise: Promise<DefaultChatTransport> | null = null;
  * }, []);
  * ```
  */
-export function getTinfoilTransport(): Promise<DefaultChatTransport> {
+export function getTinfoilTransport(): Promise<DefaultChatTransport<UIMessage>> {
   if (!transportPromise) {
     transportPromise = initializeTransport();
   }
   return transportPromise;
 }
 
-async function initializeTransport(): Promise<DefaultChatTransport> {
+async function initializeTransport(): Promise<DefaultChatTransport<UIMessage>> {
   // Get proxy URL from environment
   // In Next.js, use NEXT_PUBLIC_ prefix for client-side env vars
   const proxyUrl = process.env.NEXT_PUBLIC_PROXY_URL;
@@ -82,7 +82,7 @@ async function initializeTransport(): Promise<DefaultChatTransport> {
 export async function createTinfoilTransport(options: {
   proxyUrl: string;
   enclaveUrl?: string;
-}): Promise<DefaultChatTransport> {
+}): Promise<DefaultChatTransport<UIMessage>> {
   const secureClient = new SecureClient({
     baseURL: options.proxyUrl,
     enclaveURL: options.enclaveUrl,
