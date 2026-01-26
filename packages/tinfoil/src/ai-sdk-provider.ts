@@ -63,7 +63,7 @@ export interface CreateTinfoilAIOptions {
 export async function createTinfoilAI(apiKey?: string, options: CreateTinfoilAIOptions = {}) {
   // Resolve API key: use provided value, or fall back to env var (non-browser only)
   let resolvedApiKey = apiKey;
-  if (!resolvedApiKey && !isRealBrowser() && process.env.TINFOIL_API_KEY) {
+  if (!resolvedApiKey && !isRealBrowser() && typeof process !== 'undefined' && process.env.TINFOIL_API_KEY) {
     resolvedApiKey = process.env.TINFOIL_API_KEY;
   }
   if (!resolvedApiKey) {
