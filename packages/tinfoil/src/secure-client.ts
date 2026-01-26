@@ -10,8 +10,8 @@ import { fetchAttestationBundle } from "./atc.js";
  *   Uses HPKE/EHBP when available, falls back to TLS pinning if not.
  * - `'ehbp'` - Force HPKE encryption via the Encrypted HTTP Body Protocol.
  *   End-to-end encrypted, works through proxies. Requires X25519 WebCrypto support.
- * - `'tls'` - Force TLS certificate pinning. Direct connection to enclave only.
- *   Used automatically in Bun (which lacks X25519 WebCrypto).
+ * - `'tls'` - Force TLS certificate pinning. Requires direct connection to the enclave;
+ *   requests through a proxy will fail. Used automatically in Bun (which lacks X25519 WebCrypto).
  * 
  * @see https://docs.tinfoil.sh/resources/ehbp - EHBP Protocol specification
  */
@@ -28,13 +28,13 @@ export interface SecureClientOptions {
    */
   baseURL?: string;
   
-  /** 
+  /**
    * Override the enclave URL for verification and key fetching.
-   * When using a proxy, this should point to the actual enclave.
+   * Required if attestationBundleURL is not set. Used for fetching attestation on the fly.
    */
   enclaveURL?: string;
   
-  /** GitHub repo for release verification. Defaults to tinfoilsh/confidential-model-router. */
+  /** GitHub repo for code verification. Defaults to tinfoilsh/confidential-model-router. */
   configRepo?: string;
   
   /** 
