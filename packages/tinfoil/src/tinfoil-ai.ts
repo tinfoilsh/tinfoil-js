@@ -150,7 +150,7 @@ export class TinfoilAI {
       this.bearerToken = options.bearerToken;
     } else if (options.apiKey) {
       openAIOptions.apiKey = options.apiKey;
-    } else if (!isRealBrowser() && process.env.TINFOIL_API_KEY) {
+    } else if (!isRealBrowser() && typeof process !== 'undefined' && process.env.TINFOIL_API_KEY) {
       openAIOptions.apiKey = process.env.TINFOIL_API_KEY;
     }
 
