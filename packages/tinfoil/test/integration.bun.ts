@@ -20,7 +20,7 @@ describe("Bun Integration", () => {
     if (!isBun || !RUN_INTEGRATION) return;
     
     const { TinfoilAI } = await import("../src/index.js");
-    const client = new TinfoilAI({ apiKey: "tinfoil" });
+    const client = new TinfoilAI({ apiKey: process.env.TINFOIL_API_KEY });
     await client.ready();
     
     const doc = await client.getVerificationDocument();
@@ -31,7 +31,7 @@ describe("Bun Integration", () => {
     if (!isBun || !RUN_INTEGRATION) return;
     
     const { TinfoilAI } = await import("../src/index.js");
-    const client = new TinfoilAI({ apiKey: "tinfoil" });
+    const client = new TinfoilAI({ apiKey: process.env.TINFOIL_API_KEY });
     
     const completion = await client.chat.completions.create({
       model: "gpt-oss-120b-free",

@@ -20,7 +20,7 @@ describe("Vercel AI SDK Integration Tests", () => {
       const { createTinfoilAI } = await import("../src/ai-sdk-provider");
       const { generateText } = await import("ai");
 
-      const tinfoil = await createTinfoilAI("tinfoil");
+      const tinfoil = await createTinfoilAI(process.env.TINFOIL_API_KEY);
 
       const { text } = await generateText({
         model: tinfoil("gpt-oss-120b-free"),
@@ -36,7 +36,7 @@ describe("Vercel AI SDK Integration Tests", () => {
       const { createTinfoilAI } = await import("../src/ai-sdk-provider");
       const { streamText } = await import("ai");
 
-      const tinfoil = await createTinfoilAI("tinfoil");
+      const tinfoil = await createTinfoilAI(process.env.TINFOIL_API_KEY);
 
       const stream = streamText({
         model: tinfoil("gpt-oss-120b-free"),
@@ -56,7 +56,7 @@ describe("Vercel AI SDK Integration Tests", () => {
       const { createTinfoilAI } = await import("../src/ai-sdk-provider");
       const { generateText, tool } = await import("ai");
 
-      const tinfoil = await createTinfoilAI("tinfoil");
+      const tinfoil = await createTinfoilAI(process.env.TINFOIL_API_KEY);
 
       const { text, toolCalls } = await generateText({
         model: tinfoil("gpt-oss-120b-free"),
@@ -82,7 +82,7 @@ describe("Vercel AI SDK Integration Tests", () => {
       const { createTinfoilAI } = await import("../src/ai-sdk-provider");
       const { generateObject } = await import("ai");
 
-      const tinfoil = await createTinfoilAI("tinfoil");
+      const tinfoil = await createTinfoilAI(process.env.TINFOIL_API_KEY);
 
       const { object } = await generateObject({
         model: tinfoil("gpt-oss-120b-free"),
@@ -102,7 +102,7 @@ describe("Vercel AI SDK Integration Tests", () => {
       const { createTinfoilAI } = await import("../src/ai-sdk-provider");
       const { streamText } = await import("ai");
 
-      const tinfoil = await createTinfoilAI("tinfoil");
+      const tinfoil = await createTinfoilAI(process.env.TINFOIL_API_KEY);
       const abortController = new AbortController();
 
       const stream = streamText({
@@ -133,7 +133,7 @@ describe("Vercel AI SDK Integration Tests", () => {
       const { createTinfoilAI } = await import("../src/ai-sdk-provider");
       const { generateText } = await import("ai");
 
-      const tinfoil = await createTinfoilAI("tinfoil");
+      const tinfoil = await createTinfoilAI(process.env.TINFOIL_API_KEY);
 
       const { text } = await generateText({
         model: tinfoil("gpt-oss-120b-free"),
@@ -158,7 +158,7 @@ describe("Vercel AI SDK Integration Tests", () => {
       const provider = createOpenAICompatible({
         name: "tinfoil-direct",
         baseURL: secureClient.getBaseURL()!,
-        apiKey: "tinfoil",
+        apiKey: process.env.TINFOIL_API_KEY,
         fetch: secureClient.fetch,
       });
 
@@ -182,7 +182,7 @@ describe("Vercel AI SDK Integration Tests", () => {
       const provider = createOpenAICompatible({
         name: "tinfoil-direct",
         baseURL: secureClient.getBaseURL()!,
-        apiKey: "tinfoil",
+        apiKey: process.env.TINFOIL_API_KEY,
         fetch: secureClient.fetch,
       });
 
@@ -208,7 +208,7 @@ describe("Vercel AI SDK Integration Tests", () => {
 
       // This test verifies that baseURL can be configured separately
       // In a real proxy setup, baseURL would point to your proxy server
-      const tinfoil = await createTinfoilAI("tinfoil", {
+      const tinfoil = await createTinfoilAI(process.env.TINFOIL_API_KEY, {
         // Using default enclave URL but explicitly setting it
         // In production, you'd set baseURL to your proxy
       });
