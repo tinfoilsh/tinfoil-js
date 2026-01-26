@@ -18,7 +18,7 @@ export interface CreateTinfoilAIOptions {
    */
   enclaveURL?: string;
   
-  /** GitHub repo for release verification. */
+  /** GitHub repo for code verification. */
   configRepo?: string;
   /**
    * Optional URL to fetch a precomputed attestation bundle from.

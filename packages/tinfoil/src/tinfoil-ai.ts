@@ -76,13 +76,13 @@ export interface TinfoilAIOptions {
    */
   baseURL?: string;
   
-  /** 
+  /**
    * Override the enclave URL for verification and key fetching.
-   * When using a proxy, this should point to the actual enclave.
+   * Required if attestationBundleURL is not set. Used for fetching attestation on the fly.
    */
   enclaveURL?: string;
-  
-  /** GitHub repo for release verification. Defaults to tinfoilsh/confidential-model-router. */
+
+  /** GitHub repo for code verification. Defaults to tinfoilsh/confidential-model-router. */
   configRepo?: string;
   
   /** 

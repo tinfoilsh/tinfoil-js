@@ -1,12 +1,9 @@
 /**
  * Tinfoil Transport Singleton
- * 
+ *
  * This module provides a singleton pattern for initializing the Tinfoil SecureClient
  * and creating a transport for the Vercel AI SDK. The transport is initialized once
  * and reused across your application.
- * 
- * IMPORTANT: In browser environments, you MUST use a proxy server.
- * Set NEXT_PUBLIC_PROXY_URL to your proxy's URL.
  */
 
 import { SecureClient } from "tinfoil";
@@ -17,12 +14,12 @@ let transportPromise: Promise<DefaultChatTransport> | null = null;
 
 /**
  * Get or create the Tinfoil transport singleton.
- * 
+ *
  * This function:
- * 1. Creates a SecureClient pointing to your proxy
+ * 1. Creates a SecureClient (optionally routing through your proxy)
  * 2. Waits for attestation verification to complete
  * 3. Returns a DefaultChatTransport configured with the secure fetch
- * 
+ *
  * The transport is cached and reused on subsequent calls.
  * 
  * @example
@@ -54,8 +51,7 @@ async function initializeTransport(): Promise<DefaultChatTransport> {
     );
   }
 
-  // Create SecureClient pointing to your proxy
-  // The enclaveURL is fetched automatically from the router
+  // Create SecureClient, optionally routing traffic through your proxy
   const secureClient = new SecureClient({
     baseURL: proxyUrl,
   });
@@ -69,8 +65,8 @@ async function initializeTransport(): Promise<DefaultChatTransport> {
   return new DefaultChatTransport({
     api: "/v1/chat/completions",
     fetch: secureClient.fetch,
-    // Optional: Add custom headers for your proxy to read
-    // These are visible to your proxy but NOT to the enclave
+    // Optional: If using a proxy, add custom headers for it to read.
+    // These headers are visible to your proxy but the body remains encrypted.
     // headers: {
     //   "X-User-ID": getUserId(),
     // },
