@@ -1,6 +1,7 @@
 import { createOpenAICompatible } from "@ai-sdk/openai-compatible";
 import { TINFOIL_CONFIG } from "./config.js";
 import { SecureClient } from "./secure-client.js";
+import { isRealBrowser } from "./env.js";
 
 /**
  * Options for creating a Tinfoil AI SDK provider.
@@ -35,27 +36,40 @@ export interface CreateTinfoilAIOptions {
  * This performs enclave verification and returns an OpenAI-compatible provider
  * that can be used with Vercel AI SDK functions like `generateText` and `streamText`.
  * 
- * @param apiKey - Your Tinfoil API key
+ * @param apiKey - Your Tinfoil API key. Falls back to TINFOIL_API_KEY env var if not provided.
  * @param options - Optional configuration
  * @returns An AI SDK provider for Tinfoil
- * 
+ *
  * @example
  * ```typescript
  * import { createTinfoilAI } from "tinfoil";
  * import { generateText } from "ai";
- * 
+ *
+ * // Uses TINFOIL_API_KEY env var
+ * const tinfoil = await createTinfoilAI();
+ *
+ * // Or pass API key explicitly
  * const tinfoil = await createTinfoilAI("your-api-key");
- * 
+ *
  * const { text } = await generateText({
  *   model: tinfoil("llama3-3-70b"),
  *   prompt: "Hello!",
  * });
  * ```
- * 
+ *
  * @see https://docs.tinfoil.sh/sdk/javascript-sdk
  * @see https://sdk.vercel.ai/ - Vercel AI SDK documentation
  */
-export async function createTinfoilAI(apiKey: string, options: CreateTinfoilAIOptions = {}) {
+export async function createTinfoilAI(apiKey?: string, options: CreateTinfoilAIOptions = {}) {
+  // Resolve API key: use provided value, or fall back to env var (non-browser only)
+  let resolvedApiKey = apiKey;
+  if (!resolvedApiKey && !isRealBrowser() && process.env.TINFOIL_API_KEY) {
+    resolvedApiKey = process.env.TINFOIL_API_KEY;
+  }
+  if (!resolvedApiKey) {
+    throw new Error("API key is required. Provide apiKey parameter or set TINFOIL_API_KEY environment variable.");
+  }
+
   const baseURL = options.baseURL;
   const enclaveURL = options.enclaveURL;
   const configRepo = options.configRepo || TINFOIL_CONFIG.DEFAULT_ROUTER_REPO;
@@ -78,7 +92,7 @@ export async function createTinfoilAI(apiKey: string, options: CreateTinfoilAIOp
   return createOpenAICompatible({
     name: "tinfoil",
     baseURL: finalBaseURL,
-    apiKey: apiKey,
+    apiKey: resolvedApiKey,
     fetch: secureClient.fetch,
   });
 }
