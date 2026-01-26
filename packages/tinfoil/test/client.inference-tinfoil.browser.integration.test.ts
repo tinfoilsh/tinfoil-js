@@ -8,7 +8,7 @@ describe("TinfoilAI - enclaveURL integration", () => {
 
   it("should verify enclave when enclaveURL is set to inference.tinfoil.sh", async () => {
     const client = new TinfoilAI({
-      bearerToken: "tinfoil",
+      bearerToken: process.env.TINFOIL_API_KEY,
       enclaveURL: INFERENCE_URL,
     });
 
@@ -25,7 +25,7 @@ describe("TinfoilAI - enclaveURL integration", () => {
 
   it("should verify enclave when only baseURL is set to inference.tinfoil.sh", async () => {
     const client = new TinfoilAI({
-      bearerToken: "tinfoil",
+      bearerToken: process.env.TINFOIL_API_KEY,
       baseURL: `${INFERENCE_URL}/v1/`,
     });
 

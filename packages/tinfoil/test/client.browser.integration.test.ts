@@ -7,7 +7,7 @@ describe('Browser Client Integration Tests', () => {
   describe('TinfoilAI Client', () => {
     it('should create a TinfoilAI client and make a chat completion request', async () => {
       const client = new TinfoilAI({
-        bearerToken: 'tinfoil',
+        bearerToken: process.env.TINFOIL_API_KEY,
       });
 
       expect(client).toBeDefined();
@@ -32,7 +32,7 @@ describe('Browser Client Integration Tests', () => {
 
     it('should get verification document after client initialization', async () => {
       const client = new TinfoilAI({
-        bearerToken: 'tinfoil',
+        bearerToken: process.env.TINFOIL_API_KEY,
       });
 
       await client.ready();
@@ -52,7 +52,7 @@ describe('Browser Client Integration Tests', () => {
 
     it('should handle streaming chat completion', async () => {
       const client = new TinfoilAI({
-        bearerToken: 'tinfoil',
+        bearerToken: process.env.TINFOIL_API_KEY,
       });
 
       await client.ready();

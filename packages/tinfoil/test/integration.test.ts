@@ -13,7 +13,7 @@ describe("Examples Integration Tests", () => {
       const { TinfoilAI } = await import("../src/tinfoil-ai");
 
       const client = new TinfoilAI({
-        apiKey: "tinfoil",
+        apiKey: process.env.TINFOIL_API_KEY,
       });
 
       expect(client).toBeTruthy();
@@ -91,7 +91,7 @@ describe("Examples Integration Tests", () => {
   describe("Streaming Chat Completion", () => {
     it.skipIf(!RUN_INTEGRATION)("should handle streaming chat completion", async () => {
       const { TinfoilAI } = await import("../src/tinfoil-ai");
-      const client = new TinfoilAI({ apiKey: "tinfoil" });
+      const client = new TinfoilAI({ apiKey: process.env.TINFOIL_API_KEY });
 
       await client.ready();
 
@@ -157,7 +157,7 @@ describe("Examples Integration Tests", () => {
   describe("Audio Transcription", () => {
     it.skipIf(!RUN_INTEGRATION)("should transcribe audio using whisper-large-v3-turbo model", async () => {
       const { TinfoilAI } = await import("../src/tinfoil-ai");
-      const client = new TinfoilAI({ apiKey: "tinfoil" });
+      const client = new TinfoilAI({ apiKey: process.env.TINFOIL_API_KEY });
 
       await client.ready();
 
@@ -240,7 +240,7 @@ describe("Examples Integration Tests", () => {
       const { TinfoilAI } = await import("../src/tinfoil-ai");
 
       const client = new TinfoilAI({
-        apiKey: "tinfoil",
+        apiKey: process.env.TINFOIL_API_KEY,
         transport: 'tls',
       });
 
