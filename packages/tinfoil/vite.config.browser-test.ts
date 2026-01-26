@@ -3,6 +3,9 @@ import { defineConfig } from "vite";
 import { resolve } from "path";
 
 export default defineConfig({
+  define: {
+    'process.env.TINFOIL_API_KEY': JSON.stringify(process.env.TINFOIL_API_KEY ?? ''),
+  },
   test: {
     include: ["test/*.browser.integration.test.ts"],
     browser: {

@@ -39,12 +39,16 @@ jobs:
 
       - name: Run integration tests
         run: npm run test:integration
+        env:
+          TINFOIL_API_KEY: ${{ secrets.TINFOIL_API_KEY }}
 
       - name: Run browser tests
         run: npm run test:browser
 
       - name: Run browser integration tests
         run: npm run test:browser:integration
+        env:
+          TINFOIL_API_KEY: ${{ secrets.TINFOIL_API_KEY }}
 
       - name: Upload test coverage
         uses: actions/upload-artifact@v4
@@ -79,4 +83,6 @@ jobs:
 
       - name: Run Bun integration tests
         run: npm run test:bun:integration -w tinfoil
+        env:
+          TINFOIL_API_KEY: ${{ secrets.TINFOIL_API_KEY }}
 
