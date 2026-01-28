@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { encryptedBodyRequest, normalizeEncryptedBodyRequestArgs, getServerIdentity, createEncryptedBodyFetch } from "../src/encrypted-body-fetch";
+import { encryptedBodyRequest, normalizeEncryptedBodyRequestArgs, getServerIdentity, createEncryptedBodyFetch, createUnverifiedEncryptedBodyFetch } from "../src/encrypted-body-fetch";
 import { Identity, PROTOCOL } from "ehbp";
 
 describe("encrypted-body-fetch", () => {
@@ -234,6 +234,86 @@ describe("encrypted-body-fetch", () => {
       );
 
       // The OpenAI SDK checks 'Response' in fetch to avoid making a test request to 'data:,'
+      expect("Response" in customFetch).toBe(true);
+      expect(customFetch.Response).toBe(Response);
+    });
+  });
+
+  describe("createUnverifiedEncryptedBodyFetch", () => {
+    let originalFetch: typeof globalThis.fetch;
+
+    beforeEach(() => {
+      originalFetch = globalThis.fetch;
+    });
+
+    afterEach(() => {
+      globalThis.fetch = originalFetch;
+    });
+
+    it("fetches HPKE key from server", async () => {
+      const serverIdentity = await Identity.generate();
+      const publicConfig = await serverIdentity.marshalConfig();
+
+      let keyFetched = false;
+      let apiRequestMade = false;
+
+      globalThis.fetch = vi.fn(async (input: RequestInfo | URL) => {
+        const url = input instanceof Request ? input.url : input.toString();
+        if (url.includes("/.well-known/hpke-keys")) {
+          keyFetched = true;
+          return new Response(publicConfig as unknown as BodyInit, {
+            status: 200,
+            headers: { "content-type": PROTOCOL.KEYS_MEDIA_TYPE },
+          });
+        }
+        if (url.includes("api.example.com")) {
+          apiRequestMade = true;
+        }
+        return new Response("ok");
+      }) as typeof fetch;
+
+      const unverifiedFetch = createUnverifiedEncryptedBodyFetch("https://api.example.com");
+      await unverifiedFetch("/test");
+
+      expect(keyFetched).toBe(true);
+      expect(apiRequestMade).toBe(true);
+    });
+
+    it("fetches HPKE key from enclaveURL when provided", async () => {
+      const serverIdentity = await Identity.generate();
+      const publicConfig = await serverIdentity.marshalConfig();
+
+      let keyFetchedFromEnclave = false;
+
+      globalThis.fetch = vi.fn(async (input: RequestInfo | URL) => {
+        const url = input instanceof Request ? input.url : input.toString();
+        if (url.includes("enclave.example.com") && url.includes("/.well-known/hpke-keys")) {
+          keyFetchedFromEnclave = true;
+          return new Response(publicConfig as unknown as BodyInit, {
+            status: 200,
+            headers: { "content-type": PROTOCOL.KEYS_MEDIA_TYPE },
+          });
+        }
+        return new Response("ok");
+      }) as typeof fetch;
+
+      const unverifiedFetch = createUnverifiedEncryptedBodyFetch(
+        "https://api.example.com",
+        "https://enclave.example.com"
+      );
+      await unverifiedFetch("/test");
+
+      expect(keyFetchedFromEnclave).toBe(true);
+    });
+
+    it("returns a function with fetch signature", () => {
+      const customFetch = createUnverifiedEncryptedBodyFetch("https://api.example.com");
+      expect(typeof customFetch).toBe("function");
+      expect(customFetch.length).toBe(2);
+    });
+
+    it("exposes Response constructor for OpenAI SDK FormData support detection", () => {
+      const customFetch = createUnverifiedEncryptedBodyFetch("https://api.example.com");
       expect("Response" in customFetch).toBe(true);
       expect(customFetch.Response).toBe(Response);
     });

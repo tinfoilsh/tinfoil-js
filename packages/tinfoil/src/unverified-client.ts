@@ -54,8 +54,8 @@ export class UnverifiedClient {
     }
 
     // Dynamically import to avoid loading ehbp/hpke modules at module load time
-    const { createEncryptedBodyFetch } = await import("./encrypted-body-fetch.js");
-    this._fetch = createEncryptedBodyFetch(this.baseURL, undefined, this.enclaveURL);
+    const { createUnverifiedEncryptedBodyFetch } = await import("./encrypted-body-fetch.js");
+    this._fetch = createUnverifiedEncryptedBodyFetch(this.baseURL, this.enclaveURL);
   }
 
   public async getVerificationDocument(): Promise<void> {

@@ -157,6 +157,56 @@ export function createEncryptedBodyFetch(baseURL: string, hpkePublicKey?: string
   return secureFetch;
 }
 
+/**
+ * Creates an encrypted body fetch that fetches the HPKE key from the server.
+ * Only use for development/testing - production should use createEncryptedBodyFetch with a verified key.
+ */
+export function createUnverifiedEncryptedBodyFetch(baseURL: string, enclaveURL?: string): FetchWithResponse {
+  let transportPromise: Promise<EhbpTransport> | null = null;
+
+  const getOrCreateTransport = async (): Promise<EhbpTransport> => {
+    if (!transportPromise) {
+      const baseUrl = new URL(baseURL);
+      const keyOrigin = enclaveURL ? new URL(enclaveURL).origin : baseUrl.origin;
+      transportPromise = getUnverifiedTransportForOrigin(baseUrl.origin, keyOrigin);
+    }
+    return transportPromise;
+  };
+
+  const secureFetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    const normalized = normalizeEncryptedBodyRequestArgs(input, init);
+    const targetUrl = new URL(normalized.url, baseURL);
+
+    const headers = new Headers(normalized.init?.headers);
+    if (enclaveURL && new URL(enclaveURL).origin !== new URL(baseURL).origin) {
+      headers.set(ENCLAVE_URL_HEADER, enclaveURL);
+    }
+    const initWithEnclaveHeader = { ...normalized.init, headers };
+
+    const transportInstance = await getOrCreateTransport();
+    return transportInstance.request(targetUrl.toString(), initWithEnclaveHeader);
+  }) as FetchWithResponse;
+
+  secureFetch.Response = Response;
+  return secureFetch;
+}
+
+async function getUnverifiedTransportForOrigin(origin: string, keyOrigin: string): Promise<EhbpTransport> {
+  if (typeof globalThis !== 'undefined') {
+    const isSecure = (globalThis as any).isSecureContext !== false;
+    const hasSubtle = !!(globalThis.crypto && (globalThis.crypto as Crypto).subtle);
+    if (!isSecure || !hasSubtle) {
+      const reason = !isSecure ? 'insecure context (use HTTPS or localhost)' : 'missing WebCrypto SubtleCrypto';
+      throw new Error(`EHBP requires a secure browser context: ${reason}`);
+    }
+  }
+
+  const { Transport } = await getEhbp();
+  const serverIdentity = await getServerIdentity(keyOrigin);
+  const requestHost = new URL(origin).host;
+  return new Transport(serverIdentity, requestHost);
+}
+
 export async function getTransportForOrigin(origin: string, keyOrigin: string, hpkePublicKeyHex?: string): Promise<EhbpTransport> {
   if (typeof globalThis !== 'undefined') {
     const isSecure = (globalThis as any).isSecureContext !== false;
