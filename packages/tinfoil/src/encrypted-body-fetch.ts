@@ -15,6 +15,15 @@ function getEhbp(): Promise<typeof import("ehbp")> {
 }
 
 /**
+ * Create an Identity from a raw public key hex string.
+ * This avoids fetching from the server when the key is already known.
+ */
+async function createIdentityFromPublicKeyHex(publicKeyHex: string): Promise<EhbpIdentity> {
+  const { Identity } = await getEhbp();
+  return Identity.fromPublicKeyHex(publicKeyHex);
+}
+
+/**
  * Fetch and parse server identity from the HPKE keys endpoint.
  * Returns the server Identity which can be used to create a Transport.
  */
@@ -117,7 +126,8 @@ export function createEncryptedBodyFetch(baseURL: string, hpkePublicKey?: string
     if (!transportPromise) {
       const baseUrl = new URL(baseURL);
       const keyOrigin = enclaveURL ? new URL(enclaveURL).origin : baseUrl.origin;
-      transportPromise = getTransportForOrigin(baseUrl.origin, keyOrigin);
+      // Pass the public key to avoid fetching from the server
+      transportPromise = getTransportForOrigin(baseUrl.origin, keyOrigin, hpkePublicKey);
     }
     return transportPromise;
   };
@@ -147,7 +157,7 @@ export function createEncryptedBodyFetch(baseURL: string, hpkePublicKey?: string
   return secureFetch;
 }
 
-export async function getTransportForOrigin(origin: string, keyOrigin: string): Promise<EhbpTransport> {
+export async function getTransportForOrigin(origin: string, keyOrigin: string, hpkePublicKeyHex?: string): Promise<EhbpTransport> {
   if (typeof globalThis !== 'undefined') {
     const isSecure = (globalThis as any).isSecureContext !== false;
     const hasSubtle = !!(globalThis.crypto && (globalThis.crypto as Crypto).subtle);
@@ -158,7 +168,12 @@ export async function getTransportForOrigin(origin: string, keyOrigin: string): 
   }
 
   const { Transport } = await getEhbp();
-  const serverIdentity = await getServerIdentity(keyOrigin);
+
+  // If we have the public key from attestation, use it directly without fetching
+  const serverIdentity = hpkePublicKeyHex
+    ? await createIdentityFromPublicKeyHex(hpkePublicKeyHex)
+    : await getServerIdentity(keyOrigin);
+
   const requestHost = new URL(origin).host;
   return new Transport(serverIdentity, requestHost);
 }
