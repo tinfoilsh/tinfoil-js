@@ -85,7 +85,8 @@ describe("Secure transport integration", () => {
     expect(createSecureFetchMock).toHaveBeenCalledWith(
       testBaseURL,
       "mock-hpke-public-key",
-      undefined
+      undefined,
+      "https://test-router.tinfoil.sh"
     );
   });
 

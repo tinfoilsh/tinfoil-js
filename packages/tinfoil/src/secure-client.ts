@@ -86,6 +86,7 @@ export class SecureClient {
   private _tlsPublicKeyFingerprint?: string;
 
   private baseURL?: string;
+  private enclaveURL?: string;
   private readonly configRepo: string;
   private readonly transport: TransportMode;
   private readonly attestationBundleURL?: string;
@@ -115,9 +116,11 @@ export class SecureClient {
   private async initSecureClient(): Promise<void> {
     const bundle = await fetchAttestationBundle(this.attestationBundleURL);
 
+    this.enclaveURL = `https://${bundle.domain}`;
+
     // Derive baseURL from bundle domain if not set
     if (!this.baseURL) {
-      this.baseURL = `https://${bundle.domain}/v1/`;
+      this.baseURL = `${this.enclaveURL}/v1/`;
     }
 
     const verifier = new Verifier({
@@ -210,16 +213,16 @@ export class SecureClient {
 
   private async createTransport(hpkePublicKey?: string, tlsPublicKeyFingerprint?: string): Promise<typeof fetch> {
     if (this.transport === 'tls') {
-      return await createSecureFetch(this.baseURL!, undefined, tlsPublicKeyFingerprint);
+      return await createSecureFetch(this.baseURL!, undefined, tlsPublicKeyFingerprint, this.enclaveURL);
     }
 
     if (this.transport === 'ehbp') {
-      return await createSecureFetch(this.baseURL!, hpkePublicKey, undefined);
+      return await createSecureFetch(this.baseURL!, hpkePublicKey, undefined, this.enclaveURL);
     }
 
     // 'auto' mode: use EHBP, store TLS fingerprint for lazy fallback if needed
     this._tlsPublicKeyFingerprint = tlsPublicKeyFingerprint;
-    return await createSecureFetch(this.baseURL!, hpkePublicKey, undefined);
+    return await createSecureFetch(this.baseURL!, hpkePublicKey, undefined, this.enclaveURL);
   }
 
   private isNotSupportedError(error: unknown): boolean {
@@ -255,7 +258,7 @@ export class SecureClient {
         // In 'auto' mode, fall back to TLS on NotSupportedError (e.g., X25519 not available)
         if (this.transport === 'auto' && !this._didFallbackToTls && this._tlsPublicKeyFingerprint && this.isNotSupportedError(error)) {
           this._didFallbackToTls = true;
-          this._fetch = await createSecureFetch(this.baseURL!, undefined, this._tlsPublicKeyFingerprint);
+          this._fetch = await createSecureFetch(this.baseURL!, undefined, this._tlsPublicKeyFingerprint, this.enclaveURL);
           return await this._fetch(input, init);
         }
 

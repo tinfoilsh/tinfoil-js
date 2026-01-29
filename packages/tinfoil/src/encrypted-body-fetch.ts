@@ -103,7 +103,7 @@ export async function encryptedBodyRequest(
 
 const ENCLAVE_URL_HEADER = 'X-Tinfoil-Enclave-Url';
 
-export function createEncryptedBodyFetch(baseURL: string, hpkePublicKey: string): typeof fetch {
+export function createEncryptedBodyFetch(baseURL: string, hpkePublicKey: string, enclaveURL?: string): typeof fetch {
   let transportPromise: Promise<EhbpTransport> | null = null;
 
   const getOrCreateTransport = async (): Promise<EhbpTransport> => {
@@ -117,8 +117,15 @@ export function createEncryptedBodyFetch(baseURL: string, hpkePublicKey: string)
   return async (input: RequestInfo | URL, init?: RequestInit) => {
     const normalized = normalizeEncryptedBodyRequestArgs(input, init);
     const targetUrl = new URL(normalized.url, baseURL);
+
+    const headers = new Headers(normalized.init?.headers);
+    if (enclaveURL && new URL(enclaveURL).origin !== new URL(baseURL).origin) {
+      headers.set(ENCLAVE_URL_HEADER, enclaveURL);
+    }
+    const initWithHeader = { ...normalized.init, headers };
+
     const transportInstance = await getOrCreateTransport();
-    return encryptedBodyRequest(targetUrl.toString(), hpkePublicKey, normalized.init, transportInstance);
+    return encryptedBodyRequest(targetUrl.toString(), hpkePublicKey, initWithHeader, transportInstance);
   };
 }
 
