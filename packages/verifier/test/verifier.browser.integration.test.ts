@@ -223,8 +223,9 @@ describe('Browser Integration Tests', () => {
       }
     }, 15000);
 
-    it('should require serverURL in constructor', () => {
-      expect(() => new Verifier({ serverURL: '', configRepo: DEFAULT_CONFIG_REPO })).toThrow('serverURL is required');
+    it('should require serverURL when calling verify()', async () => {
+      const verifier = new Verifier({ serverURL: '', configRepo: DEFAULT_CONFIG_REPO });
+      await expect(verifier.verify()).rejects.toThrow('serverURL is required');
     });
 
     it('should require configRepo in constructor', () => {
