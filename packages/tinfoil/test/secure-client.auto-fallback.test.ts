@@ -37,7 +37,7 @@ const mockEhbpFetch = vi.fn();
 const mockTlsFetch = vi.fn();
 
 const createSecureFetchMock = vi.fn(
-  async (_baseURL: string, _enclaveURL: string | undefined, hpkePublicKey: string | undefined, tlsFingerprint: string | undefined) => {
+  async (_baseURL: string, hpkePublicKey: string | undefined, tlsFingerprint: string | undefined) => {
     if (hpkePublicKey) {
       return mockEhbpFetch;
     }

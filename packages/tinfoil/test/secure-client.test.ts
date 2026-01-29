@@ -33,7 +33,7 @@ const verifyMock = vi.fn(async () => ({
 
 const mockFetch = vi.fn(async () => new Response(JSON.stringify({ message: "success" })));
 const createSecureFetchMock = vi.fn(
-  async (_baseURL: string, _enclaveURL: string | undefined, hpkePublicKey: string | undefined) => {
+  async (_baseURL: string, hpkePublicKey: string | undefined) => {
     if (hpkePublicKey) {
       return mockFetch;
     }
@@ -90,7 +90,6 @@ describe("SecureClient", () => {
     expect(createSecureFetchMock).toHaveBeenCalledTimes(1);
     expect(createSecureFetchMock).toHaveBeenCalledWith(
       "https://test.example.com/",
-      "https://keys.test.example.com/",
       "mock-hpke-public-key",
       undefined,
     );

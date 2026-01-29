@@ -11,7 +11,6 @@ import { isRealBrowser } from "./env.js";
  */
 export async function createSecureFetch(
   baseURL: string,
-  enclaveURL?: string,
   hpkePublicKey?: string,
   tlsPublicKeyFingerprint?: string
 ): Promise<typeof fetch> {
