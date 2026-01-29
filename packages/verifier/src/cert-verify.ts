@@ -60,8 +60,9 @@ function domainMatchesSans(sans: string[], expectedDomain: string): boolean {
     if (san === expectedDomain) {
       return true;
     }
-    // Wildcard match (*.example.com matches sub.example.com)
-    if (san.startsWith('*.') && san.substring(2) === parentDomain) {
+    // Wildcard match (*.example.com matches sub.example.com, but NOT example.com)
+    // Per RFC 6125, wildcards only match a single label, not the apex domain
+    if (san.startsWith('*.') && san.substring(2) === parentDomain && expectedDomain !== parentDomain) {
       return true;
     }
   }
