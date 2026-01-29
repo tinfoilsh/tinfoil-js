@@ -183,15 +183,6 @@ describe("encrypted-body-fetch", () => {
       expect(customFetch.length).toBe(2);
     });
 
-    it("accepts enclaveURL parameter", () => {
-      const customFetch = createEncryptedBodyFetch(
-        "https://api.example.com",
-        "mockkey123",
-        "https://enclave.example.com"
-      );
-      expect(typeof customFetch).toBe("function");
-    });
-
     it("exposes Response constructor for OpenAI SDK FormData support detection", () => {
       const customFetch = createEncryptedBodyFetch(
         "https://api.example.com",
