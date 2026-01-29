@@ -18,7 +18,7 @@ It also supports TLS certificate pinning as a fallback mode, where all connectio
 npm install tinfoil
 ```
 
-Requires Node 20+. Works in browsers with ES2022 support, Electron and Bun via TLS pinning fallback (see [Bun Support](#bun-support)).
+Requires Node 20+. Works in browsers with ES2022 support, Electron, and Bun (see [Bun Support](#bun-support)).
 
 
 
@@ -159,7 +159,7 @@ Your requests are encrypted before leaving your machine. Even Tinfoil cannot rea
 #### Transport Modes:
 
 - **HPKE (default)**: End-to-end encrypted via RFC 9180, works through proxies
-- **TLS Pinning**: Fallback for Bun (no X25519 WebCrypto support yet)
+- **TLS Pinning**: Required for Bun (no X25519 WebCrypto support yet)
 
 For a deeper understanding, see [How It Works](https://docs.tinfoil.sh/cc/how-it-works), [Confidentiality](https://docs.tinfoil.sh/cc/confidentiality), [Verifiability](https://docs.tinfoil.sh/cc/verifiability) and [Attestation Architecture](https://docs.tinfoil.sh/verification/attestation-architecture).
 
@@ -188,9 +188,18 @@ console.log(doc.steps); // fetchDigest, verifyCode, verifyEnclave, compareMeasur
 
 ## Bun Support
 
-Bun is supported with automatic fallback to TLS certificate pinning. Since Bun doesn't yet support X25519 in WebCrypto's crypto.subtle API, the EHBP encrypted transport is not available. Instead, the SDK automatically falls back to TLS pinning, which still provides verified secure connections to the enclave.
+Bun is supported via TLS certificate pinning. Since Bun doesn't yet support X25519 in WebCrypto's crypto.subtle API, the default EHBP encrypted transport is not available. You must explicitly set `transport: 'tls'`:
 
-> **Note**: EHBP provides additional features relative to TLS pinning, including encrypted request proxying which keeps requests encrypted even through infrastructure proxies. These features will become available in Bun once X25519 WebCrypto support is added.
+```typescript
+import { TinfoilAI } from "tinfoil";
+
+const client = new TinfoilAI({
+  apiKey: "<YOUR_API_KEY>",
+  transport: "tls",
+});
+```
+
+> **Note**: EHBP provides additional features over TLS pinning, including encrypted request proxying which keeps requests encrypted even through infrastructure proxies. These features will become available in Bun once X25519 WebCrypto support is added.
 
 
 
