@@ -37,6 +37,9 @@ export class Verifier {
   }
 
   async verifyBundle(bundle: AttestationBundle): Promise<AttestationResponse> {
+    if (!bundle.enclaveCert) {
+      throw new Error('enclaveCert is required for bundle verification');
+    }
     return this.performVerification(
       bundle.enclaveAttestationReport,
       bundle.vcek,
