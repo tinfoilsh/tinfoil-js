@@ -1,9 +1,11 @@
 /**
- * Bun integration tests - verify TLS fallback works with real Tinfoil API
+ * Bun integration tests - verify TLS transport works with real Tinfoil API
  * Run with: bun test test/integration.bun.ts
- * 
+ *
  * These tests require:
  * - RUN_TINFOIL_INTEGRATION=true environment variable
+ *
+ * Bun doesn't support X25519 WebCrypto, so we must use transport: 'tls'
  */
 import { describe, it, expect, beforeAll } from "bun:test";
 
@@ -16,38 +18,44 @@ describe("Bun Integration", () => {
     if (!RUN_INTEGRATION) console.log("Skipping - RUN_TINFOIL_INTEGRATION not set");
   });
 
-  it("should create TinfoilAI client with TLS fallback", async () => {
+  it("should create TinfoilAI client with TLS transport", async () => {
     if (!isBun || !RUN_INTEGRATION) return;
-    
+
     const { TinfoilAI } = await import("../src/index.js");
-    const client = new TinfoilAI({ apiKey: process.env.TINFOIL_API_KEY });
+    const client = new TinfoilAI({
+      apiKey: process.env.TINFOIL_API_KEY,
+      transport: 'tls',
+    });
     await client.ready();
-    
+
     const doc = await client.getVerificationDocument();
     expect(doc.securityVerified).toBe(true);
   });
 
-  it("should make chat completion via TLS fallback", async () => {
+  it("should make chat completion via TLS transport", async () => {
     if (!isBun || !RUN_INTEGRATION) return;
-    
+
     const { TinfoilAI } = await import("../src/index.js");
-    const client = new TinfoilAI({ apiKey: process.env.TINFOIL_API_KEY });
-    
+    const client = new TinfoilAI({
+      apiKey: process.env.TINFOIL_API_KEY,
+      transport: 'tls',
+    });
+
     const completion = await client.chat.completions.create({
       model: "gpt-oss-120b-free",
       messages: [{ role: "user", content: "Hello!" }],
     });
-    
+
     expect(completion.choices[0].message.content).toBeDefined();
   });
 
-  it("should create SecureClient with TLS fallback", async () => {
+  it("should create SecureClient with TLS transport", async () => {
     if (!isBun || !RUN_INTEGRATION) return;
-    
+
     const { SecureClient } = await import("../src/index.js");
-    const client = new SecureClient();
+    const client = new SecureClient({ transport: 'tls' });
     await client.ready();
-    
+
     const doc = await client.getVerificationDocument();
     expect(doc.securityVerified).toBe(true);
     expect(client.getBaseURL()).toBeDefined();
