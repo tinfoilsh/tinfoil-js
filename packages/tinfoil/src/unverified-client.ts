@@ -1,8 +1,10 @@
 import { fetchRouter } from "./atc.js";
 
 interface UnverifiedClientOptions {
+  /** Base URL for API requests. If not provided, derived from keyOrigin or fetched from router. */
   baseURL?: string;
-  enclaveURL?: string;
+  /** Origin URL for fetching the HPKE public key. If not provided, derived from baseURL. */
+  keyOrigin?: string;
 }
 
 export class UnverifiedClient {
@@ -10,11 +12,11 @@ export class UnverifiedClient {
   private _fetch: typeof fetch | null = null;
 
   private baseURL?: string;
-  private enclaveURL?: string;
+  private keyOrigin?: string;
 
   constructor(options: UnverifiedClientOptions = {}) {
     this.baseURL = options.baseURL;
-    this.enclaveURL = options.enclaveURL;
+    this.keyOrigin = options.keyOrigin;
   }
 
   public async ready(): Promise<void> {
@@ -25,37 +27,35 @@ export class UnverifiedClient {
   }
 
   private async initUnverifiedClient(): Promise<void> {
-    // Only fetch router if neither baseURL nor enclaveURL is provided
-    if (!this.baseURL && !this.enclaveURL) {
+    // Only fetch router if neither baseURL nor keyOrigin is provided
+    if (!this.baseURL && !this.keyOrigin) {
       const routerAddress = await fetchRouter();
-      this.enclaveURL = `https://${routerAddress}`;
+      this.keyOrigin = `https://${routerAddress}`;
       this.baseURL = `https://${routerAddress}/v1/`;
     }
 
-    // Ensure both baseURL and enclaveURL are initialized
+    // Ensure both baseURL and keyOrigin are initialized
     if (!this.baseURL) {
-      if (this.enclaveURL) {
-        // If enclaveURL is provided but baseURL is not, derive baseURL from enclaveURL
-        const enclaveUrl = new URL(this.enclaveURL);
-        this.baseURL = `${enclaveUrl.origin}/v1/`;
+      if (this.keyOrigin) {
+        const keyOriginUrl = new URL(this.keyOrigin);
+        this.baseURL = `${keyOriginUrl.origin}/v1/`;
       } else {
-        throw new Error("Unable to determine baseURL: neither baseURL nor enclaveURL provided");
+        throw new Error("Unable to determine baseURL: neither baseURL nor keyOrigin provided");
       }
     }
 
-    if (!this.enclaveURL) {
+    if (!this.keyOrigin) {
       if (this.baseURL) {
-        // If baseURL is provided but enclaveURL is not, derive enclaveURL from baseURL
         const baseUrl = new URL(this.baseURL);
-        this.enclaveURL = baseUrl.origin;
+        this.keyOrigin = baseUrl.origin;
       } else {
-        throw new Error("Unable to determine enclaveURL: neither baseURL nor enclaveURL provided");
+        throw new Error("Unable to determine keyOrigin: neither baseURL nor keyOrigin provided");
       }
     }
 
     // Dynamically import to avoid loading ehbp/hpke modules at module load time
     const { createUnverifiedEncryptedBodyFetch } = await import("./encrypted-body-fetch.js");
-    this._fetch = createUnverifiedEncryptedBodyFetch(this.baseURL, this.enclaveURL);
+    this._fetch = createUnverifiedEncryptedBodyFetch(this.baseURL, this.keyOrigin);
   }
 
   public async getVerificationDocument(): Promise<void> {

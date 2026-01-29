@@ -86,8 +86,7 @@ describe("SecureClient auto-fallback", () => {
 
     const client = new SecureClient({
       baseURL: "https://test.example.com/",
-      enclaveURL: "https://keys.test.example.com/",
-      transport: "auto",
+            transport: "auto",
     });
 
     // After ready(), only EHBP transport should be created (TLS is lazy)
@@ -117,8 +116,7 @@ describe("SecureClient auto-fallback", () => {
 
     const client = new SecureClient({
       baseURL: "https://test.example.com/",
-      enclaveURL: "https://keys.test.example.com/",
-      transport: "auto",
+            transport: "auto",
     });
 
     // First request triggers fallback
@@ -143,8 +141,7 @@ describe("SecureClient auto-fallback", () => {
 
     const client = new SecureClient({
       baseURL: "https://test.example.com/",
-      enclaveURL: "https://keys.test.example.com/",
-      transport: "auto",
+            transport: "auto",
     });
 
     await expect(client.fetch("/test-endpoint", { method: "GET" })).rejects.toThrow("Network connection failed");
@@ -161,8 +158,7 @@ describe("SecureClient auto-fallback", () => {
 
     const client = new SecureClient({
       baseURL: "https://test.example.com/",
-      enclaveURL: "https://keys.test.example.com/",
-      transport: "ehbp",
+            transport: "ehbp",
     });
 
     await expect(client.fetch("/test-endpoint", { method: "GET" })).rejects.toThrow("NotSupportedError");
@@ -178,8 +174,7 @@ describe("SecureClient auto-fallback", () => {
 
     const client = new SecureClient({
       baseURL: "https://test.example.com/",
-      enclaveURL: "https://keys.test.example.com/",
-      transport: "auto",
+            transport: "auto",
     });
 
     const response = await client.fetch("/test-endpoint", { method: "GET" });
@@ -200,8 +195,7 @@ describe("SecureClient auto-fallback", () => {
 
     const client = new SecureClient({
       baseURL: "https://test.example.com/",
-      enclaveURL: "https://keys.test.example.com/",
-      transport: "auto",
+            transport: "auto",
     });
 
     const response = await client.fetch("/test-endpoint", { method: "GET" });

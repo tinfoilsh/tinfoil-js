@@ -116,11 +116,11 @@ describe("Examples Integration Tests", () => {
       expect(accumulatedContent.length).toBeGreaterThan(0);
     });
 
-    it("should initialize correctly when enclaveURL is provided but baseURL is not", async () => {
+    it("should initialize correctly when keyOrigin is provided but baseURL is not", async () => {
       const { UnverifiedClient } = await import("../src/unverified-client");
 
       const client = new UnverifiedClient({
-        enclaveURL: "https://example-enclave.com",
+        keyOrigin: "https://example-enclave.com",
       });
 
       await client.ready();
@@ -129,17 +129,17 @@ describe("Examples Integration Tests", () => {
       expect(client.fetch).toBeTruthy();
     });
 
-    it("SecureClient should fail verification with fake enclaveURL", async () => {
+    it("SecureClient should fail with invalid attestation bundle URL", async () => {
       const { SecureClient } = await import("../src/secure-client");
 
       const client = new SecureClient({
-        enclaveURL: "https://example-enclave.com",
+        attestationBundleURL: "https://invalid-bundle-url.example.com/bundle",
       });
 
-      await expect(client.ready()).rejects.toThrow(/verify|fetch|attestation/i);
+      await expect(client.ready()).rejects.toThrow();
     });
 
-    it("should initialize correctly when baseURL is provided but enclaveURL is not", async () => {
+    it("should initialize correctly when baseURL is provided but keyOrigin is not", async () => {
       const { UnverifiedClient } = await import("../src/unverified-client");
 
       const client = new UnverifiedClient({

@@ -134,15 +134,17 @@ export function createEncryptedBodyFetch(baseURL: string, hpkePublicKey: string)
 /**
  * Creates an encrypted body fetch that fetches the HPKE key from the server.
  * Only use for development/testing - production should use createEncryptedBodyFetch with a verified key.
+ * @param baseURL - Base URL for API requests
+ * @param keyOrigin - Origin URL for fetching the HPKE public key. If not provided, derived from baseURL.
  */
-export function createUnverifiedEncryptedBodyFetch(baseURL: string, enclaveURL?: string): FetchWithResponse {
+export function createUnverifiedEncryptedBodyFetch(baseURL: string, keyOrigin?: string): FetchWithResponse {
   let transportPromise: Promise<EhbpTransport> | null = null;
 
   const getOrCreateTransport = async (): Promise<EhbpTransport> => {
     if (!transportPromise) {
       const baseUrl = new URL(baseURL);
-      const keyOrigin = enclaveURL ? new URL(enclaveURL).origin : baseUrl.origin;
-      transportPromise = getUnverifiedTransportForOrigin(baseUrl.origin, keyOrigin);
+      const resolvedKeyOrigin = keyOrigin ? new URL(keyOrigin).origin : baseUrl.origin;
+      transportPromise = getUnverifiedTransportForOrigin(baseUrl.origin, resolvedKeyOrigin);
     }
     return transportPromise;
   };
@@ -152,8 +154,8 @@ export function createUnverifiedEncryptedBodyFetch(baseURL: string, enclaveURL?:
     const targetUrl = new URL(normalized.url, baseURL);
 
     const headers = new Headers(normalized.init?.headers);
-    if (enclaveURL && new URL(enclaveURL).origin !== new URL(baseURL).origin) {
-      headers.set(ENCLAVE_URL_HEADER, enclaveURL);
+    if (keyOrigin && new URL(keyOrigin).origin !== new URL(baseURL).origin) {
+      headers.set(ENCLAVE_URL_HEADER, keyOrigin);
     }
     const initWithEnclaveHeader = { ...normalized.init, headers };
 

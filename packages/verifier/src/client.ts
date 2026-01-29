@@ -6,7 +6,8 @@ import { compareMeasurements, FormatMismatchError, MeasurementMismatchError, mea
 import type { AttestationDocument, AttestationMeasurement, AttestationResponse, VerificationDocument, AttestationBundle } from './types.js';
 
 export interface VerifierOptions {
-  serverURL: string;
+  /** Server URL for fetching attestation. Required when using verify(), optional when using verifyBundle(). */
+  serverURL?: string;
   configRepo: string;
 }
 
@@ -16,17 +17,17 @@ export class Verifier {
   private verificationDocument?: VerificationDocument;
 
   constructor(options: VerifierOptions) {
-    if (!options.serverURL) {
-      throw new Error("serverURL is required for Verifier");
-    }
     if (!options.configRepo) {
       throw new Error("configRepo is required for Verifier");
     }
-    this.enclave = new URL(options.serverURL).hostname;
+    this.enclave = options.serverURL ? new URL(options.serverURL).hostname : '';
     this.configRepo = options.configRepo;
   }
 
   async verify(): Promise<AttestationResponse> {
+    if (!this.enclave) {
+      throw new Error("serverURL is required for verify(). Use verifyBundle() with an attestation bundle instead.");
+    }
     const attestationDoc = await fetchAttestation(this.enclave);
     const digest = await fetchLatestDigest(this.configRepo);
     const sigstoreBundle = await fetchGithubAttestationBundle(this.configRepo, digest);

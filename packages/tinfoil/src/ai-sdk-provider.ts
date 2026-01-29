@@ -7,26 +7,16 @@ import { isRealBrowser } from "./env.js";
  * Options for creating a Tinfoil AI SDK provider.
  */
 export interface CreateTinfoilAIOptions {
-  /** 
-   * Override the base URL for API requests. 
+  /**
+   * Override the base URL for API requests.
    * Useful for proxying requests through your own backend.
    */
   baseURL?: string;
-  
-  /** 
-   * Override the enclave URL for verification and key fetching.
-   */
-  enclaveURL?: string;
-  
+
   /** GitHub repo for code verification. */
   configRepo?: string;
-  /**
-   * Optional URL to fetch a precomputed attestation bundle from.
-   *
-   * This is primarily useful when you want verification to use an externally
-   * produced bundle (e.g., fetched via your own routing layer) instead of
-   * letting the client fetch it from the default router flow.
-   */
+
+  /** URL to fetch the attestation bundle from. If not set, uses the default Tinfoil ATC. */
   attestationBundleURL?: string;
 }
 
@@ -71,12 +61,10 @@ export async function createTinfoilAI(apiKey?: string, options: CreateTinfoilAIO
   }
 
   const baseURL = options.baseURL;
-  const enclaveURL = options.enclaveURL;
   const configRepo = options.configRepo || TINFOIL_CONFIG.DEFAULT_ROUTER_REPO;
 
   const secureClient = new SecureClient({
     baseURL,
-    enclaveURL,
     configRepo,
     attestationBundleURL: options.attestationBundleURL,
   });

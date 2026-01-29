@@ -235,7 +235,7 @@ describe("encrypted-body-fetch", () => {
       expect(apiRequestMade).toBe(true);
     });
 
-    it("fetches HPKE key from enclaveURL when provided", async () => {
+    it("fetches HPKE key from keyOrigin when provided", async () => {
       const serverIdentity = await Identity.generate();
       const publicConfig = await serverIdentity.marshalConfig();
 
