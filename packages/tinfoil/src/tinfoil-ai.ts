@@ -76,16 +76,10 @@ export interface TinfoilAIOptions {
    */
   baseURL?: string;
   
-  /**
-   * Override the enclave URL for verification and key fetching.
-   * Required if attestationBundleURL is not set. Used for fetching attestation on the fly.
-   */
-  enclaveURL?: string;
-
   /** GitHub repo for code verification. Defaults to tinfoilsh/confidential-model-router. */
   configRepo?: string;
-  
-  /** 
+
+  /**
    * Transport mode for secure communication.
    * - 'auto': Automatically select best available (default)
    * - 'ehbp': Force HPKE encryption via EHBP protocol
@@ -93,6 +87,8 @@ export interface TinfoilAIOptions {
    * @default 'auto'
    */
   transport?: TransportMode;
+
+  /** URL to fetch the attestation bundle from. If not set, uses the default Tinfoil ATC. */
   attestationBundleURL?: string;
   
   /** Additional OpenAI client options (passed through to underlying client) */
@@ -134,7 +130,6 @@ export class TinfoilAI {
   public apiKey?: string;
   public bearerToken?: string;
   public baseURL?: string;
-  public enclaveURL?: string;
 
   constructor(options: TinfoilAIOptions = {}) {
     const openAIOptions = { ...options };
@@ -156,12 +151,10 @@ export class TinfoilAI {
 
     this.apiKey = options.apiKey;
     this.baseURL = options.baseURL;
-    this.enclaveURL = options.enclaveURL;
     this.configRepo = options.configRepo || TINFOIL_CONFIG.DEFAULT_ROUTER_REPO;
 
     this.secureClient = new SecureClient({
       baseURL: this.baseURL,
-      enclaveURL: this.enclaveURL,
       configRepo: this.configRepo,
       transport: options.transport,
       attestationBundleURL: options.attestationBundleURL,

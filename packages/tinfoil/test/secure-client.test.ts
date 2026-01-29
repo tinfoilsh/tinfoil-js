@@ -80,7 +80,6 @@ describe("SecureClient", () => {
 
     const client = new SecureClient({
       baseURL: "https://test.example.com/",
-      enclaveURL: "https://keys.test.example.com/",
       configRepo: "test-org/test-repo",
     });
 

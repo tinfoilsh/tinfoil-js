@@ -1,4 +1,4 @@
-import { Verifier, type AttestationBundle, type VerificationDocument } from "./verifier.js";
+import { Verifier, type VerificationDocument } from "./verifier.js";
 import { TINFOIL_CONFIG } from "./config.js";
 import { createSecureFetch } from "./secure-fetch.js";
 import { fetchAttestationBundle } from "./atc.js";
@@ -21,27 +21,23 @@ export type TransportMode = 'auto' | 'ehbp' | 'tls';
  * Configuration options for SecureClient.
  */
 export interface SecureClientOptions {
-  /** 
-   * Override the base URL for API requests. 
+  /**
+   * Override the base URL for API requests.
    * Useful for proxying requests through your own backend.
    * @see https://docs.tinfoil.sh/guides/proxy-server
    */
   baseURL?: string;
-  
-  /**
-   * Override the enclave URL for verification and key fetching.
-   * Required if attestationBundleURL is not set. Used for fetching attestation on the fly.
-   */
-  enclaveURL?: string;
-  
+
   /** GitHub repo for code verification. Defaults to tinfoilsh/confidential-model-router. */
   configRepo?: string;
-  
-  /** 
+
+  /**
    * Transport mode for secure communication.
    * @default 'auto'
    */
   transport?: TransportMode;
+
+  /** URL to fetch the attestation bundle from. If not set, uses the default Tinfoil ATC. */
   attestationBundleURL?: string;
 }
 
@@ -90,14 +86,12 @@ export class SecureClient {
   private _tlsPublicKeyFingerprint?: string;
 
   private baseURL?: string;
-  private enclaveURL?: string;
-  private readonly configRepo?: string;
+  private readonly configRepo: string;
   private readonly transport: TransportMode;
   private readonly attestationBundleURL?: string;
 
   constructor(options: SecureClientOptions = {}) {
     this.baseURL = options.baseURL;
-    this.enclaveURL = options.enclaveURL;
     this.configRepo = options.configRepo || TINFOIL_CONFIG.DEFAULT_ROUTER_REPO;
     this.transport = options.transport || 'auto';
     this.attestationBundleURL = options.attestationBundleURL;
@@ -119,30 +113,19 @@ export class SecureClient {
   }
 
   private async initSecureClient(): Promise<void> {
-    // If no enclave specified, fetch attestation bundle for a router
-    let bundle: AttestationBundle | undefined;
-    if (!this.enclaveURL) {
-      bundle = await fetchAttestationBundle(this.attestationBundleURL);
-      this.enclaveURL = `https://${bundle.domain}`;
-    }
+    const bundle = await fetchAttestationBundle(this.attestationBundleURL);
 
-    // Derive baseURL if not set
+    // Derive baseURL from bundle domain if not set
     if (!this.baseURL) {
-      const enclaveUrl = new URL(this.enclaveURL);
-      this.baseURL = `${enclaveUrl.origin}/v1/`;
+      this.baseURL = `https://${bundle.domain}/v1/`;
     }
 
     const verifier = new Verifier({
-      serverURL: this.enclaveURL,
-      configRepo: this.configRepo!,
+      configRepo: this.configRepo,
     });
 
     try {
-      if (bundle) {
-        await verifier.verifyBundle(bundle);
-      } else {
-        await verifier.verify();
-      }
+      await verifier.verifyBundle(bundle);
 
       const doc = verifier.getVerificationDocument();
       if (!doc) {
@@ -169,8 +152,8 @@ export class SecureClient {
         this.verificationDocument = doc;
       } else {
         this.verificationDocument = {
-          configRepo: this.configRepo!,
-          enclaveHost: new URL(this.enclaveURL!).hostname,
+          configRepo: this.configRepo,
+          enclaveHost: bundle.domain,
           releaseDigest: '',
           codeMeasurement: { type: '', registers: [] },
           enclaveMeasurement: { measurement: { type: '', registers: [] } },
@@ -179,7 +162,7 @@ export class SecureClient {
           hardwareMeasurement: undefined,
           codeFingerprint: '',
           enclaveFingerprint: '',
-          selectedRouterEndpoint: new URL(this.enclaveURL!).hostname,
+          selectedRouterEndpoint: bundle.domain,
           securityVerified: false,
           steps: {
             fetchDigest: { status: 'pending' },

@@ -43,7 +43,7 @@ vi.mock("../src/verifier.js", () => ({
 
 // Mock createSecureFetch to simulate browser behavior (throw when no HPKE key)
 vi.mock("../src/secure-fetch.js", () => ({
-  createSecureFetch: async (_baseURL: string, _enclaveURL: string | undefined, hpkePublicKey: string | undefined) => {
+  createSecureFetch: async (_baseURL: string, hpkePublicKey: string | undefined) => {
     if (!hpkePublicKey) {
       throw new Error(
         "HPKE public key not available and TLS-only verification is not supported in browsers. " +
