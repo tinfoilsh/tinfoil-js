@@ -38,14 +38,13 @@ console.log(attestation.hpkePublicKey);
 ## Verifying a Pre-Fetched Bundle
 
 If you already have a complete attestation bundle (for example, fetched via the
-`tinfoil` SDK’s `fetchAttestationBundle()` helper), you can verify it directly:
+`tinfoil` SDK's `fetchAttestationBundle()` helper), you can verify it directly:
 
 ```typescript
 import { Verifier } from '@tinfoilsh/verifier';
 import type { AttestationBundle } from '@tinfoilsh/verifier';
 
 const verifier = new Verifier({
-  serverURL: 'https://enclave.example.com',
   configRepo: 'tinfoilsh/confidential-model-router',
 });
 
