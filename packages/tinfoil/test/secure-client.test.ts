@@ -91,6 +91,7 @@ describe("SecureClient", () => {
       "https://test.example.com/",
       "mock-hpke-public-key",
       undefined,
+      "https://test-router.tinfoil.sh",
     );
   });
 
