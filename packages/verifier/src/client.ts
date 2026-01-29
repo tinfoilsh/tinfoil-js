@@ -62,8 +62,6 @@ export class Verifier {
       verifyCertificate: enclaveCert ? { status: 'pending' } : undefined,
     };
 
-    this.enclave = domain;
-
     try {
       // Step 1: Verify enclave attestation
       let amdVerification: AttestationResponse;
@@ -72,7 +70,7 @@ export class Verifier {
         steps.verifyEnclave = { status: 'success' };
       } catch (error) {
         steps.verifyEnclave = { status: 'failed', error: (error as Error).message };
-        this.saveFailedVerificationDocument(steps);
+        this.saveFailedVerificationDocument(steps, domain);
         throw error;
       }
 
@@ -83,7 +81,7 @@ export class Verifier {
         steps.verifyCode = { status: 'success' };
       } catch (error) {
         steps.verifyCode = { status: 'failed', error: (error as Error).message };
-        this.saveFailedVerificationDocument(steps);
+        this.saveFailedVerificationDocument(steps, domain);
         throw error;
       }
 
@@ -99,7 +97,7 @@ export class Verifier {
         } else {
           steps.compareMeasurements = { status: 'failed', error: (error as Error).message };
         }
-        this.saveFailedVerificationDocument(steps);
+        this.saveFailedVerificationDocument(steps, domain);
         throw error;
       }
 
@@ -119,7 +117,7 @@ export class Verifier {
           } else {
             steps.verifyCertificate = { status: 'failed', error: (error as Error).message };
           }
-          this.saveFailedVerificationDocument(steps);
+          this.saveFailedVerificationDocument(steps, domain);
           throw error;
         }
       }
@@ -143,16 +141,16 @@ export class Verifier {
       return amdVerification;
     } catch (error) {
       if (!this.verificationDocument) {
-        this.saveFailedVerificationDocument(steps);
+        this.saveFailedVerificationDocument(steps, domain);
       }
       throw error;
     }
   }
 
-  private saveFailedVerificationDocument(steps: VerificationDocument['steps']): void {
+  private saveFailedVerificationDocument(steps: VerificationDocument['steps'], domain: string): void {
     this.verificationDocument = {
       configRepo: this.configRepo,
-      enclaveHost: this.enclave || '',
+      enclaveHost: domain,
       releaseDigest: '',
       codeMeasurement: { type: '', registers: [] },
       enclaveMeasurement: { measurement: { type: '', registers: [] } },
@@ -160,7 +158,7 @@ export class Verifier {
       hpkePublicKey: '',
       codeFingerprint: '',
       enclaveFingerprint: '',
-      selectedRouterEndpoint: this.enclave || '',
+      selectedRouterEndpoint: domain,
       securityVerified: false,
       steps
     };
