@@ -80,7 +80,7 @@ export const defaultValidationOptions: ValidationOptions = {
   permitProvisionalFirmware: false,
   platformInfo: {
     smtEnabled: true,
-    tsmeEnabled: false,
+    tsmeEnabled: true,
     eccEnabled: false,
     raplDisabled: false,
     ciphertextHidingDramEnabled: false,
