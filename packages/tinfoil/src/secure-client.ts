@@ -5,17 +5,15 @@ import { fetchAttestationBundle } from "./atc.js";
 
 /**
  * Transport mode for secure communication with the enclave.
- * 
- * - `'auto'` - Automatically select the best available transport (default).
- *   Uses HPKE/EHBP when available, falls back to TLS pinning if not.
- * - `'ehbp'` - Force HPKE encryption via the Encrypted HTTP Body Protocol.
+ *
+ * - `'ehbp'` - HPKE encryption via the Encrypted HTTP Body Protocol (default).
  *   End-to-end encrypted, works through proxies. Requires X25519 WebCrypto support.
- * - `'tls'` - Force TLS certificate pinning. Requires direct connection to the enclave;
- *   requests through a proxy will fail. Used automatically in Bun (which lacks X25519 WebCrypto).
- * 
+ * - `'tls'` - TLS certificate pinning. Requires direct connection to the enclave;
+ *   requests through a proxy will fail. Use this in runtimes without X25519 support (like Bun).
+ *
  * @see https://docs.tinfoil.sh/resources/ehbp - EHBP Protocol specification
  */
-export type TransportMode = 'auto' | 'ehbp' | 'tls';
+export type TransportMode = 'ehbp' | 'tls';
 
 /**
  * Configuration options for SecureClient.
@@ -33,7 +31,7 @@ export interface SecureClientOptions {
 
   /**
    * Transport mode for secure communication.
-   * @default 'auto'
+   * @default 'ehbp'
    */
   transport?: TransportMode;
 
@@ -82,8 +80,6 @@ export class SecureClient {
   private initPromise: Promise<void> | null = null;
   private verificationDocument: VerificationDocument | null = null;
   private _fetch: typeof fetch | null = null;
-  private _didFallbackToTls = false;
-  private _tlsPublicKeyFingerprint?: string;
 
   private baseURL?: string;
   private enclaveURL?: string;
@@ -94,7 +90,7 @@ export class SecureClient {
   constructor(options: SecureClientOptions = {}) {
     this.baseURL = options.baseURL;
     this.configRepo = options.configRepo || TINFOIL_CONFIG.DEFAULT_ROUTER_REPO;
-    this.transport = options.transport || 'auto';
+    this.transport = options.transport || 'ehbp';
     this.attestationBundleURL = options.attestationBundleURL;
   }
 
@@ -216,29 +212,16 @@ export class SecureClient {
       return await createSecureFetch(this.baseURL!, undefined, tlsPublicKeyFingerprint, this.enclaveURL);
     }
 
-    if (this.transport === 'ehbp') {
-      return await createSecureFetch(this.baseURL!, hpkePublicKey, undefined, this.enclaveURL);
-    }
-
-    // 'auto' mode: use EHBP, store TLS fingerprint for lazy fallback if needed
-    this._tlsPublicKeyFingerprint = tlsPublicKeyFingerprint;
     return await createSecureFetch(this.baseURL!, hpkePublicKey, undefined, this.enclaveURL);
-  }
-
-  private isNotSupportedError(error: unknown): boolean {
-    return error instanceof Error &&
-      (error.name === 'NotSupportedError' ||
-       error.message.includes('NotSupportedError') ||
-       error.message.includes('unsupported'));
   }
 
   /**
    * Secure fetch function that encrypts request bodies end-to-end.
-   * 
+   *
    * Use this as a drop-in replacement for global `fetch`. Request bodies are
-   * encrypted using HPKE (or TLS pinning as fallback) so only the verified
+   * encrypted using HPKE (or TLS pinning if configured) so only the verified
    * enclave can decrypt them.
-   * 
+   *
    * @example
    * ```typescript
    * const response = await client.fetch("/v1/chat/completions", {
@@ -255,13 +238,6 @@ export class SecureClient {
       try {
         return await this._fetch!(input, init);
       } catch (error) {
-        // In 'auto' mode, fall back to TLS on NotSupportedError (e.g., X25519 not available)
-        if (this.transport === 'auto' && !this._didFallbackToTls && this._tlsPublicKeyFingerprint && this.isNotSupportedError(error)) {
-          this._didFallbackToTls = true;
-          this._fetch = await createSecureFetch(this.baseURL!, undefined, this._tlsPublicKeyFingerprint, this.enclaveURL);
-          return await this._fetch(input, init);
-        }
-
         if (this.verificationDocument) {
           const errorMessage = (error as Error).message;
 
