@@ -86,7 +86,6 @@ describe("Secure transport integration", () => {
     expect(createSecureFetchMock).toHaveBeenCalledTimes(1);
     expect(createSecureFetchMock).toHaveBeenCalledWith(
       testBaseURL,
-      testEnclaveURL,
       "mock-hpke-public-key",
       undefined
     );

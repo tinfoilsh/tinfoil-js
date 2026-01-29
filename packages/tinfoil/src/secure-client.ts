@@ -227,16 +227,16 @@ export class SecureClient {
 
   private async createTransport(hpkePublicKey?: string, tlsPublicKeyFingerprint?: string): Promise<typeof fetch> {
     if (this.transport === 'tls') {
-      return await createSecureFetch(this.baseURL!, this.enclaveURL!, undefined, tlsPublicKeyFingerprint);
+      return await createSecureFetch(this.baseURL!, undefined, tlsPublicKeyFingerprint);
     }
 
     if (this.transport === 'ehbp') {
-      return await createSecureFetch(this.baseURL!, this.enclaveURL!, hpkePublicKey, undefined);
+      return await createSecureFetch(this.baseURL!, hpkePublicKey, undefined);
     }
 
     // 'auto' mode: use EHBP, store TLS fingerprint for lazy fallback if needed
     this._tlsPublicKeyFingerprint = tlsPublicKeyFingerprint;
-    return await createSecureFetch(this.baseURL!, this.enclaveURL!, hpkePublicKey, undefined);
+    return await createSecureFetch(this.baseURL!, hpkePublicKey, undefined);
   }
 
   private isNotSupportedError(error: unknown): boolean {
@@ -272,7 +272,7 @@ export class SecureClient {
         // In 'auto' mode, fall back to TLS on NotSupportedError (e.g., X25519 not available)
         if (this.transport === 'auto' && !this._didFallbackToTls && this._tlsPublicKeyFingerprint && this.isNotSupportedError(error)) {
           this._didFallbackToTls = true;
-          this._fetch = await createSecureFetch(this.baseURL!, this.enclaveURL!, undefined, this._tlsPublicKeyFingerprint);
+          this._fetch = await createSecureFetch(this.baseURL!, undefined, this._tlsPublicKeyFingerprint);
           return await this._fetch(input, init);
         }
 
