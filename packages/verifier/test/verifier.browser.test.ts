@@ -72,8 +72,9 @@ describe('Verifier Class in Browser', () => {
     expect(verifier).toBeDefined();
   });
 
-  it('throws error when serverURL is missing', () => {
-    expect(() => new Verifier({ serverURL: '', configRepo: 'org/repo' })).toThrow('serverURL is required');
+  it('throws error when calling verify() without serverURL', async () => {
+    const verifier = new Verifier({ configRepo: 'org/repo' });
+    await expect(verifier.verify()).rejects.toThrow('serverURL is required for verify()');
   });
 
   it('throws error when configRepo is missing', () => {
