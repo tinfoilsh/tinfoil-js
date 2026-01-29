@@ -123,12 +123,26 @@ export function createEncryptedBodyFetch(baseURL: string, hpkePublicKey: string)
 }
 
 /**
- * Creates an encrypted body fetch that fetches the HPKE key from the server.
- * Only use for development/testing - production should use createEncryptedBodyFetch with a verified key.
+ * WARNING: THIS FUNCTION IS INSECURE.
+ *
+ * Creates an encrypted body fetch that fetches the HPKE key from the server without
+ * attestation verification. This is vulnerable to man-in-the-middle attacks where
+ * a malicious server could provide its own key.
+ *
+ * This function is useful for testing the EHBP protocol against a local development
+ * server that doesn't have attestation set up. For production, use createEncryptedBodyFetch
+ * with a key obtained through attestation verification.
+ *
  * @param baseURL - Base URL for API requests
  * @param keyOrigin - Origin URL for fetching the HPKE public key. If not provided, derived from baseURL.
  */
 export function createUnverifiedEncryptedBodyFetch(baseURL: string, keyOrigin?: string): typeof fetch {
+  console.warn(
+    "[tinfoil] WARNING: createUnverifiedEncryptedBodyFetch is insecure. " +
+    "The HPKE key is fetched from the server without attestation verification. " +
+    "Only use for local development and testing of the EHBP protocol."
+  );
+
   let transportPromise: Promise<EhbpTransport> | null = null;
 
   const getOrCreateTransport = async (): Promise<EhbpTransport> => {

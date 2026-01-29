@@ -1,3 +1,14 @@
+/**
+ * WARNING: THIS CLIENT IS INSECURE.
+ *
+ * UnverifiedClient fetches the HPKE public key directly from the server without
+ * attestation verification. This is vulnerable to man-in-the-middle attacks where
+ * a malicious server could provide its own key.
+ *
+ * This client is useful for testing the EHBP protocol against a local development
+ * server that doesn't have attestation set up. For production, use SecureClient
+ * or TinfoilAI which verify the key through attestation.
+ */
 import { fetchRouter } from "./atc.js";
 
 interface UnverifiedClientOptions {
@@ -15,6 +26,11 @@ export class UnverifiedClient {
   private keyOrigin?: string;
 
   constructor(options: UnverifiedClientOptions = {}) {
+    console.warn(
+      "[tinfoil] WARNING: UnverifiedClient is insecure. " +
+      "The HPKE key is fetched from the server without attestation verification. " +
+      "Only use for local development and testing of the EHBP protocol."
+    );
     this.baseURL = options.baseURL;
     this.keyOrigin = options.keyOrigin;
   }
