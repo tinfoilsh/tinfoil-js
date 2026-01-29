@@ -101,12 +101,9 @@ export async function encryptedBodyRequest(
   return actualTransport.request(requestUrl, requestInit);
 }
 
-// Extended fetch type that includes Response property for OpenAI SDK compatibility
-type FetchWithResponse = typeof fetch & { Response: typeof Response };
-
 const ENCLAVE_URL_HEADER = 'X-Tinfoil-Enclave-Url';
 
-export function createEncryptedBodyFetch(baseURL: string, hpkePublicKey: string): FetchWithResponse {
+export function createEncryptedBodyFetch(baseURL: string, hpkePublicKey: string): typeof fetch {
   let transportPromise: Promise<EhbpTransport> | null = null;
 
   const getOrCreateTransport = async (): Promise<EhbpTransport> => {
@@ -117,18 +114,12 @@ export function createEncryptedBodyFetch(baseURL: string, hpkePublicKey: string)
     return transportPromise;
   };
 
-  const secureFetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+  return async (input: RequestInfo | URL, init?: RequestInit) => {
     const normalized = normalizeEncryptedBodyRequestArgs(input, init);
     const targetUrl = new URL(normalized.url, baseURL);
     const transportInstance = await getOrCreateTransport();
     return encryptedBodyRequest(targetUrl.toString(), hpkePublicKey, normalized.init, transportInstance);
-  }) as FetchWithResponse;
-
-  // Expose Response constructor for OpenAI SDK's FormData support detection
-  // This prevents the SDK from making a test request to 'data:,' which would fail through EHBP
-  secureFetch.Response = Response;
-
-  return secureFetch;
+  };
 }
 
 /**
@@ -137,7 +128,7 @@ export function createEncryptedBodyFetch(baseURL: string, hpkePublicKey: string)
  * @param baseURL - Base URL for API requests
  * @param keyOrigin - Origin URL for fetching the HPKE public key. If not provided, derived from baseURL.
  */
-export function createUnverifiedEncryptedBodyFetch(baseURL: string, keyOrigin?: string): FetchWithResponse {
+export function createUnverifiedEncryptedBodyFetch(baseURL: string, keyOrigin?: string): typeof fetch {
   let transportPromise: Promise<EhbpTransport> | null = null;
 
   const getOrCreateTransport = async (): Promise<EhbpTransport> => {
@@ -149,7 +140,7 @@ export function createUnverifiedEncryptedBodyFetch(baseURL: string, keyOrigin?: 
     return transportPromise;
   };
 
-  const secureFetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+  return async (input: RequestInfo | URL, init?: RequestInit) => {
     const normalized = normalizeEncryptedBodyRequestArgs(input, init);
     const targetUrl = new URL(normalized.url, baseURL);
 
@@ -161,10 +152,7 @@ export function createUnverifiedEncryptedBodyFetch(baseURL: string, keyOrigin?: 
 
     const transportInstance = await getOrCreateTransport();
     return transportInstance.request(targetUrl.toString(), initWithEnclaveHeader);
-  }) as FetchWithResponse;
-
-  secureFetch.Response = Response;
-  return secureFetch;
+  };
 }
 
 async function getUnverifiedTransportForOrigin(origin: string, keyOrigin: string): Promise<EhbpTransport> {

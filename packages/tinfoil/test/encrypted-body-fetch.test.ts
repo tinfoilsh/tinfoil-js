@@ -183,16 +183,6 @@ describe("encrypted-body-fetch", () => {
       expect(customFetch.length).toBe(2);
     });
 
-    it("exposes Response constructor for OpenAI SDK FormData support detection", () => {
-      const customFetch = createEncryptedBodyFetch(
-        "https://api.example.com",
-        "mockkey123"
-      );
-
-      // The OpenAI SDK checks 'Response' in fetch to avoid making a test request to 'data:,'
-      expect("Response" in customFetch).toBe(true);
-      expect(customFetch.Response).toBe(Response);
-    });
   });
 
   describe("createUnverifiedEncryptedBodyFetch", () => {
@@ -266,12 +256,6 @@ describe("encrypted-body-fetch", () => {
       const customFetch = createUnverifiedEncryptedBodyFetch("https://api.example.com");
       expect(typeof customFetch).toBe("function");
       expect(customFetch.length).toBe(2);
-    });
-
-    it("exposes Response constructor for OpenAI SDK FormData support detection", () => {
-      const customFetch = createUnverifiedEncryptedBodyFetch("https://api.example.com");
-      expect("Response" in customFetch).toBe(true);
-      expect(customFetch.Response).toBe(Response);
     });
   });
 });
