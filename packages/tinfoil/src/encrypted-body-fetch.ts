@@ -80,9 +80,8 @@ export function normalizeEncryptedBodyRequestArgs(
 
 export async function encryptedBodyRequest(
   input: RequestInfo | URL,
-  hpkePublicKey?: string,
+  hpkePublicKey: string,
   init?: RequestInit,
-  enclaveURL?: string,
   transportInstance?: EhbpTransport,
 ): Promise<Response> {
   const { url: requestUrl, init: requestInit } = normalizeEncryptedBodyRequestArgs(
@@ -93,23 +92,10 @@ export async function encryptedBodyRequest(
   let actualTransport: EhbpTransport;
 
   if (transportInstance) {
-    // Use provided transport instance
     actualTransport = transportInstance;
   } else {
-    // Create a new transport for this request
-    if (!hpkePublicKey) {
-      throw new Error("HPKE public key is required when no transport instance is provided");
-    }
     const u = new URL(requestUrl);
-    const { origin } = u;
-    actualTransport = await getTransportForOrigin(origin, hpkePublicKey);
-  }
-
-  if (hpkePublicKey) {
-    const transportKeyHash = await actualTransport.getServerPublicKeyHex();
-    if (transportKeyHash !== hpkePublicKey) {
-      throw new Error(`HPKE public key mismatch. Expected: ${hpkePublicKey}, Got: ${transportKeyHash}`);
-    }
+    actualTransport = await getTransportForOrigin(u.origin, hpkePublicKey);
   }
 
   return actualTransport.request(requestUrl, requestInit);
@@ -150,7 +136,7 @@ export function createEncryptedBodyFetch(baseURL: string, hpkePublicKey?: string
     // Get the dedicated transport instance for this fetch function
     const transportInstance = await getOrCreateTransport();
 
-    return encryptedBodyRequest(targetUrl.toString(), hpkePublicKey, initWithEnclaveHeader, enclaveURL, transportInstance);
+    return encryptedBodyRequest(targetUrl.toString(), hpkePublicKey!, initWithEnclaveHeader, transportInstance);
   }) as FetchWithResponse;
 
   // Expose Response constructor for OpenAI SDK's FormData support detection

@@ -136,35 +136,6 @@ describe("encrypted-body-fetch", () => {
       globalThis.fetch = originalFetch;
     });
 
-    it("requires HPKE public key when no transport instance provided", async () => {
-      await expect(
-        encryptedBodyRequest("https://example.com/test", undefined)
-      ).rejects.toThrow(/HPKE public key is required/);
-    });
-
-    it("rejects request when HPKE key mismatch occurs", async () => {
-      const serverIdentity = await Identity.generate();
-      const actualKeyHex = await serverIdentity.getPublicKeyHex();
-      // Generate a different identity to get a different valid key
-      const differentIdentity = await Identity.generate();
-      const differentKeyHex = await differentIdentity.getPublicKeyHex();
-
-      let apiRequestMade = false;
-      globalThis.fetch = vi.fn(async (input: RequestInfo | URL) => {
-        const url = input instanceof Request ? input.url : input.toString();
-        if (url.includes("example.com/test")) {
-          apiRequestMade = true;
-        }
-        return new Response("ok");
-      }) as typeof fetch;
-
-      // Pass actualKeyHex to create the transport, but check against differentKeyHex
-      await expect(
-        encryptedBodyRequest("https://example.com/test", actualKeyHex)
-      ).resolves.toBeDefined();
-      expect(apiRequestMade).toBe(true);
-    });
-
     it("makes request with valid HPKE key", async () => {
       const serverIdentity = await Identity.generate();
       const keyHex = await serverIdentity.getPublicKeyHex();
