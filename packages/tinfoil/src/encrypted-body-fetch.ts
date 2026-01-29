@@ -97,10 +97,12 @@ export async function encryptedBodyRequest(
     actualTransport = transportInstance;
   } else {
     // Create a new transport for this request
+    if (!hpkePublicKey) {
+      throw new Error("HPKE public key is required when no transport instance is provided");
+    }
     const u = new URL(requestUrl);
     const { origin } = u;
-    const keyOrigin = enclaveURL ? new URL(enclaveURL).origin : origin;
-    actualTransport = await getTransportForOrigin(origin, keyOrigin);
+    actualTransport = await getTransportForOrigin(origin, hpkePublicKey);
   }
 
   if (hpkePublicKey) {
@@ -124,10 +126,11 @@ export function createEncryptedBodyFetch(baseURL: string, hpkePublicKey?: string
 
   const getOrCreateTransport = async (): Promise<EhbpTransport> => {
     if (!transportPromise) {
+      if (!hpkePublicKey) {
+        throw new Error("HPKE public key is required for verified encrypted body fetch");
+      }
       const baseUrl = new URL(baseURL);
-      const keyOrigin = enclaveURL ? new URL(enclaveURL).origin : baseUrl.origin;
-      // Pass the public key to avoid fetching from the server
-      transportPromise = getTransportForOrigin(baseUrl.origin, keyOrigin, hpkePublicKey);
+      transportPromise = getTransportForOrigin(baseUrl.origin, hpkePublicKey);
     }
     return transportPromise;
   };
@@ -207,7 +210,7 @@ async function getUnverifiedTransportForOrigin(origin: string, keyOrigin: string
   return new Transport(serverIdentity, requestHost);
 }
 
-export async function getTransportForOrigin(origin: string, keyOrigin: string, hpkePublicKeyHex?: string): Promise<EhbpTransport> {
+export async function getTransportForOrigin(origin: string, hpkePublicKeyHex: string): Promise<EhbpTransport> {
   if (typeof globalThis !== 'undefined') {
     const isSecure = (globalThis as any).isSecureContext !== false;
     const hasSubtle = !!(globalThis.crypto && (globalThis.crypto as Crypto).subtle);
@@ -218,12 +221,7 @@ export async function getTransportForOrigin(origin: string, keyOrigin: string, h
   }
 
   const { Transport } = await getEhbp();
-
-  // If we have the public key from attestation, use it directly without fetching
-  const serverIdentity = hpkePublicKeyHex
-    ? await createIdentityFromPublicKeyHex(hpkePublicKeyHex)
-    : await getServerIdentity(keyOrigin);
-
+  const serverIdentity = await createIdentityFromPublicKeyHex(hpkePublicKeyHex);
   const requestHost = new URL(origin).host;
   return new Transport(serverIdentity, requestHost);
 }
