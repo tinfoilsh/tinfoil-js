@@ -60,33 +60,49 @@ export class MeasurementMismatchError extends AttestationError {
 }
 
 /**
- * Check if a predicate type is SNP-compatible (contains SNP measurements)
- */
-function isSnpCompatible(type: string): boolean {
-  return type === PredicateType.SevGuestV1 ||
-         type === PredicateType.SevGuestV2 ||
-         type === PredicateType.SnpTdxMultiplatformV1;
-}
-
-/**
  * Compares two measurements for equality.
+ * Handles cross-platform comparison between SnpTdxMultiplatformV1 and SevGuestV2.
  * @throws FormatMismatchError if the measurement types are incompatible
  * @throws MeasurementMismatchError if the registers don't match
  */
 export function compareMeasurements(a: AttestationMeasurement, b: AttestationMeasurement): void {
-  // Allow comparison between compatible SNP types
-  const typesCompatible = a.type === b.type || (isSnpCompatible(a.type) && isSnpCompatible(b.type));
-  if (!typesCompatible) {
-    throw new FormatMismatchError(
-      `Measurement types are incompatible: '${a.type}' vs '${b.type}'`
-    );
+  // Exact type match - compare all registers
+  if (a.type === b.type) {
+    if (a.registers.length !== b.registers.length ||
+        !a.registers.every((reg, i) => reg === b.registers[i])) {
+      throw new MeasurementMismatchError('Measurement registers do not match');
+    }
+    return;
   }
-  if (a.registers.length !== b.registers.length ||
-      !a.registers.every((reg, i) => reg === b.registers[i])) {
-    throw new MeasurementMismatchError(
-      `Measurement registers do not match`
-    );
+
+  // Cross-platform: SnpTdxMultiplatformV1 vs SevGuestV2
+  // MultiPlatform registers: [snp, rtmr1, rtmr2]
+  // SevGuestV2 registers: [snp]
+  // Only compare the SNP measurement (first register of both)
+  if (a.type === PredicateType.SnpTdxMultiplatformV1 && b.type === PredicateType.SevGuestV2) {
+    if (a.registers.length < 1 || b.registers.length < 1) {
+      throw new MeasurementMismatchError('Insufficient registers for comparison');
+    }
+    if (a.registers[0] !== b.registers[0]) {
+      throw new MeasurementMismatchError('SNP measurement mismatch');
+    }
+    return;
   }
+
+  // Reverse direction
+  if (a.type === PredicateType.SevGuestV2 && b.type === PredicateType.SnpTdxMultiplatformV1) {
+    if (a.registers.length < 1 || b.registers.length < 1) {
+      throw new MeasurementMismatchError('Insufficient registers for comparison');
+    }
+    if (a.registers[0] !== b.registers[0]) {
+      throw new MeasurementMismatchError('SNP measurement mismatch');
+    }
+    return;
+  }
+
+  throw new FormatMismatchError(
+    `Measurement types are incompatible: '${a.type}' vs '${b.type}'`
+  );
 }
 
 /**
