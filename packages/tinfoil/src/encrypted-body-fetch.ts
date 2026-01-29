@@ -106,15 +106,11 @@ type FetchWithResponse = typeof fetch & { Response: typeof Response };
 
 const ENCLAVE_URL_HEADER = 'X-Tinfoil-Enclave-Url';
 
-export function createEncryptedBodyFetch(baseURL: string, hpkePublicKey?: string, enclaveURL?: string): FetchWithResponse {
-  // Create a dedicated transport instance for this fetch function
+export function createEncryptedBodyFetch(baseURL: string, hpkePublicKey: string): FetchWithResponse {
   let transportPromise: Promise<EhbpTransport> | null = null;
 
   const getOrCreateTransport = async (): Promise<EhbpTransport> => {
     if (!transportPromise) {
-      if (!hpkePublicKey) {
-        throw new Error("HPKE public key is required for verified encrypted body fetch");
-      }
       const baseUrl = new URL(baseURL);
       transportPromise = getTransportForOrigin(baseUrl.origin, hpkePublicKey);
     }
@@ -124,19 +120,8 @@ export function createEncryptedBodyFetch(baseURL: string, hpkePublicKey?: string
   const secureFetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     const normalized = normalizeEncryptedBodyRequestArgs(input, init);
     const targetUrl = new URL(normalized.url, baseURL);
-
-    // Add the enclave URL header so proxies know where to forward requests
-    // Only set if enclaveURL differs from baseURL (avoids CORS issues when hitting enclave directly)
-    const headers = new Headers(normalized.init?.headers);
-    if (enclaveURL && new URL(enclaveURL).origin !== new URL(baseURL).origin) {
-      headers.set(ENCLAVE_URL_HEADER, enclaveURL);
-    }
-    const initWithEnclaveHeader = { ...normalized.init, headers };
-
-    // Get the dedicated transport instance for this fetch function
     const transportInstance = await getOrCreateTransport();
-
-    return encryptedBodyRequest(targetUrl.toString(), hpkePublicKey!, initWithEnclaveHeader, transportInstance);
+    return encryptedBodyRequest(targetUrl.toString(), hpkePublicKey, normalized.init, transportInstance);
   }) as FetchWithResponse;
 
   // Expose Response constructor for OpenAI SDK's FormData support detection
