@@ -12,7 +12,7 @@ export interface VerifierOptions {
 }
 
 export class Verifier {
-  private enclave: string;
+  private serverURL?: string;
   private configRepo: string;
   private verificationDocument?: VerificationDocument;
 
@@ -20,19 +20,20 @@ export class Verifier {
     if (!options.configRepo) {
       throw new Error("configRepo is required for Verifier");
     }
-    this.enclave = options.serverURL ? new URL(options.serverURL).hostname : '';
+    this.serverURL = options.serverURL;
     this.configRepo = options.configRepo;
   }
 
   async verify(): Promise<AttestationResponse> {
-    if (!this.enclave) {
+    if (!this.serverURL) {
       throw new Error("serverURL is required for verify(). Use verifyBundle() with an attestation bundle instead.");
     }
-    const attestationDoc = await fetchAttestation(this.enclave);
+    const domain = new URL(this.serverURL).hostname;
+    const attestationDoc = await fetchAttestation(domain);
     const digest = await fetchLatestDigest(this.configRepo);
     const sigstoreBundle = await fetchGithubAttestationBundle(this.configRepo, digest);
 
-    return this.performVerification(attestationDoc, undefined, digest, sigstoreBundle, this.enclave);
+    return this.performVerification(attestationDoc, undefined, digest, sigstoreBundle, domain);
   }
 
   async verifyBundle(bundle: AttestationBundle): Promise<AttestationResponse> {
