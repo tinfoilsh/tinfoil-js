@@ -222,6 +222,9 @@ export class SecureClient {
    * encrypted using HPKE (or TLS pinning if configured) so only the verified
    * enclave can decrypt them.
    *
+   * On failure, automatically re-verifies attestation and retries once in case
+   * the enclave restarted with new keys.
+   *
    * @example
    * ```typescript
    * const response = await client.fetch("/v1/chat/completions", {
@@ -238,8 +241,22 @@ export class SecureClient {
       try {
         return await this._fetch!(input, init);
       } catch (error) {
+        if (!(error instanceof Error)) {
+          throw error;
+        }
+
+        // Retry once - enclave may have restarted with new keys
+        this.initPromise = null;
+        try {
+          await this.ready();
+          return await this._fetch!(input, init);
+        } catch {
+          // Retry failed, throw original error
+        }
+
+        // Update verification document with error info
         if (this.verificationDocument) {
-          const errorMessage = (error as Error).message;
+          const errorMessage = error.message;
 
           if (errorMessage.includes('HPKE public key mismatch')) {
             this.verificationDocument.steps.verifyHPKEKey = {
