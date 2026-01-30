@@ -16,7 +16,7 @@ export interface CreateTinfoilAIOptions {
   /** GitHub repo for code verification. */
   configRepo?: string;
 
-  /** URL to fetch the attestation bundle from. If not set, uses the default Tinfoil ATC. */
+  /** URL to fetch the attestation bundle from. */
   attestationBundleURL?: string;
 }
 

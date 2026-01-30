@@ -2,10 +2,10 @@ import { TINFOIL_CONFIG } from "./config.js";
 import type { AttestationBundle } from "@tinfoilsh/verifier";
 
 /**
- * Fetches a complete attestation bundle from ATC (single-request mode).
+ * Fetches a complete attestation bundle.
  * The bundle contains all material needed for verification without additional network calls.
  *
- * @param atcBaseUrl - Base URL for ATC (defaults to TINFOIL_CONFIG.ATC_BASE_URL)
+ * @param atcBaseUrl - Base URL for the attestation endpoint (defaults to TINFOIL_CONFIG.ATC_BASE_URL)
  * @returns The complete attestation bundle
  * @throws Error if the request fails
  */
@@ -33,10 +33,9 @@ export async function fetchAttestationBundle(atcBaseUrl: string = TINFOIL_CONFIG
 }
 
 /**
- * Fetches the list of available routers from the ATC API
- * and returns a randomly selected address.
+ * Fetches the list of available routers and returns a randomly selected address.
  *
- * @param atcBaseUrl - Base URL for ATC (defaults to TINFOIL_CONFIG.ATC_BASE_URL)
+ * @param atcBaseUrl - Base URL for the attestation endpoint (defaults to TINFOIL_CONFIG.ATC_BASE_URL)
  * @returns A randomly selected router address
  * @throws Error if no routers are found or if the request fails
  */

@@ -87,7 +87,7 @@ export interface TinfoilAIOptions {
    */
   transport?: TransportMode;
 
-  /** URL to fetch the attestation bundle from. If not set, uses the default Tinfoil ATC. */
+  /** URL to fetch the attestation bundle from. */
   attestationBundleURL?: string;
   
   /** Additional OpenAI client options (passed through to underlying client) */

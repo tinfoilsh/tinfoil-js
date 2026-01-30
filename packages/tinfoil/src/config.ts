@@ -3,7 +3,7 @@
  */
 export const TINFOIL_CONFIG = {
   /**
-   * Base URL for the ATC (Air Traffic Control) service
+   * Base URL for the attestation endpoint
    */
   ATC_BASE_URL: "https://atc.tinfoil.sh",
 
