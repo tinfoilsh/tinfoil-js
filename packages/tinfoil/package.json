@@ -52,12 +52,10 @@
   },
   "dependencies": {
     "@ai-sdk/openai-compatible": "^2.0.26",
-    "@eslint/js": "^9.39.2",
     "@freedomofpress/sigstore-browser": "^0.1.11",
     "@tinfoilsh/verifier": "1.0.5",
     "ehbp": "^0.1.5",
-    "openai": "^6.17.0",
-    "typescript-eslint": "^8.54.0"
+    "openai": "^6.17.0"
   },
   "peerDependencies": {
     "ai": "^6.0.69"
@@ -68,16 +66,19 @@
     }
   },
   "devDependencies": {
+    "@eslint/js": "^9.39.2",
     "@types/node": "^25.2.0",
     "@typescript-eslint/eslint-plugin": "^8.54.0",
     "@typescript-eslint/parser": "^8.54.0",
     "@vitest/browser": "^4.0.18",
+    "@vitest/browser-playwright": "^4.0.18",
     "ai": "^6.0.69",
     "dotenv": "^17.2.1",
     "eslint": "^9.39.2",
     "jsdom": "^28.0.0",
     "playwright": "^1.58.1",
     "ts-node": "^10.9.2",
+    "typescript-eslint": "^8.54.0",
     "vite": "^7.3.1",
     "vitest": "^4.0.18"
   }
