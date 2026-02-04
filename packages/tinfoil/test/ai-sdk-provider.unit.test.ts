@@ -10,7 +10,7 @@ const secureClientMock = {
 
 vi.mock("../src/secure-client", () => {
   return {
-    SecureClient: vi.fn(() => secureClientMock),
+    SecureClient: vi.fn(function () { return secureClientMock; }),
   };
 });
 
