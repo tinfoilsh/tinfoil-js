@@ -1,6 +1,7 @@
 /// <reference types="vitest" />
 import { defineConfig } from "vite";
 import { resolve } from "path";
+import { playwright } from "@vitest/browser-playwright";
 
 export default defineConfig({
   test: {
@@ -9,7 +10,7 @@ export default defineConfig({
     testTimeout: 30_000,
     browser: {
       enabled: true,
-      provider: "playwright",
+      provider: playwright(),
       headless: true,
       instances: [{ browser: "chromium" }],
     },
