@@ -12,7 +12,7 @@ import { ASN1Obj } from '@freedomofpress/crypto-browser';
 import { decodeDomains, bytesToHex } from './dcode.js';
 import { hashAttestationDocument } from './types.js';
 import type { AttestationDocument } from './types.js';
-import { VerificationError, ValidationError } from './errors.js';
+import { AttestationError } from './errors.js';
 
 /**
  * Extract DNS names from Subject Alternative Name extension
@@ -88,8 +88,8 @@ export interface CertVerificationResult {
  * @param attestationDoc - Attestation document to verify hash against
  * @param expectedHpkeKey - Expected HPKE public key (hex)
  * @returns Verification result with extracted values
- * @throws VerificationError if certificate parsing or decoding fails
- * @throws ValidationError if certificate values don't match expected values
+ * @throws AttestationError if certificate parsing or decoding fails
+ * @throws AttestationError if certificate values don't match expected values
  */
 export async function verifyCertificate(
   certPem: string,
@@ -102,7 +102,7 @@ export async function verifyCertificate(
   try {
     cert = X509Certificate.parse(certPem);
   } catch (error) {
-    throw new VerificationError(
+    throw new AttestationError(
       `Failed to parse certificate: ${(error as Error).message}`
     );
   }
@@ -110,12 +110,12 @@ export async function verifyCertificate(
   // 2. Extract SANs
   const sans = extractSANs(cert);
   if (sans.length === 0) {
-    throw new VerificationError('Certificate has no Subject Alternative Names');
+    throw new AttestationError('Certificate has no Subject Alternative Names');
   }
 
   // 3. Verify domain
   if (!domainMatchesSans(sans, expectedDomain)) {
-    throw new ValidationError(
+    throw new AttestationError(
       `Certificate not valid for domain: ${expectedDomain}. SANs: ${sans.join(', ')}`
     );
   }
@@ -123,21 +123,21 @@ export async function verifyCertificate(
   // 4. Extract and verify HPKE key
   const hpkeSans = sans.filter(s => s.includes('.hpke.'));
   if (hpkeSans.length === 0) {
-    throw new VerificationError('Certificate SANs do not contain HPKE key');
+    throw new AttestationError('Certificate SANs do not contain HPKE key');
   }
   
   let hpkeKeyBytes: Uint8Array;
   try {
     hpkeKeyBytes = decodeDomains(hpkeSans, 'hpke');
   } catch (error) {
-    throw new VerificationError(
+    throw new AttestationError(
       `Failed to decode HPKE key from SANs: ${(error as Error).message}`
     );
   }
   
   const hpkePublicKey = bytesToHex(hpkeKeyBytes);
   if (hpkePublicKey !== expectedHpkeKey) {
-    throw new ValidationError(
+    throw new AttestationError(
       `HPKE key mismatch: certificate has ${hpkePublicKey}, expected ${expectedHpkeKey}`
     );
   }
@@ -145,14 +145,14 @@ export async function verifyCertificate(
   // 5. Extract and verify attestation hash
   const hattSans = sans.filter(s => s.includes('.hatt.'));
   if (hattSans.length === 0) {
-    throw new VerificationError('Certificate SANs do not contain attestation hash');
+    throw new AttestationError('Certificate SANs do not contain attestation hash');
   }
   
   let hashBytes: Uint8Array;
   try {
     hashBytes = decodeDomains(hattSans, 'hatt');
   } catch (error) {
-    throw new VerificationError(
+    throw new AttestationError(
       `Failed to decode attestation hash from SANs: ${(error as Error).message}`
     );
   }
@@ -162,7 +162,7 @@ export async function verifyCertificate(
   const computedHash = await hashAttestationDocument(attestationDoc);
   
   if (certAttestationHash !== computedHash) {
-    throw new ValidationError(
+    throw new AttestationError(
       `Attestation hash mismatch: certificate has ${certAttestationHash}, computed ${computedHash}`
     );
   }

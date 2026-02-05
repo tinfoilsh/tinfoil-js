@@ -4,7 +4,7 @@ import type { TCBParts, SnpPolicy, SnpPlatformInfo } from './types.js';
 import { tcbFromInt, tcbMeetsMinimum, bytesToHex } from './utils.js';
 import { ReportSigner } from './constants.js';
 import { uint8ArrayEqual } from '@freedomofpress/crypto-browser';
-import { ValidationError } from '../errors.js';
+import { AttestationError } from '../errors.js';
 
 /**
  * Verification options for an SEV-SNP attestation report.
@@ -107,49 +107,49 @@ export const defaultValidationOptions: ValidationOptions = {
 function validatePolicy(reportPolicy: SnpPolicy, required: SnpPolicy) {
   // ABI version check - required version must not be greater than report version
   if (comparePolicyVersions(required, reportPolicy) > 0) {
-    throw new ValidationError(`Required ABI version (${required.abiMajor}.${required.abiMinor}) is greater than report's ABI version (${reportPolicy.abiMajor}.${reportPolicy.abiMinor})`);
+    throw new AttestationError(`Required ABI version (${required.abiMajor}.${required.abiMinor}) is greater than report's ABI version (${reportPolicy.abiMajor}.${reportPolicy.abiMinor})`);
   }
 
   // Unauthorized capabilities (report has them enabled, but required doesn't allow)
   if (!required.migrateMa && reportPolicy.migrateMa) {
-    throw new ValidationError(`Found unauthorized migration agent capability. Report policy: ${JSON.stringify(reportPolicy)}, Required policy: ${JSON.stringify(required)}`);
+    throw new AttestationError(`Found unauthorized migration agent capability. Report policy: ${JSON.stringify(reportPolicy)}, Required policy: ${JSON.stringify(required)}`);
   }
 
   if (!required.debug && reportPolicy.debug) {
-    throw new ValidationError(`Found unauthorized debug capability. Report policy: ${JSON.stringify(reportPolicy)}, Required policy: ${JSON.stringify(required)}`);
+    throw new AttestationError(`Found unauthorized debug capability. Report policy: ${JSON.stringify(reportPolicy)}, Required policy: ${JSON.stringify(required)}`);
   }
 
   if (!required.smt && reportPolicy.smt) {
-    throw new ValidationError(`Found unauthorized symmetric multithreading (SMT) capability. Report policy: ${JSON.stringify(reportPolicy)}, Required policy: ${JSON.stringify(required)}`);
+    throw new AttestationError(`Found unauthorized symmetric multithreading (SMT) capability. Report policy: ${JSON.stringify(reportPolicy)}, Required policy: ${JSON.stringify(required)}`);
   }
 
   if (!required.cxlAllowed && reportPolicy.cxlAllowed) {
-    throw new ValidationError(`Found unauthorized CXL capability. Report policy: ${JSON.stringify(reportPolicy)}, Required policy: ${JSON.stringify(required)}`);
+    throw new AttestationError(`Found unauthorized CXL capability. Report policy: ${JSON.stringify(reportPolicy)}, Required policy: ${JSON.stringify(required)}`);
   }
 
   if (!required.memAes256Xts && reportPolicy.memAes256Xts) {
-    throw new ValidationError(`Found unauthorized memory encryption mode. Report policy: ${JSON.stringify(reportPolicy)}, Required policy: ${JSON.stringify(required)}`);
+    throw new AttestationError(`Found unauthorized memory encryption mode. Report policy: ${JSON.stringify(reportPolicy)}, Required policy: ${JSON.stringify(required)}`);
   }
 
   // Required restrictions/features (report lacks what required mandates)
   if (required.singleSocket && !reportPolicy.singleSocket) {
-    throw new ValidationError(`Required single socket restriction not present. Report policy: ${JSON.stringify(reportPolicy)}, Required policy: ${JSON.stringify(required)}`);
+    throw new AttestationError(`Required single socket restriction not present. Report policy: ${JSON.stringify(reportPolicy)}, Required policy: ${JSON.stringify(required)}`);
   }
 
   if (required.memAes256Xts && !reportPolicy.memAes256Xts) {
-    throw new ValidationError(`Found unauthorized memory encryption mode. Report policy: ${JSON.stringify(reportPolicy)}, Required policy: ${JSON.stringify(required)}`);
+    throw new AttestationError(`Found unauthorized memory encryption mode. Report policy: ${JSON.stringify(reportPolicy)}, Required policy: ${JSON.stringify(required)}`);
   }
 
   if (required.raplDis && !reportPolicy.raplDis) {
-    throw new ValidationError(`Found unauthorized RAPL capability. Report policy: ${JSON.stringify(reportPolicy)}, Required policy: ${JSON.stringify(required)}`);
+    throw new AttestationError(`Found unauthorized RAPL capability. Report policy: ${JSON.stringify(reportPolicy)}, Required policy: ${JSON.stringify(required)}`);
   }
 
   if (required.ciphertextHidingDram && !reportPolicy.ciphertextHidingDram) {
-    throw new ValidationError(`Ciphertext hiding in DRAM isn't enforced. Report policy: ${JSON.stringify(reportPolicy)}, Required policy: ${JSON.stringify(required)}`);
+    throw new AttestationError(`Ciphertext hiding in DRAM isn't enforced. Report policy: ${JSON.stringify(reportPolicy)}, Required policy: ${JSON.stringify(required)}`);
   }
 
   if (required.pageSwapDisabled && !reportPolicy.pageSwapDisabled) {
-    throw new ValidationError(`Page swap isn't disabled. Report policy: ${JSON.stringify(reportPolicy)}, Required policy: ${JSON.stringify(required)}`);
+    throw new AttestationError(`Page swap isn't disabled. Report policy: ${JSON.stringify(reportPolicy)}, Required policy: ${JSON.stringify(required)}`);
   }
 }
 
@@ -192,16 +192,16 @@ export function validateReport(report: Report, chain: CertificateChain, options:
 
   if (options.minimumGuestSvn !== undefined) {
     if (report.guestSvn < options.minimumGuestSvn) {
-      throw new ValidationError(`Guest SVN ${report.guestSvn} is less than minimum required ${options.minimumGuestSvn}`);
+      throw new AttestationError(`Guest SVN ${report.guestSvn} is less than minimum required ${options.minimumGuestSvn}`);
     }
   }
 
   if (options.minimumBuild !== undefined) {
     if (report.currentBuild < options.minimumBuild) {
-      throw new ValidationError(`Current SNP firmware build number ${report.currentBuild} is less than minimum required ${options.minimumBuild}`);
+      throw new AttestationError(`Current SNP firmware build number ${report.currentBuild} is less than minimum required ${options.minimumBuild}`);
     }
     if (report.committedBuild < options.minimumBuild) {
-      throw new ValidationError(`Committed SNP firmware build number ${report.committedBuild} is less than minimum required ${options.minimumBuild}`);
+      throw new AttestationError(`Committed SNP firmware build number ${report.committedBuild} is less than minimum required ${options.minimumBuild}`);
     }
   }
 
@@ -209,10 +209,10 @@ export function validateReport(report: Report, chain: CertificateChain, options:
     const currentVersion = (report.currentMajor << 8) | report.currentMinor;
     const committedVersion = (report.committedMajor << 8) | report.committedMinor;
     if (currentVersion < options.minimumVersion) {
-      throw new ValidationError(`Current SNP firmware version ${report.currentMajor}.${report.currentMinor} is less than minimum required ${options.minimumVersion >> 8}.${options.minimumVersion & 0xff}`);
+      throw new AttestationError(`Current SNP firmware version ${report.currentMajor}.${report.currentMinor} is less than minimum required ${options.minimumVersion >> 8}.${options.minimumVersion & 0xff}`);
     }
     if (committedVersion < options.minimumVersion) {
-      throw new ValidationError(`Committed SNP firmware version ${report.committedMajor}.${report.committedMinor} is less than minimum required ${options.minimumVersion >> 8}.${options.minimumVersion & 0xff}`);
+      throw new AttestationError(`Committed SNP firmware version ${report.committedMajor}.${report.committedMinor} is less than minimum required ${options.minimumVersion >> 8}.${options.minimumVersion & 0xff}`);
     }
   }
 
@@ -223,13 +223,13 @@ export function validateReport(report: Report, chain: CertificateChain, options:
     const reportedTcbParts = tcbFromInt(report.reportedTcb);
 
     if (!tcbMeetsMinimum(currentTcbParts, options.minimumTcb)) {
-      throw new ValidationError(`Current TCB ${tcbPartsToString(currentTcbParts)} does not meet minimum requirements ${tcbPartsToString(options.minimumTcb)}`);
+      throw new AttestationError(`Current TCB ${tcbPartsToString(currentTcbParts)} does not meet minimum requirements ${tcbPartsToString(options.minimumTcb)}`);
     }
     if (!tcbMeetsMinimum(committedTcbParts, options.minimumTcb)) {
-      throw new ValidationError(`Committed TCB ${tcbPartsToString(committedTcbParts)} does not meet minimum requirements ${tcbPartsToString(options.minimumTcb)}`);
+      throw new AttestationError(`Committed TCB ${tcbPartsToString(committedTcbParts)} does not meet minimum requirements ${tcbPartsToString(options.minimumTcb)}`);
     }
     if (!tcbMeetsMinimum(reportedTcbParts, options.minimumTcb)) {
-      throw new ValidationError(`Reported TCB ${tcbPartsToString(reportedTcbParts)} does not meet minimum requirements ${tcbPartsToString(options.minimumTcb)}`);
+      throw new AttestationError(`Reported TCB ${tcbPartsToString(reportedTcbParts)} does not meet minimum requirements ${tcbPartsToString(options.minimumTcb)}`);
     }
   }
 
@@ -239,87 +239,87 @@ export function validateReport(report: Report, chain: CertificateChain, options:
   if (options.minimumLaunchTcb) {
     const launchTcbParts = tcbFromInt(report.launchTcb);
     if (!tcbMeetsMinimum(launchTcbParts, options.minimumLaunchTcb)) {
-      throw new ValidationError(`Launch TCB ${tcbPartsToString(launchTcbParts)} does not meet minimum requirements ${tcbPartsToString(options.minimumLaunchTcb)}`);
+      throw new AttestationError(`Launch TCB ${tcbPartsToString(launchTcbParts)} does not meet minimum requirements ${tcbPartsToString(options.minimumLaunchTcb)}`);
     }
   }
 
   // Field equality checks
   if (options.reportData) {
     if (report.reportData.length !== 64) {
-      throw new ValidationError(`Report data length is ${report.reportData.length}, expected 64 bytes`);
+      throw new AttestationError(`Report data length is ${report.reportData.length}, expected 64 bytes`);
     }
     if (!uint8ArrayEqual(report.reportData, options.reportData)) {
-      throw new ValidationError(`Report data mismatch: got ${bytesToHex(report.reportData)}, expected ${bytesToHex(options.reportData)}`);
+      throw new AttestationError(`Report data mismatch: got ${bytesToHex(report.reportData)}, expected ${bytesToHex(options.reportData)}`);
     }
   }
 
   if (options.hostData) {
     if (report.hostData.length !== 32) {
-      throw new ValidationError(`Host data length is ${report.hostData.length}, expected 32 bytes`);
+      throw new AttestationError(`Host data length is ${report.hostData.length}, expected 32 bytes`);
     }
     if (!uint8ArrayEqual(report.hostData, options.hostData)) {
-      throw new ValidationError(`Host data mismatch: got ${bytesToHex(report.hostData)}, expected ${bytesToHex(options.hostData)}`);
+      throw new AttestationError(`Host data mismatch: got ${bytesToHex(report.hostData)}, expected ${bytesToHex(options.hostData)}`);
     }
   }
 
   if (options.measurement) {
     if (report.measurement.length !== 48) {
-      throw new ValidationError(`Measurement length is ${report.measurement.length}, expected 48 bytes`);
+      throw new AttestationError(`Measurement length is ${report.measurement.length}, expected 48 bytes`);
     }
     if (!uint8ArrayEqual(report.measurement, options.measurement)) {
-      throw new ValidationError(`Measurement mismatch: got ${bytesToHex(report.measurement)}, expected ${bytesToHex(options.measurement)}`);
+      throw new AttestationError(`Measurement mismatch: got ${bytesToHex(report.measurement)}, expected ${bytesToHex(options.measurement)}`);
     }
   }
 
   if (options.chipId) {
     if (report.chipId.length !== 64) {
-      throw new ValidationError(`Chip ID length is ${report.chipId.length}, expected 64 bytes`);
+      throw new AttestationError(`Chip ID length is ${report.chipId.length}, expected 64 bytes`);
     }
     if (!uint8ArrayEqual(report.chipId, options.chipId)) {
-      throw new ValidationError(`Chip ID mismatch: got ${bytesToHex(report.chipId)}, expected ${bytesToHex(options.chipId)}`);
+      throw new AttestationError(`Chip ID mismatch: got ${bytesToHex(report.chipId)}, expected ${bytesToHex(options.chipId)}`);
     }
   }
 
   if (options.imageId) {
     if (report.imageId.length !== 16) {
-      throw new ValidationError(`Image ID length is ${report.imageId.length}, expected 16 bytes`);
+      throw new AttestationError(`Image ID length is ${report.imageId.length}, expected 16 bytes`);
     }
     if (!uint8ArrayEqual(report.imageId, options.imageId)) {
-      throw new ValidationError(`Image ID mismatch: got ${bytesToHex(report.imageId)}, expected ${bytesToHex(options.imageId)}`);
+      throw new AttestationError(`Image ID mismatch: got ${bytesToHex(report.imageId)}, expected ${bytesToHex(options.imageId)}`);
     }
   }
 
   if (options.familyId) {
     if (report.familyId.length !== 16) {
-      throw new ValidationError(`Family ID length is ${report.familyId.length}, expected 16 bytes`);
+      throw new AttestationError(`Family ID length is ${report.familyId.length}, expected 16 bytes`);
     }
     if (!uint8ArrayEqual(report.familyId, options.familyId)) {
-      throw new ValidationError(`Family ID mismatch: got ${bytesToHex(report.familyId)}, expected ${bytesToHex(options.familyId)}`);
+      throw new AttestationError(`Family ID mismatch: got ${bytesToHex(report.familyId)}, expected ${bytesToHex(options.familyId)}`);
     }
   }
 
   if (options.reportId) {
     if (report.reportId.length !== 32) {
-      throw new ValidationError(`Report ID length is ${report.reportId.length}, expected 32 bytes`);
+      throw new AttestationError(`Report ID length is ${report.reportId.length}, expected 32 bytes`);
     }
     if (!uint8ArrayEqual(report.reportId, options.reportId)) {
-      throw new ValidationError(`Report ID mismatch: got ${bytesToHex(report.reportId)}, expected ${bytesToHex(options.reportId)}`);
+      throw new AttestationError(`Report ID mismatch: got ${bytesToHex(report.reportId)}, expected ${bytesToHex(options.reportId)}`);
     }
   }
 
   if (options.reportIdMa) {
     if (report.reportIdMa.length !== 32) {
-      throw new ValidationError(`Report ID MA length is ${report.reportIdMa.length}, expected 32 bytes`);
+      throw new AttestationError(`Report ID MA length is ${report.reportIdMa.length}, expected 32 bytes`);
     }
     if (!uint8ArrayEqual(report.reportIdMa, options.reportIdMa)) {
-      throw new ValidationError(`Report ID MA mismatch: got ${bytesToHex(report.reportIdMa)}, expected ${bytesToHex(options.reportIdMa)}`);
+      throw new AttestationError(`Report ID MA mismatch: got ${bytesToHex(report.reportIdMa)}, expected ${bytesToHex(options.reportIdMa)}`);
     }
   }
 
   // VCEK-specific CHIP_ID ↔ HWID equality check
   if (report.signerInfoParsed.signingKey === ReportSigner.VcekReportSigner) {
     if (report.signerInfoParsed.maskChipKey && report.chipId.some(b => b !== 0)) {
-      throw new ValidationError('maskChipKey is set but CHIP_ID is not zeroed');
+      throw new AttestationError('maskChipKey is set but CHIP_ID is not zeroed');
     }
     if (!report.signerInfoParsed.maskChipKey) {
       chain.validateVcekHwid(report.chipId);
@@ -334,35 +334,35 @@ export function validateReport(report: Report, chain: CertificateChain, options:
   // VMPL check
   if (options.vmpl !== undefined) {
     if (!(0 <= report.vmpl && report.vmpl <= 3)) {
-      throw new ValidationError(`VMPL ${report.vmpl} is not in valid range 0-3`);
+      throw new AttestationError(`VMPL ${report.vmpl} is not in valid range 0-3`);
     }
     if (report.vmpl !== options.vmpl) {
-      throw new ValidationError(`VMPL mismatch: got ${report.vmpl}, expected ${options.vmpl}`);
+      throw new AttestationError(`VMPL mismatch: got ${report.vmpl}, expected ${options.vmpl}`);
     }
   }
 
   // Provisional firmware check - we only support permitProvisionalFirmware = false
   if (options.permitProvisionalFirmware) {
-    throw new ValidationError('Provisional firmware is not supported');
+    throw new AttestationError('Provisional firmware is not supported');
   }
 
   // When permitProvisionalFirmware = false, committed and current values must be equal
   if (report.committedBuild !== report.currentBuild) {
-    throw new ValidationError(`Committed build ${report.committedBuild} does not match current build ${report.currentBuild}`);
+    throw new AttestationError(`Committed build ${report.committedBuild} does not match current build ${report.currentBuild}`);
   }
   if (report.committedMinor !== report.currentMinor) {
-    throw new ValidationError(`Committed minor version ${report.committedMinor} does not match current minor version ${report.currentMinor}`);
+    throw new AttestationError(`Committed minor version ${report.committedMinor} does not match current minor version ${report.currentMinor}`);
   }
   if (report.committedMajor !== report.currentMajor) {
-    throw new ValidationError(`Committed major version ${report.committedMajor} does not match current major version ${report.currentMajor}`);
+    throw new AttestationError(`Committed major version ${report.committedMajor} does not match current major version ${report.currentMajor}`);
   }
   if (report.committedTcb !== report.currentTcb) {
-    throw new ValidationError(`Committed TCB 0x${report.committedTcb.toString(16)} does not match current TCB 0x${report.currentTcb.toString(16)}`);
+    throw new AttestationError(`Committed TCB 0x${report.committedTcb.toString(16)} does not match current TCB 0x${report.currentTcb.toString(16)}`);
   }
 
   // ID-block / author key requirements
   if (options.requireAuthorKey || options.requireIdBlock) {
-    throw new ValidationError('ID-block and author key requirements are not supported yet');
+    throw new AttestationError('ID-block and author key requirements are not supported yet');
   }
 }
 
@@ -380,31 +380,31 @@ export function validateReport(report: Report, chain: CertificateChain, options:
 function validatePlatformInfo(reportInfo: SnpPlatformInfo, required: SnpPlatformInfo) {
   // Unauthorized features (report has it enabled, but required doesn't allow it)
   if (reportInfo.smtEnabled && !required.smtEnabled) {
-    throw new ValidationError(`Unauthorized platform feature SMT enabled. Report platform info: ${JSON.stringify(reportInfo)}, Required platform info: ${JSON.stringify(required)}`);
+    throw new AttestationError(`Unauthorized platform feature SMT enabled. Report platform info: ${JSON.stringify(reportInfo)}, Required platform info: ${JSON.stringify(required)}`);
   }
 
   // Required features (report lacks something that required mandates)
   if (!reportInfo.eccEnabled && required.eccEnabled) {
-    throw new ValidationError(`Required platform feature ECC not enabled. Report platform info: ${JSON.stringify(reportInfo)}, Required platform info: ${JSON.stringify(required)}`);
+    throw new AttestationError(`Required platform feature ECC not enabled. Report platform info: ${JSON.stringify(reportInfo)}, Required platform info: ${JSON.stringify(required)}`);
   }
 
   if (!reportInfo.tsmeEnabled && required.tsmeEnabled) {
-    throw new ValidationError(`Required platform feature TSME not enabled. Report platform info: ${JSON.stringify(reportInfo)}, Required platform info: ${JSON.stringify(required)}`);
+    throw new AttestationError(`Required platform feature TSME not enabled. Report platform info: ${JSON.stringify(reportInfo)}, Required platform info: ${JSON.stringify(required)}`);
   }
 
   if (!reportInfo.raplDisabled && required.raplDisabled) {
-    throw new ValidationError(`Required platform feature RAPL not disabled. Report platform info: ${JSON.stringify(reportInfo)}, Required platform info: ${JSON.stringify(required)}`);
+    throw new AttestationError(`Required platform feature RAPL not disabled. Report platform info: ${JSON.stringify(reportInfo)}, Required platform info: ${JSON.stringify(required)}`);
   }
 
   if (!reportInfo.ciphertextHidingDramEnabled && required.ciphertextHidingDramEnabled) {
-    throw new ValidationError(`Required ciphertext hiding in DRAM not enforced. Report platform info: ${JSON.stringify(reportInfo)}, Required platform info: ${JSON.stringify(required)}`);
+    throw new AttestationError(`Required ciphertext hiding in DRAM not enforced. Report platform info: ${JSON.stringify(reportInfo)}, Required platform info: ${JSON.stringify(required)}`);
   }
 
   if (!reportInfo.aliasCheckComplete && required.aliasCheckComplete) {
-    throw new ValidationError(`Required memory alias check hasn't been completed. Report platform info: ${JSON.stringify(reportInfo)}, Required platform info: ${JSON.stringify(required)}`);
+    throw new AttestationError(`Required memory alias check hasn't been completed. Report platform info: ${JSON.stringify(reportInfo)}, Required platform info: ${JSON.stringify(required)}`);
   }
 
   if (!reportInfo.tioEnabled && required.tioEnabled) {
-    throw new ValidationError(`Required TIO not enabled. Report platform info: ${JSON.stringify(reportInfo)}, Required platform info: ${JSON.stringify(required)}`);
+    throw new AttestationError(`Required TIO not enabled. Report platform info: ${JSON.stringify(reportInfo)}, Required platform info: ${JSON.stringify(required)}`);
   }
 }

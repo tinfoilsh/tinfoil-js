@@ -4,8 +4,6 @@ export {
   ConfigurationError,
   FetchError,
   AttestationError,
-  VerificationError,
-  ValidationError,
 } from './errors.js';
 
 // Verification functions

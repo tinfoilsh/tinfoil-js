@@ -38,19 +38,19 @@ export interface AttestationResponse {
   measurement: AttestationMeasurement;
 }
 
-import { ValidationError } from './errors.js';
+import { AttestationError } from './errors.js';
 
 /**
  * Compares two measurements for equality.
  * Handles cross-platform comparison between SnpTdxMultiplatformV1 and SevGuestV2.
- * @throws ValidationError if the measurement types are incompatible or registers don't match
+ * @throws AttestationError if the measurement types are incompatible or registers don't match
  */
 export function compareMeasurements(a: AttestationMeasurement, b: AttestationMeasurement): void {
   // Exact type match - compare all registers
   if (a.type === b.type) {
     if (a.registers.length !== b.registers.length ||
         !a.registers.every((reg, i) => reg === b.registers[i])) {
-      throw new ValidationError('Measurement mismatch: registers do not match');
+      throw new AttestationError('Measurement mismatch: registers do not match');
     }
     return;
   }
@@ -61,10 +61,10 @@ export function compareMeasurements(a: AttestationMeasurement, b: AttestationMea
   // Only compare the SNP measurement (first register of both)
   if (a.type === PredicateType.SnpTdxMultiplatformV1 && b.type === PredicateType.SevGuestV2) {
     if (a.registers.length < 1 || b.registers.length < 1) {
-      throw new ValidationError('Insufficient registers for comparison');
+      throw new AttestationError('Insufficient registers for comparison');
     }
     if (a.registers[0] !== b.registers[0]) {
-      throw new ValidationError('SNP measurement mismatch');
+      throw new AttestationError('SNP measurement mismatch');
     }
     return;
   }
@@ -72,15 +72,15 @@ export function compareMeasurements(a: AttestationMeasurement, b: AttestationMea
   // Reverse direction
   if (a.type === PredicateType.SevGuestV2 && b.type === PredicateType.SnpTdxMultiplatformV1) {
     if (a.registers.length < 1 || b.registers.length < 1) {
-      throw new ValidationError('Insufficient registers for comparison');
+      throw new AttestationError('Insufficient registers for comparison');
     }
     if (a.registers[0] !== b.registers[0]) {
-      throw new ValidationError('SNP measurement mismatch');
+      throw new AttestationError('SNP measurement mismatch');
     }
     return;
   }
 
-  throw new ValidationError(
+  throw new AttestationError(
     `Measurement types are incompatible: '${a.type}' vs '${b.type}'`
   );
 }

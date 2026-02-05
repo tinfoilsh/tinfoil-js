@@ -61,8 +61,7 @@ For callers that want structured error handling, these error classes are part of
 
 - `ConfigurationError` — client misconfigured (e.g., missing required options)
 - `FetchError` — network or HTTP errors when fetching attestation material
-- `VerificationError` — cryptographic or parsing failures during verification of attestation material
-- `ValidationError` — attested values don't match expected values (e.g., measurement mismatch, policy mismatch)
+- `AttestationError` — attestation verification failed (parsing, signatures, certificates, measurement mismatch, policy violation)
 
 ## Inspecting Verification Results
 

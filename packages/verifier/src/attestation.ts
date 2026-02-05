@@ -5,7 +5,7 @@ import { CertificateChain } from './sev/cert-chain.js';
 import { verifyAttestation as verifyAttestationInternal } from './sev/verify.js';
 import { bytesToHex } from './sev/utils.js';
 import { validateReport, defaultValidationOptions } from './sev/validation.js';
-import { FetchError, VerificationError, ValidationError, wrapOrThrow } from './errors.js';
+import { FetchError, AttestationError, wrapOrThrow } from './errors.js';
 
 const ATTESTATION_ENDPOINT = '/.well-known/tinfoil-attestation';
 
@@ -46,7 +46,7 @@ export async function verifyAttestation(doc: AttestationDocument, vcekBase64?: s
     const vcekDer = vcekBase64 ? base64ToBytes(vcekBase64) : undefined;
     return verifySevAttestationV2(doc.body, vcekDer);
   } else {
-    throw new VerificationError(`Unsupported attestation format: ${doc.format}`);
+    throw new AttestationError(`Unsupported attestation format: ${doc.format}`);
   }
 }
 
@@ -91,7 +91,7 @@ async function verifySevReport(attestationDoc: string, isCompressed: boolean, vc
   try {
     attDocBytes = base64ToBytes(attestationDoc);
   } catch (e) {
-    throw new VerificationError('Failed to decode base64', { cause: e as Error });
+    throw new AttestationError('Failed to decode base64', { cause: e as Error });
   }
 
   if (isCompressed) {
@@ -102,7 +102,7 @@ async function verifySevReport(attestationDoc: string, isCompressed: boolean, vc
   try {
     report = new Report(attDocBytes);
   } catch (e) {
-    throw new VerificationError('Failed to parse report', { cause: e as Error });
+    throw new AttestationError('Failed to parse report', { cause: e as Error });
   }
 
   const chain = await CertificateChain.fromReport(report, vcekDer);
@@ -111,17 +111,17 @@ async function verifySevReport(attestationDoc: string, isCompressed: boolean, vc
   try {
     res = await verifyAttestationInternal(chain, report);
   } catch (e) {
-    wrapOrThrow(e, VerificationError, 'Failed to verify attestation');
+    wrapOrThrow(e, AttestationError, 'Failed to verify attestation');
   }
 
   if (!res) {
-    throw new VerificationError('Attestation verification failed!');
+    throw new AttestationError('Attestation verification failed!');
   }
 
   try {
     validateReport(report, chain, defaultValidationOptions);
   } catch (e) {
-    wrapOrThrow(e, ValidationError, 'Failed to validate report');
+    wrapOrThrow(e, AttestationError, 'Failed to validate report');
   }
 
   return report;

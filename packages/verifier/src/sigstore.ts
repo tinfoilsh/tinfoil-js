@@ -2,7 +2,7 @@ import { PredicateType } from './types.js';
 import type { AttestationMeasurement } from './types.js';
 import type { X509Certificate, VerificationPolicy } from '@freedomofpress/sigstore-browser';
 import sigstoreTrustedRoot from './sigstore-trusted-root.json' with { type: 'json' };
-import { VerificationError, wrapOrThrow } from './errors.js';
+import { AttestationError, wrapOrThrow } from './errors.js';
 
 class GitHubWorkflowRefPattern implements VerificationPolicy {
   private pattern: RegExp;
@@ -14,10 +14,10 @@ class GitHubWorkflowRefPattern implements VerificationPolicy {
   verify(cert: X509Certificate): void {
     const ext = cert.extGitHubWorkflowRef;
     if (!ext) {
-      throw new VerificationError('Certificate does not contain GitHubWorkflowRef extension');
+      throw new AttestationError('Certificate does not contain GitHubWorkflowRef extension');
     }
     if (!this.pattern.test(ext.workflowRef)) {
-      throw new VerificationError(
+      throw new AttestationError(
         `Certificate's GitHubWorkflowRef "${ext.workflowRef}" does not match pattern "${this.pattern}"`
       );
     }
@@ -72,7 +72,7 @@ export async function verifySigstoreAttestation(
     const payload = JSON.parse(new TextDecoder().decode(payloadBytes));
 
     if (payloadType !== 'application/vnd.in-toto+json') {
-      throw new VerificationError(`Unsupported payload type: ${payloadType}. Only supports In-toto.`);
+      throw new AttestationError(`Unsupported payload type: ${payloadType}. Only supports In-toto.`);
     }
 
     const predicateType = payload.predicateType as PredicateType;
@@ -82,7 +82,7 @@ export async function verifySigstoreAttestation(
     // Now, verify that the provided external digest matches the
     // actual digest in the payload returned from the verified envelope
     if (digest !== payload.subject[0].digest.sha256) {
-      throw new VerificationError(
+      throw new AttestationError(
         `Provided digest does not match verified DSSE payload digest. Expected: ${digest}, Got: ${payload.subject[0].digest.sha256}`
       );
     }
@@ -91,16 +91,16 @@ export async function verifySigstoreAttestation(
     let registers: string[];
 
     if (!predicateFields) {
-      throw new VerificationError('Payload does not contain predicate');
+      throw new AttestationError('Payload does not contain predicate');
     }
 
     if (predicateType === PredicateType.SnpTdxMultiplatformV1) {
       if (!predicateFields.snp_measurement) {
-        throw new VerificationError('SNP TDX Multiplatform V1 predicate does not contain snp_measurement');
+        throw new AttestationError('SNP TDX Multiplatform V1 predicate does not contain snp_measurement');
       }
       registers = [predicateFields.snp_measurement];
     } else {
-      throw new VerificationError(`Unsupported predicate type: ${predicateType}`);
+      throw new AttestationError(`Unsupported predicate type: ${predicateType}`);
     }
 
     return {
@@ -109,6 +109,6 @@ export async function verifySigstoreAttestation(
     };
 
   } catch (e) {
-    wrapOrThrow(e, VerificationError, 'Reference data verification failed');
+    wrapOrThrow(e, AttestationError, 'Reference data verification failed');
   }
 }

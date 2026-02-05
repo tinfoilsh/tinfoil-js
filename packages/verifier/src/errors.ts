@@ -7,8 +7,6 @@
  * ├── ConfigurationError   - Client misconfigured or used incorrectly
  * ├── FetchError           - Couldn't fetch attestation materials
  * └── AttestationError     - Attestation failed (security issue)
- *     ├── VerificationError - Cryptographic verification failed
- *     └── ValidationError   - Attested values don't match expected
  * ```
  */
 
@@ -62,7 +60,20 @@ export class FetchError extends TinfoilError {
 }
 
 /**
- * Base class for attestation-related security errors.
+ * Thrown when attestation verification fails.
+ * 
+ * This covers all attestation-related security errors:
+ * - Material verification failures (parsing, signatures, certificates)
+ * - Policy validation failures (measurement mismatch, policy violation)
+ * 
+ * Examples:
+ * - Data parsing failed (malformed report, invalid base64, bad structure)
+ * - Sigstore signature invalid
+ * - Hardware certificate chain invalid
+ * - Report signature invalid
+ * - Measurement mismatch (enclave code doesn't match signed release)
+ * - Policy violation (debug enabled, TCB too low)
+ * - Key binding mismatch (transport keys don't match attested keys)
  * 
  * Action: Stop - security issue - you should retry the entire attestation protocol.
  */
@@ -70,45 +81,6 @@ export class AttestationError extends TinfoilError {
   constructor(message: string, options?: { cause?: Error }) {
     super(message, options);
     this.name = 'AttestationError';
-  }
-}
-
-/**
- * Thrown when cryptographic verification of attestation material fails.
- * 
- * Examples:
- * - Data parsing failed (malformed report, invalid base64, bad structure)
- * - Sigstore signature invalid
- * - Hardware certificate chain invalid
- * - Report signature invalid
- * 
- * This means we cannot trust the authenticity of the attestation data.
- * 
- * Action: Stop - security issue - you should retry the entire attestation protocol.
- */
-export class VerificationError extends AttestationError {
-  constructor(message: string, options?: { cause?: Error }) {
-    super(message, options);
-    this.name = 'VerificationError';
-  }
-}
-
-/**
- * Thrown when attested values don't match expected values.
- * 
- * Examples:
- * - Measurement mismatch (enclave code doesn't match signed release)
- * - Policy violation (debug enabled, TCB too low)
- * - Key binding mismatch (transport keys don't match attested keys)
- * 
- * This means the enclave doesn't meet the required security policy.
- * 
- * Action: Stop - security issue - you should retry the entire attestation protocol.
- */
-export class ValidationError extends AttestationError {
-  constructor(message: string, options?: { cause?: Error }) {
-    super(message, options);
-    this.name = 'ValidationError';
   }
 }
 
@@ -122,13 +94,13 @@ export class ValidationError extends AttestationError {
  * try {
  *   await someOperation();
  * } catch (e) {
- *   wrapOrThrow(e, VerificationError, 'Operation failed');
+ *   wrapOrThrow(e, AttestationError, 'Operation failed');
  * }
  * ```
  */
 export function wrapOrThrow(
   e: unknown,
-  ErrorClass: typeof VerificationError | typeof ValidationError | typeof FetchError | typeof ConfigurationError,
+  ErrorClass: typeof AttestationError | typeof FetchError | typeof ConfigurationError,
   message: string
 ): never {
   if (e instanceof TinfoilError) {
