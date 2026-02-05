@@ -1,6 +1,6 @@
 import { X509Certificate, createHash } from "crypto";
 import type { ReadableStream as NodeWebReadableStream } from "stream/web";
-import { ConfigurationError, ValidationError } from "./verifier.js";
+import { ConfigurationError, AttestationError } from "./verifier.js";
 
 function isBun(): boolean {
   return typeof process !== "undefined" &&
@@ -12,13 +12,13 @@ function createCheckServerIdentity(expectedFingerprintHex: string): (host: strin
   return (host: string, cert: any): Error | undefined => {
     const raw = cert?.raw as Buffer | undefined;
     if (!raw) {
-      return new ValidationError("Certificate raw bytes are unavailable for pinning");
+      return new AttestationError("Certificate raw bytes are unavailable for pinning");
     }
     const x509 = new X509Certificate(raw);
     const publicKeyDer = x509.publicKey.export({ type: "spki", format: "der" });
     const fp = createHash("sha256").update(publicKeyDer).digest("hex");
     if (fp !== expectedFingerprintHex) {
-      return new ValidationError(`Certificate public key fingerprint mismatch. Expected: ${expectedFingerprintHex}, Got: ${fp}`);
+      return new AttestationError(`Certificate public key fingerprint mismatch. Expected: ${expectedFingerprintHex}, Got: ${fp}`);
     }
     return undefined;
   };
