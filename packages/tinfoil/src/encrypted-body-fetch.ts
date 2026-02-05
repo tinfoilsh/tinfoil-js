@@ -1,5 +1,6 @@
 // Types are imported separately - type imports don't cause runtime loading
 import type { Transport as EhbpTransport, Identity as EhbpIdentity } from "ehbp";
+import { ConfigurationError, FetchError } from "./verifier.js";
 
 // Lazy-loaded ehbp module - cache the promise to prevent duplicate imports on concurrent calls
 let ehbpModulePromise: Promise<typeof import("ehbp")> | null = null;
@@ -32,18 +33,18 @@ export async function getServerIdentity(enclaveURL: string): Promise<EhbpIdentit
   const keysURL = new URL(PROTOCOL.KEYS_PATH, enclaveURL);
 
   if (keysURL.protocol !== 'https:') {
-    throw new Error(`HTTPS is required for remote key retrieval. Invalid protocol: ${keysURL.protocol}`);
+    throw new ConfigurationError(`HTTPS is required for remote key retrieval. Invalid protocol: ${keysURL.protocol}`);
   }
 
   const response = await fetch(keysURL.toString());
 
   if (!response.ok) {
-    throw new Error(`Failed to get server public key: ${response.status}`);
+    throw new FetchError(`Failed to get server public key: ${response.status}`);
   }
 
   const contentType = response.headers.get('content-type');
   if (contentType !== PROTOCOL.KEYS_MEDIA_TYPE) {
-    throw new Error(`Invalid content type: ${contentType}`);
+    throw new FetchError(`Invalid content type: ${contentType}`);
   }
 
   const keysData = new Uint8Array(await response.arrayBuffer());
@@ -182,7 +183,7 @@ async function getUnverifiedTransportForOrigin(origin: string, keyOrigin: string
     const hasSubtle = !!(globalThis.crypto && (globalThis.crypto as Crypto).subtle);
     if (!isSecure || !hasSubtle) {
       const reason = !isSecure ? 'insecure context (use HTTPS or localhost)' : 'missing WebCrypto SubtleCrypto';
-      throw new Error(`EHBP requires a secure browser context: ${reason}`);
+      throw new ConfigurationError(`EHBP requires a secure browser context: ${reason}`);
     }
   }
 

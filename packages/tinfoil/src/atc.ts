@@ -1,5 +1,6 @@
 import { TINFOIL_CONFIG } from "./config.js";
 import type { AttestationBundle } from "@tinfoilsh/verifier";
+import { FetchError } from "./verifier.js";
 
 /**
  * Fetches a complete attestation bundle.
@@ -14,7 +15,7 @@ export async function fetchAttestationBundle(atcBaseUrl: string = TINFOIL_CONFIG
   const response = await fetch(url);
 
   if (!response.ok) {
-    throw new Error(`Failed to fetch attestation bundle: ${response.status} ${response.statusText}`);
+    throw new FetchError(`Failed to fetch attestation bundle: ${response.status} ${response.statusText}`);
   }
 
   const bundle = await response.json();
@@ -45,13 +46,13 @@ export async function fetchRouter(atcBaseUrl: string = TINFOIL_CONFIG.ATC_BASE_U
   const response = await fetch(routersUrl);
 
   if (!response.ok) {
-    throw new Error(`Failed to fetch routers: ${response.status} ${response.statusText}`);
+    throw new FetchError(`Failed to fetch routers: ${response.status} ${response.statusText}`);
   }
 
   const routers: string[] = await response.json();
 
   if (!Array.isArray(routers) || routers.length === 0) {
-    throw new Error("No routers found in the response");
+    throw new FetchError("No routers found in the response");
   }
 
   return routers[Math.floor(Math.random() * routers.length)];

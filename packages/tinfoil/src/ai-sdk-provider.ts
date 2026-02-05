@@ -2,6 +2,7 @@ import { createOpenAICompatible } from "@ai-sdk/openai-compatible";
 import { TINFOIL_CONFIG } from "./config.js";
 import { SecureClient } from "./secure-client.js";
 import { isRealBrowser } from "./env.js";
+import { ConfigurationError } from "./verifier.js";
 
 /**
  * Options for creating a Tinfoil AI SDK provider.
@@ -57,7 +58,7 @@ export async function createTinfoilAI(apiKey?: string, options: CreateTinfoilAIO
     resolvedApiKey = process.env.TINFOIL_API_KEY;
   }
   if (!resolvedApiKey) {
-    throw new Error("API key is required. Provide apiKey parameter or set TINFOIL_API_KEY environment variable.");
+    throw new ConfigurationError("API key is required. Provide apiKey parameter or set TINFOIL_API_KEY environment variable.");
   }
 
   const baseURL = options.baseURL;
@@ -74,7 +75,7 @@ export async function createTinfoilAI(apiKey?: string, options: CreateTinfoilAIO
   // Get the baseURL from SecureClient after initialization
   const finalBaseURL = baseURL || secureClient.getBaseURL();
   if (!finalBaseURL) {
-    throw new Error("Unable to determine baseURL for AI SDK provider");
+    throw new ConfigurationError("Unable to determine baseURL for AI SDK provider");
   }
 
   return createOpenAICompatible({

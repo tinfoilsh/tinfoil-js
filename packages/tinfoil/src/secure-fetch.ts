@@ -1,4 +1,5 @@
 import { isRealBrowser } from "./env.js";
+import { ConfigurationError } from "./verifier.js";
 
 /**
  * Creates a secure fetch function with either HPKE encryption or TLS pinning.
@@ -23,14 +24,14 @@ export async function createSecureFetch(
   }
 
   if (isRealBrowser()) {
-    throw new Error(
+    throw new ConfigurationError(
       "HPKE public key not available and TLS-only verification is not supported in browsers. " +
       "Only HPKE-enabled enclaves can be used in browser environments."
     );
   }
 
   if (!tlsPublicKeyFingerprint) {
-    throw new Error(
+    throw new ConfigurationError(
       "Neither HPKE public key nor TLS public key fingerprint available for verification"
     );
   }

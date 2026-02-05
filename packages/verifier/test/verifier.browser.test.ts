@@ -2,7 +2,8 @@ import { describe, it, expect } from 'vitest';
 import { Report } from '../src/sev/report.js';
 import { bytesToHex } from '../src/sev/utils.js';
 import { Verifier } from '../src/client.js';
-import { compareMeasurements, measurementFingerprint, FormatMismatchError, MeasurementMismatchError } from '../src/types.js';
+import { compareMeasurements, measurementFingerprint } from '../src/types.js';
+import { ValidationError } from '../src/errors.js';
 
 describe('Browser Environment Verification', () => {
   it('confirms running in browser environment', () => {
@@ -97,16 +98,18 @@ describe('Measurement Comparison in Browser', () => {
     expect(() => compareMeasurements(a, b)).not.toThrow();
   });
 
-  it('throws FormatMismatchError for different types', () => {
+  it('throws ValidationError for incompatible types', () => {
     const a = { type: 'sev-snp', registers: ['abc123'] };
     const b = { type: 'tdx', registers: ['abc123'] };
-    expect(() => compareMeasurements(a, b)).toThrow(FormatMismatchError);
+    expect(() => compareMeasurements(a, b)).toThrow(ValidationError);
+    expect(() => compareMeasurements(a, b)).toThrow(/incompatible/);
   });
 
-  it('throws MeasurementMismatchError for different registers', () => {
+  it('throws ValidationError for different registers', () => {
     const a = { type: 'sev-snp', registers: ['abc123'] };
     const b = { type: 'sev-snp', registers: ['def456'] };
-    expect(() => compareMeasurements(a, b)).toThrow(MeasurementMismatchError);
+    expect(() => compareMeasurements(a, b)).toThrow(ValidationError);
+    expect(() => compareMeasurements(a, b)).toThrow(/mismatch/);
   });
 });
 

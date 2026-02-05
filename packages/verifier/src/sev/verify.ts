@@ -2,6 +2,7 @@ import type { Report } from './report.js';
 import type { CertificateChain } from './cert-chain.js';
 import { POLICY_RESERVED_1_BIT } from './constants.js';
 import { KeyTypes, HashAlgorithms } from '@freedomofpress/crypto-browser';
+import { VerificationError } from '../errors.js';
 
 /**
  * Verify the attestation report signature using VCEK's public key.
@@ -17,22 +18,22 @@ async function verifyReportSignature(
 ): Promise<boolean> {
   // Validate Report Format
   if (report.version < 2) {
-    throw new Error(`Report version is lower than 2: is ${report.version}`);
+    throw new VerificationError(`Report version is lower than 2: is ${report.version}`);
   }
 
   // Check reserved bit must be 1
   if (!(report.policy & (1n << BigInt(POLICY_RESERVED_1_BIT)))) {
-    throw new Error(`policy[${POLICY_RESERVED_1_BIT}] is reserved, must be 1, got 0`);
+    throw new VerificationError(`policy[${POLICY_RESERVED_1_BIT}] is reserved, must be 1, got 0`);
   }
 
   // Check policy bits 63-26 must be zero
   if (report.policy >> 26n) {
-    throw new Error('policy bits 63-26 must be zero');
+    throw new VerificationError('policy bits 63-26 must be zero');
   }  
 
   // Check signature algorithm must be ECDSA
   if (report.signatureAlgo !== 1) { // 1 = SignEcdsaP384Sha384
-    throw new Error(`Unknown SignatureAlgo: ${report.signatureAlgo}`);
+    throw new VerificationError(`Unknown SignatureAlgo: ${report.signatureAlgo}`);
   }
 
   // Convert the signature from AMD's little-endian format to WebCrypto raw format
@@ -73,7 +74,7 @@ async function verifyReportSignature(
 
     return isValid;
   } catch (e) {
-    throw new Error('Attestation signature verification failed', { cause: e });
+    throw new VerificationError('Attestation signature verification failed', { cause: e as Error });
   }
 }
 
@@ -91,7 +92,7 @@ export async function verifyAttestation(
   // Verify certificate chain
   const isChainValid = await chain.verifyChain();
   if (!isChainValid) {
-    throw new Error('Certificate chain verification returned false');
+    throw new VerificationError('Certificate chain verification returned false');
   }
 
   // Get the CryptoKey from VCEK certificate
@@ -99,7 +100,7 @@ export async function verifyAttestation(
   const vcekPublicKey = await chain.vcekPublicKey;
   const isSignatureValid = await verifyReportSignature(vcekPublicKey, report);
   if (!isSignatureValid) {
-    throw new Error('Report signature verification returned false');
+    throw new VerificationError('Report signature verification returned false');
   }
 
   return true;

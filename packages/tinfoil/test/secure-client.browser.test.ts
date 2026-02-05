@@ -39,6 +39,12 @@ vi.mock("../src/verifier.js", () => ({
       return mockVerificationDocument;
     }
   },
+  ConfigurationError: class ConfigurationError extends Error {
+    constructor(message: string) {
+      super(message);
+      this.name = 'ConfigurationError';
+    }
+  },
 }));
 
 // Mock createSecureFetch to simulate browser behavior (throw when no HPKE key)
