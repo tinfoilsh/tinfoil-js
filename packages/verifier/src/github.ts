@@ -1,3 +1,5 @@
+import { FetchError } from './errors.js';
+
 export interface Release {
   tag_name: string;
   body: string;
@@ -21,7 +23,7 @@ export async function fetchLatestDigest(repo: string): Promise<string> {
   const releaseResponse = await fetch(url);
 
   if (!releaseResponse.ok) {
-    throw new Error(`Failed to fetch release: ${releaseResponse.status} ${releaseResponse.statusText}`);
+    throw new FetchError(`Failed to fetch release: ${releaseResponse.status} ${releaseResponse.statusText}`);
   }
 
   const responseData: Release = await releaseResponse.json();
@@ -47,7 +49,7 @@ export async function fetchLatestDigest(repo: string): Promise<string> {
   const response = await fetch(digestUrl);
 
   if (!response.ok) {
-    throw new Error(`Failed to fetch attestation digest: ${response.status} ${response.statusText}`);
+    throw new FetchError(`Failed to fetch attestation digest: ${response.status} ${response.statusText}`);
   }
 
   return (await response.text()).trim();
@@ -68,21 +70,21 @@ export async function fetchGithubAttestationBundle(repo: string, digest: string)
   try {
     bundleResponse = await fetch(url);
     if (!bundleResponse.ok) {
-      throw new Error(`HTTP ${bundleResponse.status} ${bundleResponse.statusText}`);
+      throw new FetchError(`HTTP ${bundleResponse.status} ${bundleResponse.statusText}`);
     }
   } catch (e) {
-    throw new Error(`Error fetching attestation from ${url}`, { cause: e });
+    throw new FetchError(`Error fetching attestation from ${url}`, { cause: e as Error });
   }
 
   let responseData: GitHubAttestationResponse;
   try {
     responseData = await bundleResponse.json();
   } catch (e) {
-    throw new Error(`Error decoding JSON response from ${url}`, { cause: e });
+    throw new FetchError(`Error decoding JSON response from ${url}`, { cause: e as Error });
   }
 
   if (!responseData.attestations?.[0]?.bundle) {
-    throw new Error(`Invalid attestation response format from ${url}. Response: ${JSON.stringify(responseData)}`);
+    throw new FetchError(`Invalid attestation response format from ${url}. Response: ${JSON.stringify(responseData)}`);
   }
   return responseData.attestations[0].bundle;
 }

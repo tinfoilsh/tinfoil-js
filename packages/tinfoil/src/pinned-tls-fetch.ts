@@ -1,5 +1,6 @@
 import { X509Certificate, createHash } from "crypto";
 import type { ReadableStream as NodeWebReadableStream } from "stream/web";
+import { ConfigurationError, ValidationError } from "./verifier.js";
 
 function isBun(): boolean {
   return typeof process !== "undefined" &&
@@ -11,13 +12,13 @@ function createCheckServerIdentity(expectedFingerprintHex: string): (host: strin
   return (host: string, cert: any): Error | undefined => {
     const raw = cert?.raw as Buffer | undefined;
     if (!raw) {
-      return new Error("Certificate raw bytes are unavailable for pinning");
+      return new ValidationError("Certificate raw bytes are unavailable for pinning");
     }
     const x509 = new X509Certificate(raw);
     const publicKeyDer = x509.publicKey.export({ type: "spki", format: "der" });
     const fp = createHash("sha256").update(publicKeyDer).digest("hex");
     if (fp !== expectedFingerprintHex) {
-      return new Error(`Certificate public key fingerprint mismatch. Expected: ${expectedFingerprintHex}, Got: ${fp}`);
+      return new ValidationError(`Certificate public key fingerprint mismatch. Expected: ${expectedFingerprintHex}, Got: ${fp}`);
     }
     return undefined;
   };
@@ -29,7 +30,7 @@ async function createBunPinnedTlsFetch(baseURL: string, expectedFingerprintHex: 
 
   const parsedBase = new URL(baseURL);
   if (parsedBase.protocol !== "https:") {
-    throw new Error(`HTTP connections are not allowed. Use HTTPS. URL: ${baseURL}`);
+    throw new ConfigurationError(`HTTP connections are not allowed. Use HTTPS. URL: ${baseURL}`);
   }
 
   return (async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -41,7 +42,7 @@ async function createBunPinnedTlsFetch(baseURL: string, expectedFingerprintHex: 
 
     const url = makeURL(input);
     if (url.protocol !== "https:") {
-      throw new Error(`HTTP connections are not allowed. Use HTTPS. URL: ${url.toString()}`);
+      throw new ConfigurationError(`HTTP connections are not allowed. Use HTTPS. URL: ${url.toString()}`);
     }
 
     const fetchInit: RequestInit & { tls?: { checkServerIdentity: (host: string, cert: any) => Error | undefined } } = {
@@ -78,7 +79,7 @@ async function createNodePinnedTlsFetch(baseURL: string, expectedFingerprintHex:
 
     const url = makeURL(input);
     if (url.protocol !== "https:") {
-      throw new Error(`HTTP connections are not allowed. Use HTTPS. URL: ${url.toString()}`);
+      throw new ConfigurationError(`HTTP connections are not allowed. Use HTTPS. URL: ${url.toString()}`);
     }
 
     // Gather method and headers

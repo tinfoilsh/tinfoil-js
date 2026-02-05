@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { Verifier } from '../src/client.js';
-import { compareMeasurements, measurementFingerprint, PredicateType, FormatMismatchError, MeasurementMismatchError } from '../src/types.js';
+import { compareMeasurements, measurementFingerprint, PredicateType } from '../src/types.js';
+import { ValidationError } from '../src/errors.js';
 
 const DEFAULT_ENCLAVE_URL = 'https://inference.tinfoil.sh';
 const DEFAULT_CONFIG_REPO = 'tinfoilsh/confidential-model-router';
@@ -172,16 +173,18 @@ describe('Browser Integration Tests', () => {
       expect(() => compareMeasurements(a, b)).not.toThrow();
     });
 
-    it('should throw FormatMismatchError for incompatible types', () => {
+    it('should throw ValidationError for incompatible types', () => {
       const a = { type: 'sev-snp', registers: ['abc123'] };
       const b = { type: 'tdx-incompatible', registers: ['abc123'] };
-      expect(() => compareMeasurements(a, b)).toThrow(FormatMismatchError);
+      expect(() => compareMeasurements(a, b)).toThrow(ValidationError);
+      expect(() => compareMeasurements(a, b)).toThrow(/incompatible/);
     });
 
-    it('should throw MeasurementMismatchError for different registers', () => {
+    it('should throw ValidationError for different registers', () => {
       const a = { type: 'sev-snp', registers: ['abc123'] };
       const b = { type: 'sev-snp', registers: ['def456'] };
-      expect(() => compareMeasurements(a, b)).toThrow(MeasurementMismatchError);
+      expect(() => compareMeasurements(a, b)).toThrow(ValidationError);
+      expect(() => compareMeasurements(a, b)).toThrow(/mismatch/);
     });
 
     it('should allow comparison between SNP and multiplatform types', () => {

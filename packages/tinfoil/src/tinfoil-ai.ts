@@ -12,7 +12,7 @@ import type {
   Responses,
 } from "openai/resources";
 import { SecureClient, type TransportMode } from "./secure-client.js";
-import type { VerificationDocument } from "./verifier.js";
+import { type VerificationDocument, ConfigurationError } from "./verifier.js";
 import { TINFOIL_CONFIG } from "./config.js";
 import { isRealBrowser } from "./env.js";
 
@@ -240,7 +240,7 @@ export class TinfoilAI {
   public async getVerificationDocument(): Promise<VerificationDocument> {
     await this.ready();
     if (!this.verificationDocument) {
-      throw new Error("Verification document unavailable: client not verified yet");
+      throw new ConfigurationError("Verification document unavailable: client not verified yet");
     }
     return this.verificationDocument;
   }

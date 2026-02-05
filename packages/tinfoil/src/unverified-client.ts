@@ -10,6 +10,7 @@
  * or TinfoilAI which verify the key through attestation.
  */
 import { fetchRouter } from "./atc.js";
+import { ConfigurationError } from "./verifier.js";
 
 interface UnverifiedClientOptions {
   /** Base URL for API requests. If not provided, derived from keyOrigin or fetched from router. */
@@ -56,7 +57,7 @@ export class UnverifiedClient {
         const keyOriginUrl = new URL(this.keyOrigin);
         this.baseURL = `${keyOriginUrl.origin}/v1/`;
       } else {
-        throw new Error("Unable to determine baseURL: neither baseURL nor keyOrigin provided");
+        throw new ConfigurationError("Unable to determine baseURL: neither baseURL nor keyOrigin provided");
       }
     }
 
@@ -65,7 +66,7 @@ export class UnverifiedClient {
         const baseUrl = new URL(this.baseURL);
         this.keyOrigin = baseUrl.origin;
       } else {
-        throw new Error("Unable to determine keyOrigin: neither baseURL nor keyOrigin provided");
+        throw new ConfigurationError("Unable to determine keyOrigin: neither baseURL nor keyOrigin provided");
       }
     }
 
@@ -81,7 +82,7 @@ export class UnverifiedClient {
     
     await this.initPromise;
 
-    throw new Error("Verification document unavailable: this version of the client is unverified");
+    throw new ConfigurationError("Verification document unavailable: this version of the client is unverified");
   }
 
   get fetch(): typeof fetch {

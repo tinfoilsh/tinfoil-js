@@ -1,9 +1,10 @@
 import { verifyAttestation as verifyAmdAttestation, fetchAttestation } from './attestation.js';
 import { fetchLatestDigest, fetchGithubAttestationBundle } from './github.js';
 import { verifySigstoreAttestation } from './sigstore.js';
-import { verifyCertificate, CertificateVerificationError } from './cert-verify.js';
-import { compareMeasurements, FormatMismatchError, MeasurementMismatchError, measurementFingerprint } from './types.js';
+import { verifyCertificate } from './cert-verify.js';
+import { compareMeasurements, measurementFingerprint } from './types.js';
 import type { AttestationDocument, AttestationMeasurement, AttestationResponse, VerificationDocument, AttestationBundle } from './types.js';
+import { ConfigurationError } from './errors.js';
 
 export interface VerifierOptions {
   /** Server URL for fetching attestation. Required when using verify(), optional when using verifyBundle(). */
@@ -18,7 +19,7 @@ export class Verifier {
 
   constructor(options: VerifierOptions) {
     if (!options.configRepo) {
-      throw new Error("configRepo is required for Verifier");
+      throw new ConfigurationError("configRepo is required for Verifier");
     }
     this.serverURL = options.serverURL;
     this.configRepo = options.configRepo;
@@ -94,13 +95,7 @@ export class Verifier {
         compareMeasurements(codeMeasurements, amdVerification.measurement);
         steps.compareMeasurements = { status: 'success' };
       } catch (error) {
-        if (error instanceof FormatMismatchError) {
-          steps.compareMeasurements = { status: 'failed', error: error.message };
-        } else if (error instanceof MeasurementMismatchError) {
-          steps.compareMeasurements = { status: 'failed', error: error.message };
-        } else {
-          steps.compareMeasurements = { status: 'failed', error: (error as Error).message };
-        }
+        steps.compareMeasurements = { status: 'failed', error: (error as Error).message };
         this.saveFailedVerificationDocument(steps, domain);
         throw error;
       }
@@ -116,11 +111,7 @@ export class Verifier {
           );
           steps.verifyCertificate = { status: 'success' };
         } catch (error) {
-          if (error instanceof CertificateVerificationError) {
-            steps.verifyCertificate = { status: 'failed', error: error.message };
-          } else {
-            steps.verifyCertificate = { status: 'failed', error: (error as Error).message };
-          }
+          steps.verifyCertificate = { status: 'failed', error: (error as Error).message };
           this.saveFailedVerificationDocument(steps, domain);
           throw error;
         }
