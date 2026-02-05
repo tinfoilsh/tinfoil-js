@@ -5,7 +5,7 @@ import { ARK_CERT, ASK_CERT } from './certs.js';
 import { tcbFromInt, bytesToHex } from './utils.js';
 import { X509Certificate } from '@freedomofpress/sigstore-browser';
 import { ASN1Obj, uint8ArrayEqual } from '@freedomofpress/crypto-browser';
-import { FetchError, VerificationError } from '../errors.js';
+import { FetchError, VerificationError, wrapOrThrow } from '../errors.js';
 
 // SEV-SNP VCEK OID definitions
 const SnpOid = {
@@ -115,7 +115,7 @@ export class CertificateChain {
 
       return true;
     } catch (e) {
-      throw new VerificationError('Certificate chain verification failed', { cause: e as Error });
+      wrapOrThrow(e, VerificationError, 'Certificate chain verification failed');
     }
   }
 

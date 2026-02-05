@@ -5,7 +5,7 @@ import { CertificateChain } from './sev/cert-chain.js';
 import { verifyAttestation as verifyAttestationInternal } from './sev/verify.js';
 import { bytesToHex } from './sev/utils.js';
 import { validateReport, defaultValidationOptions } from './sev/validation.js';
-import { FetchError, VerificationError, ValidationError } from './errors.js';
+import { FetchError, VerificationError, ValidationError, wrapOrThrow } from './errors.js';
 
 const ATTESTATION_ENDPOINT = '/.well-known/tinfoil-attestation';
 
@@ -111,7 +111,7 @@ async function verifySevReport(attestationDoc: string, isCompressed: boolean, vc
   try {
     res = await verifyAttestationInternal(chain, report);
   } catch (e) {
-    throw new VerificationError('Failed to verify attestation', { cause: e as Error });
+    wrapOrThrow(e, VerificationError, 'Failed to verify attestation');
   }
 
   if (!res) {
@@ -121,7 +121,7 @@ async function verifySevReport(attestationDoc: string, isCompressed: boolean, vc
   try {
     validateReport(report, chain, defaultValidationOptions);
   } catch (e) {
-    throw new ValidationError('Failed to validate report', { cause: e as Error });
+    wrapOrThrow(e, ValidationError, 'Failed to validate report');
   }
 
   return report;

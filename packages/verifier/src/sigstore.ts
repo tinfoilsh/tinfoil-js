@@ -2,7 +2,7 @@ import { PredicateType } from './types.js';
 import type { AttestationMeasurement } from './types.js';
 import type { X509Certificate, VerificationPolicy } from '@freedomofpress/sigstore-browser';
 import sigstoreTrustedRoot from './sigstore-trusted-root.json' with { type: 'json' };
-import { VerificationError } from './errors.js';
+import { VerificationError, wrapOrThrow } from './errors.js';
 
 class GitHubWorkflowRefPattern implements VerificationPolicy {
   private pattern: RegExp;
@@ -109,6 +109,6 @@ export async function verifySigstoreAttestation(
     };
 
   } catch (e) {
-    throw new VerificationError('Reference data verification failed', { cause: e as Error });
+    wrapOrThrow(e, VerificationError, 'Reference data verification failed');
   }
 }

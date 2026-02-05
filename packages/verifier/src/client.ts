@@ -27,7 +27,7 @@ export class Verifier {
 
   async verify(): Promise<AttestationResponse> {
     if (!this.serverURL) {
-      throw new Error("serverURL is required for verify(). Use verifyBundle() with an attestation bundle instead.");
+      throw new ConfigurationError("serverURL is required for verify(). Use verifyBundle() with an attestation bundle instead.");
     }
     const domain = new URL(this.serverURL).hostname;
     const attestationDoc = await fetchAttestation(domain);
@@ -39,7 +39,7 @@ export class Verifier {
 
   async verifyBundle(bundle: AttestationBundle): Promise<AttestationResponse> {
     if (!bundle.enclaveCert) {
-      throw new Error('enclaveCert is required for bundle verification');
+      throw new ConfigurationError('enclaveCert is required for bundle verification');
     }
     return this.performVerification(
       bundle.enclaveAttestationReport,

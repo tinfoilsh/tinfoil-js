@@ -2,7 +2,7 @@ import type { Report } from './report.js';
 import type { CertificateChain } from './cert-chain.js';
 import { POLICY_RESERVED_1_BIT } from './constants.js';
 import { KeyTypes, HashAlgorithms } from '@freedomofpress/crypto-browser';
-import { VerificationError } from '../errors.js';
+import { VerificationError, wrapOrThrow } from '../errors.js';
 
 /**
  * Verify the attestation report signature using VCEK's public key.
@@ -74,7 +74,7 @@ async function verifyReportSignature(
 
     return isValid;
   } catch (e) {
-    throw new VerificationError('Attestation signature verification failed', { cause: e as Error });
+    wrapOrThrow(e, VerificationError, 'Attestation signature verification failed');
   }
 }
 
