@@ -1,4 +1,4 @@
-import { Verifier, type VerificationDocument, ConfigurationError } from "./verifier.js";
+import { Verifier, type VerificationDocument } from "./verifier.js";
 import { TINFOIL_CONFIG } from "./config.js";
 import { createSecureFetch } from "./secure-fetch.js";
 import { fetchAttestationBundle } from "./atc.js";
@@ -128,7 +128,7 @@ export class SecureClient {
 
       const doc = verifier.getVerificationDocument();
       if (!doc) {
-        throw new Error("Verification document not available after successful verification");
+        throw new Error("Internal error: verification document not available after successful verification");
       }
       this.verificationDocument = doc;
 
@@ -193,7 +193,7 @@ export class SecureClient {
     await this.initPromise!.catch(() => {});
 
     if (!this.verificationDocument) {
-      throw new ConfigurationError("Verification document unavailable: client not verified yet");
+      throw new Error("Internal error: verification document unavailable after ready()");
     }
     return this.verificationDocument;
   }

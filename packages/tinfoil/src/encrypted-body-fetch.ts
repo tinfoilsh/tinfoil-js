@@ -199,7 +199,7 @@ export async function getTransportForOrigin(origin: string, hpkePublicKeyHex: st
     const hasSubtle = !!(globalThis.crypto && (globalThis.crypto as Crypto).subtle);
     if (!isSecure || !hasSubtle) {
       const reason = !isSecure ? 'insecure context (use HTTPS or localhost)' : 'missing WebCrypto SubtleCrypto';
-      throw new Error(`EHBP requires a secure browser context: ${reason}`);
+      throw new ConfigurationError(`EHBP requires a secure browser context: ${reason}`);
     }
   }
 

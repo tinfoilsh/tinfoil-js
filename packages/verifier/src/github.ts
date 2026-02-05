@@ -1,4 +1,4 @@
-import { FetchError } from './errors.js';
+import { FetchError, wrapOrThrow } from './errors.js';
 
 export interface Release {
   tag_name: string;
@@ -66,21 +66,15 @@ export async function fetchLatestDigest(repo: string): Promise<string> {
 export async function fetchGithubAttestationBundle(repo: string, digest: string): Promise<unknown> {
   const url = `https://api-github-proxy.tinfoil.sh/repos/${repo}/attestations/sha256:${digest}`;
 
-  let bundleResponse;
+  let responseData: GitHubAttestationResponse;
   try {
-    bundleResponse = await fetch(url);
+    const bundleResponse = await fetch(url);
     if (!bundleResponse.ok) {
       throw new FetchError(`HTTP ${bundleResponse.status} ${bundleResponse.statusText}`);
     }
-  } catch (e) {
-    throw new FetchError(`Error fetching attestation from ${url}`, { cause: e as Error });
-  }
-
-  let responseData: GitHubAttestationResponse;
-  try {
     responseData = await bundleResponse.json();
   } catch (e) {
-    throw new FetchError(`Error decoding JSON response from ${url}`, { cause: e as Error });
+    wrapOrThrow(e, FetchError, `Error fetching attestation from ${url}`);
   }
 
   if (!responseData.attestations?.[0]?.bundle) {

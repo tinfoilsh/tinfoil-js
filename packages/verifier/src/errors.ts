@@ -112,3 +112,28 @@ export class ValidationError extends AttestationError {
   }
 }
 
+/**
+ * Helper to handle errors in catch blocks.
+ * - If the error is already a TinfoilError, rethrow it as-is
+ * - Otherwise, wrap it in the specified error class
+ * 
+ * @example
+ * ```typescript
+ * try {
+ *   await someOperation();
+ * } catch (e) {
+ *   wrapOrThrow(e, VerificationError, 'Operation failed');
+ * }
+ * ```
+ */
+export function wrapOrThrow(
+  e: unknown,
+  ErrorClass: typeof VerificationError | typeof ValidationError | typeof FetchError | typeof ConfigurationError,
+  message: string
+): never {
+  if (e instanceof TinfoilError) {
+    throw e;
+  }
+  throw new ErrorClass(message, { cause: e as Error });
+}
+
