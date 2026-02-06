@@ -1,4 +1,4 @@
-import { Verifier, type VerificationDocument } from "./verifier.js";
+import { Verifier, FetchError, type VerificationDocument } from "./verifier.js";
 import { TINFOIL_CONFIG } from "./config.js";
 import { createSecureFetch } from "./secure-fetch.js";
 import { fetchAttestationBundle } from "./atc.js";
@@ -121,7 +121,13 @@ export class SecureClient {
    */
   public async ready(): Promise<void> {
     if (!this.initPromise) {
-      this.initPromise = this.initSecureClient();
+      this.initPromise = this.initSecureClient().catch(err => {
+        // FetchErrors are transient (network issues) and happen before any state is accumulated -- reset by default
+        if (err instanceof FetchError) {
+          this.reset();
+        }
+        throw err;
+      });
     }
     return this.initPromise;
   }
