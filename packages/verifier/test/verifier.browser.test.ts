@@ -102,7 +102,7 @@ describe('Measurement Comparison in Browser', () => {
     const a = { type: 'sev-snp', registers: ['abc123'] };
     const b = { type: 'tdx', registers: ['abc123'] };
     expect(() => compareMeasurements(a, b)).toThrow(AttestationError);
-    expect(() => compareMeasurements(a, b)).toThrow(/incompatible/);
+    expect(() => compareMeasurements(a, b)).toThrow(/Incompatible/);
   });
 
   it('throws AttestationError for different registers', () => {
