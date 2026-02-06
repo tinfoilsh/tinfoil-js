@@ -56,11 +56,11 @@ export async function fetchLatestDigest(repo: string): Promise<string> {
 }
 
 /**
- * Fetches the sigstore bundle from a repo for a given repo and EIF hash.
+ * Fetches the Sigstore bundle from GitHub's attestation API for a given repo and release digest.
  *
  * @param repo - The GitHub repository in format "owner/repo"
- * @param digest - The EIF hash/digest
- * @returns The sigstore bundle JSON object
+ * @param digest - The SHA256 release digest
+ * @returns The Sigstore bundle JSON object
  * @throws Error if there's any error fetching or parsing the data
  */
 export async function fetchGithubAttestationBundle(repo: string, digest: string): Promise<unknown> {
