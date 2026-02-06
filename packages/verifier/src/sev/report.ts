@@ -64,7 +64,7 @@ export class Report {
    */
   constructor(data: Uint8Array) {
     if (data.length < REPORT_SIZE) {
-      throw new AttestationError(`Array size is 0x${data.length.toString(16)}, an SEV-SNP attestation report size is 0x${REPORT_SIZE.toString(16)}`);
+      throw new AttestationError(`Invalid attestation report: Data size (${data.length} bytes) is smaller than expected SEV-SNP report size (${REPORT_SIZE} bytes)`);
     }
 
     // Parse all fields using little-endian byte order
@@ -76,12 +76,12 @@ export class Report {
 
     // Check reserved bit must be 1
     if (!(this.policy & (1n << BigInt(POLICY_RESERVED_1_BIT)))) {
-      throw new AttestationError(`policy[${POLICY_RESERVED_1_BIT}] is reserved, must be 1, got 0`);
+      throw new AttestationError('Invalid attestation report: Policy field has invalid reserved bit (must be 1)');
     }
 
     // Check bits 63-26 must be zero
     if (this.policy >> 26n) {
-      throw new AttestationError('policy bits 63-26 must be zero');
+      throw new AttestationError('Invalid attestation report: Policy field has non-zero reserved bits');
     }
 
     this.familyId = data.slice(0x10, 0x20);  // 16 bytes
@@ -93,7 +93,7 @@ export class Report {
     try {
       mbz64(this.currentTcb, 'current_tcb', 47, 16);
     } catch (e) {
-      throw new AttestationError('current_tcb not correctly formed', { cause: e as Error });
+      throw new AttestationError('Invalid attestation report: TCB (Trusted Computing Base) version field is malformed', { cause: e as Error });
     }
 
     this.platformInfo = view.getBigUint64(0x40, true);
@@ -105,12 +105,12 @@ export class Report {
     try {
       mbz64(BigInt(this.signerInfo), 'signer_info', 31, 5);
     } catch (e) {
-      throw new AttestationError('signer_info not correctly formed', { cause: e as Error });
+      throw new AttestationError('Invalid attestation report: Signer info field is malformed', { cause: e as Error });
     }
 
     const signingKey = (this.signerInfo >> 2) & 7;
     if (signingKey !== ReportSigner.VcekReportSigner) {
-      throw new AttestationError(`This implementation only supports VCEK signed reports. Got ${signingKey}`);
+      throw new AttestationError(`Unsupported signing key type: This verifier only supports VCEK-signed attestation reports (got signing key type ${signingKey})`);
     }
 
     this.signerInfoParsed = {
@@ -122,7 +122,7 @@ export class Report {
     try {
       mbz(data, 0x4c, 0x50);
     } catch (e) {
-      throw new AttestationError('report_data not correctly formed', { cause: e as Error });
+      throw new AttestationError('Invalid attestation report: Reserved bytes at offset 0x4C are not zeroed', { cause: e as Error });
     }
 
     // 0x4C-0x50 is MBZ (Must Be Zero)
@@ -138,7 +138,7 @@ export class Report {
     try {
       mbz64(this.reportedTcb, 'reported_tcb', 47, 16);
     } catch (e) {
-      throw new AttestationError('reported_tcb not correctly formed', { cause: e as Error });
+      throw new AttestationError('Invalid attestation report: Reported TCB field is malformed', { cause: e as Error });
     }
 
     let mbzLo = 0x188;
@@ -155,13 +155,13 @@ export class Report {
       this.stepping = 0x01;
       this.productName = 'Genoa';
     } else {
-      throw new AttestationError('Unknown report version');
+      throw new AttestationError(`Unsupported attestation report version: ${this.version}. Only version 2 (revision 1.55) and version 3+ are supported`);
     }
 
     try {
       mbz(data, mbzLo, 0x1a0);
     } catch (e) {
-      throw new AttestationError('report_data not correctly formed', { cause: e as Error });
+      throw new AttestationError('Invalid attestation report: Reserved bytes in version section are not zeroed', { cause: e as Error });
     }
 
     this.chipId = data.slice(0x1a0, 0x1e0);        // 64 bytes
@@ -170,7 +170,7 @@ export class Report {
     try {
       mbz64(this.committedTcb, 'committed_tcb', 47, 16);
     } catch (e) {
-      throw new AttestationError('committed_tcb not correctly formed', { cause: e as Error });
+      throw new AttestationError('Invalid attestation report: Committed TCB field is malformed', { cause: e as Error });
     }
 
     // Version fields
@@ -181,7 +181,7 @@ export class Report {
     try {
       mbz(data, 0x1eb, 0x1ec);
     } catch (e) {
-      throw new AttestationError('report_data not correctly formed', { cause: e as Error });
+      throw new AttestationError('Invalid attestation report: Reserved bytes after current version are not zeroed', { cause: e as Error });
     }
 
     this.committedBuild = view.getUint8(0x1ec);
@@ -191,7 +191,7 @@ export class Report {
     try {
       mbz(data, 0x1ef, 0x1f0);
     } catch (e) {
-      throw new AttestationError('report_data not correctly formed', { cause: e as Error });
+      throw new AttestationError('Invalid attestation report: Reserved bytes after committed version are not zeroed', { cause: e as Error });
     }
 
     this.launchTcb = view.getBigUint64(0x1f0, true);
@@ -199,20 +199,20 @@ export class Report {
     try {
       mbz64(this.launchTcb, 'launch_tcb', 47, 16);
     } catch (e) {
-      throw new AttestationError('launch_tcb not correctly formed', { cause: e as Error });
+      throw new AttestationError('Invalid attestation report: Launch TCB field is malformed', { cause: e as Error });
     }
 
     try {
       mbz(data, 0x1f8, SIGNATURE_OFFSET);
     } catch (e) {
-      throw new AttestationError('report_data not correctly formed', { cause: e as Error });
+      throw new AttestationError('Invalid attestation report: Reserved bytes before signature are not zeroed', { cause: e as Error });
     }
 
     if (this.signatureAlgo === 1) {  // ECDSA P-384 SHA-384
       try {
         mbz(data, SIGNATURE_OFFSET + ECDSA_P384_SHA384_SIGNATURE_SIZE, REPORT_SIZE);
       } catch (e) {
-        throw new AttestationError('report_data not correctly formed', { cause: e as Error });
+        throw new AttestationError('Invalid attestation report: Reserved bytes after signature are not zeroed', { cause: e as Error });
       }
     }
 
@@ -260,7 +260,7 @@ function mbz(data: Uint8Array, lo: number, hi: number): void {
     const hexStr = Array.from(data.slice(lo, hi))
       .map(b => b.toString(16).padStart(2, '0'))
       .join('');
-    throw new AttestationError(`mbz range [0x${lo.toString(16)}:0x${hi.toString(16)}] not all zero: ${hexStr}`);
+    throw new AttestationError(`reserved bytes at offset 0x${lo.toString(16)}-0x${hi.toString(16)} contain non-zero data: ${hexStr}`);
   }
 }
 
@@ -279,6 +279,6 @@ function mbz64(data: bigint, base: string, hi: number, lo: number): void {
   // Extract and check the bits
   const bits = (data >> BigInt(lo)) & mask;
   if (bits !== 0n) {
-    throw new AttestationError(`mbz range ${base}[0x${lo.toString(16)}:0x${hi.toString(16)}] not all zero: ${data.toString(16)}`);
+    throw new AttestationError(`Reserved bits in ${base} field contain non-zero data: 0x${data.toString(16)}`);
   }
 }

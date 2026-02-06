@@ -14,11 +14,11 @@ class GitHubWorkflowRefPattern implements VerificationPolicy {
   verify(cert: X509Certificate): void {
     const ext = cert.extGitHubWorkflowRef;
     if (!ext) {
-      throw new AttestationError('Certificate does not contain GitHubWorkflowRef extension');
+      throw new AttestationError('Sigstore certificate verification failed: Missing GitHub workflow reference extension');
     }
     if (!this.pattern.test(ext.workflowRef)) {
       throw new AttestationError(
-        `Certificate's GitHubWorkflowRef "${ext.workflowRef}" does not match pattern "${this.pattern}"`
+        `Sigstore certificate verification failed: Workflow reference "${ext.workflowRef}" does not match expected pattern (must be a tagged release)`
       );
     }
   }
@@ -72,7 +72,7 @@ export async function verifySigstoreAttestation(
     const payload = JSON.parse(new TextDecoder().decode(payloadBytes));
 
     if (payloadType !== 'application/vnd.in-toto+json') {
-      throw new AttestationError(`Unsupported payload type: ${payloadType}. Only supports In-toto.`);
+      throw new AttestationError(`Unsupported Sigstore payload type: "${payloadType}". Only in-toto attestation format is supported`);
     }
 
     const predicateType = payload.predicateType as PredicateType;
@@ -83,7 +83,7 @@ export async function verifySigstoreAttestation(
     // actual digest in the payload returned from the verified envelope
     if (digest !== payload.subject[0].digest.sha256) {
       throw new AttestationError(
-        `Provided digest does not match verified DSSE payload digest. Expected: ${digest}, Got: ${payload.subject[0].digest.sha256}`
+        `Release digest mismatch: The release digest from GitHub (${digest}) does not match the digest in the sigstore bundle (${payload.subject[0].digest.sha256})`
       );
     }
 
@@ -91,16 +91,16 @@ export async function verifySigstoreAttestation(
     let registers: string[];
 
     if (!predicateFields) {
-      throw new AttestationError('Payload does not contain predicate');
+      throw new AttestationError('Invalid Sigstore bundle: Payload is missing the predicate field containing measurements');
     }
 
     if (predicateType === PredicateType.SnpTdxMultiplatformV1) {
       if (!predicateFields.snp_measurement) {
-        throw new AttestationError('SNP TDX Multiplatform V1 predicate does not contain snp_measurement');
+        throw new AttestationError('Invalid Sigstore bundle: SNP/TDX multiplatform predicate is missing the snp_measurement field');
       }
       registers = [predicateFields.snp_measurement];
     } else {
-      throw new AttestationError(`Unsupported predicate type: ${predicateType}`);
+      throw new AttestationError(`Unsupported attestation predicate type: "${predicateType}". Only SNP/TDX multiplatform V1 is supported`);
     }
 
     return {
@@ -109,6 +109,6 @@ export async function verifySigstoreAttestation(
     };
 
   } catch (e) {
-    wrapOrThrow(e, AttestationError, 'Reference data verification failed');
+    wrapOrThrow(e, AttestationError, 'Sigstore code bundle verification failed');
   }
 }

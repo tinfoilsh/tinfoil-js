@@ -112,44 +112,44 @@ function validatePolicy(reportPolicy: SnpPolicy, required: SnpPolicy) {
 
   // Unauthorized capabilities (report has them enabled, but required doesn't allow)
   if (!required.migrateMa && reportPolicy.migrateMa) {
-    throw new AttestationError(`Found unauthorized migration agent capability. Report policy: ${JSON.stringify(reportPolicy)}, Required policy: ${JSON.stringify(required)}`);
+    throw new AttestationError('Security policy violation: Migration agent is enabled but not allowed');
   }
 
   if (!required.debug && reportPolicy.debug) {
-    throw new AttestationError(`Found unauthorized debug capability. Report policy: ${JSON.stringify(reportPolicy)}, Required policy: ${JSON.stringify(required)}`);
+    throw new AttestationError('Security policy violation: Debug mode is enabled but not allowed. The enclave must have debug disabled for production use');
   }
 
   if (!required.smt && reportPolicy.smt) {
-    throw new AttestationError(`Found unauthorized symmetric multithreading (SMT) capability. Report policy: ${JSON.stringify(reportPolicy)}, Required policy: ${JSON.stringify(required)}`);
+    throw new AttestationError('Security policy violation: Simultaneous multithreading (SMT) is enabled but not allowed');
   }
 
   if (!required.cxlAllowed && reportPolicy.cxlAllowed) {
-    throw new AttestationError(`Found unauthorized CXL capability. Report policy: ${JSON.stringify(reportPolicy)}, Required policy: ${JSON.stringify(required)}`);
+    throw new AttestationError('Security policy violation: CXL (Compute Express Link) is enabled but not allowed');
   }
 
   if (!required.memAes256Xts && reportPolicy.memAes256Xts) {
-    throw new AttestationError(`Found unauthorized memory encryption mode. Report policy: ${JSON.stringify(reportPolicy)}, Required policy: ${JSON.stringify(required)}`);
+    throw new AttestationError('Security policy violation: AES-256-XTS memory encryption mode is enabled but not allowed');
   }
 
   // Required restrictions/features (report lacks what required mandates)
   if (required.singleSocket && !reportPolicy.singleSocket) {
-    throw new AttestationError(`Required single socket restriction not present. Report policy: ${JSON.stringify(reportPolicy)}, Required policy: ${JSON.stringify(required)}`);
+    throw new AttestationError('Security policy violation: Single socket mode is required but not enabled');
   }
 
   if (required.memAes256Xts && !reportPolicy.memAes256Xts) {
-    throw new AttestationError(`Found unauthorized memory encryption mode. Report policy: ${JSON.stringify(reportPolicy)}, Required policy: ${JSON.stringify(required)}`);
+    throw new AttestationError('Security policy violation: AES-256-XTS memory encryption mode is required but not enabled');
   }
 
   if (required.raplDis && !reportPolicy.raplDis) {
-    throw new AttestationError(`Found unauthorized RAPL capability. Report policy: ${JSON.stringify(reportPolicy)}, Required policy: ${JSON.stringify(required)}`);
+    throw new AttestationError('Security policy violation: RAPL (power monitoring) must be disabled but is enabled');
   }
 
   if (required.ciphertextHidingDram && !reportPolicy.ciphertextHidingDram) {
-    throw new AttestationError(`Ciphertext hiding in DRAM isn't enforced. Report policy: ${JSON.stringify(reportPolicy)}, Required policy: ${JSON.stringify(required)}`);
+    throw new AttestationError('Security policy violation: DRAM ciphertext hiding is required but not enabled');
   }
 
   if (required.pageSwapDisabled && !reportPolicy.pageSwapDisabled) {
-    throw new AttestationError(`Page swap isn't disabled. Report policy: ${JSON.stringify(reportPolicy)}, Required policy: ${JSON.stringify(required)}`);
+    throw new AttestationError('Security policy violation: Page swap must be disabled but is enabled');
   }
 }
 
@@ -319,7 +319,7 @@ export function validateReport(report: Report, chain: CertificateChain, options:
   // VCEK-specific CHIP_ID ↔ HWID equality check
   if (report.signerInfoParsed.signingKey === ReportSigner.VcekReportSigner) {
     if (report.signerInfoParsed.maskChipKey && report.chipId.some(b => b !== 0)) {
-      throw new AttestationError('maskChipKey is set but CHIP_ID is not zeroed');
+      throw new AttestationError('Invalid attestation report: chip ID masking is enabled but chip ID field is not zeroed');
     }
     if (!report.signerInfoParsed.maskChipKey) {
       chain.validateVcekHwid(report.chipId);
@@ -343,26 +343,26 @@ export function validateReport(report: Report, chain: CertificateChain, options:
 
   // Provisional firmware check - we only support permitProvisionalFirmware = false
   if (options.permitProvisionalFirmware) {
-    throw new AttestationError('Provisional firmware is not supported');
+    throw new AttestationError('Unsupported option: Provisional firmware validation is not yet implemented');
   }
 
   // When permitProvisionalFirmware = false, committed and current values must be equal
   if (report.committedBuild !== report.currentBuild) {
-    throw new AttestationError(`Committed build ${report.committedBuild} does not match current build ${report.currentBuild}`);
+    throw new AttestationError(`Firmware version mismatch: Committed build (${report.committedBuild}) does not match current build (${report.currentBuild}). This may indicate provisional firmware`);
   }
   if (report.committedMinor !== report.currentMinor) {
-    throw new AttestationError(`Committed minor version ${report.committedMinor} does not match current minor version ${report.currentMinor}`);
+    throw new AttestationError(`Firmware version mismatch: Committed minor version (${report.committedMinor}) does not match current (${report.currentMinor})`);
   }
   if (report.committedMajor !== report.currentMajor) {
-    throw new AttestationError(`Committed major version ${report.committedMajor} does not match current major version ${report.currentMajor}`);
+    throw new AttestationError(`Firmware version mismatch: Committed major version (${report.committedMajor}) does not match current (${report.currentMajor})`);
   }
   if (report.committedTcb !== report.currentTcb) {
-    throw new AttestationError(`Committed TCB 0x${report.committedTcb.toString(16)} does not match current TCB 0x${report.currentTcb.toString(16)}`);
+    throw new AttestationError(`Firmware version mismatch: Committed TCB does not match current TCB. This may indicate provisional firmware`);
   }
 
   // ID-block / author key requirements
   if (options.requireAuthorKey || options.requireIdBlock) {
-    throw new AttestationError('ID-block and author key requirements are not supported yet');
+    throw new AttestationError('Unsupported option: ID-block and author key validation is not yet implemented');
   }
 }
 
@@ -380,31 +380,31 @@ export function validateReport(report: Report, chain: CertificateChain, options:
 function validatePlatformInfo(reportInfo: SnpPlatformInfo, required: SnpPlatformInfo) {
   // Unauthorized features (report has it enabled, but required doesn't allow it)
   if (reportInfo.smtEnabled && !required.smtEnabled) {
-    throw new AttestationError(`Unauthorized platform feature SMT enabled. Report platform info: ${JSON.stringify(reportInfo)}, Required platform info: ${JSON.stringify(required)}`);
+    throw new AttestationError('Platform policy violation: SMT (simultaneous multithreading) is enabled but not allowed');
   }
 
   // Required features (report lacks something that required mandates)
   if (!reportInfo.eccEnabled && required.eccEnabled) {
-    throw new AttestationError(`Required platform feature ECC not enabled. Report platform info: ${JSON.stringify(reportInfo)}, Required platform info: ${JSON.stringify(required)}`);
+    throw new AttestationError('Platform policy violation: ECC memory is required but not enabled');
   }
 
   if (!reportInfo.tsmeEnabled && required.tsmeEnabled) {
-    throw new AttestationError(`Required platform feature TSME not enabled. Report platform info: ${JSON.stringify(reportInfo)}, Required platform info: ${JSON.stringify(required)}`);
+    throw new AttestationError('Platform policy violation: TSME (transparent SME) is required but not enabled');
   }
 
   if (!reportInfo.raplDisabled && required.raplDisabled) {
-    throw new AttestationError(`Required platform feature RAPL not disabled. Report platform info: ${JSON.stringify(reportInfo)}, Required platform info: ${JSON.stringify(required)}`);
+    throw new AttestationError('Platform policy violation: RAPL (power monitoring) must be disabled but is enabled');
   }
 
   if (!reportInfo.ciphertextHidingDramEnabled && required.ciphertextHidingDramEnabled) {
-    throw new AttestationError(`Required ciphertext hiding in DRAM not enforced. Report platform info: ${JSON.stringify(reportInfo)}, Required platform info: ${JSON.stringify(required)}`);
+    throw new AttestationError('Platform policy violation: DRAM ciphertext hiding is required but not enabled');
   }
 
   if (!reportInfo.aliasCheckComplete && required.aliasCheckComplete) {
-    throw new AttestationError(`Required memory alias check hasn't been completed. Report platform info: ${JSON.stringify(reportInfo)}, Required platform info: ${JSON.stringify(required)}`);
+    throw new AttestationError('Platform policy violation: Memory alias check is required but has not completed');
   }
 
   if (!reportInfo.tioEnabled && required.tioEnabled) {
-    throw new AttestationError(`Required TIO not enabled. Report platform info: ${JSON.stringify(reportInfo)}, Required platform info: ${JSON.stringify(required)}`);
+    throw new AttestationError('Platform policy violation: TIO (trusted I/O) is required but not enabled');
   }
 }

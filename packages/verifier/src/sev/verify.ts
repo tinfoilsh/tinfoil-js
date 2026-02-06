@@ -18,22 +18,22 @@ async function verifyReportSignature(
 ): Promise<boolean> {
   // Validate Report Format
   if (report.version < 2) {
-    throw new AttestationError(`Report version is lower than 2: is ${report.version}`);
+    throw new AttestationError(`Unsupported attestation report version ${report.version}. Minimum required version is 2`);
   }
 
   // Check reserved bit must be 1
   if (!(report.policy & (1n << BigInt(POLICY_RESERVED_1_BIT)))) {
-    throw new AttestationError(`policy[${POLICY_RESERVED_1_BIT}] is reserved, must be 1, got 0`);
+    throw new AttestationError('Invalid attestation report: Policy field has invalid reserved bit');
   }
 
   // Check policy bits 63-26 must be zero
   if (report.policy >> 26n) {
-    throw new AttestationError('policy bits 63-26 must be zero');
+    throw new AttestationError('Invalid attestation report: Policy field has non-zero reserved bits');
   }  
 
   // Check signature algorithm must be ECDSA
   if (report.signatureAlgo !== 1) { // 1 = SignEcdsaP384Sha384
-    throw new AttestationError(`Unknown SignatureAlgo: ${report.signatureAlgo}`);
+    throw new AttestationError(`Unsupported signature algorithm (${report.signatureAlgo}). Only ECDSA P-384 with SHA-384 (algorithm 1) is supported`);
   }
 
   // Convert the signature from AMD's little-endian format to WebCrypto raw format
@@ -74,7 +74,7 @@ async function verifyReportSignature(
 
     return isValid;
   } catch (e) {
-    wrapOrThrow(e, AttestationError, 'Attestation signature verification failed');
+    wrapOrThrow(e, AttestationError, 'Failed to verify attestation report signature using VCEK public key');
   }
 }
 
@@ -92,7 +92,7 @@ export async function verifyAttestation(
   // Verify certificate chain
   const isChainValid = await chain.verifyChain();
   if (!isChainValid) {
-    throw new AttestationError('Certificate chain verification returned false');
+    throw new AttestationError('AMD certificate chain verification failed: The chain from ARK to ASK to VCEK could not be verified');
   }
 
   // Get the CryptoKey from VCEK certificate
@@ -100,7 +100,7 @@ export async function verifyAttestation(
   const vcekPublicKey = await chain.vcekPublicKey;
   const isSignatureValid = await verifyReportSignature(vcekPublicKey, report);
   if (!isSignatureValid) {
-    throw new AttestationError('Report signature verification returned false');
+    throw new AttestationError('Attestation report signature is invalid: The report was not signed by the expected VCEK key');
   }
 
   return true;

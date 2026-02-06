@@ -33,18 +33,18 @@ export async function getServerIdentity(enclaveURL: string): Promise<EhbpIdentit
   const keysURL = new URL(PROTOCOL.KEYS_PATH, enclaveURL);
 
   if (keysURL.protocol !== 'https:') {
-    throw new ConfigurationError(`HTTPS is required for remote key retrieval. Invalid protocol: ${keysURL.protocol}`);
+    throw new ConfigurationError(`HTTPS is required for key retrieval. Got ${keysURL.protocol}`);
   }
 
   const response = await fetch(keysURL.toString());
 
   if (!response.ok) {
-    throw new FetchError(`Failed to get server public key: ${response.status}`);
+    throw new FetchError(`Failed to fetch HPKE public key from enclave: HTTP ${response.status}`);
   }
 
   const contentType = response.headers.get('content-type');
   if (contentType !== PROTOCOL.KEYS_MEDIA_TYPE) {
-    throw new FetchError(`Invalid content type: ${contentType}`);
+    throw new FetchError(`Invalid response from HPKE key endpoint: Expected content-type "${PROTOCOL.KEYS_MEDIA_TYPE}", got "${contentType}"`);
   }
 
   const keysData = new Uint8Array(await response.arrayBuffer());
@@ -182,8 +182,8 @@ async function getUnverifiedTransportForOrigin(origin: string, keyOrigin: string
     const isSecure = (globalThis as any).isSecureContext !== false;
     const hasSubtle = !!(globalThis.crypto && (globalThis.crypto as Crypto).subtle);
     if (!isSecure || !hasSubtle) {
-      const reason = !isSecure ? 'insecure context (use HTTPS or localhost)' : 'missing WebCrypto SubtleCrypto';
-      throw new ConfigurationError(`EHBP requires a secure browser context: ${reason}`);
+      const reason = !isSecure ? 'Use HTTPS or localhost' : 'WebCrypto SubtleCrypto API is not available';
+      throw new ConfigurationError(`EHBP encryption requires a secure browser context: ${reason}`);
     }
   }
 
@@ -198,8 +198,8 @@ export async function getTransportForOrigin(origin: string, hpkePublicKeyHex: st
     const isSecure = (globalThis as any).isSecureContext !== false;
     const hasSubtle = !!(globalThis.crypto && (globalThis.crypto as Crypto).subtle);
     if (!isSecure || !hasSubtle) {
-      const reason = !isSecure ? 'insecure context (use HTTPS or localhost)' : 'missing WebCrypto SubtleCrypto';
-      throw new ConfigurationError(`EHBP requires a secure browser context: ${reason}`);
+      const reason = !isSecure ? 'Use HTTPS or localhost' : 'WebCrypto SubtleCrypto API is not available';
+      throw new ConfigurationError(`EHBP encryption requires a secure browser context: ${reason}`);
     }
   }
 

@@ -16,7 +16,7 @@ function base32Decode(input: string): Uint8Array {
   
   for (const c of s) {
     const i = B32.indexOf(c);
-    if (i < 0) throw new AttestationError(`Invalid base32: ${c}`);
+    if (i < 0) throw new AttestationError(`Invalid certificate data: Unexpected character "${c}" in base32-encoded field`);
     val = (val << 5) | i;
     if ((bits += 5) >= 8) out[idx++] = (val >> (bits -= 8)) & 0xff;
   }
@@ -31,7 +31,7 @@ export function decodeDomains(domains: string[], prefix: string): Uint8Array {
     .map(d => d.split('.')[0].slice(2))
     .join('');
   
-  if (!chunks) throw new AttestationError(`No domains with prefix: ${prefix}`);
+  if (!chunks) throw new AttestationError(`Invalid certificate: Missing expected DNS names with prefix "${prefix}"`);
   return base32Decode(chunks);
 }
 

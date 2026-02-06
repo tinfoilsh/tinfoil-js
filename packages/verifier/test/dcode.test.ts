@@ -36,7 +36,7 @@ describe('dcode decoder', () => {
 
     it('should throw if prefix not found', () => {
       const domains = ['00orsxg5a.hpke.example.com'];
-      expect(() => decodeDomains(domains, 'missing')).toThrow('No domains with prefix');
+      expect(() => decodeDomains(domains, 'missing')).toThrow('Missing expected DNS names with prefix');
     });
 
     it('should handle case-insensitive base32', () => {

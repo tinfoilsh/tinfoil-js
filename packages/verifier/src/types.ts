@@ -50,7 +50,7 @@ export function compareMeasurements(a: AttestationMeasurement, b: AttestationMea
   if (a.type === b.type) {
     if (a.registers.length !== b.registers.length ||
         !a.registers.every((reg, i) => reg === b.registers[i])) {
-      throw new AttestationError('Measurement mismatch: registers do not match');
+      throw new AttestationError('Code measurement mismatch: The enclave is running different code than the expected release');
     }
     return;
   }
@@ -61,10 +61,10 @@ export function compareMeasurements(a: AttestationMeasurement, b: AttestationMea
   // Only compare the SNP measurement (first register of both)
   if (a.type === PredicateType.SnpTdxMultiplatformV1 && b.type === PredicateType.SevGuestV2) {
     if (a.registers.length < 1 || b.registers.length < 1) {
-      throw new AttestationError('Insufficient registers for comparison');
+      throw new AttestationError('Invalid measurement data: Missing measurement registers');
     }
     if (a.registers[0] !== b.registers[0]) {
-      throw new AttestationError('SNP measurement mismatch');
+      throw new AttestationError('Code measurement mismatch: The SNP measurement from the enclave does not match the expected measurement from the signed release');
     }
     return;
   }
@@ -72,16 +72,16 @@ export function compareMeasurements(a: AttestationMeasurement, b: AttestationMea
   // Reverse direction
   if (a.type === PredicateType.SevGuestV2 && b.type === PredicateType.SnpTdxMultiplatformV1) {
     if (a.registers.length < 1 || b.registers.length < 1) {
-      throw new AttestationError('Insufficient registers for comparison');
+      throw new AttestationError('Invalid measurement data: Missing measurement registers');
     }
     if (a.registers[0] !== b.registers[0]) {
-      throw new AttestationError('SNP measurement mismatch');
+      throw new AttestationError('Code measurement mismatch: The SNP measurement from the enclave does not match the expected measurement from the signed release');
     }
     return;
   }
 
   throw new AttestationError(
-    `Measurement types are incompatible: '${a.type}' vs '${b.type}'`
+    `Cannot compare measurements: Incompatible measurement types "${a.type}" and "${b.type}"`
   );
 }
 

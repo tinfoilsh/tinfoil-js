@@ -103,27 +103,27 @@ export async function verifyCertificate(
     cert = X509Certificate.parse(certPem);
   } catch (error) {
     throw new AttestationError(
-      `Failed to parse certificate: ${(error as Error).message}`
+      `Failed to parse enclave TLS certificate: ${(error as Error).message}`
     );
   }
 
   // 2. Extract SANs
   const sans = extractSANs(cert);
   if (sans.length === 0) {
-    throw new AttestationError('Certificate has no Subject Alternative Names');
+    throw new AttestationError('Invalid enclave certificate: No Subject Alternative Names found');
   }
 
   // 3. Verify domain
   if (!domainMatchesSans(sans, expectedDomain)) {
     throw new AttestationError(
-      `Certificate not valid for domain: ${expectedDomain}. SANs: ${sans.join(', ')}`
+      `Certificate domain mismatch: Certificate is not valid for "${expectedDomain}"`
     );
   }
 
   // 4. Extract and verify HPKE key
   const hpkeSans = sans.filter(s => s.includes('.hpke.'));
   if (hpkeSans.length === 0) {
-    throw new AttestationError('Certificate SANs do not contain HPKE key');
+    throw new AttestationError('Invalid enclave certificate: No HPKE key embedded in Subject Alternative Names');
   }
   
   let hpkeKeyBytes: Uint8Array;
@@ -131,21 +131,21 @@ export async function verifyCertificate(
     hpkeKeyBytes = decodeDomains(hpkeSans, 'hpke');
   } catch (error) {
     throw new AttestationError(
-      `Failed to decode HPKE key from SANs: ${(error as Error).message}`
+      `Failed to extract HPKE key from certificate: ${(error as Error).message}`
     );
   }
   
   const hpkePublicKey = bytesToHex(hpkeKeyBytes);
   if (hpkePublicKey !== expectedHpkeKey) {
     throw new AttestationError(
-      `HPKE key mismatch: certificate has ${hpkePublicKey}, expected ${expectedHpkeKey}`
+      'HPKE key mismatch: The encryption key in the certificate does not match the attested key'
     );
   }
 
   // 5. Extract and verify attestation hash
   const hattSans = sans.filter(s => s.includes('.hatt.'));
   if (hattSans.length === 0) {
-    throw new AttestationError('Certificate SANs do not contain attestation hash');
+    throw new AttestationError('Invalid enclave certificate: No attestation hash embedded in Subject Alternative Names');
   }
   
   let hashBytes: Uint8Array;
@@ -153,7 +153,7 @@ export async function verifyCertificate(
     hashBytes = decodeDomains(hattSans, 'hatt');
   } catch (error) {
     throw new AttestationError(
-      `Failed to decode attestation hash from SANs: ${(error as Error).message}`
+      `Failed to extract attestation hash from certificate: ${(error as Error).message}`
     );
   }
   
@@ -163,7 +163,7 @@ export async function verifyCertificate(
   
   if (certAttestationHash !== computedHash) {
     throw new AttestationError(
-      `Attestation hash mismatch: certificate has ${certAttestationHash}, computed ${computedHash}`
+      'Attestation hash mismatch: The hash in the certificate does not match the attestation document'
     );
   }
 
