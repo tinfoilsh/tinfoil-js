@@ -137,7 +137,7 @@ describe("Bun compatibility", () => {
       const wrongFingerprint = "0000000000000000000000000000000000000000000000000000000000000000";
       const pinnedFetch = await createPinnedTlsFetch("https://www.cloudflare.com", wrongFingerprint);
 
-      await expect(pinnedFetch("/")).rejects.toThrow("fingerprint mismatch");
+      await expect(pinnedFetch("/")).rejects.toThrow("TLS pinning failed");
     });
 
     it("should reject HTTP connections during creation", async () => {
@@ -148,7 +148,7 @@ describe("Bun compatibility", () => {
           "http://example.com",
           "0000000000000000000000000000000000000000000000000000000000000000"
         )
-      ).rejects.toThrow("HTTP connections are not allowed");
+      ).rejects.toThrow("Insecure connection rejected");
     });
 
     it("should verify certificate on every request", async () => {
@@ -205,7 +205,7 @@ describe("Bun compatibility", () => {
 
       // Create pinned fetch and make a request - should still verify and fail
       const pinnedFetch = await createPinnedTlsFetch("https://www.wikipedia.org", wrongFingerprint);
-      await expect(pinnedFetch("/")).rejects.toThrow("fingerprint mismatch");
+      await expect(pinnedFetch("/")).rejects.toThrow("TLS pinning failed");
     });
   });
 });
