@@ -97,7 +97,7 @@ export class SecureClient {
   /**
    * Wait for the client to complete verification and be ready for requests.
    * 
-   * This performs enclave attestation, code verification, and establishes
+   * This performs enclave attestation, code provenance verification, and establishes
    * the secure transport. Must be called before using `fetch`.
    * 
    * @throws Error if verification fails

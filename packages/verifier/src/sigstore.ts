@@ -73,7 +73,7 @@ export async function verifySigstoreBundle(
     const payload = JSON.parse(new TextDecoder().decode(payloadBytes));
 
     if (payloadType !== 'application/vnd.in-toto+json') {
-      throw new AttestationError(`Unsupported Sigstore payload type: "${payloadType}". Only in-toto attestation format is supported`);
+      throw new AttestationError(`Unsupported Sigstore payload type: "${payloadType}". Only in-toto statements (application/vnd.in-toto+json) are supported`);
     }
 
     const predicateType = payload.predicateType as PredicateType;
@@ -101,7 +101,7 @@ export async function verifySigstoreBundle(
       }
       registers = [predicateFields.snp_measurement];
     } else {
-      throw new AttestationError(`Unsupported attestation predicate type: "${predicateType}". Only SNP/TDX multiplatform V1 is supported`);
+      throw new AttestationError(`Unsupported in-toto predicate type: "${predicateType}". Only SNP/TDX multiplatform V1 is supported`);
     }
 
     return {
