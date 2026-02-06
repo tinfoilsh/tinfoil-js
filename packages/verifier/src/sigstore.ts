@@ -25,16 +25,17 @@ class GitHubWorkflowRefPattern implements VerificationPolicy {
 }
 
 /**
- * Verifies the attested measurements of an enclave image against a trusted root (Sigstore)
- * and returns the measurement payload contained in the DSSE.
+ * Verifies a Sigstore bundle.
+ * Validates the DSSE envelope signature, certificate identity policy,
+ * Rekor log consistency, and extracts the measurement payload.
  *
- * @param bundleJson - The bundle JSON data
+ * @param bundleJson - The Sigstore bundle JSON data
  * @param digest - The expected hex-encoded SHA256 digest of the DSSE payload
  * @param repo - The repository name
  * @returns The verified measurement data
  * @throws Error if verification fails or digests don't match
  */
-export async function verifySigstoreAttestation(
+export async function verifySigstoreBundle(
   bundleJson: unknown,
   digest: string,
   repo: string
