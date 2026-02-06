@@ -21,10 +21,18 @@ export type TransportMode = 'ehbp' | 'tls';
 export interface SecureClientOptions {
   /**
    * Override the base URL for API requests.
+   * When set, requests are sent to this URL instead of directly to the enclave.
    * Useful for proxying requests through your own backend.
    * @see https://docs.tinfoil.sh/guides/proxy-server
    */
   baseURL?: string;
+
+  /**
+   * Explicit enclave URL. When set, this takes precedence over the domain
+   * returned by the attestation bundle.
+   * Use this when connecting to a custom enclave endpoint rather than the default router.
+   */
+  enclaveURL?: string;
 
   /** GitHub repo for code verification. Defaults to tinfoilsh/confidential-model-router. */
   configRepo?: string;
@@ -77,27 +85,36 @@ export interface SecureClientOptions {
  * @see https://docs.tinfoil.sh/guides/proxy-server - Proxy server setup
  */
 export class SecureClient {
+  // --- Immutable config (from constructor, never changes) ---
+  private readonly config: {
+    readonly baseURL?: string;
+    readonly enclaveURL?: string;
+    readonly configRepo: string;
+    readonly transport: TransportMode;
+    readonly attestationBundleURL?: string;
+  };
+
+  // --- Derived state (cleared on reset) ---
   private initPromise: Promise<void> | null = null;
   private verificationDocument: VerificationDocument | null = null;
   private _fetch: typeof fetch | null = null;
-
-  private baseURL?: string;
-  private enclaveURL?: string;
-  private readonly configRepo: string;
-  private readonly transport: TransportMode;
-  private readonly attestationBundleURL?: string;
+  private resolvedEnclaveURL?: string;
+  private resolvedBaseURL?: string;
 
   constructor(options: SecureClientOptions = {}) {
-    this.baseURL = options.baseURL;
-    this.configRepo = options.configRepo || TINFOIL_CONFIG.DEFAULT_ROUTER_REPO;
-    this.transport = options.transport || 'ehbp';
-    this.attestationBundleURL = options.attestationBundleURL;
+    this.config = {
+      baseURL: options.baseURL,
+      enclaveURL: options.enclaveURL,
+      configRepo: options.configRepo || TINFOIL_CONFIG.DEFAULT_ROUTER_REPO,
+      transport: options.transport || 'ehbp',
+      attestationBundleURL: options.attestationBundleURL,
+    };
   }
 
   /**
    * Wait for the client to complete verification and be ready for requests.
    * 
-   * This performs enclave attestation, code provenance verification, and establishes
+   * This performs enclave attestation, code verification, and establishes
    * the secure transport. Must be called before using `fetch`.
    * 
    * @throws Error if verification fails
@@ -109,18 +126,45 @@ export class SecureClient {
     return this.initPromise;
   }
 
+  /**
+   * Reset the client, clearing all verification state and transport.
+   * 
+   * After calling reset(), the next call to `ready()` or `fetch()` will
+   * perform a fresh attestation and establish a new secure transport.
+   * 
+   * Use this for retry logic when the enclave may have restarted with new keys,
+   * or when you want to force re-verification.
+   * 
+   * @example
+   * ```typescript
+   * // Force re-attestation
+   * client.reset();
+   * await client.ready();
+   * 
+   * // Or let it re-attest lazily on next request
+   * client.reset();
+   * await client.fetch("/v1/chat/completions", { ... });
+   * ```
+   */
+  public reset(): void {
+    this.initPromise = null;
+    this._fetch = null;
+    this.verificationDocument = null;
+    this.resolvedEnclaveURL = undefined;
+    this.resolvedBaseURL = undefined;
+  }
+
   private async initSecureClient(): Promise<void> {
-    const bundle = await fetchAttestationBundle(this.attestationBundleURL);
+    const bundle = await fetchAttestationBundle(this.config.attestationBundleURL);
 
-    this.enclaveURL = `https://${bundle.domain}`;
+    // Resolve enclaveURL: user-provided config takes precedence, otherwise from bundle
+    this.resolvedEnclaveURL = this.config.enclaveURL ?? `https://${bundle.domain}`;
 
-    // Derive baseURL from bundle domain if not set
-    if (!this.baseURL) {
-      this.baseURL = `${this.enclaveURL}/v1/`;
-    }
+    // Resolve baseURL: user-provided config (proxy) takes precedence, otherwise from enclave
+    this.resolvedBaseURL = this.config.baseURL ?? `${this.resolvedEnclaveURL}/v1/`;
 
     const verifier = new Verifier({
-      configRepo: this.configRepo,
+      configRepo: this.config.configRepo,
     });
 
     try {
@@ -151,7 +195,7 @@ export class SecureClient {
         this.verificationDocument = doc;
       } else {
         this.verificationDocument = {
-          configRepo: this.configRepo,
+          configRepo: this.config.configRepo,
           enclaveHost: bundle.domain,
           releaseDigest: '',
           codeMeasurement: { type: '', registers: [] },
@@ -201,18 +245,25 @@ export class SecureClient {
   /**
    * Get the base URL for API requests.
    * 
-   * @returns The base URL (e.g., "https://enclave.example.com/v1/")
+   * Returns the base URL requests will be sent to.
    */
   public getBaseURL(): string | undefined {
-    return this.baseURL;
+    return this.resolvedBaseURL;
+  }
+
+  /**
+   * Get the URL of the enclave endpoint, or undefined before ready().
+   */
+  public getEnclaveURL(): string | undefined {
+    return this.resolvedEnclaveURL;
   }
 
   private async createTransport(hpkePublicKey?: string, tlsPublicKeyFingerprint?: string): Promise<typeof fetch> {
-    if (this.transport === 'tls') {
-      return await createSecureFetch(this.baseURL!, undefined, tlsPublicKeyFingerprint, this.enclaveURL);
+    if (this.config.transport === 'tls') {
+      return await createSecureFetch(this.resolvedBaseURL!, undefined, tlsPublicKeyFingerprint, this.resolvedEnclaveURL);
     }
 
-    return await createSecureFetch(this.baseURL!, hpkePublicKey, undefined, this.enclaveURL);
+    return await createSecureFetch(this.resolvedBaseURL!, hpkePublicKey, undefined, this.resolvedEnclaveURL);
   }
 
   /**
@@ -246,7 +297,7 @@ export class SecureClient {
         }
 
         // Retry once - enclave may have restarted with new keys
-        this.initPromise = null;
+        this.reset();
         try {
           await this.ready();
           return await this._fetch!(input, init);

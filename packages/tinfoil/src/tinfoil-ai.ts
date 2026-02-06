@@ -13,7 +13,6 @@ import type {
 } from "openai/resources";
 import { SecureClient, type TransportMode } from "./secure-client.js";
 import { type VerificationDocument } from "./verifier.js";
-import { TINFOIL_CONFIG } from "./config.js";
 import { isRealBrowser } from "./env.js";
 
 function createAsyncProxy<T extends object>(promise: Promise<T>): T {
@@ -75,6 +74,12 @@ export interface TinfoilAIOptions {
    * @see https://docs.tinfoil.sh/guides/proxy-server
    */
   baseURL?: string;
+
+  /**
+   * Explicit enclave URL.
+   * Use this when connecting to a custom enclave rather than the default routers.
+   */
+  enclaveURL?: string;
   
   /** GitHub repo for code verification. Defaults to tinfoilsh/confidential-model-router. */
   configRepo?: string;
@@ -121,14 +126,11 @@ export class TinfoilAI {
   private client?: OpenAI;
   private clientPromise: Promise<OpenAI>;
   private readyPromise?: Promise<void>;
-  private configRepo?: string;
   private secureClient: SecureClient;
-  private verificationDocument?: VerificationDocument;
   private useBearerToken: boolean;
 
   public apiKey?: string;
   public bearerToken?: string;
-  public baseURL?: string;
 
   constructor(options: TinfoilAIOptions = {}) {
     const openAIOptions = { ...options };
@@ -149,12 +151,11 @@ export class TinfoilAI {
     }
 
     this.apiKey = options.apiKey;
-    this.baseURL = options.baseURL;
-    this.configRepo = options.configRepo || TINFOIL_CONFIG.DEFAULT_ROUTER_REPO;
 
     this.secureClient = new SecureClient({
-      baseURL: this.baseURL,
-      configRepo: this.configRepo,
+      baseURL: options.baseURL,
+      enclaveURL: options.enclaveURL,
+      configRepo: options.configRepo,
       transport: options.transport,
       attestationBundleURL: options.attestationBundleURL,
     });
@@ -190,14 +191,8 @@ export class TinfoilAI {
     > = {},
   ): Promise<OpenAI> {
     await this.secureClient.ready();
-    
-    this.verificationDocument = await this.secureClient.getVerificationDocument();
-    if (!this.verificationDocument) {
-      throw new Error("Internal error: verification document not available after successful verification");
-    }
 
-    // Use the provided baseURL, or get it from SecureClient after initialization
-    const baseURL = this.baseURL || this.secureClient.getBaseURL();
+    const baseURL = this.secureClient.getBaseURL();
 
     const clientOptions: ConstructorParameters<typeof OpenAI>[0] = {
       ...options,
@@ -239,10 +234,7 @@ export class TinfoilAI {
    */
   public async getVerificationDocument(): Promise<VerificationDocument> {
     await this.ready();
-    if (!this.verificationDocument) {
-      throw new Error("Internal error: verification document unavailable after ready()");
-    }
-    return this.verificationDocument;
+    return this.secureClient.getVerificationDocument();
   }
 
   get chat(): Chat {

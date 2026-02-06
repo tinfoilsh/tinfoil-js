@@ -149,4 +149,202 @@ describe("SecureClient", () => {
     expect(verifyMock).toHaveBeenCalledTimes(1);
     expect(createSecureFetchMock).toHaveBeenCalledTimes(1);
   });
+
+  describe("reset()", () => {
+    it("should re-attest when ready() is called after reset()", async () => {
+      const { SecureClient } = await import("../src/secure-client");
+
+      const client = new SecureClient({
+        baseURL: "https://test.example.com/",
+        configRepo: "test-org/test-repo",
+      });
+
+      await client.ready();
+      expect(verifyMock).toHaveBeenCalledTimes(1);
+      expect(createSecureFetchMock).toHaveBeenCalledTimes(1);
+
+      client.reset();
+      await client.ready();
+
+      // Attestation and transport should have been re-established
+      expect(verifyMock).toHaveBeenCalledTimes(2);
+      expect(createSecureFetchMock).toHaveBeenCalledTimes(2);
+    });
+
+    it("should re-attest lazily when fetch is called after reset()", async () => {
+      const { SecureClient } = await import("../src/secure-client");
+
+      const client = new SecureClient({
+        baseURL: "https://test.example.com/",
+      });
+
+      await client.fetch("/test", { method: "GET" });
+      expect(verifyMock).toHaveBeenCalledTimes(1);
+
+      client.reset();
+
+      // No attestation yet — reset is lazy
+      expect(verifyMock).toHaveBeenCalledTimes(1);
+
+      await client.fetch("/test", { method: "GET" });
+
+      // Now it should have re-attested
+      expect(verifyMock).toHaveBeenCalledTimes(2);
+      expect(createSecureFetchMock).toHaveBeenCalledTimes(2);
+    });
+
+    it("should clear verification document after reset()", async () => {
+      const { SecureClient } = await import("../src/secure-client");
+
+      const client = new SecureClient({
+        baseURL: "https://test.example.com/",
+      });
+
+      const doc = await client.getVerificationDocument();
+      expect(doc).toEqual(mockVerificationDocument);
+
+      client.reset();
+      await client.ready();
+
+      // Should get a fresh verification document
+      const newDoc = await client.getVerificationDocument();
+      expect(newDoc).toEqual(mockVerificationDocument);
+      expect(verifyMock).toHaveBeenCalledTimes(2);
+    });
+
+    it("should be safe to call reset() multiple times", async () => {
+      const { SecureClient } = await import("../src/secure-client");
+
+      const client = new SecureClient({
+        baseURL: "https://test.example.com/",
+      });
+
+      await client.ready();
+
+      client.reset();
+      client.reset();
+      client.reset();
+
+      await client.ready();
+
+      // Should only have attested twice total (initial + one after resets)
+      expect(verifyMock).toHaveBeenCalledTimes(2);
+    });
+
+    it("should clear resolved URLs after reset()", async () => {
+      const { SecureClient } = await import("../src/secure-client");
+
+      const client = new SecureClient();
+
+      await client.ready();
+      expect(client.getBaseURL()).toBe("https://test-router.tinfoil.sh/v1/");
+      expect(client.getEnclaveURL()).toBe("https://test-router.tinfoil.sh");
+
+      client.reset();
+
+      // Derived state should be cleared
+      expect(client.getBaseURL()).toBeUndefined();
+      expect(client.getEnclaveURL()).toBeUndefined();
+
+      await client.ready();
+
+      // Re-derived from fresh bundle
+      expect(client.getBaseURL()).toBe("https://test-router.tinfoil.sh/v1/");
+      expect(client.getEnclaveURL()).toBe("https://test-router.tinfoil.sh");
+    });
+  });
+
+  describe("URL resolution", () => {
+    it("Case 1: no config — derives both URLs from bundle", async () => {
+      const { SecureClient } = await import("../src/secure-client");
+
+      const client = new SecureClient();
+      await client.ready();
+
+      expect(client.getEnclaveURL()).toBe("https://test-router.tinfoil.sh");
+      expect(client.getBaseURL()).toBe("https://test-router.tinfoil.sh/v1/");
+
+      expect(createSecureFetchMock).toHaveBeenCalledWith(
+        "https://test-router.tinfoil.sh/v1/",
+        "mock-hpke-public-key",
+        undefined,
+        "https://test-router.tinfoil.sh",
+      );
+    });
+
+    it("Case 2: proxy — baseURL is proxy, enclaveURL from bundle", async () => {
+      const { SecureClient } = await import("../src/secure-client");
+
+      const client = new SecureClient({
+        baseURL: "https://my-proxy.com/api/",
+      });
+      await client.ready();
+
+      expect(client.getEnclaveURL()).toBe("https://test-router.tinfoil.sh");
+      expect(client.getBaseURL()).toBe("https://my-proxy.com/api/");
+
+      expect(createSecureFetchMock).toHaveBeenCalledWith(
+        "https://my-proxy.com/api/",
+        "mock-hpke-public-key",
+        undefined,
+        "https://test-router.tinfoil.sh",
+      );
+    });
+
+    it("Case 3: custom enclave — enclaveURL from config, baseURL derived", async () => {
+      const { SecureClient } = await import("../src/secure-client");
+
+      const client = new SecureClient({
+        enclaveURL: "https://my-enclave.example.com",
+      });
+      await client.ready();
+
+      expect(client.getEnclaveURL()).toBe("https://my-enclave.example.com");
+      expect(client.getBaseURL()).toBe("https://my-enclave.example.com/v1/");
+
+      expect(createSecureFetchMock).toHaveBeenCalledWith(
+        "https://my-enclave.example.com/v1/",
+        "mock-hpke-public-key",
+        undefined,
+        "https://my-enclave.example.com",
+      );
+    });
+
+    it("Case 4: proxy + custom enclave — both from config", async () => {
+      const { SecureClient } = await import("../src/secure-client");
+
+      const client = new SecureClient({
+        baseURL: "https://my-proxy.com/api/",
+        enclaveURL: "https://my-enclave.example.com",
+      });
+      await client.ready();
+
+      expect(client.getEnclaveURL()).toBe("https://my-enclave.example.com");
+      expect(client.getBaseURL()).toBe("https://my-proxy.com/api/");
+
+      expect(createSecureFetchMock).toHaveBeenCalledWith(
+        "https://my-proxy.com/api/",
+        "mock-hpke-public-key",
+        undefined,
+        "https://my-enclave.example.com",
+      );
+    });
+
+    it("Case 4: reset preserves proxy + custom enclave config", async () => {
+      const { SecureClient } = await import("../src/secure-client");
+
+      const client = new SecureClient({
+        baseURL: "https://my-proxy.com/api/",
+        enclaveURL: "https://my-enclave.example.com",
+      });
+      await client.ready();
+
+      client.reset();
+      await client.ready();
+
+      expect(client.getEnclaveURL()).toBe("https://my-enclave.example.com");
+      expect(client.getBaseURL()).toBe("https://my-proxy.com/api/");
+      expect(verifyMock).toHaveBeenCalledTimes(2);
+    });
+  });
 });
