@@ -53,6 +53,12 @@ vi.mock("../src/verifier.js", () => ({
       return mockVerificationDocument;
     }
   },
+  FetchError: class FetchError extends Error {
+    constructor(message: string) {
+      super(message);
+      this.name = 'FetchError';
+    }
+  },
 }));
 
 vi.mock("../src/secure-fetch.js", () => ({
