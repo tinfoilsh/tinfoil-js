@@ -74,7 +74,7 @@ export async function fetchGithubAttestationBundle(repo: string, digest: string)
     }
     responseData = await bundleResponse.json();
   } catch (e) {
-    wrapOrThrow(e, FetchError, `Failed to fetch Sigstore attestation bundle from GitHub for ${repo}`);
+    wrapOrThrow(e, FetchError, `Failed to fetch Sigstore bundle from GitHub for ${repo}`);
   }
 
   if (!responseData.attestations?.[0]?.bundle) {

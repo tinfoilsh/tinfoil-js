@@ -1,6 +1,6 @@
 import { verifyAttestation as verifyAmdAttestation, fetchAttestation } from './attestation.js';
 import { fetchLatestDigest, fetchGithubAttestationBundle } from './github.js';
-import { verifySigstoreAttestation } from './sigstore.js';
+import { verifySigstoreBundle } from './sigstore.js';
 import { verifyCertificate } from './cert-verify.js';
 import { compareMeasurements, measurementFingerprint } from './types.js';
 import type { AttestationDocument, AttestationMeasurement, AttestationResponse, VerificationDocument, AttestationBundle } from './types.js';
@@ -79,10 +79,10 @@ export class Verifier {
         throw error;
       }
 
-      // Step 2: Verify code attestation (Sigstore)
+      // Step 2: Verify code provenance (Sigstore bundle)
       let codeMeasurements: AttestationMeasurement;
       try {
-        codeMeasurements = await verifySigstoreAttestation(sigstoreBundle, digest, this.configRepo);
+        codeMeasurements = await verifySigstoreBundle(sigstoreBundle, digest, this.configRepo);
         steps.verifyCode = { status: 'success' };
       } catch (error) {
         steps.verifyCode = { status: 'failed', error: (error as Error).message };
