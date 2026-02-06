@@ -103,7 +103,8 @@ export async function verifyCertificate(
     cert = X509Certificate.parse(certPem);
   } catch (error) {
     throw new AttestationError(
-      `Failed to parse enclave TLS certificate: ${(error as Error).message}`
+      `Failed to parse enclave TLS certificate: ${(error as Error).message}`,
+      { cause: error as Error }
     );
   }
 
@@ -131,7 +132,8 @@ export async function verifyCertificate(
     hpkeKeyBytes = decodeDomains(hpkeSans, 'hpke');
   } catch (error) {
     throw new AttestationError(
-      `Failed to extract HPKE key from certificate: ${(error as Error).message}`
+      `Failed to extract HPKE key from certificate: ${(error as Error).message}`,
+      { cause: error as Error }
     );
   }
   
@@ -153,7 +155,8 @@ export async function verifyCertificate(
     hashBytes = decodeDomains(hattSans, 'hatt');
   } catch (error) {
     throw new AttestationError(
-      `Failed to extract attestation hash from certificate: ${(error as Error).message}`
+      `Failed to extract attestation hash from certificate: ${(error as Error).message}`,
+      { cause: error as Error }
     );
   }
   
