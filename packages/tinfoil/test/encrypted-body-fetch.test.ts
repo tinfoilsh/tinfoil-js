@@ -6,7 +6,7 @@ describe("encrypted-body-fetch", () => {
   describe("getServerIdentity", () => {
     it("rejects non-HTTPS URLs", async () => {
       await expect(getServerIdentity("http://example.com/v1")).rejects.toThrow(
-        /HTTPS is required for remote key retrieval/
+        /HTTPS is required for key retrieval/
       );
     });
 
@@ -23,7 +23,7 @@ describe("encrypted-body-fetch", () => {
 
       try {
         await expect(getServerIdentity("https://example.com/v1")).rejects.toThrow(
-          /Invalid content type/
+          /Invalid response from HPKE key endpoint/
         );
       } finally {
         globalThis.fetch = originalFetch;
@@ -43,7 +43,7 @@ describe("encrypted-body-fetch", () => {
 
       try {
         await expect(getServerIdentity("https://example.com/v1")).rejects.toThrow(
-          /Failed to get server public key: 500/
+          /Failed to fetch HPKE public key from enclave/
         );
       } finally {
         globalThis.fetch = originalFetch;

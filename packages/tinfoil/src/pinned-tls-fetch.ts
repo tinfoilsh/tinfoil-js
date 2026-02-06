@@ -12,13 +12,13 @@ function createCheckServerIdentity(expectedFingerprintHex: string): (host: strin
   return (host: string, cert: any): Error | undefined => {
     const raw = cert?.raw as Buffer | undefined;
     if (!raw) {
-      return new AttestationError("Certificate raw bytes are unavailable for pinning");
+      return new AttestationError("TLS pinning failed: Certificate raw bytes are unavailable");
     }
     const x509 = new X509Certificate(raw);
     const publicKeyDer = x509.publicKey.export({ type: "spki", format: "der" });
     const fp = createHash("sha256").update(publicKeyDer).digest("hex");
     if (fp !== expectedFingerprintHex) {
-      return new AttestationError(`Certificate public key fingerprint mismatch. Expected: ${expectedFingerprintHex}, Got: ${fp}`);
+      return new AttestationError("TLS pinning failed: Server certificate public key does not match the attested key");
     }
     return undefined;
   };
@@ -30,7 +30,7 @@ async function createBunPinnedTlsFetch(baseURL: string, expectedFingerprintHex: 
 
   const parsedBase = new URL(baseURL);
   if (parsedBase.protocol !== "https:") {
-    throw new ConfigurationError(`HTTP connections are not allowed. Use HTTPS. URL: ${baseURL}`);
+    throw new ConfigurationError(`Insecure connection rejected: HTTP is not allowed. Use HTTPS for ${baseURL}`);
   }
 
   return (async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -42,7 +42,7 @@ async function createBunPinnedTlsFetch(baseURL: string, expectedFingerprintHex: 
 
     const url = makeURL(input);
     if (url.protocol !== "https:") {
-      throw new ConfigurationError(`HTTP connections are not allowed. Use HTTPS. URL: ${url.toString()}`);
+      throw new ConfigurationError(`Insecure connection rejected: HTTP is not allowed. Use HTTPS for ${url.toString()}`);
     }
 
     const fetchInit: RequestInit & { tls?: { checkServerIdentity: (host: string, cert: any) => Error | undefined } } = {
@@ -79,7 +79,7 @@ async function createNodePinnedTlsFetch(baseURL: string, expectedFingerprintHex:
 
     const url = makeURL(input);
     if (url.protocol !== "https:") {
-      throw new ConfigurationError(`HTTP connections are not allowed. Use HTTPS. URL: ${url.toString()}`);
+      throw new ConfigurationError(`Insecure connection rejected: HTTP is not allowed. Use HTTPS for ${url.toString()}`);
     }
 
     // Gather method and headers

@@ -21,7 +21,7 @@ export async function fetchAttestation(host: string): Promise<AttestationDocumen
   const response = await fetch(url);
 
   if (!response.ok) {
-    throw new FetchError(`Failed to fetch attestation: ${response.status} ${response.statusText}`);
+    throw new FetchError(`Failed to fetch attestation document from ${host}: HTTP ${response.status} ${response.statusText}`);
   }
 
   const docDict = await response.json();
@@ -46,7 +46,7 @@ export async function verifyAttestation(doc: AttestationDocument, vcekBase64?: s
     const vcekDer = vcekBase64 ? base64ToBytes(vcekBase64) : undefined;
     return verifySevAttestationV2(doc.body, vcekDer);
   } else {
-    throw new AttestationError(`Unsupported attestation format: ${doc.format}`);
+    throw new AttestationError(`Unsupported attestation document format: "${doc.format}". Only SEV-SNP Guest V2 format is supported`);
   }
 }
 
@@ -91,7 +91,7 @@ async function verifySevReport(attestationDoc: string, isCompressed: boolean, vc
   try {
     attDocBytes = base64ToBytes(attestationDoc);
   } catch (e) {
-    throw new AttestationError('Failed to decode base64', { cause: e as Error });
+    throw new AttestationError('Failed to decode attestation document: Invalid base64 encoding', { cause: e as Error });
   }
 
   if (isCompressed) {
@@ -102,7 +102,7 @@ async function verifySevReport(attestationDoc: string, isCompressed: boolean, vc
   try {
     report = new Report(attDocBytes);
   } catch (e) {
-    throw new AttestationError('Failed to parse report', { cause: e as Error });
+    throw new AttestationError('Failed to parse SEV-SNP attestation report', { cause: e as Error });
   }
 
   const chain = await CertificateChain.fromReport(report, vcekDer);
@@ -111,17 +111,17 @@ async function verifySevReport(attestationDoc: string, isCompressed: boolean, vc
   try {
     res = await verifyAttestationInternal(chain, report);
   } catch (e) {
-    wrapOrThrow(e, AttestationError, 'Failed to verify attestation');
+    wrapOrThrow(e, AttestationError, 'Attestation cryptographic verification failed');
   }
 
   if (!res) {
-    throw new AttestationError('Attestation verification failed!');
+    throw new AttestationError('Attestation verification failed: Report signature or certificate chain is invalid');
   }
 
   try {
     validateReport(report, chain, defaultValidationOptions);
   } catch (e) {
-    wrapOrThrow(e, AttestationError, 'Failed to validate report');
+    wrapOrThrow(e, AttestationError, 'Attestation policy validation failed');
   }
 
   return report;

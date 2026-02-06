@@ -23,7 +23,7 @@ export async function fetchLatestDigest(repo: string): Promise<string> {
   const releaseResponse = await fetch(url);
 
   if (!releaseResponse.ok) {
-    throw new FetchError(`Failed to fetch release: ${releaseResponse.status} ${releaseResponse.statusText}`);
+    throw new FetchError(`Failed to fetch latest release from GitHub for ${repo}: HTTP ${releaseResponse.status} ${releaseResponse.statusText}`);
   }
 
   const responseData: Release = await releaseResponse.json();
@@ -49,7 +49,7 @@ export async function fetchLatestDigest(repo: string): Promise<string> {
   const response = await fetch(digestUrl);
 
   if (!response.ok) {
-    throw new FetchError(`Failed to fetch attestation digest: ${response.status} ${response.statusText}`);
+    throw new FetchError(`Failed to fetch release digest for ${repo} tag ${tagName}: HTTP ${response.status} ${response.statusText}`);
   }
 
   return (await response.text()).trim();
@@ -70,15 +70,15 @@ export async function fetchGithubAttestationBundle(repo: string, digest: string)
   try {
     const bundleResponse = await fetch(url);
     if (!bundleResponse.ok) {
-      throw new FetchError(`HTTP ${bundleResponse.status} ${bundleResponse.statusText}`);
+      throw new FetchError(`Failed to fetch GitHub attestation bundle: HTTP ${bundleResponse.status} ${bundleResponse.statusText}`);
     }
     responseData = await bundleResponse.json();
   } catch (e) {
-    wrapOrThrow(e, FetchError, `Error fetching attestation from ${url}`);
+    wrapOrThrow(e, FetchError, `Failed to fetch Sigstore attestation bundle from GitHub for ${repo}`);
   }
 
   if (!responseData.attestations?.[0]?.bundle) {
-    throw new FetchError(`Invalid attestation response format from ${url}. Response: ${JSON.stringify(responseData)}`);
+    throw new FetchError(`No attestation bundle found for ${repo} with digest ${digest}`);
   }
   return responseData.attestations[0].bundle;
 }

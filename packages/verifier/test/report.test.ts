@@ -21,6 +21,6 @@ describe('Report Parsing', () => {
 
   it('rejects invalid report size', () => {
     const tooSmall = new Uint8Array(100);
-    expect(() => new Report(tooSmall)).toThrow('attestation report size');
+    expect(() => new Report(tooSmall)).toThrow('smaller than expected SEV-SNP report size');
   });
 });

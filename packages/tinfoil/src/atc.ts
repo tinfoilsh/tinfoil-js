@@ -15,7 +15,7 @@ export async function fetchAttestationBundle(atcBaseUrl: string = TINFOIL_CONFIG
   const response = await fetch(url);
 
   if (!response.ok) {
-    throw new FetchError(`Failed to fetch attestation bundle: ${response.status} ${response.statusText}`);
+    throw new FetchError(`Failed to fetch attestation bundle from ${atcBaseUrl}: HTTP ${response.status} ${response.statusText}`);
   }
 
   const bundle = await response.json();
@@ -46,13 +46,13 @@ export async function fetchRouter(atcBaseUrl: string = TINFOIL_CONFIG.ATC_BASE_U
   const response = await fetch(routersUrl);
 
   if (!response.ok) {
-    throw new FetchError(`Failed to fetch routers: ${response.status} ${response.statusText}`);
+    throw new FetchError(`Failed to fetch router list from ${atcBaseUrl}: HTTP ${response.status} ${response.statusText}`);
   }
 
   const routers: string[] = await response.json();
 
   if (!Array.isArray(routers) || routers.length === 0) {
-    throw new FetchError("No routers found in the response");
+    throw new FetchError("No available routers found in the response");
   }
 
   return routers[Math.floor(Math.random() * routers.length)];

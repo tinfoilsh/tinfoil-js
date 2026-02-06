@@ -128,7 +128,7 @@ export class SecureClient {
 
       const doc = verifier.getVerificationDocument();
       if (!doc) {
-        throw new Error("Internal error: verification document not available after successful verification");
+        throw new Error("Internal error: Verification document unavailable after successful attestation verification");
       }
       this.verificationDocument = doc;
 
@@ -193,7 +193,7 @@ export class SecureClient {
     await this.initPromise!.catch(() => {});
 
     if (!this.verificationDocument) {
-      throw new Error("Internal error: verification document unavailable after ready()");
+      throw new Error("Internal error: Verification document unavailable. Call ready() before accessing verification details");
     }
     return this.verificationDocument;
   }
