@@ -47,6 +47,28 @@ export interface SecureClientOptions {
   attestationBundleURL?: string;
 }
 
+function createPendingVerificationDocument(configRepo: string): VerificationDocument {
+  return {
+    configRepo,
+    enclaveHost: '',
+    releaseDigest: '',
+    codeMeasurement: { type: '', registers: [] },
+    enclaveMeasurement: { measurement: { type: '', registers: [] } },
+    tlsPublicKey: '',
+    hpkePublicKey: '',
+    codeFingerprint: '',
+    enclaveFingerprint: '',
+    selectedRouterEndpoint: '',
+    securityVerified: false,
+    steps: {
+      fetchDigest: { status: 'pending' },
+      verifyCode: { status: 'pending' },
+      verifyEnclave: { status: 'pending' },
+      compareMeasurements: { status: 'pending' },
+    },
+  };
+}
+
 /**
  * Low-level secure client providing a verified fetch function for custom HTTP requests.
  * 
@@ -96,7 +118,7 @@ export class SecureClient {
 
   // --- Derived state (cleared on reset) ---
   private initPromise: Promise<void> | null = null;
-  private verificationDocument: VerificationDocument | null = null;
+  private verificationDocument: VerificationDocument;
   private _fetch: typeof fetch | null = null;
   private resolvedEnclaveURL?: string;
   private resolvedBaseURL?: string;
@@ -109,6 +131,7 @@ export class SecureClient {
       transport: options.transport || 'ehbp',
       attestationBundleURL: options.attestationBundleURL,
     };
+    this.verificationDocument = createPendingVerificationDocument(this.config.configRepo);
   }
 
   /**
@@ -155,7 +178,7 @@ export class SecureClient {
   public reset(): void {
     this.initPromise = null;
     this._fetch = null;
-    this.verificationDocument = null;
+    this.verificationDocument = createPendingVerificationDocument(this.config.configRepo);
     this.resolvedEnclaveURL = undefined;
     this.resolvedBaseURL = undefined;
   }
@@ -174,57 +197,11 @@ export class SecureClient {
     });
 
     try {
-      await verifier.verifyBundle(bundle);
-
-      const doc = verifier.getVerificationDocument();
-      if (!doc) {
-        throw new Error("Internal error: Verification document unavailable after successful attestation verification");
-      }
-      this.verificationDocument = doc;
-
-      // Extract keys from the verification document
-      const { hpkePublicKey, tlsPublicKeyFingerprint } = this.verificationDocument.enclaveMeasurement;
-
-      try {
-        this._fetch = await this.createTransport(hpkePublicKey, tlsPublicKeyFingerprint);
-      } catch (transportError) {
-        this.verificationDocument.steps.createTransport = {
-          status: 'failed',
-          error: (transportError as Error).message
-        };
-        this.verificationDocument.securityVerified = false;
-        throw transportError;
-      }
-    } catch (error) {
-      const doc = verifier.getVerificationDocument();
-      if (doc) {
-        this.verificationDocument = doc;
-      } else {
-        this.verificationDocument = {
-          configRepo: this.config.configRepo,
-          enclaveHost: bundle.domain,
-          releaseDigest: '',
-          codeMeasurement: { type: '', registers: [] },
-          enclaveMeasurement: { measurement: { type: '', registers: [] } },
-          tlsPublicKey: '',
-          hpkePublicKey: '',
-          hardwareMeasurement: undefined,
-          codeFingerprint: '',
-          enclaveFingerprint: '',
-          selectedRouterEndpoint: bundle.domain,
-          securityVerified: false,
-          steps: {
-            fetchDigest: { status: 'pending' },
-            verifyCode: { status: 'pending' },
-            verifyEnclave: { status: 'pending' },
-            compareMeasurements: { status: 'pending' },
-            createTransport: undefined,
-            verifyHPKEKey: undefined,
-            otherError: { status: 'failed', error: (error as Error).message },
-          }
-        };
-      }
-      throw error;
+      const attestation = await verifier.verifyBundle(bundle);
+      this._fetch = await this.createTransport(attestation.hpkePublicKey, attestation.tlsPublicKeyFingerprint);
+    } finally {
+      // Always capture the verifier's doc (success or partial-failure)
+      this.verificationDocument = verifier.getVerificationDocument() ?? this.verificationDocument;
     }
   }
 
@@ -232,19 +209,9 @@ export class SecureClient {
    * Get the verification document containing attestation details.
    * 
    * @returns The verification document with attestation results
-   * @throws Error if verification has not completed
    * @see https://docs.tinfoil.sh/verification/attestation-architecture
    */
-  public async getVerificationDocument(): Promise<VerificationDocument> {
-    if (!this.initPromise) {
-      await this.ready();
-    }
-
-    await this.initPromise!.catch(() => {});
-
-    if (!this.verificationDocument) {
-      throw new Error("Internal error: Verification document unavailable. Call ready() before accessing verification details");
-    }
+  public getVerificationDocument(): VerificationDocument {
     return this.verificationDocument;
   }
 
@@ -298,51 +265,22 @@ export class SecureClient {
       try {
         return await this._fetch!(input, init);
       } catch (error) {
-        if (!(error instanceof Error)) {
-          throw error;
-        }
-
         // Retry once - enclave may have restarted with new keys
         this.reset();
         try {
           await this.ready();
           return await this._fetch!(input, init);
-        } catch {
-          // Retry failed, throw original error
-        }
-
-        // Update verification document with error info
-        if (this.verificationDocument) {
-          const errorMessage = error.message;
-
-          if (errorMessage.includes('HPKE public key mismatch')) {
-            this.verificationDocument.steps.verifyHPKEKey = {
-              status: 'failed',
-              error: errorMessage
-            };
-            this.verificationDocument.securityVerified = false;
-          } else if (errorMessage.includes('Transport initialization failed') || errorMessage.includes('Request initialization failed')) {
-            this.verificationDocument.steps.createTransport = {
-              status: 'failed',
-              error: errorMessage
-            };
-            this.verificationDocument.securityVerified = false;
-          } else if (errorMessage.includes('Failed to get HPKE key')) {
-            this.verificationDocument.steps.verifyHPKEKey = {
-              status: 'failed',
-              error: errorMessage
-            };
-            this.verificationDocument.securityVerified = false;
-          } else {
-            this.verificationDocument.steps.otherError = {
-              status: 'failed',
-              error: errorMessage
-            };
-            this.verificationDocument.securityVerified = false;
+        } catch (retryError) {
+          // Retry also failed — record latest error and throw with chain
+          this.verificationDocument.steps.otherError = {
+            status: 'failed',
+            error: retryError instanceof Error ? retryError.message : String(retryError)
+          };
+          if (retryError instanceof Error) {
+            retryError.cause = error;
           }
+          throw retryError;
         }
-
-        throw error;
       }
     };
   }

@@ -72,15 +72,9 @@ export async function createTinfoilAI(apiKey?: string, options: CreateTinfoilAIO
 
   await secureClient.ready();
 
-  // Get the baseURL from SecureClient after initialization
-  const finalBaseURL = baseURL || secureClient.getBaseURL();
-  if (!finalBaseURL) {
-    throw new ConfigurationError("Unable to determine baseURL for AI SDK provider");
-  }
-
   return createOpenAICompatible({
     name: "tinfoil",
-    baseURL: finalBaseURL,
+    baseURL: secureClient.getBaseURL()!,
     apiKey: resolvedApiKey,
     fetch: secureClient.fetch,
   });
