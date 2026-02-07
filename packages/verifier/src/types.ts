@@ -144,8 +144,6 @@ export interface VerificationDocument {
     verifyEnclave: VerificationStepState;
     compareMeasurements: VerificationStepState;
     verifyCertificate?: VerificationStepState;
-    createTransport?: VerificationStepState;
-    verifyHPKEKey?: VerificationStepState;
     otherError?: VerificationStepState;
   };
 }

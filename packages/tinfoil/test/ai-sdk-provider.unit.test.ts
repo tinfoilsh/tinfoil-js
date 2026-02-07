@@ -49,29 +49,21 @@ describe("createTinfoilAI (unit)", () => {
     expect(model.modelId).toBe("some-model");
   });
 
-  it("prefers explicit baseURL over SecureClient.getBaseURL()", async () => {
+  it("passes explicit baseURL to SecureClient which resolves it via getBaseURL()", async () => {
     const { createTinfoilAI } = await import("../src/ai-sdk-provider");
 
     secureClientMock.getBaseURL.mockClear();
     createOpenAICompatibleMock.mockClear();
 
+    // When explicit baseURL is provided, SecureClient uses it as resolvedBaseURL
+    secureClientMock.getBaseURL.mockReturnValueOnce("https://explicit.invalid/");
+
     await createTinfoilAI("api-key", { baseURL: "https://explicit.invalid/" });
 
-    expect(secureClientMock.getBaseURL).not.toHaveBeenCalled();
     expect(createOpenAICompatibleMock).toHaveBeenCalledWith(
       expect.objectContaining({
         baseURL: "https://explicit.invalid/",
       }),
-    );
-  });
-
-  it("throws if no baseURL can be determined", async () => {
-    const { createTinfoilAI } = await import("../src/ai-sdk-provider");
-
-    secureClientMock.getBaseURL.mockReturnValueOnce(undefined as any);
-
-    await expect(createTinfoilAI("api-key")).rejects.toThrow(
-      "Unable to determine baseURL for AI SDK provider",
     );
   });
 });

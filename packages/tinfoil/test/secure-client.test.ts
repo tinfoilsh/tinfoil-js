@@ -131,7 +131,8 @@ describe("SecureClient", () => {
       baseURL: "https://test.example.com/",
     });
 
-    const verificationDocument = await client.getVerificationDocument();
+    await client.ready();
+    const verificationDocument = client.getVerificationDocument();
 
     expect(verifyMock).toHaveBeenCalledTimes(1);
     expect(verificationDocument).toEqual(mockVerificationDocument);
@@ -206,14 +207,15 @@ describe("SecureClient", () => {
         baseURL: "https://test.example.com/",
       });
 
-      const doc = await client.getVerificationDocument();
+      await client.ready();
+      const doc = client.getVerificationDocument();
       expect(doc).toEqual(mockVerificationDocument);
 
       client.reset();
       await client.ready();
 
       // Should get a fresh verification document
-      const newDoc = await client.getVerificationDocument();
+      const newDoc = client.getVerificationDocument();
       expect(newDoc).toEqual(mockVerificationDocument);
       expect(verifyMock).toHaveBeenCalledTimes(2);
     });

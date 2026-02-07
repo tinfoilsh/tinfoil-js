@@ -76,12 +76,6 @@ export class UnverifiedClient {
   }
 
   public async getVerificationDocument(): Promise<void> {
-    if (!this.initPromise) {
-      await this.ready();
-    }
-    
-    await this.initPromise;
-
     throw new ConfigurationError("Verification document unavailable: this version of the client is unverified");
   }
 
