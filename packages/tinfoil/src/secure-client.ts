@@ -1,4 +1,4 @@
-import { Verifier, FetchError, type VerificationDocument } from "./verifier.js";
+import { Verifier, type VerificationDocument } from "./verifier.js";
 import { TINFOIL_CONFIG } from "./config.js";
 import { createSecureFetch } from "./secure-fetch.js";
 import { fetchAttestationBundle } from "./atc.js";
@@ -45,6 +45,14 @@ export interface SecureClientOptions {
 
   /** URL to fetch the attestation bundle from. */
   attestationBundleURL?: string;
+}
+
+/**
+ * Duck-typed check for EHBP KeyConfigMismatchError.
+ * TODO: Replace with direct import once ehbp publishes typed errors.
+ */
+function isKeyConfigMismatchError(error: unknown): boolean {
+  return error instanceof Error && error.name === 'KeyConfigMismatchError';
 }
 
 function createPendingVerificationDocument(configRepo: string): VerificationDocument {
@@ -145,10 +153,8 @@ export class SecureClient {
   public async ready(): Promise<void> {
     if (!this.initPromise) {
       this.initPromise = this.initSecureClient().catch(err => {
-        // FetchErrors are transient (network issues) and happen before any state is accumulated -- reset by default
-        if (err instanceof FetchError) {
-          this.reset();
-        }
+        // Never cache a rejected promise — next ready() starts fresh
+        this.reset();
         throw err;
       });
     }
@@ -246,8 +252,8 @@ export class SecureClient {
    * encrypted using HPKE (or TLS pinning if configured) so only the verified
    * enclave can decrypt them.
    *
-   * On failure, automatically re-verifies attestation and retries once in case
-   * the enclave restarted with new keys.
+   * On `KeyConfigMismatchError` (server key rotation), automatically re-attests
+   * and retries the request once. All other errors propagate to the caller.
    *
    * @example
    * ```typescript
@@ -265,22 +271,13 @@ export class SecureClient {
       try {
         return await this._fetch!(input, init);
       } catch (error) {
-        // Retry once - enclave may have restarted with new keys
-        this.reset();
-        try {
+        // Channel recovery: server rotated keys, request was never processed — safe to retry
+        if (isKeyConfigMismatchError(error)) {
+          this.reset();
           await this.ready();
           return await this._fetch!(input, init);
-        } catch (retryError) {
-          // Retry also failed — record latest error and throw with chain
-          this.verificationDocument.steps.otherError = {
-            status: 'failed',
-            error: retryError instanceof Error ? retryError.message : String(retryError)
-          };
-          if (retryError instanceof Error) {
-            retryError.cause = error;
-          }
-          throw retryError;
         }
+        throw error;
       }
     };
   }
