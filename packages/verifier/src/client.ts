@@ -3,7 +3,7 @@ import { verifySigstoreBundle } from './sigstore.js';
 import { assembleAttestationBundle } from './bundle.js';
 import { verifyCertificate } from './cert-verify.js';
 import { compareMeasurements, measurementFingerprint } from './types.js';
-import type { AttestationDocument, AttestationMeasurement, AttestationResponse, VerificationDocument, AttestationBundle } from './types.js';
+import type { AttestationResponse, VerificationDocument, AttestationBundle } from './types.js';
 import { ConfigurationError } from './errors.js';
 
 export interface VerifierOptions {
@@ -35,24 +35,8 @@ export class Verifier {
   }
 
   async verifyBundle(bundle: AttestationBundle): Promise<AttestationResponse> {
-    return this.performVerification(
-      bundle.enclaveAttestationReport,
-      bundle.vcek,
-      bundle.digest,
-      bundle.sigstoreBundle,
-      bundle.domain,
-      bundle.enclaveCert
-    );
-  }
+    const { enclaveAttestationReport: attestationDoc, vcek, digest, sigstoreBundle, domain, enclaveCert } = bundle;
 
-  private async performVerification(
-    attestationDoc: AttestationDocument,
-    vcek: string,
-    digest: string,
-    sigstoreBundle: unknown,
-    domain: string,
-    enclaveCert: string
-  ): Promise<AttestationResponse> {
     const steps: VerificationDocument['steps'] = {
       fetchDigest: { status: 'success' }, // Already fetched by caller
       verifyCode: { status: 'pending' },
@@ -74,7 +58,7 @@ export class Verifier {
       }
 
       // Step 2: Verify code provenance (Sigstore bundle)
-      let codeMeasurements: AttestationMeasurement;
+      let codeMeasurements;
       try {
         codeMeasurements = await verifySigstoreBundle(sigstoreBundle, digest, this.configRepo);
         steps.verifyCode = { status: 'success' };
