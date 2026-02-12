@@ -2,10 +2,9 @@ import type { Report } from './report.js';
 import type { TCBParts } from './types.js';
 import { ReportSigner } from './constants.js';
 import { ARK_CERT, ASK_CERT } from './certs.js';
-import { tcbFromInt, bytesToHex } from './utils.js';
 import { X509Certificate } from '@freedomofpress/sigstore-browser';
 import { ASN1Obj, uint8ArrayEqual } from '@freedomofpress/crypto-browser';
-import { FetchError, AttestationError, wrapOrThrow } from '../errors.js';
+import { AttestationError, wrapOrThrow } from '../errors.js';
 
 // SEV-SNP VCEK OID definitions
 const SnpOid = {
@@ -39,8 +38,7 @@ export class CertificateChain {
     public vcek: X509Certificate
   ) {}
 
-  static async fromReport(report: Report, vcekDer?: Uint8Array): Promise<CertificateChain> {
-    // Validate report
+  static async fromReport(report: Report, vcekDer: Uint8Array): Promise<CertificateChain> {
     if (report.productName !== 'Genoa') {
       throw new AttestationError(`Unsupported processor: ${report.productName}. This verifier only supports AMD EPYC Genoa processors`);
     }
@@ -49,33 +47,11 @@ export class CertificateChain {
       throw new AttestationError('Unsupported signing key: This verifier only supports VCEK-signed attestation reports');
     }
 
-    // Fetch VCEK if not provided
-    const vcek = vcekDer ?? await this.fetchVcekForReport(report);
-
     const ark = X509Certificate.parse(ARK_CERT);
     const ask = X509Certificate.parse(ASK_CERT);
-    const vcekCert = X509Certificate.parse(vcek);
+    const vcekCert = X509Certificate.parse(vcekDer);
 
     return new CertificateChain(ark, ask, vcekCert);
-  }
-
-  private static async fetchVcekForReport(report: Report): Promise<Uint8Array> {
-    const vcekUrl = buildVCEKUrl(report.productName, report.chipId, report.reportedTcb);
-
-    const isBrowser = typeof window !== 'undefined' && typeof window.localStorage !== 'undefined';
-    if (isBrowser) { // Browser supports local caching
-      const cached = localStorage.getItem(vcekUrl);
-      if (cached) {
-        try { // Base64 decode and return as Uint8Array
-          return Uint8Array.from(atob(cached), c => c.charCodeAt(0));
-        } catch { // Base64 decode failed, remove from cache
-          localStorage.removeItem(vcekUrl);
-        }
-      }
-      return fetchAndCacheVCEK(vcekUrl);
-    }
-
-    return fetchVCEK(vcekUrl);
   }
 
   async verifyChain(): Promise<boolean> {
@@ -319,37 +295,3 @@ export class CertificateChain {
   }
 }
 
-async function fetchAndCacheVCEK(vcekUrl: string): Promise<Uint8Array> {
-  const vcekDer = await fetchVCEK(vcekUrl);
-
-  // Cache for future use (URL serves as cache key)
-  if (typeof localStorage !== 'undefined') {
-    try {
-      const base64 = btoa(String.fromCharCode(...vcekDer));
-      localStorage.setItem(vcekUrl, base64);
-    } catch {
-      // Cache storage failed (quota exceeded, etc), continue anyway
-    }
-  }
-
-  return vcekDer;
-}
-
-export function buildVCEKUrl(productName: string, chipId: Uint8Array, reportedTcb: bigint): string {
-  const tcb = tcbFromInt(reportedTcb);
-  const chipIdHex = bytesToHex(chipId);
-  const baseUrl = 'https://kds-proxy.tinfoil.sh/vcek/v1';
-
-  return `${baseUrl}/${productName}/${chipIdHex}?blSPL=${tcb.blSpl}&teeSPL=${tcb.teeSpl}&snpSPL=${tcb.snpSpl}&ucodeSPL=${tcb.ucodeSpl}`;
-}
-
-export async function fetchVCEK(url: string): Promise<Uint8Array> {
-  const response = await fetch(url);
-
-  if (!response.ok) {
-    throw new FetchError(`Failed to fetch VCEK certificate from AMD KDS: HTTP ${response.status} ${response.statusText}`);
-  }
-
-  const arrayBuffer = await response.arrayBuffer();
-  return new Uint8Array(arrayBuffer);
-}

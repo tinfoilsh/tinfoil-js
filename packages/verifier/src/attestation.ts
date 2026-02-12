@@ -5,46 +5,20 @@ import { CertificateChain } from './sev/cert-chain.js';
 import { verifyAttestation as verifyAttestationInternal } from './sev/verify.js';
 import { bytesToHex } from './sev/utils.js';
 import { validateReport, defaultValidationOptions } from './sev/validation.js';
-import { FetchError, AttestationError, wrapOrThrow } from './errors.js';
-
-const ATTESTATION_ENDPOINT = '/.well-known/tinfoil-attestation';
-
-/**
- * Retrieves the attestation document from a given enclave hostname.
- *
- * @param host - The hostname of the enclave
- * @returns The attestation document
- * @throws Error if the request fails
- */
-export async function fetchAttestation(host: string): Promise<AttestationDocument> {
-  const url = `https://${host}${ATTESTATION_ENDPOINT}`;
-  const response = await fetch(url);
-
-  if (!response.ok) {
-    throw new FetchError(`Failed to fetch attestation document from ${host}: HTTP ${response.status} ${response.statusText}`);
-  }
-
-  const docDict = await response.json();
-
-  return {
-    format: docDict.format as PredicateType,
-    body: docDict.body,
-  };
-}
+import { AttestationError, wrapOrThrow } from './errors.js';
 
 /**
  * Checks the attestation document against its trust root
  * and returns the inner measurements.
  *
  * @param doc - The attestation document to verify
- * @param vcekBase64 - Optional pre-fetched VCEK certificate in base64-encoded DER format
+ * @param vcekBase64 - VCEK certificate in base64-encoded DER format
  * @returns The verification result
  * @throws Error if verification fails or format is unsupported
  */
-export async function verifyAttestation(doc: AttestationDocument, vcekBase64?: string): Promise<AttestationResponse> {
+export async function verifyAttestation(doc: AttestationDocument, vcekBase64: string): Promise<AttestationResponse> {
   if (doc.format === PredicateType.SevGuestV2) {
-    const vcekDer = vcekBase64 ? base64ToBytes(vcekBase64) : undefined;
-    return verifySevAttestationV2(doc.body, vcekDer);
+    return verifySevAttestationV2(doc.body, base64ToBytes(vcekBase64));
   } else {
     throw new AttestationError(`Unsupported attestation document format: "${doc.format}". Only SEV-SNP Guest V2 format is supported`);
   }
@@ -58,7 +32,7 @@ export async function verifyAttestation(doc: AttestationDocument, vcekBase64?: s
  * @returns Verification result
  * @throws Error if verification fails
  */
-async function verifySevAttestationV2(attestationDoc: string, vcekDer?: Uint8Array): Promise<AttestationResponse> {
+async function verifySevAttestationV2(attestationDoc: string, vcekDer: Uint8Array): Promise<AttestationResponse> {
   const report = await verifySevReport(attestationDoc, true, vcekDer);
 
   const measurement = {
@@ -86,7 +60,7 @@ async function verifySevAttestationV2(attestationDoc: string, vcekDer?: Uint8Arr
  * @returns The parsed and verified report
  * @throws Error if verification fails
  */
-async function verifySevReport(attestationDoc: string, isCompressed: boolean, vcekDer?: Uint8Array): Promise<Report> {
+async function verifySevReport(attestationDoc: string, isCompressed: boolean, vcekDer: Uint8Array): Promise<Report> {
   let attDocBytes: Uint8Array;
   try {
     attDocBytes = base64ToBytes(attestationDoc);
