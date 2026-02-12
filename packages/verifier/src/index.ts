@@ -8,6 +8,7 @@ export {
 
 // Verification functions
 export { verifyAttestation, fetchAttestation } from './attestation.js';
+export { assembleAttestationBundle } from './bundle.js';
 export { Verifier } from './client.js';
 export { fetchLatestDigest, fetchGithubAttestationBundle } from './github.js';
 export { PredicateType, compareMeasurements, measurementFingerprint, hashAttestationDocument } from './types.js';

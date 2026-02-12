@@ -1,6 +1,6 @@
-import { verifyAttestation as verifyAmdAttestation, fetchAttestation } from './attestation.js';
-import { fetchLatestDigest, fetchGithubAttestationBundle } from './github.js';
+import { verifyAttestation as verifyAmdAttestation } from './attestation.js';
 import { verifySigstoreBundle } from './sigstore.js';
+import { assembleAttestationBundle } from './bundle.js';
 import { verifyCertificate } from './cert-verify.js';
 import { compareMeasurements, measurementFingerprint } from './types.js';
 import type { AttestationDocument, AttestationMeasurement, AttestationResponse, VerificationDocument, AttestationBundle } from './types.js';
@@ -30,17 +30,11 @@ export class Verifier {
       throw new ConfigurationError("serverURL is required for verify(). Use verifyBundle() with an attestation bundle instead.");
     }
     const domain = new URL(this.serverURL).hostname;
-    const attestationDoc = await fetchAttestation(domain);
-    const digest = await fetchLatestDigest(this.configRepo);
-    const sigstoreBundle = await fetchGithubAttestationBundle(this.configRepo, digest);
-
-    return this.performVerification(attestationDoc, undefined, digest, sigstoreBundle, domain);
+    const bundle = await assembleAttestationBundle(domain, this.configRepo);
+    return this.verifyBundle(bundle);
   }
 
   async verifyBundle(bundle: AttestationBundle): Promise<AttestationResponse> {
-    if (!bundle.enclaveCert) {
-      throw new ConfigurationError('enclaveCert is required for bundle verification');
-    }
     return this.performVerification(
       bundle.enclaveAttestationReport,
       bundle.vcek,
@@ -57,14 +51,14 @@ export class Verifier {
     digest: string,
     sigstoreBundle: unknown,
     domain: string,
-    enclaveCert?: string
+    enclaveCert: string
   ): Promise<AttestationResponse> {
     const steps: VerificationDocument['steps'] = {
       fetchDigest: { status: 'success' }, // Already fetched by caller
       verifyCode: { status: 'pending' },
       verifyEnclave: { status: 'pending' },
       compareMeasurements: { status: 'pending' },
-      verifyCertificate: enclaveCert ? { status: 'pending' } : undefined,
+      verifyCertificate: { status: 'pending' },
     };
 
     try {
@@ -100,21 +94,19 @@ export class Verifier {
         throw error;
       }
 
-      // Step 4: Verify certificate (if provided)
-      if (enclaveCert) {
-        try {
-          await verifyCertificate(
-            enclaveCert,
-            domain,
-            attestationDoc,
-            amdVerification.hpkePublicKey || ''
-          );
-          steps.verifyCertificate = { status: 'success' };
-        } catch (error) {
-          steps.verifyCertificate = { status: 'failed', error: (error as Error).message };
-          this.saveFailedVerificationDocument(steps, domain);
-          throw error;
-        }
+      // Step 4: Verify certificate
+      try {
+        await verifyCertificate(
+          enclaveCert,
+          domain,
+          attestationDoc,
+          amdVerification.hpkePublicKey || ''
+        );
+        steps.verifyCertificate = { status: 'success' };
+      } catch (error) {
+        steps.verifyCertificate = { status: 'failed', error: (error as Error).message };
+        this.saveFailedVerificationDocument(steps, domain);
+        throw error;
       }
 
       // Build successful verification document
