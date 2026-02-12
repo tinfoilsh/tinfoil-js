@@ -47,7 +47,7 @@ export class Verifier {
 
   private async performVerification(
     attestationDoc: AttestationDocument,
-    vcek: string | undefined,
+    vcek: string,
     digest: string,
     sigstoreBundle: unknown,
     domain: string,
