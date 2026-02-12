@@ -127,7 +127,7 @@ async function verifySevReport(attestationDoc: string, isCompressed: boolean, vc
   return report;
 }
 
-function base64ToBytes(base64: string): Uint8Array {
+export function base64ToBytes(base64: string): Uint8Array {
   const binaryString = atob(base64);
   const bytes = new Uint8Array(binaryString.length);
   for (let i = 0; i < binaryString.length; i++) {
@@ -136,7 +136,7 @@ function base64ToBytes(base64: string): Uint8Array {
   return bytes;
 }
 
-async function decompressGzip(data: Uint8Array): Promise<Uint8Array> {
+export async function decompressGzip(data: Uint8Array): Promise<Uint8Array> {
   // Use DecompressionStream if available (browsers, Node.js 18+)
   if (typeof DecompressionStream !== 'undefined') {
     const stream = new Response(data.buffer as ArrayBuffer).body;

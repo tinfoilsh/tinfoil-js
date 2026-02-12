@@ -1,9 +1,29 @@
 import { describe, it, expect } from 'vitest';
 import { Verifier } from '../src/client.js';
+import { assembleAttestationBundle } from '../src/bundle.js';
 
 const RUN_INTEGRATION = process.env.RUN_TINFOIL_INTEGRATION === 'true';
 
 describe('Node.js Integration Tests', () => {
+  describe('assembleAttestationBundle', () => {
+    it.skipIf(!RUN_INTEGRATION)('should assemble a complete bundle from inference.tinfoil.sh', async () => {
+      const bundle = await assembleAttestationBundle(
+        'inference.tinfoil.sh',
+        'tinfoilsh/confidential-model-router',
+      );
+
+      expect(bundle.domain).toBe('inference.tinfoil.sh');
+      expect(bundle.enclaveAttestationReport).toBeDefined();
+      expect(bundle.enclaveAttestationReport.format).toBeTruthy();
+      expect(bundle.enclaveAttestationReport.body).toBeTruthy();
+      expect(bundle.digest).toMatch(/^[0-9a-f]{64}$/);
+      expect(bundle.sigstoreBundle).toBeDefined();
+      expect(bundle.vcek).toBeTruthy();
+      expect(bundle.enclaveCert).toBeTruthy();
+      expect(bundle.enclaveCert).toContain('BEGIN CERTIFICATE');
+    }, 60000);
+  });
+
   describe('Verifier against inference.tinfoil.sh', () => {
     it.skipIf(!RUN_INTEGRATION)('should verify enclave with serverURL set to inference.tinfoil.sh', async () => {
       const verifier = new Verifier({

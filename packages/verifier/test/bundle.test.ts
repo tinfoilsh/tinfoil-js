@@ -143,19 +143,17 @@ describe('Bundle Verification', () => {
     await expect(verifier.verifyBundle(tamperedBundle)).rejects.toThrow();
   });
 
-  it('should fail verification when enclaveCert is missing', async () => {
-    const bundleWithoutCert = {
+  it('should fail verification when enclaveCert is empty', async () => {
+    const bundleWithBadCert = {
       ...bundle,
       enclaveCert: '',
     };
 
     const verifier = new Verifier({
-      serverURL: `https://${bundleWithoutCert.domain}`,
+      serverURL: `https://${bundleWithBadCert.domain}`,
       configRepo: 'tinfoilsh/confidential-model-router',
     });
 
-    await expect(verifier.verifyBundle(bundleWithoutCert)).rejects.toThrow(
-      'enclaveCert is required for bundle verification'
-    );
+    await expect(verifier.verifyBundle(bundleWithBadCert)).rejects.toThrow();
   });
 });

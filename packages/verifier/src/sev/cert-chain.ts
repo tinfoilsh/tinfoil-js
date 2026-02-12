@@ -335,7 +335,7 @@ async function fetchAndCacheVCEK(vcekUrl: string): Promise<Uint8Array> {
   return vcekDer;
 }
 
-function buildVCEKUrl(productName: string, chipId: Uint8Array, reportedTcb: bigint): string {
+export function buildVCEKUrl(productName: string, chipId: Uint8Array, reportedTcb: bigint): string {
   const tcb = tcbFromInt(reportedTcb);
   const chipIdHex = bytesToHex(chipId);
   const baseUrl = 'https://kds-proxy.tinfoil.sh/vcek/v1';
@@ -343,7 +343,7 @@ function buildVCEKUrl(productName: string, chipId: Uint8Array, reportedTcb: bigi
   return `${baseUrl}/${productName}/${chipIdHex}?blSPL=${tcb.blSpl}&teeSPL=${tcb.teeSpl}&snpSPL=${tcb.snpSpl}&ucodeSPL=${tcb.ucodeSpl}`;
 }
 
-async function fetchVCEK(url: string): Promise<Uint8Array> {
+export async function fetchVCEK(url: string): Promise<Uint8Array> {
   const response = await fetch(url);
 
   if (!response.ok) {
