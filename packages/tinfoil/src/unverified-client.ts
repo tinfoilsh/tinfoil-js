@@ -9,6 +9,7 @@
  * server that doesn't have attestation set up. For production, use SecureClient
  * or TinfoilAI which verify the key through attestation.
  */
+import { createUnverifiedEncryptedBodyFetch } from "./encrypted-body-fetch.js";
 import { fetchRouter } from "./atc.js";
 import { ConfigurationError } from "./verifier.js";
 
@@ -70,8 +71,6 @@ export class UnverifiedClient {
       }
     }
 
-    // Dynamically import to avoid loading ehbp/hpke modules at module load time
-    const { createUnverifiedEncryptedBodyFetch } = await import("./encrypted-body-fetch.js");
     this._fetch = createUnverifiedEncryptedBodyFetch(this.baseURL, this.keyOrigin);
   }
 
