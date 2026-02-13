@@ -1,4 +1,4 @@
-import { Verifier, assembleAttestationBundle, ConfigurationError, type VerificationDocument } from "./verifier.js";
+import { Verifier, assembleAttestationBundle, ConfigurationError, FetchError, AttestationError, type VerificationDocument } from "./verifier.js";
 import type { AttestationBundle } from "./verifier.js";
 import { TINFOIL_CONFIG } from "./config.js";
 import { createSecureFetch } from "./secure-fetch.js";
@@ -159,13 +159,32 @@ export class SecureClient {
    */
   public async ready(): Promise<void> {
     if (!this.initPromise) {
-      this.initPromise = this.initSecureClient().catch(err => {
-        // Never cache a rejected promise — next ready() starts fresh
+      this.initPromise = this.initSecureClient().catch(async err => {
+        // Only try recovery if the error is transient (network I/O, attestation errors)
+        if (err instanceof FetchError || err instanceof AttestationError) {
+          this.clearDerivedState(); // Start with a new enclave
+          await new Promise(r => setTimeout(r, 1000)); // Wait 1 second before retrying
+          return this.initSecureClient().catch(retryErr => {
+            this.reset();
+            throw retryErr;
+          });
+        }
+        // Everything else (ConfigurationError, bugs) — propagate immediately
         this.reset();
         throw err;
       });
     }
     return this.initPromise;
+  }
+
+  /**
+   * Clear derived state without touching initPromise (preserves deduplication).
+   */
+  private clearDerivedState(): void {
+    this._fetch = null;
+    this.verificationDocument = createPendingVerificationDocument(this.config.configRepo);
+    this.resolvedEnclaveURL = undefined;
+    this.resolvedBaseURL = undefined;
   }
 
   /**
@@ -190,10 +209,7 @@ export class SecureClient {
    */
   public reset(): void {
     this.initPromise = null;
-    this._fetch = null;
-    this.verificationDocument = createPendingVerificationDocument(this.config.configRepo);
-    this.resolvedEnclaveURL = undefined;
-    this.resolvedBaseURL = undefined;
+    this.clearDerivedState();
   }
 
   private async initSecureClient(): Promise<void> {
