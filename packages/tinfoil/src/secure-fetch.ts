@@ -1,13 +1,16 @@
 import { isRealBrowser } from "./env.js";
 import { ConfigurationError } from "./verifier.js";
+import type { SecureTransport } from "./encrypted-body-fetch.js";
+
+export type { SecureTransport } from "./encrypted-body-fetch.js";
 
 /**
  * Creates a secure fetch function with either HPKE encryption or TLS pinning.
- * 
+ *
  * This is the unified implementation for both browser and server environments:
  * - In browsers: Only HPKE encryption is supported (requires hpkePublicKey)
  * - In Node.js/Bun: Also supports TLS certificate pinning when configured
- * 
+ *
  * All imports are dynamic to enable tree-shaking in browser bundles.
  */
 export async function createSecureFetch(
@@ -15,7 +18,7 @@ export async function createSecureFetch(
   hpkePublicKey?: string,
   tlsPublicKeyFingerprint?: string,
   enclaveURL?: string
-): Promise<typeof fetch> {
+): Promise<SecureTransport> {
   if (hpkePublicKey) {
     // Dynamic import to enable tree-shaking in browser bundles.
     const { createEncryptedBodyFetch } = await import("./encrypted-body-fetch.js");
@@ -37,5 +40,11 @@ export async function createSecureFetch(
 
   // Dynamic import to avoid including Node.js crypto module in browser bundles
   const { createPinnedTlsFetch } = await import("./pinned-tls-fetch.js");
-  return createPinnedTlsFetch(baseURL, tlsPublicKeyFingerprint);
+  const pinnedFetch = await createPinnedTlsFetch(baseURL, tlsPublicKeyFingerprint);
+  return {
+    fetch: pinnedFetch,
+    getSessionRecoveryToken() {
+      throw new Error('Session recovery tokens are only available in EHBP transport mode');
+    },
+  };
 }

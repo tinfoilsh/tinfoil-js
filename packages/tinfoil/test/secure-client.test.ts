@@ -32,10 +32,11 @@ const verifyMock = vi.fn(async () => ({
 }));
 
 const mockFetch = vi.fn(async () => new Response(JSON.stringify({ message: "success" })));
+const mockGetSessionRecoveryToken = vi.fn(async () => ({ exportedSecret: new Uint8Array(), requestEnc: new Uint8Array() }));
 const createSecureFetchMock = vi.fn(
   async (_baseURL: string, hpkePublicKey: string | undefined) => {
     if (hpkePublicKey) {
-      return mockFetch;
+      return { fetch: mockFetch, getSessionRecoveryToken: mockGetSessionRecoveryToken };
     }
     throw new Error("TLS-only verification not supported in tests");
   },

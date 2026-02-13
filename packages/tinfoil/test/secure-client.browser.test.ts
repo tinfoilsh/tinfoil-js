@@ -75,7 +75,7 @@ vi.mock("../src/secure-fetch.js", () => ({
           "Only HPKE-enabled enclaves can be used in browser environments."
       );
     }
-    return vi.fn();
+    return { fetch: vi.fn(), getSessionRecoveryToken: vi.fn() };
   },
 }));
 

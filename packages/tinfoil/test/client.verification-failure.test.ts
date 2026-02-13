@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
 const createSecureFetchMock = vi.fn(async () => {
-  return (async () => new Response(null)) as typeof fetch;
+  return { fetch: (async () => new Response(null)) as typeof fetch, getSessionRecoveryToken: vi.fn() };
 });
 
 vi.mock("../src/verifier.js", () => ({

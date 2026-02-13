@@ -1,6 +1,13 @@
 // Types are imported separately - type imports don't cause runtime loading
-import type { Transport as EhbpTransport, Identity as EhbpIdentity } from "ehbp";
+import type { Transport as EhbpTransport, Identity as EhbpIdentity, SessionRecoveryToken } from "ehbp";
 import { ConfigurationError, FetchError } from "./verifier.js";
+
+export type { SessionRecoveryToken } from "ehbp";
+
+export interface SecureTransport {
+  fetch: typeof fetch;
+  getSessionRecoveryToken(): SessionRecoveryToken;
+}
 
 // Lazy-loaded ehbp module - cache the promise to prevent duplicate imports on concurrent calls
 let ehbpModulePromise: Promise<typeof import("ehbp")> | null = null;
@@ -104,29 +111,40 @@ export async function encryptedBodyRequest(
 
 const ENCLAVE_URL_HEADER = 'X-Tinfoil-Enclave-Url';
 
-export function createEncryptedBodyFetch(baseURL: string, hpkePublicKey: string, enclaveURL?: string): typeof fetch {
+export function createEncryptedBodyFetch(baseURL: string, hpkePublicKey: string, enclaveURL?: string): SecureTransport {
   let transportPromise: Promise<EhbpTransport> | null = null;
+  let resolvedTransport: EhbpTransport | null = null;
 
   const getOrCreateTransport = async (): Promise<EhbpTransport> => {
     if (!transportPromise) {
       const baseUrl = new URL(baseURL);
       transportPromise = getTransportForOrigin(baseUrl.origin, hpkePublicKey);
+      transportPromise.then(t => { resolvedTransport = t; });
     }
     return transportPromise;
   };
 
-  return async (input: RequestInfo | URL, init?: RequestInit) => {
-    const normalized = normalizeEncryptedBodyRequestArgs(input, init);
-    const targetUrl = new URL(normalized.url, baseURL);
+  return {
+    fetch: async (input: RequestInfo | URL, init?: RequestInit) => {
+      const normalized = normalizeEncryptedBodyRequestArgs(input, init);
+      const targetUrl = new URL(normalized.url, baseURL);
 
-    const headers = new Headers(normalized.init?.headers);
-    if (enclaveURL && new URL(enclaveURL).origin !== new URL(baseURL).origin) {
-      headers.set(ENCLAVE_URL_HEADER, enclaveURL);
-    }
-    const initWithHeader = { ...normalized.init, headers };
+      const headers = new Headers(normalized.init?.headers);
+      if (enclaveURL && new URL(enclaveURL).origin !== new URL(baseURL).origin) {
+        headers.set(ENCLAVE_URL_HEADER, enclaveURL);
+      }
+      const initWithHeader = { ...normalized.init, headers };
 
-    const transportInstance = await getOrCreateTransport();
-    return encryptedBodyRequest(targetUrl.toString(), hpkePublicKey, initWithHeader, transportInstance);
+      const transportInstance = await getOrCreateTransport();
+      return encryptedBodyRequest(targetUrl.toString(), hpkePublicKey, initWithHeader, transportInstance);
+    },
+
+    getSessionRecoveryToken(): SessionRecoveryToken {
+      if (!resolvedTransport) {
+        throw new Error('No session recovery token available — no request has been made yet');
+      }
+      return resolvedTransport.getSessionRecoveryToken();
+    },
   };
 }
 
