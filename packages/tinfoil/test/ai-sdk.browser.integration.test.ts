@@ -28,6 +28,7 @@ describe('AI SDK Browser Transport Tests', () => {
         },
         body: JSON.stringify({
           model: 'gpt-oss-120b-free',
+          max_tokens: 5,
           messages: [{ role: 'user', content: 'Say hello' }],
         }),
       });
@@ -53,6 +54,7 @@ describe('AI SDK Browser Transport Tests', () => {
         },
         body: JSON.stringify({
           model: 'gpt-oss-120b-free',
+          max_tokens: 5,
           messages: [{ role: 'user', content: 'Count 1 2 3' }],
           stream: true,
         }),
@@ -97,6 +99,7 @@ describe('AI SDK Browser Transport Tests', () => {
         },
         body: JSON.stringify({
           model: 'gpt-oss-120b-free',
+          max_tokens: 5,
           messages: [{ role: 'user', content: 'Hello' }],
         }),
       });
@@ -120,6 +123,7 @@ describe('AI SDK Browser Transport Tests', () => {
         },
         body: JSON.stringify({
           model: 'gpt-oss-120b-free',
+          max_tokens: 5,
           messages: [{ role: 'user', content: 'Write a very long story' }],
           stream: true,
         }),
@@ -163,6 +167,7 @@ describe('AI SDK Browser Transport Tests', () => {
         },
         body: JSON.stringify({
           model: 'gpt-oss-120b-free',
+          max_tokens: 5,
           messages: [{ role: 'user', content: 'Hello' }],
         }),
       });
@@ -189,6 +194,7 @@ describe('AI SDK Browser Transport Tests', () => {
         },
         body: JSON.stringify({
           model: 'gpt-oss-120b-free',
+          max_tokens: 5,
           messages: [{ role: 'user', content: 'Hello' }],
         }),
       });

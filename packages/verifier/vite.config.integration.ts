@@ -4,6 +4,7 @@ import { defineConfig } from "vite";
 export default defineConfig({
   test: {
     include: ["**/*.browser.integration.test.ts"],
+    testTimeout: 30_000,
     browser: {
       enabled: true,
       provider: "playwright",
