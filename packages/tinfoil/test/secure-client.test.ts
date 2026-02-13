@@ -53,10 +53,18 @@ vi.mock("../src/verifier.js", () => ({
       return mockVerificationDocument;
     }
   },
-  FetchError: class FetchError extends Error {
+  assembleAttestationBundle: vi.fn(async (enclaveHost: string) => ({
+    domain: enclaveHost,
+    enclaveAttestationReport: { format: "test", body: "test" },
+    digest: "test-digest",
+    sigstoreBundle: {},
+    vcek: "test-vcek",
+    enclaveCert: "test-enclave-cert",
+  })),
+  ConfigurationError: class ConfigurationError extends Error {
     constructor(message: string) {
       super(message);
-      this.name = 'FetchError';
+      this.name = 'ConfigurationError';
     }
   },
 }));
@@ -86,7 +94,6 @@ describe("SecureClient", () => {
 
     const client = new SecureClient({
       baseURL: "https://test.example.com/",
-      configRepo: "test-org/test-repo",
     });
 
     await client.ready();
@@ -163,7 +170,6 @@ describe("SecureClient", () => {
 
       const client = new SecureClient({
         baseURL: "https://test.example.com/",
-        configRepo: "test-org/test-repo",
       });
 
       await client.ready();

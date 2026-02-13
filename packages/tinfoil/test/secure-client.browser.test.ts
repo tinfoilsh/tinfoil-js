@@ -39,16 +39,18 @@ vi.mock("../src/verifier.js", () => ({
       return mockVerificationDocument;
     }
   },
+  assembleAttestationBundle: vi.fn(async (enclaveHost: string) => ({
+    domain: enclaveHost,
+    enclaveAttestationReport: { format: "test", body: "test" },
+    digest: "test-digest",
+    sigstoreBundle: {},
+    vcek: "test-vcek",
+    enclaveCert: "test-enclave-cert",
+  })),
   ConfigurationError: class ConfigurationError extends Error {
     constructor(message: string) {
       super(message);
       this.name = 'ConfigurationError';
-    }
-  },
-  FetchError: class FetchError extends Error {
-    constructor(message: string) {
-      super(message);
-      this.name = 'FetchError';
     }
   },
 }));

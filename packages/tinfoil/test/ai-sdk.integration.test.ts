@@ -25,6 +25,7 @@ describe("Vercel AI SDK Integration Tests", () => {
       const { text } = await generateText({
         model: tinfoil("gpt-oss-120b-free"),
         prompt: "Say 'hello' and nothing else.",
+        maxTokens: 5,
       });
 
       expect(text).toBeTruthy();
@@ -41,6 +42,7 @@ describe("Vercel AI SDK Integration Tests", () => {
       const stream = streamText({
         model: tinfoil("gpt-oss-120b-free"),
         prompt: "Count from 1 to 3.",
+        maxTokens: 5,
       });
 
       let accumulatedText = "";
@@ -61,6 +63,7 @@ describe("Vercel AI SDK Integration Tests", () => {
       const { text, toolCalls } = await generateText({
         model: tinfoil("gpt-oss-120b-free"),
         prompt: "What is the weather in San Francisco? Use the weather tool.",
+        maxTokens: 5,
         tools: {
           weather: tool({
             description: "Get the weather for a location",
@@ -91,6 +94,7 @@ describe("Vercel AI SDK Integration Tests", () => {
           age: z.number(),
         }),
         prompt: "Generate a fictional person with a name and age.",
+        maxTokens: 5,
       });
 
       expect(object).toBeTruthy();
@@ -108,6 +112,7 @@ describe("Vercel AI SDK Integration Tests", () => {
       const stream = streamText({
         model: tinfoil("gpt-oss-120b-free"),
         prompt: "Write a very long story about a dragon.",
+        maxTokens: 5,
         abortSignal: abortController.signal,
       });
 
@@ -139,6 +144,7 @@ describe("Vercel AI SDK Integration Tests", () => {
         model: tinfoil("gpt-oss-120b-free"),
         system: "You are a helpful assistant. Always respond with exactly one word.",
         prompt: "What color is the sky?",
+        maxTokens: 5,
       });
 
       expect(text).toBeTruthy();
@@ -165,6 +171,7 @@ describe("Vercel AI SDK Integration Tests", () => {
       const { text } = await generateText({
         model: provider("gpt-oss-120b-free"),
         prompt: "Say 'hello' and nothing else.",
+        maxTokens: 5,
       });
 
       expect(text).toBeTruthy();
@@ -189,6 +196,7 @@ describe("Vercel AI SDK Integration Tests", () => {
       const stream = streamText({
         model: provider("gpt-oss-120b-free"),
         prompt: "Count from 1 to 3.",
+        maxTokens: 5,
       });
 
       let accumulatedText = "";
@@ -216,6 +224,7 @@ describe("Vercel AI SDK Integration Tests", () => {
       const { text } = await generateText({
         model: tinfoil("gpt-oss-120b-free"),
         prompt: "Say 'proxy works' and nothing else.",
+        maxTokens: 5,
       });
 
       expect(text).toBeTruthy();

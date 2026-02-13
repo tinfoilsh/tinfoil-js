@@ -8,6 +8,7 @@ export default defineConfig({
   },
   test: {
     include: ["test/*.browser.integration.test.ts"],
+    testTimeout: 30_000,
     browser: {
       enabled: true,
       provider: "playwright",

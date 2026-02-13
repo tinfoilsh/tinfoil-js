@@ -16,10 +16,10 @@ vi.mock("../src/verifier.js", () => ({
       return undefined;
     }
   },
-  FetchError: class FetchError extends Error {
+  ConfigurationError: class ConfigurationError extends Error {
     constructor(message: string) {
       super(message);
-      this.name = 'FetchError';
+      this.name = 'ConfigurationError';
     }
   },
 }));
