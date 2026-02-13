@@ -124,25 +124,20 @@ export interface TinfoilAIOptions {
  */
 export class TinfoilAI {
   private client?: OpenAI;
-  private clientPromise: Promise<OpenAI>;
-  private readyPromise?: Promise<void>;
   private secureClient: SecureClient;
-  private useBearerToken: boolean;
+  private openAIOptions: Record<string, any>;
 
   public apiKey?: string;
   public bearerToken?: string;
 
   constructor(options: TinfoilAIOptions = {}) {
-    const openAIOptions = { ...options };
-
-    // bearerToken is used for browser auth (e.g., JWT from your auth system)
-    // It automatically enables browser usage without dangerouslyAllowBrowser
-    this.useBearerToken = !!options.bearerToken;
+    const openAIOptions: Record<string, any> = { ...options };
 
     // In browser builds, never read secrets from process.env to avoid
     // leaking credentials into client bundles. Require explicit apiKey or bearerToken.
     if (options.bearerToken) {
       openAIOptions.apiKey = options.bearerToken;
+      openAIOptions.dangerouslyAllowBrowser = true;
       this.bearerToken = options.bearerToken;
     } else if (options.apiKey) {
       openAIOptions.apiKey = options.apiKey;
@@ -150,7 +145,13 @@ export class TinfoilAI {
       openAIOptions.apiKey = process.env.TINFOIL_API_KEY;
     }
 
+    if ((options as any).dangerouslyAllowBrowser === true) {
+      openAIOptions.dangerouslyAllowBrowser = true;
+    }
+
     this.apiKey = options.apiKey;
+
+    this.openAIOptions = openAIOptions;
 
     this.secureClient = new SecureClient({
       baseURL: options.baseURL,
@@ -159,8 +160,6 @@ export class TinfoilAI {
       transport: options.transport,
       attestationBundleURL: options.attestationBundleURL,
     });
-
-    this.clientPromise = this.createOpenAIClient(openAIOptions);
   }
 
   /**
@@ -177,41 +176,30 @@ export class TinfoilAI {
    * ```
    */
   public async ready(): Promise<void> {
-    if (!this.readyPromise) {
-      this.readyPromise = (async () => {
-        this.client = await this.clientPromise;
-      })();
-    }
-    return this.readyPromise;
+    await this.ensureReady();
   }
 
-  private async createOpenAIClient(
-    options: Partial<
-      Omit<ConstructorParameters<typeof OpenAI>[0], "baseURL">
-    > = {},
-  ): Promise<OpenAI> {
-    await this.secureClient.ready();
-
-    const baseURL = this.secureClient.getBaseURL();
-
-    const clientOptions: ConstructorParameters<typeof OpenAI>[0] = {
-      ...options,
-      baseURL: baseURL,
-      fetch: this.secureClient.fetch,
-    };
-
-    // Automatically allow browser usage when bearerToken is used (e.g., JWT auth)
-    // or when explicitly requested via dangerouslyAllowBrowser
-    if (this.useBearerToken || (options as any).dangerouslyAllowBrowser === true) {
-      clientOptions.dangerouslyAllowBrowser = true;
-    }
-
-    return new OpenAI(clientOptions);
+  /**
+   * Reset the client, clearing all verification state and transport.
+   * 
+   * After calling reset(), the next call to `ready()` or any API method
+   * will perform a fresh attestation and establish a new secure transport.
+   */
+  public reset(): void {
+    this.client = undefined;
+    this.secureClient.reset();
   }
 
   private async ensureReady(): Promise<OpenAI> {
-    await this.ready();
-    return this.client!;
+    await this.secureClient.ready();
+    if (!this.client) {
+      this.client = new OpenAI({
+        ...this.openAIOptions,
+        baseURL: this.secureClient.getBaseURL(),
+        fetch: this.secureClient.fetch,
+      });
+    }
+    return this.client;
   }
 
   /**
