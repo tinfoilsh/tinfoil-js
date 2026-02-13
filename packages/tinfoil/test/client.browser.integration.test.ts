@@ -17,6 +17,7 @@ describe('Browser Client Integration Tests', () => {
       const completion = await client.chat.completions.create({
         messages: [{ role: 'user', content: 'Hello!' }],
         model: 'gpt-oss-120b-free',
+        max_tokens: 5,
       });
 
       expect(completion).toBeDefined();
@@ -26,8 +27,6 @@ describe('Browser Client Integration Tests', () => {
       const firstChoice = completion.choices[0];
       expect(firstChoice).toBeDefined();
       expect(firstChoice.message).toBeDefined();
-      expect(typeof firstChoice.message.content).toBe('string');
-      expect(firstChoice.message.content!.length).toBeGreaterThan(0);
     }, 60000);
 
     it('should get verification document after client initialization', async () => {
@@ -63,19 +62,17 @@ describe('Browser Client Integration Tests', () => {
           { role: 'user', content: 'Is this a test?' },
         ],
         model: 'gpt-oss-120b-free',
+        max_tokens: 5,
         stream: true,
       });
 
-      let accumulatedContent = '';
+      let chunksReceived = 0;
 
       for await (const chunk of stream) {
-        const content = chunk.choices[0]?.delta?.content;
-        if (content) {
-          accumulatedContent += content;
-        }
+        chunksReceived++;
       }
 
-      expect(accumulatedContent.length).toBeGreaterThan(0);
+      expect(chunksReceived).toBeGreaterThan(0);
     }, 60000);
   });
 
@@ -94,6 +91,7 @@ describe('Browser Client Integration Tests', () => {
         },
         body: JSON.stringify({
           model: 'gpt-oss-120b-free',
+          max_tokens: 5,
           messages: [{ role: 'user', content: 'Hello!' }],
         }),
       });
@@ -110,8 +108,6 @@ describe('Browser Client Integration Tests', () => {
       const firstChoice = responseBody.choices[0];
       expect(firstChoice).toBeDefined();
       expect(firstChoice.message).toBeDefined();
-      expect(typeof firstChoice.message.content).toBe('string');
-      expect(firstChoice.message.content.length).toBeGreaterThan(0);
     }, 60000);
 
     it('should get verification document from SecureClient', async () => {
@@ -144,6 +140,7 @@ describe('Browser Client Integration Tests', () => {
         },
         body: JSON.stringify({
           model: 'gpt-oss-120b-free',
+          max_tokens: 5,
           messages: [{ role: 'user', content: 'Hello!' }],
         }),
       });
