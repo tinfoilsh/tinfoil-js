@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 const MOCK_MEASUREMENT_TYPE = "https://tinfoil.sh/predicate/sev-snp-guest/v1";
 
@@ -57,6 +57,12 @@ vi.mock("../src/verifier.js", () => ({
     constructor(message: string) {
       super(message);
       this.name = 'FetchError';
+    }
+  },
+  AttestationError: class AttestationError extends Error {
+    constructor(message: string) {
+      super(message);
+      this.name = 'AttestationError';
     }
   },
   ConfigurationError: class ConfigurationError extends Error {
@@ -270,6 +276,95 @@ describe("SecureClient", () => {
       // Re-derived from fresh bundle
       expect(client.getBaseURL()).toBe("https://test-router.tinfoil.sh/v1/");
       expect(client.getEnclaveURL()).toBe("https://test-router.tinfoil.sh");
+    });
+  });
+
+  describe("init recovery", () => {
+    beforeEach(() => {
+      vi.useFakeTimers();
+    });
+
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    it("should retry once on FetchError then succeed", async () => {
+      const { FetchError } = await import("../src/verifier.js");
+      verifyMock
+        .mockRejectedValueOnce(new FetchError("network timeout"))
+        .mockResolvedValueOnce({
+          tlsPublicKeyFingerprint: undefined,
+          hpkePublicKey: "mock-hpke-public-key",
+          measurement: { type: MOCK_MEASUREMENT_TYPE, registers: [] },
+        });
+
+      const { SecureClient } = await import("../src/secure-client");
+      const client = new SecureClient({ baseURL: "https://test.example.com/" });
+
+      const readyPromise = client.ready();
+      await vi.advanceTimersByTimeAsync(1000);
+      await readyPromise;
+
+      expect(verifyMock).toHaveBeenCalledTimes(2);
+      expect(createSecureFetchMock).toHaveBeenCalledTimes(1);
+    });
+
+    it("should retry once on AttestationError then succeed", async () => {
+      const { AttestationError } = await import("../src/verifier.js");
+      verifyMock
+        .mockRejectedValueOnce(new AttestationError("stale report"))
+        .mockResolvedValueOnce({
+          tlsPublicKeyFingerprint: undefined,
+          hpkePublicKey: "mock-hpke-public-key",
+          measurement: { type: MOCK_MEASUREMENT_TYPE, registers: [] },
+        });
+
+      const { SecureClient } = await import("../src/secure-client");
+      const client = new SecureClient({ baseURL: "https://test.example.com/" });
+
+      const readyPromise = client.ready();
+      await vi.advanceTimersByTimeAsync(1000);
+      await readyPromise;
+
+      expect(verifyMock).toHaveBeenCalledTimes(2);
+      expect(createSecureFetchMock).toHaveBeenCalledTimes(1);
+    });
+
+    it("should propagate after second transient failure", async () => {
+      const { FetchError } = await import("../src/verifier.js");
+      verifyMock
+        .mockRejectedValueOnce(new FetchError("first failure"))
+        .mockRejectedValueOnce(new FetchError("second failure"));
+
+      const { SecureClient } = await import("../src/secure-client");
+      const client = new SecureClient({ baseURL: "https://test.example.com/" });
+
+      // Attach rejection handler before advancing timers to avoid unhandled rejection
+      const assertion = expect(client.ready()).rejects.toThrow("second failure");
+      await vi.advanceTimersByTimeAsync(1000);
+      await assertion;
+      expect(verifyMock).toHaveBeenCalledTimes(2);
+    });
+
+    it("should not retry on ConfigurationError", async () => {
+      const { ConfigurationError } = await import("../src/verifier.js");
+      verifyMock.mockRejectedValueOnce(new ConfigurationError("bad config"));
+
+      const { SecureClient } = await import("../src/secure-client");
+      const client = new SecureClient({ baseURL: "https://test.example.com/" });
+
+      await expect(client.ready()).rejects.toThrow("bad config");
+      expect(verifyMock).toHaveBeenCalledTimes(1);
+    });
+
+    it("should not retry on unknown errors", async () => {
+      verifyMock.mockRejectedValueOnce(new TypeError("unexpected bug"));
+
+      const { SecureClient } = await import("../src/secure-client");
+      const client = new SecureClient({ baseURL: "https://test.example.com/" });
+
+      await expect(client.ready()).rejects.toThrow("unexpected bug");
+      expect(verifyMock).toHaveBeenCalledTimes(1);
     });
   });
 

@@ -22,6 +22,12 @@ vi.mock("../src/verifier.js", () => ({
       this.name = 'FetchError';
     }
   },
+  AttestationError: class AttestationError extends Error {
+    constructor(message: string) {
+      super(message);
+      this.name = 'AttestationError';
+    }
+  },
   ConfigurationError: class ConfigurationError extends Error {
     constructor(message: string) {
       super(message);
