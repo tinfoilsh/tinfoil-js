@@ -154,6 +154,40 @@ describe("Examples Integration Tests", () => {
 
   });
 
+  describe("Custom Enclave (non-ATC) Path", () => {
+    it.skipIf(!RUN_INTEGRATION)("should verify and fetch using enclaveURL (assembleAttestationBundle)", async () => {
+      const { SecureClient } = await import("../src/secure-client");
+
+      const client = new SecureClient({
+        enclaveURL: "https://inference.tinfoil.sh",
+      });
+
+      await client.ready();
+
+      const doc = await client.getVerificationDocument();
+      expect(doc.securityVerified).toBe(true);
+      expect(doc.enclaveHost).toBe("inference.tinfoil.sh");
+
+      const response = await client.fetch("/v1/models", { method: "GET" });
+      expect(response.status).toBe(200);
+    });
+
+    it.skipIf(!RUN_INTEGRATION)("should verify with enclaveURL and explicit configRepo", async () => {
+      const { SecureClient } = await import("../src/secure-client");
+
+      const client = new SecureClient({
+        enclaveURL: "https://inference.tinfoil.sh",
+        configRepo: "tinfoilsh/confidential-model-router",
+      });
+
+      await client.ready();
+
+      const doc = await client.getVerificationDocument();
+      expect(doc.securityVerified).toBe(true);
+      expect(doc.configRepo).toBe("tinfoilsh/confidential-model-router");
+    });
+  });
+
   describe("Audio Transcription", () => {
     it.skipIf(!RUN_INTEGRATION)("should transcribe audio using whisper-large-v3-turbo model", async () => {
       const { TinfoilAI } = await import("../src/tinfoil-ai");

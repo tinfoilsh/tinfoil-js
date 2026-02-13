@@ -273,6 +273,122 @@ describe("SecureClient", () => {
     });
   });
 
+  describe("constructor validation", () => {
+    it("should throw ConfigurationError when configRepo is set without enclaveURL", async () => {
+      const { SecureClient } = await import("../src/secure-client");
+
+      expect(() => {
+        new SecureClient({ configRepo: "custom/repo" });
+      }).toThrow("configRepo requires enclaveURL");
+    });
+
+    it("should warn when enclaveURL is set without configRepo", async () => {
+      const consoleSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+      const { SecureClient } = await import("../src/secure-client");
+
+      new SecureClient({ enclaveURL: "https://custom.example.com" });
+
+      expect(consoleSpy).toHaveBeenCalledWith(
+        expect.stringContaining("[tinfoil] No configRepo specified"),
+      );
+      consoleSpy.mockRestore();
+    });
+
+    it("should not warn when both enclaveURL and configRepo are set", async () => {
+      const consoleSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+      const { SecureClient } = await import("../src/secure-client");
+
+      new SecureClient({
+        enclaveURL: "https://custom.example.com",
+        configRepo: "custom/repo",
+      });
+
+      expect(consoleSpy).not.toHaveBeenCalled();
+      consoleSpy.mockRestore();
+    });
+
+    it("should not warn or throw when neither enclaveURL nor configRepo are set", async () => {
+      const consoleSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+      const { SecureClient } = await import("../src/secure-client");
+
+      expect(() => new SecureClient()).not.toThrow();
+      expect(consoleSpy).not.toHaveBeenCalled();
+      consoleSpy.mockRestore();
+    });
+  });
+
+  describe("attestation bundle paths", () => {
+    it("should use fetchAttestationBundle when enclaveURL is not set", async () => {
+      const { SecureClient } = await import("../src/secure-client");
+      const { fetchAttestationBundle } = await import("../src/atc.js");
+
+      const client = new SecureClient();
+      await client.ready();
+
+      expect(fetchAttestationBundle).toHaveBeenCalledTimes(1);
+    });
+
+    it("should use assembleAttestationBundle when enclaveURL is set", async () => {
+      const { SecureClient } = await import("../src/secure-client");
+      const { assembleAttestationBundle } = await import("../src/verifier.js");
+
+      const client = new SecureClient({
+        enclaveURL: "https://my-enclave.example.com",
+        configRepo: "custom/repo",
+      });
+      await client.ready();
+
+      expect(assembleAttestationBundle).toHaveBeenCalledWith(
+        "my-enclave.example.com",
+        "custom/repo",
+      );
+    });
+  });
+
+  describe("KeyConfigMismatchError recovery", () => {
+    it("should re-attest and retry on KeyConfigMismatchError", async () => {
+      const { SecureClient } = await import("../src/secure-client");
+
+      const client = new SecureClient({
+        baseURL: "https://test.example.com/",
+      });
+      await client.ready();
+      expect(verifyMock).toHaveBeenCalledTimes(1);
+
+      // First call throws KeyConfigMismatchError, second succeeds
+      const keyMismatchError = new Error("Key config mismatch");
+      keyMismatchError.name = "KeyConfigMismatchError";
+      mockFetch
+        .mockRejectedValueOnce(keyMismatchError)
+        .mockResolvedValueOnce(new Response(JSON.stringify({ ok: true })));
+
+      const response = await client.fetch("/test", { method: "GET" });
+
+      // Should have re-attested (initial + recovery)
+      expect(verifyMock).toHaveBeenCalledTimes(2);
+      expect(createSecureFetchMock).toHaveBeenCalledTimes(2);
+      expect(await response.json()).toEqual({ ok: true });
+    });
+
+    it("should propagate non-KeyConfigMismatchError errors", async () => {
+      const { SecureClient } = await import("../src/secure-client");
+
+      const client = new SecureClient({
+        baseURL: "https://test.example.com/",
+      });
+      await client.ready();
+
+      mockFetch.mockRejectedValueOnce(new Error("network failure"));
+
+      await expect(
+        client.fetch("/test", { method: "GET" }),
+      ).rejects.toThrow("network failure");
+
+      // Should NOT have re-attested
+      expect(verifyMock).toHaveBeenCalledTimes(1);
+    });
+  });
+
   describe("URL resolution", () => {
     it("Case 1: no config — derives both URLs from bundle", async () => {
       const { SecureClient } = await import("../src/secure-client");
