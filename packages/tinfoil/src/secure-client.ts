@@ -1,7 +1,8 @@
 import { Verifier, FetchError, type VerificationDocument } from "./verifier.js";
 import { TINFOIL_CONFIG } from "./config.js";
-import { createSecureFetch } from "./secure-fetch.js";
+import { createSecureFetch, type SecureTransport } from "./secure-fetch.js";
 import { fetchAttestationBundle } from "./atc.js";
+import type { SessionRecoveryToken } from "./encrypted-body-fetch.js";
 
 /**
  * Transport mode for secure communication with the enclave.
@@ -119,7 +120,7 @@ export class SecureClient {
   // --- Derived state (cleared on reset) ---
   private initPromise: Promise<void> | null = null;
   private verificationDocument: VerificationDocument;
-  private _fetch: typeof fetch | null = null;
+  private _transport: SecureTransport | null = null;
   private resolvedEnclaveURL?: string;
   private resolvedBaseURL?: string;
 
@@ -177,7 +178,7 @@ export class SecureClient {
    */
   public reset(): void {
     this.initPromise = null;
-    this._fetch = null;
+    this._transport = null;
     this.verificationDocument = createPendingVerificationDocument(this.config.configRepo);
     this.resolvedEnclaveURL = undefined;
     this.resolvedBaseURL = undefined;
@@ -198,7 +199,7 @@ export class SecureClient {
 
     try {
       const attestation = await verifier.verifyBundle(bundle);
-      this._fetch = await this.createTransport(attestation.hpkePublicKey, attestation.tlsPublicKeyFingerprint);
+      this._transport = await this.createTransport(attestation.hpkePublicKey, attestation.tlsPublicKeyFingerprint);
     } finally {
       // Always capture the verifier's doc (success or partial-failure)
       this.verificationDocument = verifier.getVerificationDocument() ?? this.verificationDocument;
@@ -231,7 +232,7 @@ export class SecureClient {
     return this.resolvedEnclaveURL;
   }
 
-  private async createTransport(hpkePublicKey?: string, tlsPublicKeyFingerprint?: string): Promise<typeof fetch> {
+  private async createTransport(hpkePublicKey?: string, tlsPublicKeyFingerprint?: string): Promise<SecureTransport> {
     if (this.config.transport === 'tls') {
       return await createSecureFetch(this.resolvedBaseURL!, undefined, tlsPublicKeyFingerprint, this.resolvedEnclaveURL);
     }
@@ -263,13 +264,13 @@ export class SecureClient {
       await this.ready();
 
       try {
-        return await this._fetch!(input, init);
+        return await this._transport!.fetch(input, init);
       } catch (error) {
         // Retry once - enclave may have restarted with new keys
         this.reset();
         try {
           await this.ready();
-          return await this._fetch!(input, init);
+          return await this._transport!.fetch(input, init);
         } catch (retryError) {
           // Retry also failed — record latest error and throw with chain
           this.verificationDocument.steps.otherError = {
@@ -283,5 +284,20 @@ export class SecureClient {
         }
       }
     };
+  }
+
+  public getSessionRecoveryToken(): SessionRecoveryToken {
+    if (!this._transport) {
+      throw new Error('Client not initialized — call ready() or fetch() first');
+    }
+    return this._transport.getSessionRecoveryToken();
+  }
+
+  static async decryptRecoveryResponse(
+    response: Response,
+    token: SessionRecoveryToken,
+  ): Promise<Response> {
+    const { decryptResponseWithToken } = await import("ehbp");
+    return decryptResponseWithToken(response, token);
   }
 }
