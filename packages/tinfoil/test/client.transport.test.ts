@@ -53,6 +53,12 @@ vi.mock("../src/verifier.js", () => ({
       this.name = 'FetchError';
     }
   },
+  ConfigurationError: class ConfigurationError extends Error {
+    constructor(message: string) {
+      super(message);
+      this.name = 'ConfigurationError';
+    }
+  },
 }));
 
 vi.mock("../src/secure-fetch.js", () => ({
