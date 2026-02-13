@@ -4,6 +4,9 @@ import { TINFOIL_CONFIG } from "./config.js";
 import { createSecureFetch } from "./secure-fetch.js";
 import { fetchAttestationBundle } from "./atc.js";
 
+/** Delay before retrying init on transient failure (ms). */
+const INIT_RETRY_DELAY_MS = 1000;
+
 /**
  * Transport mode for secure communication with the enclave.
  *
@@ -163,7 +166,7 @@ export class SecureClient {
         // Only try recovery if the error is transient (network I/O, attestation errors)
         if (err instanceof FetchError || err instanceof AttestationError) {
           this.clearDerivedState(); // Start with a new enclave
-          await new Promise(r => setTimeout(r, 1000)); // Wait 1 second before retrying
+          await new Promise(r => setTimeout(r, INIT_RETRY_DELAY_MS));
           return this.initSecureClient().catch(retryErr => {
             this.reset();
             throw retryErr;
