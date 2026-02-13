@@ -33,7 +33,7 @@ const verifyMock = vi.fn(async () => ({
 }));
 
 const mockFetch = vi.fn(async () => new Response(null));
-const createSecureFetchMock = vi.fn(async () => mockFetch);
+const createSecureFetchMock = vi.fn(async () => ({ fetch: mockFetch, getSessionRecoveryToken: vi.fn() }));
 
 vi.mock("../src/verifier.js", () => ({
   Verifier: class {

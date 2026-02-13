@@ -177,10 +177,11 @@ describe("encrypted-body-fetch", () => {
       expect(targetUrl.toString()).toBe("https://other.example.com/endpoint");
     });
 
-    it("returns a function with fetch signature", () => {
-      const customFetch = createEncryptedBodyFetch("https://api.example.com", "mockkey123");
-      expect(typeof customFetch).toBe("function");
-      expect(customFetch.length).toBe(2);
+    it("returns a SecureTransport object", () => {
+      const transport = createEncryptedBodyFetch("https://api.example.com", "mockkey123");
+      expect(typeof transport).toBe("object");
+      expect(typeof transport.fetch).toBe("function");
+      expect(typeof transport.getSessionRecoveryToken).toBe("function");
     });
 
   });
