@@ -127,9 +127,6 @@ export class TinfoilAI {
   private secureClient: SecureClient;
   private openAIOptions: Record<string, any>;
 
-  public apiKey?: string;
-  public bearerToken?: string;
-
   constructor(options: TinfoilAIOptions = {}) {
     const openAIOptions: Record<string, any> = { ...options };
 
@@ -138,7 +135,6 @@ export class TinfoilAI {
     if (options.bearerToken) {
       openAIOptions.apiKey = options.bearerToken;
       openAIOptions.dangerouslyAllowBrowser = true;
-      this.bearerToken = options.bearerToken;
     } else if (options.apiKey) {
       openAIOptions.apiKey = options.apiKey;
     } else if (!isRealBrowser() && typeof process !== 'undefined' && process.env.TINFOIL_API_KEY) {
@@ -148,8 +144,6 @@ export class TinfoilAI {
     if ((options as any).dangerouslyAllowBrowser === true) {
       openAIOptions.dangerouslyAllowBrowser = true;
     }
-
-    this.apiKey = options.apiKey;
 
     this.openAIOptions = openAIOptions;
 
@@ -165,29 +159,17 @@ export class TinfoilAI {
   /**
    * Wait for the client to complete verification and be ready for requests.
    * 
-   * Most methods automatically wait for ready(), but you can call this explicitly
-   * in browsers to show loading state during verification.
+   * All API methods (chat, audio, etc.) call this automatically — you only 
+   * need this for UI loading states during verification.
    * 
    * @example
    * ```typescript
    * const client = new TinfoilAI({ bearerToken: jwt });
-   * await client.ready(); // Wait for verification
-   * // Now make requests
+   * await client.ready(); // Show spinner while verifying
    * ```
    */
   public async ready(): Promise<void> {
     await this.ensureReady();
-  }
-
-  /**
-   * Reset the client, clearing all verification state and transport.
-   * 
-   * After calling reset(), the next call to `ready()` or any API method
-   * will perform a fresh attestation and establish a new secure transport.
-   */
-  public reset(): void {
-    this.client = undefined;
-    this.secureClient.reset();
   }
 
   private async ensureReady(): Promise<OpenAI> {
