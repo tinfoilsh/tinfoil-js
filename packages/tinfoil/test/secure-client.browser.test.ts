@@ -51,6 +51,13 @@ vi.mock("../src/verifier.js", () => ({
       this.name = 'FetchError';
     }
   },
+  assembleAttestationBundle: vi.fn(async () => ({
+    domain: "custom-enclave.example.com",
+    enclaveAttestationReport: { format: "test", body: "test" },
+    digest: "test-digest",
+    sigstoreBundle: {},
+    vcek: "test-vcek",
+  })),
 }));
 
 // Mock createSecureFetch to simulate browser behavior (throw when no HPKE key)

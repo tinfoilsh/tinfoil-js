@@ -59,6 +59,19 @@ vi.mock("../src/verifier.js", () => ({
       this.name = 'FetchError';
     }
   },
+  ConfigurationError: class ConfigurationError extends Error {
+    constructor(message: string) {
+      super(message);
+      this.name = 'ConfigurationError';
+    }
+  },
+  assembleAttestationBundle: vi.fn(async () => ({
+    domain: "custom-enclave.example.com",
+    enclaveAttestationReport: { format: "test", body: "test" },
+    digest: "test-digest",
+    sigstoreBundle: {},
+    vcek: "test-vcek",
+  })),
 }));
 
 vi.mock("../src/secure-fetch.js", () => ({
@@ -86,7 +99,6 @@ describe("SecureClient", () => {
 
     const client = new SecureClient({
       baseURL: "https://test.example.com/",
-      configRepo: "test-org/test-repo",
     });
 
     await client.ready();
@@ -163,7 +175,6 @@ describe("SecureClient", () => {
 
       const client = new SecureClient({
         baseURL: "https://test.example.com/",
-        configRepo: "test-org/test-repo",
       });
 
       await client.ready();
