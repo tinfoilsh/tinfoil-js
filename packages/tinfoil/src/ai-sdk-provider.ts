@@ -1,5 +1,4 @@
 import { createOpenAICompatible } from "@ai-sdk/openai-compatible";
-import { TINFOIL_CONFIG } from "./config.js";
 import { SecureClient } from "./secure-client.js";
 import { isRealBrowser } from "./env.js";
 import { ConfigurationError } from "./verifier.js";
@@ -61,12 +60,9 @@ export async function createTinfoilAI(apiKey?: string, options: CreateTinfoilAIO
     throw new ConfigurationError("API key is required. Provide apiKey parameter or set TINFOIL_API_KEY environment variable.");
   }
 
-  const baseURL = options.baseURL;
-  const configRepo = options.configRepo || TINFOIL_CONFIG.DEFAULT_ROUTER_REPO;
-
   const secureClient = new SecureClient({
-    baseURL,
-    configRepo,
+    baseURL: options.baseURL,
+    configRepo: options.configRepo,
     attestationBundleURL: options.attestationBundleURL,
   });
 

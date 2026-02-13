@@ -1,4 +1,5 @@
-import { Verifier, type VerificationDocument } from "./verifier.js";
+import { Verifier, assembleAttestationBundle, ConfigurationError, type VerificationDocument } from "./verifier.js";
+import type { AttestationBundle } from "./verifier.js";
 import { TINFOIL_CONFIG } from "./config.js";
 import { createSecureFetch } from "./secure-fetch.js";
 import { fetchAttestationBundle } from "./atc.js";
@@ -132,10 +133,16 @@ export class SecureClient {
   private resolvedBaseURL?: string;
 
   constructor(options: SecureClientOptions = {}) {
+    if (options.configRepo && !options.enclaveURL) {
+      throw new ConfigurationError("configRepo requires enclaveURL — without it, ATC always uses the default router repo.");
+    } else if (options.enclaveURL && !options.configRepo) {
+      console.warn(`[tinfoil] No configRepo specified, verifying against "${TINFOIL_CONFIG.DEFAULT_ROUTER_REPO}".`);
+    }
+
     this.config = {
       baseURL: options.baseURL,
       enclaveURL: options.enclaveURL,
-      configRepo: options.configRepo || TINFOIL_CONFIG.DEFAULT_ROUTER_REPO,
+      configRepo: options.configRepo ?? TINFOIL_CONFIG.DEFAULT_ROUTER_REPO,
       transport: options.transport || 'ehbp',
       attestationBundleURL: options.attestationBundleURL,
     };
@@ -190,7 +197,16 @@ export class SecureClient {
   }
 
   private async initSecureClient(): Promise<void> {
-    const bundle = await fetchAttestationBundle(this.config.attestationBundleURL);
+    let bundle: AttestationBundle;
+
+    if (this.config.enclaveURL) {
+      // Custom enclave: assemble the bundle locally
+      const host = new URL(this.config.enclaveURL).host;
+      bundle = await assembleAttestationBundle(host, this.config.configRepo);
+    } else {
+      // Default router: fetch pre-assembled bundle from ATC
+      bundle = await fetchAttestationBundle(this.config.attestationBundleURL);
+    }
 
     // Resolve enclaveURL: user-provided config takes precedence, otherwise from bundle
     this.resolvedEnclaveURL = this.config.enclaveURL ?? `https://${bundle.domain}`;
