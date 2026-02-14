@@ -3,6 +3,8 @@ import { X509Certificate } from '@freedomofpress/sigstore-browser';
 import { ASN1Obj } from '@freedomofpress/crypto-browser';
 import { decodeDomains, bytesToHex } from '../src/dcode.js';
 import { hashAttestationDocument } from '../src/types.js';
+import { verifyCertificate } from '../src/cert-verify.js';
+import { AttestationError } from '../src/errors.js';
 import bundleFixture from './fixtures/attestation-bundle.json';
 
 describe('Certificate Verification', () => {
@@ -60,5 +62,131 @@ describe('Certificate Verification', () => {
     // Verify they match!
     console.log('Hashes match:', hattString === computedHash);
     expect(hattString).toBe(computedHash);
+  });
+});
+
+describe('verifyCertificate — error paths', () => {
+  it('should throw AttestationError on invalid PEM', async () => {
+    await expect(
+      verifyCertificate(
+        'not-a-valid-pem',
+        'test.example.com',
+        bundleFixture.enclaveAttestationReport,
+        'deadbeef',
+      ),
+    ).rejects.toThrow(AttestationError);
+
+    await expect(
+      verifyCertificate(
+        'not-a-valid-pem',
+        'test.example.com',
+        bundleFixture.enclaveAttestationReport,
+        'deadbeef',
+      ),
+    ).rejects.toThrow(/Failed to parse enclave TLS certificate/);
+  });
+
+  it('should throw AttestationError on domain mismatch', async () => {
+    // Use the real cert but with a wrong domain
+    await expect(
+      verifyCertificate(
+        bundleFixture.enclaveCert,
+        'wrong-domain.example.com',
+        bundleFixture.enclaveAttestationReport,
+        'deadbeef',
+      ),
+    ).rejects.toThrow(AttestationError);
+
+    await expect(
+      verifyCertificate(
+        bundleFixture.enclaveCert,
+        'wrong-domain.example.com',
+        bundleFixture.enclaveAttestationReport,
+        'deadbeef',
+      ),
+    ).rejects.toThrow(/Certificate domain mismatch/);
+  });
+
+  it('should throw AttestationError on HPKE key mismatch', async () => {
+    // Use the real cert and correct domain, but wrong HPKE key
+    await expect(
+      verifyCertificate(
+        bundleFixture.enclaveCert,
+        bundleFixture.domain,
+        bundleFixture.enclaveAttestationReport,
+        'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+      ),
+    ).rejects.toThrow(AttestationError);
+
+    await expect(
+      verifyCertificate(
+        bundleFixture.enclaveCert,
+        bundleFixture.domain,
+        bundleFixture.enclaveAttestationReport,
+        'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+      ),
+    ).rejects.toThrow(/HPKE key mismatch/);
+  });
+
+  it('should throw AttestationError on attestation hash mismatch', async () => {
+    // Extract the correct HPKE key from the cert so we pass that check
+    const cert = X509Certificate.parse(bundleFixture.enclaveCert);
+    const sanExtension = cert.extension('2.5.29.17');
+    const asn1 = ASN1Obj.parseBuffer(sanExtension!.value);
+    const sans: string[] = [];
+    for (const generalName of asn1.subs) {
+      if (generalName.tag.number === 2 && !generalName.tag.constructed) {
+        sans.push(new TextDecoder().decode(generalName.value));
+      }
+    }
+    const hpkeSans = sans.filter(s => s.includes('.hpke.'));
+    const hpkeKey = bytesToHex(decodeDomains(hpkeSans, 'hpke'));
+
+    // Use a different attestation document so the hash won't match
+    const fakeAttestation = { format: 'sev-snp-guest/v2' as const, body: 'dGVzdA==' };
+
+    await expect(
+      verifyCertificate(
+        bundleFixture.enclaveCert,
+        bundleFixture.domain,
+        fakeAttestation,
+        hpkeKey,
+      ),
+    ).rejects.toThrow(AttestationError);
+
+    await expect(
+      verifyCertificate(
+        bundleFixture.enclaveCert,
+        bundleFixture.domain,
+        fakeAttestation,
+        hpkeKey,
+      ),
+    ).rejects.toThrow(/Attestation hash mismatch/);
+  });
+
+  it('should succeed with correct certificate, domain, key, and attestation', async () => {
+    // Extract the correct HPKE key
+    const cert = X509Certificate.parse(bundleFixture.enclaveCert);
+    const sanExtension = cert.extension('2.5.29.17');
+    const asn1 = ASN1Obj.parseBuffer(sanExtension!.value);
+    const sans: string[] = [];
+    for (const generalName of asn1.subs) {
+      if (generalName.tag.number === 2 && !generalName.tag.constructed) {
+        sans.push(new TextDecoder().decode(generalName.value));
+      }
+    }
+    const hpkeSans = sans.filter(s => s.includes('.hpke.'));
+    const hpkeKey = bytesToHex(decodeDomains(hpkeSans, 'hpke'));
+
+    const result = await verifyCertificate(
+      bundleFixture.enclaveCert,
+      bundleFixture.domain,
+      bundleFixture.enclaveAttestationReport,
+      hpkeKey,
+    );
+
+    expect(result.hpkePublicKey).toBe(hpkeKey);
+    expect(result.attestationHash).toBeTruthy();
+    expect(result.dnsNames.length).toBeGreaterThan(0);
   });
 });

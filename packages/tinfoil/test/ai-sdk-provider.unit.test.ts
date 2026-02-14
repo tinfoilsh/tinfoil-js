@@ -27,6 +27,18 @@ vi.mock("@ai-sdk/openai-compatible", () => {
 });
 
 describe("createTinfoilAI (unit)", () => {
+  it("throws ConfigurationError when no API key is provided", async () => {
+    // Clear TINFOIL_API_KEY so env fallback doesn't kick in
+    const saved = process.env.TINFOIL_API_KEY;
+    delete process.env.TINFOIL_API_KEY;
+    try {
+      const { createTinfoilAI } = await import("../src/ai-sdk-provider");
+      await expect(createTinfoilAI(undefined)).rejects.toThrow(/API key is required/);
+    } finally {
+      if (saved !== undefined) process.env.TINFOIL_API_KEY = saved;
+    }
+  });
+
   it("uses SecureClient.getBaseURL() when baseURL is not provided", async () => {
     const { createTinfoilAI } = await import("../src/ai-sdk-provider");
 
