@@ -1,26 +1,37 @@
-import { describe, it, expect } from "vitest";
-import { z } from "zod";
+import { describe, it, expect, beforeAll } from "vitest";
 
 const RUN_INTEGRATION = process.env.RUN_TINFOIL_INTEGRATION === "true";
 
 /**
  * Vercel AI SDK Integration Tests
- * 
+ *
  * Tests the integration between Tinfoil SDK and Vercel AI SDK using:
  * 1. createTinfoilAI - convenience function for AI SDK provider
  * 2. SecureClient.fetch - direct usage with createOpenAI from @ai-sdk/openai
- * 
+ *
  * These tests verify that Tinfoil's secure fetch works correctly with
- * all AI SDK features: text generation, streaming, tool calling, and structured output.
+ * all AI SDK features: text generation, streaming, abort, and system messages.
+ *
+ * Clients are shared across tests within each describe block to avoid
+ * redundant attestation round-trips — attestation is already tested elsewhere.
+ *
+ * Tool calling and structured output are tested with mocked responses in
+ * ai-sdk-provider.unit.test.ts (no real LLM needed for those).
  */
 describe("Vercel AI SDK Integration Tests", () => {
-  
-  describe("createTinfoilAI Provider", () => {
-    it.skipIf(!RUN_INTEGRATION)("should generate text with generateText", async () => {
-      const { createTinfoilAI } = await import("../src/ai-sdk-provider");
-      const { generateText } = await import("ai");
 
-      const tinfoil = await createTinfoilAI(process.env.TINFOIL_API_KEY);
+  describe("createTinfoilAI Provider", () => {
+    // Share a single attested provider across all tests in this group
+    let tinfoil: any;
+
+    beforeAll(async () => {
+      if (!RUN_INTEGRATION) return;
+      const { createTinfoilAI } = await import("../src/ai-sdk-provider");
+      tinfoil = await createTinfoilAI(process.env.TINFOIL_API_KEY);
+    });
+
+    it.skipIf(!RUN_INTEGRATION)("should generate text with generateText", async () => {
+      const { generateText } = await import("ai");
 
       const { text } = await generateText({
         model: tinfoil("gpt-oss-120b-free"),
@@ -34,10 +45,7 @@ describe("Vercel AI SDK Integration Tests", () => {
     }, 60000);
 
     it.skipIf(!RUN_INTEGRATION)("should stream text with streamText", async () => {
-      const { createTinfoilAI } = await import("../src/ai-sdk-provider");
       const { streamText } = await import("ai");
-
-      const tinfoil = await createTinfoilAI(process.env.TINFOIL_API_KEY);
 
       const stream = streamText({
         model: tinfoil("gpt-oss-120b-free"),
@@ -54,59 +62,9 @@ describe("Vercel AI SDK Integration Tests", () => {
       expect(accumulatedText.length).toBeGreaterThan(0);
     }, 60000);
 
-    it.skipIf(!RUN_INTEGRATION)("should handle tool calling", async () => {
-      const { createTinfoilAI } = await import("../src/ai-sdk-provider");
-      const { generateText, tool } = await import("ai");
-
-      const tinfoil = await createTinfoilAI(process.env.TINFOIL_API_KEY);
-
-      const { text, toolCalls } = await generateText({
-        model: tinfoil("gpt-oss-120b-free"),
-        prompt: "What is the weather in San Francisco? Use the weather tool.",
-        maxTokens: 5,
-        tools: {
-          weather: tool({
-            description: "Get the weather for a location",
-            parameters: z.object({
-              location: z.string().describe("The city to get weather for"),
-            }),
-            execute: async ({ location }) => {
-              return { temperature: 72, condition: "sunny", location };
-            },
-          }),
-        },
-      });
-
-      // The model should either call the tool or respond with text
-      expect(text !== undefined || toolCalls !== undefined).toBe(true);
-    }, 60000);
-
-    it.skipIf(!RUN_INTEGRATION)("should handle structured output with generateObject", async () => {
-      const { createTinfoilAI } = await import("../src/ai-sdk-provider");
-      const { generateObject } = await import("ai");
-
-      const tinfoil = await createTinfoilAI(process.env.TINFOIL_API_KEY);
-
-      const { object } = await generateObject({
-        model: tinfoil("gpt-oss-120b-free"),
-        schema: z.object({
-          name: z.string(),
-          age: z.number(),
-        }),
-        prompt: "Generate a fictional person with a name and age.",
-        maxTokens: 5,
-      });
-
-      expect(object).toBeTruthy();
-      expect(typeof object.name).toBe("string");
-      expect(typeof object.age).toBe("number");
-    }, 60000);
-
     it.skipIf(!RUN_INTEGRATION)("should handle AbortController cancellation", async () => {
-      const { createTinfoilAI } = await import("../src/ai-sdk-provider");
       const { streamText } = await import("ai");
 
-      const tinfoil = await createTinfoilAI(process.env.TINFOIL_API_KEY);
       const abortController = new AbortController();
 
       const stream = streamText({
@@ -135,10 +93,7 @@ describe("Vercel AI SDK Integration Tests", () => {
     }, 60000);
 
     it.skipIf(!RUN_INTEGRATION)("should work with system message", async () => {
-      const { createTinfoilAI } = await import("../src/ai-sdk-provider");
       const { generateText } = await import("ai");
-
-      const tinfoil = await createTinfoilAI(process.env.TINFOIL_API_KEY);
 
       const { text } = await generateText({
         model: tinfoil("gpt-oss-120b-free"),
@@ -153,20 +108,27 @@ describe("Vercel AI SDK Integration Tests", () => {
   });
 
   describe("SecureClient with @ai-sdk/openai-compatible", () => {
-    it.skipIf(!RUN_INTEGRATION)("should work with createOpenAICompatible directly", async () => {
+    // Share a single attested SecureClient + provider across both tests
+    let provider: any;
+
+    beforeAll(async () => {
+      if (!RUN_INTEGRATION) return;
       const { SecureClient } = await import("../src/secure-client");
       const { createOpenAICompatible } = await import("@ai-sdk/openai-compatible");
-      const { generateText } = await import("ai");
 
       const secureClient = new SecureClient();
       await secureClient.ready();
 
-      const provider = createOpenAICompatible({
+      provider = createOpenAICompatible({
         name: "tinfoil-direct",
         baseURL: secureClient.getBaseURL()!,
         apiKey: process.env.TINFOIL_API_KEY,
         fetch: secureClient.fetch,
       });
+    });
+
+    it.skipIf(!RUN_INTEGRATION)("should work with createOpenAICompatible directly", async () => {
+      const { generateText } = await import("ai");
 
       const { text } = await generateText({
         model: provider("gpt-oss-120b-free"),
@@ -179,19 +141,7 @@ describe("Vercel AI SDK Integration Tests", () => {
     }, 60000);
 
     it.skipIf(!RUN_INTEGRATION)("should stream with createOpenAICompatible directly", async () => {
-      const { SecureClient } = await import("../src/secure-client");
-      const { createOpenAICompatible } = await import("@ai-sdk/openai-compatible");
       const { streamText } = await import("ai");
-
-      const secureClient = new SecureClient();
-      await secureClient.ready();
-
-      const provider = createOpenAICompatible({
-        name: "tinfoil-direct",
-        baseURL: secureClient.getBaseURL()!,
-        apiKey: process.env.TINFOIL_API_KEY,
-        fetch: secureClient.fetch,
-      });
 
       const stream = streamText({
         model: provider("gpt-oss-120b-free"),

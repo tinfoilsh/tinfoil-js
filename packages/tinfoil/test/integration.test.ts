@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, beforeAll } from "vitest";
 import * as fs from "fs";
 import * as path from "path";
 import { fileURLToPath } from "url";
@@ -7,20 +7,36 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 const RUN_INTEGRATION = process.env.RUN_TINFOIL_INTEGRATION === "true";
 
+/**
+ * Integration tests for the Tinfoil SDK.
+ *
+ * Clients are shared across tests where they use the same configuration to
+ * avoid redundant attestation round-trips — attestation is tested elsewhere.
+ */
 describe("Examples Integration Tests", () => {
+  // Shared TinfoilAI client (default config) for chat, streaming, and audio tests
+  let sharedTinfoilClient: any;
+  // Shared default SecureClient for direct fetch and transport-auto tests
+  let sharedSecureClient: any;
+
+  beforeAll(async () => {
+    if (!RUN_INTEGRATION) return;
+    const { TinfoilAI } = await import("../src/tinfoil-ai");
+    const { SecureClient } = await import("../src/secure-client");
+
+    sharedTinfoilClient = new TinfoilAI({ apiKey: process.env.TINFOIL_API_KEY });
+    sharedSecureClient = new SecureClient();
+
+    // Attest both in parallel
+    await Promise.all([
+      sharedTinfoilClient.ready(),
+      sharedSecureClient.ready(),
+    ]);
+  });
+
   describe("Basic Chat Example", () => {
     it.skipIf(!RUN_INTEGRATION)("should create a TinfoilAI client and make a chat completion request", async () => {
-      const { TinfoilAI } = await import("../src/tinfoil-ai");
-
-      const client = new TinfoilAI({
-        apiKey: process.env.TINFOIL_API_KEY,
-      });
-
-      expect(client).toBeTruthy();
-
-      await client.ready();
-
-      const completion = await client.chat.completions.create({
+      const completion = await sharedTinfoilClient.chat.completions.create({
         messages: [{ role: "user", content: "Hello!" }],
         model: "gpt-oss-120b-free",
         max_tokens: 5,
@@ -38,14 +54,7 @@ describe("Examples Integration Tests", () => {
 
   describe("Secure Client Example", () => {
     it.skipIf(!RUN_INTEGRATION)("should create a SecureClient and make a direct fetch request", async () => {
-      const { SecureClient } = await import("../src/secure-client");
-
-      const client = new SecureClient();
-      expect(client).toBeTruthy();
-
-      await client.ready();
-
-      const response = await client.fetch("/v1/chat/completions", {
+      const response = await sharedSecureClient.fetch("/v1/chat/completions", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -91,12 +100,7 @@ describe("Examples Integration Tests", () => {
 
   describe("Streaming Chat Completion", () => {
     it.skipIf(!RUN_INTEGRATION)("should handle streaming chat completion", async () => {
-      const { TinfoilAI } = await import("../src/tinfoil-ai");
-      const client = new TinfoilAI({ apiKey: process.env.TINFOIL_API_KEY });
-
-      await client.ready();
-
-      const stream = await client.chat.completions.create({
+      const stream = await sharedTinfoilClient.chat.completions.create({
         messages: [
           { role: "system", content: "No matter what the user says, only respond with: Done." },
           { role: "user", content: "Is this a test?" },
@@ -189,15 +193,10 @@ describe("Examples Integration Tests", () => {
 
   describe("Audio Transcription", () => {
     it.skipIf(!RUN_INTEGRATION)("should transcribe audio using whisper-large-v3-turbo model", async () => {
-      const { TinfoilAI } = await import("../src/tinfoil-ai");
-      const client = new TinfoilAI({ apiKey: process.env.TINFOIL_API_KEY });
-
-      await client.ready();
-
       const audioPath = path.join(__dirname, "fixtures", "test.mp3");
       const audioFile = fs.createReadStream(audioPath);
 
-      const transcription = await client.audio.transcriptions.create({
+      const transcription = await sharedTinfoilClient.audio.transcriptions.create({
         model: "whisper-large-v3-turbo",
         file: audioFile,
       });
@@ -210,12 +209,8 @@ describe("Examples Integration Tests", () => {
 
   describe("Transport Mode Options", () => {
     it.skipIf(!RUN_INTEGRATION)("should work with transport: 'auto' (default)", async () => {
-      const { SecureClient } = await import("../src/secure-client");
-
-      const client = new SecureClient({ transport: 'auto' });
-      await client.ready();
-
-      const response = await client.fetch("/v1/chat/completions", {
+      // Reuses the shared default SecureClient (which uses 'auto' transport)
+      const response = await sharedSecureClient.fetch("/v1/chat/completions", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
