@@ -142,6 +142,42 @@ describe("SecureClient", () => {
     expect(responseBody).toEqual(mockResponseBody);
   });
 
+  it("should deduplicate concurrent ready() calls", async () => {
+    const { SecureClient } = await import("../src/secure-client");
+
+    const client = new SecureClient({
+      baseURL: "https://test.example.com/",
+    });
+
+    // Call ready() three times concurrently
+    const [r1, r2, r3] = await Promise.all([
+      client.ready(),
+      client.ready(),
+      client.ready(),
+    ]);
+
+    // Only one attestation should have happened
+    expect(verifyMock).toHaveBeenCalledTimes(1);
+    expect(createSecureFetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("should return pending verification document before ready()", async () => {
+    const { SecureClient } = await import("../src/secure-client");
+
+    const client = new SecureClient({
+      baseURL: "https://test.example.com/",
+    });
+
+    // Before ready(), document should exist but not be verified
+    const doc = client.getVerificationDocument();
+    expect(doc).toBeTruthy();
+    expect(doc.securityVerified).toBe(false);
+    expect(doc.steps.fetchDigest.status).toBe("pending");
+    expect(doc.steps.verifyCode.status).toBe("pending");
+    expect(doc.steps.verifyEnclave.status).toBe("pending");
+    expect(doc.steps.compareMeasurements.status).toBe("pending");
+  });
+
   it("should handle verification document retrieval", async () => {
     const { SecureClient } = await import("../src/secure-client");
 

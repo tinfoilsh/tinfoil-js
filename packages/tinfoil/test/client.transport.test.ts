@@ -114,4 +114,18 @@ describe("Secure transport integration", () => {
 
     expect(provider).toBeTruthy();
   });
+
+  it("TinfoilAI throws when no API key is available (no env var)", async () => {
+    const saved = process.env.TINFOIL_API_KEY;
+    delete process.env.TINFOIL_API_KEY;
+    try {
+      const { TinfoilAI } = await import("../src/tinfoil-ai");
+      const client = new TinfoilAI(); // no apiKey, no bearerToken, no env var
+
+      // The error surfaces on ready() when OpenAI client is created
+      await expect(client.ready()).rejects.toThrow();
+    } finally {
+      if (saved !== undefined) process.env.TINFOIL_API_KEY = saved;
+    }
+  });
 });
