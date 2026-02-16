@@ -87,7 +87,7 @@ export interface TinfoilAIOptions {
   /**
    * Transport mode for secure communication.
    * - 'ehbp': HPKE encryption via EHBP protocol (default)
-   * - 'tls': TLS certificate pinning (for runtimes without X25519 support)
+   * - 'tls': TLS certificate pinning
    * @default 'ehbp'
    */
   transport?: TransportMode;
