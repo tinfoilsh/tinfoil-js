@@ -1,4 +1,4 @@
-{
+export default {
   "mediaType": "application/vnd.dev.sigstore.trustedroot+json;version=0.1",
   "tlogs": [
     {
@@ -123,4 +123,4 @@
       }
     }
   ]
-}
+};

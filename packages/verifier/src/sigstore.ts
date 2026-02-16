@@ -1,7 +1,7 @@
 import { PredicateType } from './types.js';
 import type { AttestationMeasurement } from './types.js';
 import type { X509Certificate, VerificationPolicy } from '@freedomofpress/sigstore-browser';
-import sigstoreTrustedRoot from './sigstore-trusted-root.json' with { type: 'json' };
+import sigstoreTrustedRoot from './sigstore-trusted-root.js';
 import { AttestationError, wrapOrThrow } from './errors.js';
 
 class GitHubWorkflowRefPattern implements VerificationPolicy {
