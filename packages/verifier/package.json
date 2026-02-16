@@ -49,7 +49,7 @@
     "dist"
   ],
   "dependencies": {
-    "@freedomofpress/crypto-browser": "^0.1.6",
+    "@freedomofpress/crypto-browser": "^0.1.7",
     "@freedomofpress/sigstore-browser": "^0.1.11",
     "@freedomofpress/tuf-browser": "^0.1.8"
   },
