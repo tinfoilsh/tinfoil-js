@@ -6,7 +6,7 @@ import { ConfigurationError } from "./verifier.js";
  * 
  * This is the unified implementation for both browser and server environments:
  * - In browsers: Only HPKE encryption is supported (requires hpkePublicKey)
- * - In Node.js/Bun: Falls back to TLS certificate pinning if HPKE unavailable
+ * - In Node.js/Bun: Also supports TLS certificate pinning when configured
  * 
  * All imports are dynamic to enable tree-shaking in browser bundles.
  */
