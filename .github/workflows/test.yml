@@ -26,10 +26,13 @@ jobs:
         run: npm ci
 
       - name: Install Playwright browsers
-        run: npx playwright install chromium
+        run: npx playwright install chromium webkit
 
       - name: Build
         run: npm run build
+
+      - name: Check ES2020 compatibility
+        run: npm run check:es2020
 
       - name: Lint
         run: npm run lint

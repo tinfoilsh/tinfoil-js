@@ -19,6 +19,7 @@
     "test:integration": "RUN_TINFOIL_INTEGRATION=true npm test",
     "test:browser": "vitest run --config vite.config.playwright.ts",
     "test:browser:integration": "vitest run --config vite.config.integration.ts",
+    "check:es2020": "acorn --ecma2020 --module --silent dist/*.js",
     "clean": "rm -rf dist",
     "prepublishOnly": "npm run build"
   },
