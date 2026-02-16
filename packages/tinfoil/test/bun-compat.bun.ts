@@ -2,8 +2,7 @@
  * Bun compatibility tests
  * Run with: bun test test/bun-compat.bun.ts
  *
- * These tests verify that the TLS pinning fallback works correctly in Bun,
- * since Bun doesn't support X25519 in WebCrypto's crypto.subtle API.
+ * These tests verify TLS pinning works correctly in Bun.
  *
  * Note: Some TLS-related tests may be flaky due to Bun's connection pooling.
  * The tests use different hostnames to avoid connection reuse issues.
@@ -15,31 +14,29 @@ import { createPinnedTlsFetch } from "../src/pinned-tls-fetch.js";
 const isBun = typeof process !== "undefined" && (process as any).versions?.bun;
 
 /**
- * Test that module imports don't trigger X25519 errors at load time.
- * This catches regressions where static imports of encrypted-body-fetch
- * cause immediate failures in Bun (which doesn't support X25519 deriveBits).
+ * Test that module imports work cleanly at load time.
  */
-describe("Module imports (no X25519 errors at load time)", () => {
-  it("should import index.js without X25519 errors", async () => {
+describe("Module imports", () => {
+  it("should import index.js without errors", async () => {
     if (!isBun) return;
     // This should not throw - encrypted-body-fetch should be lazy loaded
     const module = await import("../src/index.js");
     expect(module).toBeDefined();
   });
 
-  it("should import secure-fetch.js without X25519 errors", async () => {
+  it("should import secure-fetch.js without errors", async () => {
     if (!isBun) return;
     const module = await import("../src/secure-fetch.js");
     expect(module.createSecureFetch).toBeDefined();
   });
 
-  it("should import secure-client.js without X25519 errors", async () => {
+  it("should import secure-client.js without errors", async () => {
     if (!isBun) return;
     const module = await import("../src/secure-client.js");
     expect(module).toBeDefined();
   });
 
-  it("should import unverified-client.js without X25519 errors", async () => {
+  it("should import unverified-client.js without errors", async () => {
     if (!isBun) return;
     const module = await import("../src/unverified-client.js");
     expect(module.UnverifiedClient).toBeDefined();
@@ -51,39 +48,6 @@ describe("Bun compatibility", () => {
     if (!isBun) {
       console.log("Skipping Bun-specific tests (not running in Bun)");
     }
-  });
-
-  describe("X25519 WebCrypto", () => {
-    it("should fail deriveBits with NotSupportedError (expected in Bun)", async () => {
-      if (!isBun) return;
-
-      // Key generation works in Bun
-      const keyPair = await crypto.subtle.generateKey(
-        { name: "X25519" },
-        true,
-        ["deriveBits", "deriveKey"]
-      );
-      expect(keyPair).toBeDefined();
-
-      const otherKeyPair = await crypto.subtle.generateKey(
-        { name: "X25519" },
-        true,
-        ["deriveBits", "deriveKey"]
-      );
-
-      // But deriveBits fails - this is why we need TLS fallback
-      try {
-        await crypto.subtle.deriveBits(
-          { name: "X25519", public: otherKeyPair.publicKey },
-          keyPair.privateKey,
-          256
-        );
-        // If we get here, Bun has added X25519 support
-        console.log("X25519 deriveBits now works in Bun - EHBP should work!");
-      } catch (error) {
-        expect((error as Error).name).toBe("NotSupportedError");
-      }
-    });
   });
 
   describe("TLS pinning via fetch", () => {

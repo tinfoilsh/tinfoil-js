@@ -18,7 +18,6 @@ export async function createSecureFetch(
 ): Promise<typeof fetch> {
   if (hpkePublicKey) {
     // Dynamic import to avoid loading ehbp/hpke modules when using TLS-only mode.
-    // This prevents WebCrypto X25519 errors in runtimes that don't support it (like Bun).
     const { createEncryptedBodyFetch } = await import("./encrypted-body-fetch.js");
     return createEncryptedBodyFetch(baseURL, hpkePublicKey, enclaveURL);
   }
