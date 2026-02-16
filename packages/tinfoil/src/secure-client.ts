@@ -11,9 +11,9 @@ const INIT_RETRY_DELAY_MS = 1000;
  * Transport mode for secure communication with the enclave.
  *
  * - `'ehbp'` - HPKE encryption via the Encrypted HTTP Body Protocol (default).
- *   End-to-end encrypted, works through proxies. Requires X25519 WebCrypto support.
+ *   End-to-end encrypted, works through proxies.
  * - `'tls'` - TLS certificate pinning. Requires direct connection to the enclave;
- *   requests through a proxy will fail. Use this in runtimes without X25519 support (like Bun).
+ *   requests through a proxy will fail.
  *
  * @see https://docs.tinfoil.sh/resources/ehbp - EHBP Protocol specification
  */

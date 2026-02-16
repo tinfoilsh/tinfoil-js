@@ -14,6 +14,7 @@
  * Base error class for all Tinfoil SDK errors.
  */
 export class TinfoilError extends Error {
+  declare cause?: Error;
   constructor(message: string, options?: { cause?: Error }) {
     super(message);
     this.name = 'TinfoilError';
