@@ -27,6 +27,7 @@
     "test:browser": "vitest run --config vite.config.browser.ts",
     "test:browser:integration": "vitest run --config vite.config.browser-test.ts",
     "lint": "eslint src/**/*.ts",
+    "check:es2020": "acorn --ecma2020 --module --silent dist/*.js",
     "clean": "rm -rf dist",
     "prepublishOnly": "npm run build"
   },

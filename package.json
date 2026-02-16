@@ -12,6 +12,7 @@
     "test:browser": "npm run test:browser -ws --if-present",
     "test:browser:integration": "npm run test:browser:integration -ws --if-present",
     "test:all": "npm run test && npm run test:integration && npm run test:browser && npm run test:browser:integration",
+    "check:es2020": "npm run check:es2020 -ws --if-present",
     "clean": "npm run clean -ws --if-present",
     "sync": "syncpack fix-mismatches",
     "postinstall": "syncpack fix-mismatches",
@@ -21,6 +22,7 @@
     "publish:tinfoil": "npm run build -w tinfoil && npm publish -w tinfoil --access public"
   },
   "devDependencies": {
+    "acorn": "^8.15.0",
     "syncpack": "^13.0.4",
     "typescript": "^5.9.2"
   },
