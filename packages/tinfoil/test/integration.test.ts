@@ -16,7 +16,7 @@ const RUN_INTEGRATION = process.env.RUN_TINFOIL_INTEGRATION === "true";
 describe("Examples Integration Tests", () => {
   // Shared TinfoilAI client (default config) for chat, streaming, and audio tests
   let sharedTinfoilClient: any;
-  // Shared default SecureClient for direct fetch and transport-auto tests
+  // Shared default SecureClient for direct fetch and default transport tests
   let sharedSecureClient: any;
 
   beforeAll(async () => {
@@ -208,8 +208,8 @@ describe("Examples Integration Tests", () => {
   });
 
   describe("Transport Mode Options", () => {
-    it.skipIf(!RUN_INTEGRATION)("should work with transport: 'auto' (default)", async () => {
-      // Reuses the shared default SecureClient (which uses 'auto' transport)
+    it.skipIf(!RUN_INTEGRATION)("should work with default transport (ehbp)", async () => {
+      // Reuses the shared default SecureClient (which uses default ehbp transport)
       const response = await sharedSecureClient.fetch("/v1/chat/completions", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
