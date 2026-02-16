@@ -178,15 +178,6 @@ export function createUnverifiedEncryptedBodyFetch(baseURL: string, keyOrigin?: 
 }
 
 async function getUnverifiedTransportForOrigin(origin: string, keyOrigin: string): Promise<EhbpTransport> {
-  if (typeof globalThis !== 'undefined') {
-    const isSecure = (globalThis as any).isSecureContext !== false;
-    const hasSubtle = !!(globalThis.crypto && (globalThis.crypto as Crypto).subtle);
-    if (!isSecure || !hasSubtle) {
-      const reason = !isSecure ? 'Use HTTPS or localhost' : 'WebCrypto SubtleCrypto API is not available';
-      throw new ConfigurationError(`EHBP encryption requires a secure browser context: ${reason}`);
-    }
-  }
-
   const { Transport } = await getEhbp();
   const serverIdentity = await getServerIdentity(keyOrigin);
   const requestHost = new URL(origin).host;
@@ -194,15 +185,6 @@ async function getUnverifiedTransportForOrigin(origin: string, keyOrigin: string
 }
 
 export async function getTransportForOrigin(origin: string, hpkePublicKeyHex: string): Promise<EhbpTransport> {
-  if (typeof globalThis !== 'undefined') {
-    const isSecure = (globalThis as any).isSecureContext !== false;
-    const hasSubtle = !!(globalThis.crypto && (globalThis.crypto as Crypto).subtle);
-    if (!isSecure || !hasSubtle) {
-      const reason = !isSecure ? 'Use HTTPS or localhost' : 'WebCrypto SubtleCrypto API is not available';
-      throw new ConfigurationError(`EHBP encryption requires a secure browser context: ${reason}`);
-    }
-  }
-
   const { Transport } = await getEhbp();
   const serverIdentity = await createIdentityFromPublicKeyHex(hpkePublicKeyHex);
   const requestHost = new URL(origin).host;
