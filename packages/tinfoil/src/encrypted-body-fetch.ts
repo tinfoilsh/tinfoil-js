@@ -184,7 +184,7 @@ async function getUnverifiedTransportForOrigin(origin: string, keyOrigin: string
   return new Transport(serverIdentity, requestHost);
 }
 
-export async function getTransportForOrigin(origin: string, hpkePublicKeyHex: string): Promise<EhbpTransport> {
+async function getTransportForOrigin(origin: string, hpkePublicKeyHex: string): Promise<EhbpTransport> {
   const { Transport } = await getEhbp();
   const serverIdentity = await createIdentityFromPublicKeyHex(hpkePublicKeyHex);
   const requestHost = new URL(origin).host;

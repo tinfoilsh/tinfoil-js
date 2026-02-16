@@ -1,7 +1,7 @@
 export const POLICY_RESERVED_1_BIT = 17;
 export const REPORT_SIZE = 0x4A0;
 export const SIGNATURE_OFFSET = 0x2A0;
-export const ECDSA_RS_SIZE = 72;
+const ECDSA_RS_SIZE = 72;
 export const ECDSA_P384_SHA384_SIGNATURE_SIZE = ECDSA_RS_SIZE + ECDSA_RS_SIZE;
 
 export const ZEN3ZEN4_FAMILY = 0x19;

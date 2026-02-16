@@ -52,7 +52,7 @@ export function bytesToHex(bytes: Uint8Array): string {
     .join('');
 }
 
-export function hexToBytes(hex: string): Uint8Array {
+function hexToBytes(hex: string): Uint8Array {
   if (hex.length % 2 !== 0) {
     throw new Error('Hex string must have even length');
   }
