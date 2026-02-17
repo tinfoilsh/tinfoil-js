@@ -54,7 +54,7 @@
   "dependencies": {
     "@ai-sdk/openai-compatible": "^2.0.26",
     "@freedomofpress/sigstore-browser": "^0.1.11",
-    "@tinfoilsh/verifier": "1.0.5",
+    "@tinfoilsh/verifier": "1.1.0",
     "ehbp": "^0.1.7",
     "openai": "^6.17.0"
   },
