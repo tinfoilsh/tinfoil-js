@@ -18,7 +18,7 @@ It also supports TLS certificate pinning as an alternative transport mode, where
 npm install tinfoil
 ```
 
-Requires Node 20+. Works in browsers with ES2022 support, Electron, and Bun (see [Bun Support](#bun-support)).
+Requires Node 20+. Works in browsers with ES2020 support, Electron, and Bun (see [Bun Support](#bun-support)).
 
 
 
@@ -183,24 +183,6 @@ const doc = verifier.getVerificationDocument();
 console.log(doc.securityVerified);
 console.log(doc.steps); // fetchDigest, verifyCode, verifyEnclave, compareMeasurements
 ```
-
-
-
-## Bun Support
-
-Bun is fully supported with the default EHBP encrypted transport. No special configuration is needed:
-
-```typescript
-import { TinfoilAI } from "tinfoil";
-
-const client = new TinfoilAI({
-  apiKey: "<YOUR_API_KEY>",
-});
-```
-
-TLS certificate pinning is also available as an alternative transport by setting `transport: 'tls'`.
-
-
 
 ## Proxy Support
 
