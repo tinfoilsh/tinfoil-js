@@ -3,19 +3,11 @@ export { TinfoilAI } from "./tinfoil-ai.js";
 export { TinfoilAI as default } from "./tinfoil-ai.js";
 export type { TinfoilAIOptions } from "./tinfoil-ai.js";
 
-// Export verifier (FetchError intentionally omitted from public API)
 export {
   TinfoilError,
   ConfigurationError,
   AttestationError,
-  verifyAttestation,
-  assembleAttestationBundle,
   Verifier,
-  PredicateType,
-  compareMeasurements,
-  measurementFingerprint,
-  hashAttestationDocument,
-  verifyCertificate,
 } from "./verifier.js";
 
 export type {
@@ -31,7 +23,6 @@ export type {
 } from "./verifier.js";
 export { createTinfoilAI } from "./ai-sdk-provider.js";
 export type { CreateTinfoilAIOptions } from "./ai-sdk-provider.js";
-export { TINFOIL_CONFIG } from "./config.js";
 export { SecureClient, type TransportMode } from "./secure-client.js";
 export { UnverifiedClient } from "./unverified-client.js";
 export { fetchRouter, fetchAttestationBundle } from "./atc.js";
