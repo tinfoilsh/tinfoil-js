@@ -17,7 +17,7 @@ export async function createSecureFetch(
   enclaveURL?: string
 ): Promise<typeof fetch> {
   if (hpkePublicKey) {
-    // Dynamic import to avoid loading ehbp/hpke modules when using TLS-only mode.
+    // Dynamic import to enable tree-shaking in browser bundles.
     const { createEncryptedBodyFetch } = await import("./encrypted-body-fetch.js");
     return createEncryptedBodyFetch(baseURL, hpkePublicKey, enclaveURL);
   }
