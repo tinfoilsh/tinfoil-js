@@ -8,6 +8,7 @@ export {
   ConfigurationError,
   AttestationError,
   Verifier,
+  assembleAttestationBundle,
 } from "./verifier.js";
 
 export type {
