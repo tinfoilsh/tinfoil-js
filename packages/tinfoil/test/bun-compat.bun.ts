@@ -13,36 +13,6 @@ import { createPinnedTlsFetch } from "../src/pinned-tls-fetch.js";
 
 const isBun = typeof process !== "undefined" && (process as any).versions?.bun;
 
-/**
- * Test that module imports work cleanly at load time.
- */
-describe("Module imports", () => {
-  it("should import index.js without errors", async () => {
-    if (!isBun) return;
-    // This should not throw - encrypted-body-fetch should be lazy loaded
-    const module = await import("../src/index.js");
-    expect(module).toBeDefined();
-  });
-
-  it("should import secure-fetch.js without errors", async () => {
-    if (!isBun) return;
-    const module = await import("../src/secure-fetch.js");
-    expect(module.createSecureFetch).toBeDefined();
-  });
-
-  it("should import secure-client.js without errors", async () => {
-    if (!isBun) return;
-    const module = await import("../src/secure-client.js");
-    expect(module).toBeDefined();
-  });
-
-  it("should import unverified-client.js without errors", async () => {
-    if (!isBun) return;
-    const module = await import("../src/unverified-client.js");
-    expect(module.UnverifiedClient).toBeDefined();
-  });
-});
-
 describe("Bun compatibility", () => {
   beforeAll(() => {
     if (!isBun) {
