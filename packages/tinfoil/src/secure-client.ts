@@ -1,4 +1,4 @@
-import { Verifier, assembleAttestationBundle, ConfigurationError, FetchError, AttestationError, type VerificationDocument } from "./verifier.js";
+import { Verifier, ConfigurationError, FetchError, AttestationError, type VerificationDocument } from "./verifier.js";
 import type { AttestationBundle } from "./verifier.js";
 import { TINFOIL_CONFIG } from "./config.js";
 import { createSecureFetch } from "./secure-fetch.js";
@@ -136,6 +136,9 @@ export class SecureClient {
   private resolvedBaseURL?: string;
 
   constructor(options: SecureClientOptions = {}) {
+    if (options.enclaveURL && !options.enclaveURL.startsWith("https://")) {
+      throw new ConfigurationError(`enclaveURL must use HTTPS. Got: ${options.enclaveURL}`);
+    }
     if (options.configRepo && !options.enclaveURL) {
       throw new ConfigurationError("configRepo requires enclaveURL — without it, ATC always uses the default router repo.");
     } else if (options.enclaveURL && !options.configRepo) {
@@ -216,16 +219,13 @@ export class SecureClient {
   }
 
   private async initSecureClient(): Promise<void> {
-    let bundle: AttestationBundle;
-
-    if (this.config.enclaveURL) {
-      // Custom enclave: assemble the bundle locally
-      const host = new URL(this.config.enclaveURL).host;
-      bundle = await assembleAttestationBundle(host, this.config.configRepo);
-    } else {
-      // Default router: fetch pre-assembled bundle from ATC
-      bundle = await fetchAttestationBundle(this.config.attestationBundleURL);
-    }
+    const bundle: AttestationBundle = await fetchAttestationBundle({
+      atcBaseUrl: this.config.attestationBundleURL,
+      enclaveURL: this.config.enclaveURL,
+      configRepo: this.config.configRepo !== TINFOIL_CONFIG.DEFAULT_ROUTER_REPO
+        ? this.config.configRepo
+        : undefined,
+    });
 
     // Resolve enclaveURL: user-provided config takes precedence, otherwise from bundle
     this.resolvedEnclaveURL = this.config.enclaveURL ?? `https://${bundle.domain}`;

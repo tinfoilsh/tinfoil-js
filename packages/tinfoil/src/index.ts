@@ -26,7 +26,7 @@ export { createTinfoilAI } from "./ai-sdk-provider.js";
 export type { CreateTinfoilAIOptions } from "./ai-sdk-provider.js";
 export { SecureClient, type TransportMode } from "./secure-client.js";
 export { UnverifiedClient } from "./unverified-client.js";
-export { fetchRouter, fetchAttestationBundle } from "./atc.js";
+export { fetchRouter, fetchAttestationBundle, type FetchAttestationBundleOptions } from "./atc.js";
 
 // Re-export OpenAI utility types and classes that users might need
 // Using public exports from the main OpenAI package instead of deep imports

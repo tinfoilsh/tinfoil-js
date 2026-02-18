@@ -158,11 +158,14 @@ describe("Examples Integration Tests", () => {
   });
 
   describe("Custom Enclave (non-ATC) Path", () => {
+    const LOCAL_ATC = process.env.LOCAL_ATC_URL;
+
     it.skipIf(!RUN_INTEGRATION)("should verify and fetch using enclaveURL (assembleAttestationBundle)", async () => {
       const { SecureClient } = await import("../src/secure-client");
 
       const client = new SecureClient({
         enclaveURL: "https://inference.tinfoil.sh",
+        ...(LOCAL_ATC && { attestationBundleURL: LOCAL_ATC }),
       });
 
       await client.ready();
@@ -181,6 +184,7 @@ describe("Examples Integration Tests", () => {
       const client = new SecureClient({
         enclaveURL: "https://inference.tinfoil.sh",
         configRepo: "tinfoilsh/confidential-model-router",
+        ...(LOCAL_ATC && { attestationBundleURL: LOCAL_ATC }),
       });
 
       await client.ready();

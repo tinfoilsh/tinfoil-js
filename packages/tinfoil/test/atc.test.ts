@@ -82,7 +82,7 @@ describe("ATC API", () => {
       const { fetchAttestationBundle } = await import("../src/atc");
 
       // Using production URL explicitly to test custom URL parameter
-      const bundle = await fetchAttestationBundle("https://atc.tinfoil.sh");
+      const bundle = await fetchAttestationBundle({ atcBaseUrl: "https://atc.tinfoil.sh" });
 
       expect(bundle).toBeDefined();
       expect(bundle.domain).toBeDefined();
@@ -91,7 +91,7 @@ describe("ATC API", () => {
     it("should throw on invalid ATC URL", async () => {
       const { fetchAttestationBundle } = await import("../src/atc");
 
-      await expect(fetchAttestationBundle("https://invalid.example.com")).rejects.toThrow();
+      await expect(fetchAttestationBundle({ atcBaseUrl: "https://invalid.example.com" })).rejects.toThrow();
     });
   });
 
