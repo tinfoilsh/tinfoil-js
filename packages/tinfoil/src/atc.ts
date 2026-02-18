@@ -2,20 +2,38 @@ import { TINFOIL_CONFIG } from "./config.js";
 import type { AttestationBundle } from "@tinfoilsh/verifier";
 import { FetchError } from "./verifier.js";
 
+export interface FetchAttestationBundleOptions {
+  atcBaseUrl?: string;
+  enclaveURL?: string;
+  configRepo?: string;
+}
+
 /**
- * Fetches a complete attestation bundle.
- * The bundle contains all material needed for verification without additional network calls.
+ * Fetches a complete attestation bundle from ATC.
  *
- * @param atcBaseUrl - Base URL for the attestation endpoint (defaults to TINFOIL_CONFIG.ATC_BASE_URL)
- * @returns The complete attestation bundle
- * @throws Error if the request fails
+ * When enclaveURL or configRepo are provided, issues a POST so ATC builds a
+ * bundle for the specified enclave/repo. Otherwise issues a GET for the
+ * default router behaviour.
  */
-export async function fetchAttestationBundle(atcBaseUrl: string = TINFOIL_CONFIG.ATC_BASE_URL): Promise<AttestationBundle> {
-  const url = `${atcBaseUrl}/attestation`;
-  const response = await fetch(url);
+export async function fetchAttestationBundle(options: FetchAttestationBundleOptions = {}): Promise<AttestationBundle> {
+  const baseUrl = options.atcBaseUrl ?? TINFOIL_CONFIG.ATC_BASE_URL;
+  const url = `${baseUrl}/attestation`;
+
+  const usePost = !!(options.enclaveURL || options.configRepo);
+
+  const response = usePost
+    ? await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          enclaveUrl: options.enclaveURL,
+          repo: options.configRepo,
+        }),
+      })
+    : await fetch(url);
 
   if (!response.ok) {
-    throw new FetchError(`Failed to fetch attestation bundle from ${atcBaseUrl}: HTTP ${response.status} ${response.statusText}`);
+    throw new FetchError(`Failed to fetch attestation bundle from ${baseUrl}: HTTP ${response.status} ${response.statusText}`);
   }
 
   const bundle = await response.json();

@@ -449,7 +449,7 @@ describe("SecureClient", () => {
   });
 
   describe("attestation bundle paths", () => {
-    it("should use fetchAttestationBundle when enclaveURL is not set", async () => {
+    it("should use fetchAttestationBundle via GET when no custom options", async () => {
       const { SecureClient } = await import("../src/secure-client");
       const { fetchAttestationBundle } = await import("../src/atc.js");
 
@@ -457,11 +457,16 @@ describe("SecureClient", () => {
       await client.ready();
 
       expect(fetchAttestationBundle).toHaveBeenCalledTimes(1);
+      expect(fetchAttestationBundle).toHaveBeenCalledWith({
+        atcBaseUrl: undefined,
+        enclaveURL: undefined,
+        configRepo: undefined,
+      });
     });
 
-    it("should use assembleAttestationBundle when enclaveURL is set", async () => {
+    it("should pass enclaveURL and configRepo to fetchAttestationBundle", async () => {
       const { SecureClient } = await import("../src/secure-client");
-      const { assembleAttestationBundle } = await import("../src/verifier.js");
+      const { fetchAttestationBundle } = await import("../src/atc.js");
 
       const client = new SecureClient({
         enclaveURL: "https://my-enclave.example.com",
@@ -469,10 +474,12 @@ describe("SecureClient", () => {
       });
       await client.ready();
 
-      expect(assembleAttestationBundle).toHaveBeenCalledWith(
-        "my-enclave.example.com",
-        "custom/repo",
-      );
+      expect(fetchAttestationBundle).toHaveBeenCalledTimes(1);
+      expect(fetchAttestationBundle).toHaveBeenCalledWith({
+        atcBaseUrl: undefined,
+        enclaveURL: "https://my-enclave.example.com",
+        configRepo: "custom/repo",
+      });
     });
   });
 
