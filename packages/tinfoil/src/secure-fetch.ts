@@ -43,7 +43,7 @@ export async function createSecureFetch(
   const pinnedFetch = await createPinnedTlsFetch(baseURL, tlsPublicKeyFingerprint);
   return {
     fetch: pinnedFetch,
-    getSessionRecoveryToken() {
+    async getSessionRecoveryToken() {
       throw new Error('Session recovery tokens are only available in EHBP transport mode');
     },
   };
