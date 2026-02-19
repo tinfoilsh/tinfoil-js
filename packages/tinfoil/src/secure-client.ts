@@ -318,7 +318,7 @@ export class SecureClient {
     };
   }
 
-  public getSessionRecoveryToken(): SessionRecoveryToken {
+  public async getSessionRecoveryToken(): Promise<SessionRecoveryToken> {
     if (!this._transport) {
       throw new Error('Client not initialized — call ready() or fetch() first');
     }
