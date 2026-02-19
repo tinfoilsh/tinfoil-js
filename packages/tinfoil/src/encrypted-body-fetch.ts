@@ -6,7 +6,7 @@ export type { SessionRecoveryToken } from "ehbp";
 
 export interface SecureTransport {
   fetch: typeof fetch;
-  getSessionRecoveryToken(): SessionRecoveryToken;
+  getSessionRecoveryToken(): Promise<SessionRecoveryToken>;
 }
 
 // Lazy-loaded ehbp module - cache the promise to prevent duplicate imports on concurrent calls
@@ -113,13 +113,11 @@ const ENCLAVE_URL_HEADER = 'X-Tinfoil-Enclave-Url';
 
 export function createEncryptedBodyFetch(baseURL: string, hpkePublicKey: string, enclaveURL?: string): SecureTransport {
   let transportPromise: Promise<EhbpTransport> | null = null;
-  let resolvedTransport: EhbpTransport | null = null;
 
-  const getOrCreateTransport = async (): Promise<EhbpTransport> => {
+  const getOrCreateTransport = (): Promise<EhbpTransport> => {
     if (!transportPromise) {
       const baseUrl = new URL(baseURL);
       transportPromise = getTransportForOrigin(baseUrl.origin, hpkePublicKey);
-      transportPromise.then(t => { resolvedTransport = t; });
     }
     return transportPromise;
   };
@@ -139,11 +137,12 @@ export function createEncryptedBodyFetch(baseURL: string, hpkePublicKey: string,
       return encryptedBodyRequest(targetUrl.toString(), hpkePublicKey, initWithHeader, transportInstance);
     },
 
-    getSessionRecoveryToken(): SessionRecoveryToken {
-      if (!resolvedTransport) {
+    async getSessionRecoveryToken(): Promise<SessionRecoveryToken> {
+      if (!transportPromise) {
         throw new Error('No session recovery token available — no request has been made yet');
       }
-      return resolvedTransport.getSessionRecoveryToken();
+      const transport = await transportPromise;
+      return transport.getSessionRecoveryToken();
     },
   };
 }
