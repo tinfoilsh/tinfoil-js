@@ -1,3 +1,4 @@
+import { createEncryptedBodyFetch } from "./encrypted-body-fetch.js";
 import { isRealBrowser } from "./env.js";
 import { ConfigurationError } from "./verifier.js";
 
@@ -6,9 +7,7 @@ import { ConfigurationError } from "./verifier.js";
  * 
  * This is the unified implementation for both browser and server environments:
  * - In browsers: Only HPKE encryption is supported (requires hpkePublicKey)
- * - In Node.js/Bun: Also supports TLS certificate pinning when configured
- * 
- * All imports are dynamic to enable tree-shaking in browser bundles.
+ * - In Node.js/Bun: Falls back to TLS certificate pinning if HPKE unavailable
  */
 export async function createSecureFetch(
   baseURL: string,
@@ -17,8 +16,6 @@ export async function createSecureFetch(
   enclaveURL?: string
 ): Promise<typeof fetch> {
   if (hpkePublicKey) {
-    // Dynamic import to enable tree-shaking in browser bundles.
-    const { createEncryptedBodyFetch } = await import("./encrypted-body-fetch.js");
     return createEncryptedBodyFetch(baseURL, hpkePublicKey, enclaveURL);
   }
 

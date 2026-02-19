@@ -1,3 +1,4 @@
+import { KeyConfigMismatchError } from "ehbp";
 import { Verifier, ConfigurationError, FetchError, AttestationError, type VerificationDocument } from "./verifier.js";
 import type { AttestationBundle } from "./verifier.js";
 import { TINFOIL_CONFIG } from "./config.js";
@@ -49,14 +50,6 @@ export interface SecureClientOptions {
 
   /** URL to fetch the attestation bundle from. */
   attestationBundleURL?: string;
-}
-
-/**
- * Duck-typed check for EHBP KeyConfigMismatchError.
- * TODO: Replace with direct import once ehbp publishes typed errors.
- */
-function isKeyConfigMismatchError(error: unknown): boolean {
-  return error instanceof Error && error.name === 'KeyConfigMismatchError';
 }
 
 function createPendingVerificationDocument(configRepo: string): VerificationDocument {
@@ -307,7 +300,7 @@ export class SecureClient {
         return await this._fetch!(input, init);
       } catch (error) {
         // Channel recovery: server rotated keys, request was never processed — safe to retry
-        if (isKeyConfigMismatchError(error)) {
+        if (error instanceof KeyConfigMismatchError) {
           this.reset();
           await this.ready();
           return await this._fetch!(input, init);

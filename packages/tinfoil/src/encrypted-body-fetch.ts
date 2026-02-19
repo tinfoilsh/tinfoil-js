@@ -1,26 +1,12 @@
-// Types are imported separately - type imports don't cause runtime loading
+import { Transport, Identity, PROTOCOL } from "ehbp";
 import type { Transport as EhbpTransport, Identity as EhbpIdentity } from "ehbp";
 import { ConfigurationError, FetchError } from "./verifier.js";
-
-// Lazy-loaded ehbp module - cache the promise to prevent duplicate imports on concurrent calls
-let ehbpModulePromise: Promise<typeof import("ehbp")> | null = null;
-
-function getEhbp(): Promise<typeof import("ehbp")> {
-  if (!ehbpModulePromise) {
-    ehbpModulePromise = import("ehbp").catch((err) => {
-      ehbpModulePromise = null;
-      throw err;
-    });
-  }
-  return ehbpModulePromise;
-}
 
 /**
  * Create an Identity from a raw public key hex string.
  * This avoids fetching from the server when the key is already known.
  */
-async function createIdentityFromPublicKeyHex(publicKeyHex: string): Promise<EhbpIdentity> {
-  const { Identity } = await getEhbp();
+function createIdentityFromPublicKeyHex(publicKeyHex: string): Promise<EhbpIdentity> {
   return Identity.fromPublicKeyHex(publicKeyHex);
 }
 
@@ -29,7 +15,6 @@ async function createIdentityFromPublicKeyHex(publicKeyHex: string): Promise<Ehb
  * Returns the server Identity which can be used to create a Transport.
  */
 export async function getServerIdentity(enclaveURL: string): Promise<EhbpIdentity> {
-  const { Identity, PROTOCOL } = await getEhbp();
   const keysURL = new URL(PROTOCOL.KEYS_PATH, enclaveURL);
 
   if (keysURL.protocol !== 'https:') {
@@ -177,15 +162,26 @@ export function createUnverifiedEncryptedBodyFetch(baseURL: string, keyOrigin?: 
   };
 }
 
+function checkWebCryptoAvailable(): void {
+  if (typeof globalThis !== 'undefined') {
+    const isSecure = (globalThis as any).isSecureContext !== false;
+    const hasSubtle = !!(globalThis.crypto && (globalThis.crypto as Crypto).subtle);
+    if (!isSecure || !hasSubtle) {
+      const reason = !isSecure ? 'Use HTTPS or localhost' : 'WebCrypto SubtleCrypto API is not available';
+      throw new ConfigurationError(`EHBP encryption requires a secure browser context: ${reason}`);
+    }
+  }
+}
+
 async function getUnverifiedTransportForOrigin(origin: string, keyOrigin: string): Promise<EhbpTransport> {
-  const { Transport } = await getEhbp();
+  checkWebCryptoAvailable();
   const serverIdentity = await getServerIdentity(keyOrigin);
   const requestHost = new URL(origin).host;
   return new Transport(serverIdentity, requestHost);
 }
 
-async function getTransportForOrigin(origin: string, hpkePublicKeyHex: string): Promise<EhbpTransport> {
-  const { Transport } = await getEhbp();
+export async function getTransportForOrigin(origin: string, hpkePublicKeyHex: string): Promise<EhbpTransport> {
+  checkWebCryptoAvailable();
   const serverIdentity = await createIdentityFromPublicKeyHex(hpkePublicKeyHex);
   const requestHost = new URL(origin).host;
   return new Transport(serverIdentity, requestHost);
