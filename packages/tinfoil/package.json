@@ -55,7 +55,7 @@
     "@ai-sdk/openai-compatible": "^2.0.26",
     "@freedomofpress/sigstore-browser": "^0.1.11",
     "@tinfoilsh/verifier": "1.1.1",
-    "ehbp": "^0.1.7",
+    "ehbp": "^0.2.0",
     "openai": "^6.17.0"
   },
   "peerDependencies": {
