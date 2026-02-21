@@ -3,6 +3,7 @@ import type { AttestationBundle } from "./verifier.js";
 import { TINFOIL_CONFIG } from "./config.js";
 import { createSecureFetch, type SecureTransport } from "./secure-fetch.js";
 import { fetchAttestationBundle } from "./atc.js";
+import { getEhbp } from "./encrypted-body-fetch.js";
 import type { SessionRecoveryToken } from "./encrypted-body-fetch.js";
 
 /** Delay before retrying init on transient failure (ms). */
@@ -320,7 +321,7 @@ export class SecureClient {
 
   public async getSessionRecoveryToken(): Promise<SessionRecoveryToken> {
     if (!this._transport) {
-      throw new Error('Client not initialized — call ready() or fetch() first');
+      throw new Error('No session recovery token available — call fetch() first');
     }
     return this._transport.getSessionRecoveryToken();
   }
@@ -329,7 +330,7 @@ export class SecureClient {
     response: Response,
     token: SessionRecoveryToken,
   ): Promise<Response> {
-    const { decryptResponseWithToken } = await import("ehbp");
+    const { decryptResponseWithToken } = await getEhbp();
     return decryptResponseWithToken(response, token);
   }
 }

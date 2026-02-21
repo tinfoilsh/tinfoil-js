@@ -12,7 +12,7 @@ export interface SecureTransport {
 // Lazy-loaded ehbp module - cache the promise to prevent duplicate imports on concurrent calls
 let ehbpModulePromise: Promise<typeof import("ehbp")> | null = null;
 
-function getEhbp(): Promise<typeof import("ehbp")> {
+export function getEhbp(): Promise<typeof import("ehbp")> {
   if (!ehbpModulePromise) {
     ehbpModulePromise = import("ehbp").catch((err) => {
       ehbpModulePromise = null;
