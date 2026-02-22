@@ -9,7 +9,7 @@ import { createEncryptedBodyFetch, type SecureTransport } from "./encrypted-body
  * - In browsers: Only HPKE encryption is supported (requires hpkePublicKey)
  * - In Node.js/Bun: Also supports TLS certificate pinning when configured
  *
- * All imports are dynamic to enable tree-shaking in browser bundles.
+ * The pinned-tls-fetch import is dynamic to keep Node.js-only code out of browser bundles.
  */
 export async function createSecureFetch(
   baseURL: string,

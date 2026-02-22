@@ -495,8 +495,8 @@ describe("SecureClient", () => {
       expect(verifyMock).toHaveBeenCalledTimes(1);
 
       // First call throws KeyConfigMismatchError, second succeeds
-      const keyMismatchError = new Error("Key config mismatch");
-      keyMismatchError.name = "KeyConfigMismatchError";
+      const { KeyConfigMismatchError } = await import("ehbp");
+      const keyMismatchError = new KeyConfigMismatchError("Key config mismatch");
       mockFetch
         .mockRejectedValueOnce(keyMismatchError)
         .mockResolvedValueOnce(new Response(JSON.stringify({ ok: true })));
