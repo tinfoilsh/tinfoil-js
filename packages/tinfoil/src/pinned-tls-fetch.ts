@@ -1,12 +1,7 @@
 import { X509Certificate, createHash } from "crypto";
 import type { ReadableStream as NodeWebReadableStream } from "stream/web";
 import { ConfigurationError, AttestationError } from "./verifier.js";
-
-function isBun(): boolean {
-  return typeof process !== "undefined" &&
-    (process as any).versions &&
-    (process as any).versions.bun;
-}
+import { isBun } from "./env.js";
 
 function createCheckServerIdentity(expectedFingerprintHex: string): (host: string, cert: any) => Error | undefined {
   return (host: string, cert: any): Error | undefined => {

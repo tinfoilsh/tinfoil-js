@@ -1,3 +1,9 @@
+export function isBun(): boolean {
+  return typeof process !== "undefined" &&
+    !!(process as any).versions &&
+    !!(process as any).versions.bun;
+}
+
 /**
  * Detects if the code is running in a real browser environment.
  * Returns false for server-side runtimes (Node.js, Bun, Deno, edge runtimes).
@@ -14,11 +20,7 @@ export function isRealBrowser(): boolean {
   }
 
   // Check for Bun
-  if (
-    typeof process !== "undefined" &&
-    (process as any).versions &&
-    (process as any).versions.bun
-  ) {
+  if (isBun()) {
     return false;
   }
 
