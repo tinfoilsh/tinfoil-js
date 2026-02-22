@@ -97,12 +97,14 @@ export async function encryptedBodyRequest(
 const ENCLAVE_URL_HEADER = 'X-Tinfoil-Enclave-Url';
 
 export function createEncryptedBodyFetch(baseURL: string, hpkePublicKey: string, enclaveURL?: string): SecureTransport {
+  const baseOrigin = new URL(baseURL).origin;
+  const needsEnclaveHeader = !!enclaveURL && new URL(enclaveURL).origin !== baseOrigin;
+
   let transportPromise: Promise<Transport> | null = null;
 
   const getOrCreateTransport = (): Promise<Transport> => {
     if (!transportPromise) {
-      const baseUrl = new URL(baseURL);
-      transportPromise = getTransportForOrigin(baseUrl.origin, hpkePublicKey);
+      transportPromise = getTransportForOrigin(baseOrigin, hpkePublicKey);
     }
     return transportPromise;
   };
@@ -113,8 +115,8 @@ export function createEncryptedBodyFetch(baseURL: string, hpkePublicKey: string,
       const targetUrl = new URL(normalized.url, baseURL);
 
       const headers = new Headers(normalized.init?.headers);
-      if (enclaveURL && new URL(enclaveURL).origin !== new URL(baseURL).origin) {
-        headers.set(ENCLAVE_URL_HEADER, enclaveURL);
+      if (needsEnclaveHeader) {
+        headers.set(ENCLAVE_URL_HEADER, enclaveURL!);
       }
       const initWithHeader = { ...normalized.init, headers };
 
@@ -153,13 +155,15 @@ export function createUnverifiedEncryptedBodyFetch(baseURL: string, keyOrigin?: 
     "Only use for local development and testing of the EHBP protocol."
   );
 
+  const baseOrigin = new URL(baseURL).origin;
+  const resolvedKeyOrigin = keyOrigin ? new URL(keyOrigin).origin : baseOrigin;
+  const needsEnclaveHeader = !!keyOrigin && resolvedKeyOrigin !== baseOrigin;
+
   let transportPromise: Promise<Transport> | null = null;
 
   const getOrCreateTransport = async (): Promise<Transport> => {
     if (!transportPromise) {
-      const baseUrl = new URL(baseURL);
-      const resolvedKeyOrigin = keyOrigin ? new URL(keyOrigin).origin : baseUrl.origin;
-      transportPromise = getUnverifiedTransportForOrigin(baseUrl.origin, resolvedKeyOrigin);
+      transportPromise = getUnverifiedTransportForOrigin(baseOrigin, resolvedKeyOrigin);
     }
     return transportPromise;
   };
@@ -169,8 +173,8 @@ export function createUnverifiedEncryptedBodyFetch(baseURL: string, keyOrigin?: 
     const targetUrl = new URL(normalized.url, baseURL);
 
     const headers = new Headers(normalized.init?.headers);
-    if (keyOrigin && new URL(keyOrigin).origin !== new URL(baseURL).origin) {
-      headers.set(ENCLAVE_URL_HEADER, keyOrigin);
+    if (needsEnclaveHeader) {
+      headers.set(ENCLAVE_URL_HEADER, keyOrigin!);
     }
     const initWithEnclaveHeader = { ...normalized.init, headers };
 
