@@ -1,5 +1,5 @@
 import { TINFOIL_CONFIG } from "./config.js";
-import type { AttestationBundle } from "@tinfoilsh/verifier";
+import type { AttestationBundle } from "./verifier.js";
 import { FetchError } from "./verifier.js";
 
 export interface FetchAttestationBundleOptions {
