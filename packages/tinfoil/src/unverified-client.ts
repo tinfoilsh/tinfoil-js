@@ -11,7 +11,7 @@
  */
 import { fetchRouter } from "./atc.js";
 import { ConfigurationError } from "./verifier.js";
-import type { SecureTransport } from "./encrypted-body-fetch.js";
+import { createUnverifiedEncryptedBodyFetch, type SecureTransport } from "./encrypted-body-fetch.js";
 
 interface UnverifiedClientOptions {
   /** Base URL for API requests. If not provided, derived from keyOrigin or fetched from router. */
@@ -71,8 +71,6 @@ export class UnverifiedClient {
       }
     }
 
-    // Dynamically import to avoid loading ehbp/hpke modules at module load time
-    const { createUnverifiedEncryptedBodyFetch } = await import("./encrypted-body-fetch.js");
     this._transport = createUnverifiedEncryptedBodyFetch(this.baseURL, this.keyOrigin);
   }
 
