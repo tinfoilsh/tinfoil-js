@@ -76,7 +76,7 @@ export class UnverifiedClient {
     this._transport = createUnverifiedEncryptedBodyFetch(this.baseURL, this.keyOrigin);
   }
 
-  public async getVerificationDocument(): Promise<void> {
+  public async getVerificationDocument(): Promise<never> {
     throw new ConfigurationError("Verification document unavailable: this version of the client is unverified");
   }
 
