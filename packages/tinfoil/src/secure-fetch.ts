@@ -1,6 +1,6 @@
 import { isRealBrowser } from "./env.js";
 import { ConfigurationError } from "./verifier.js";
-import type { SecureTransport } from "./encrypted-body-fetch.js";
+import { createEncryptedBodyFetch, type SecureTransport } from "./encrypted-body-fetch.js";
 
 export type { SecureTransport } from "./encrypted-body-fetch.js";
 
@@ -20,8 +20,6 @@ export async function createSecureFetch(
   enclaveURL?: string
 ): Promise<SecureTransport> {
   if (hpkePublicKey) {
-    // Dynamic import to enable tree-shaking in browser bundles.
-    const { createEncryptedBodyFetch } = await import("./encrypted-body-fetch.js");
     return createEncryptedBodyFetch(baseURL, hpkePublicKey, enclaveURL);
   }
 

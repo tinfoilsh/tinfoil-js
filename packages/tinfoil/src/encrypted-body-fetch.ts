@@ -1,5 +1,4 @@
-import { Identity, Transport, PROTOCOL } from "ehbp";
-import type { Transport as EhbpTransport, Identity as EhbpIdentity, SessionRecoveryToken } from "ehbp";
+import { Identity, Transport, PROTOCOL, type SessionRecoveryToken } from "ehbp";
 import { ConfigurationError, FetchError } from "./verifier.js";
 
 export type { SessionRecoveryToken } from "ehbp";
@@ -14,7 +13,7 @@ export interface SecureTransport {
  * Create an Identity from a raw public key hex string.
  * This avoids fetching from the server when the key is already known.
  */
-async function createIdentityFromPublicKeyHex(publicKeyHex: string): Promise<EhbpIdentity> {
+async function createIdentityFromPublicKeyHex(publicKeyHex: string): Promise<Identity> {
   return Identity.fromPublicKeyHex(publicKeyHex);
 }
 
@@ -22,7 +21,7 @@ async function createIdentityFromPublicKeyHex(publicKeyHex: string): Promise<Ehb
  * Fetch and parse server identity from the HPKE keys endpoint.
  * Returns the server Identity which can be used to create a Transport.
  */
-export async function getServerIdentity(enclaveURL: string): Promise<EhbpIdentity> {
+export async function getServerIdentity(enclaveURL: string): Promise<Identity> {
   const keysURL = new URL(PROTOCOL.KEYS_PATH, enclaveURL);
 
   if (keysURL.protocol !== 'https:') {
@@ -76,14 +75,14 @@ export async function encryptedBodyRequest(
   input: RequestInfo | URL,
   hpkePublicKey: string,
   init?: RequestInit,
-  transportInstance?: EhbpTransport,
+  transportInstance?: Transport,
 ): Promise<Response> {
   const { url: requestUrl, init: requestInit } = normalizeEncryptedBodyRequestArgs(
     input,
     init,
   );
 
-  let actualTransport: EhbpTransport;
+  let actualTransport: Transport;
 
   if (transportInstance) {
     actualTransport = transportInstance;
@@ -98,9 +97,9 @@ export async function encryptedBodyRequest(
 const ENCLAVE_URL_HEADER = 'X-Tinfoil-Enclave-Url';
 
 export function createEncryptedBodyFetch(baseURL: string, hpkePublicKey: string, enclaveURL?: string): SecureTransport {
-  let transportPromise: Promise<EhbpTransport> | null = null;
+  let transportPromise: Promise<Transport> | null = null;
 
-  const getOrCreateTransport = (): Promise<EhbpTransport> => {
+  const getOrCreateTransport = (): Promise<Transport> => {
     if (!transportPromise) {
       const baseUrl = new URL(baseURL);
       transportPromise = getTransportForOrigin(baseUrl.origin, hpkePublicKey);
@@ -154,9 +153,9 @@ export function createUnverifiedEncryptedBodyFetch(baseURL: string, keyOrigin?: 
     "Only use for local development and testing of the EHBP protocol."
   );
 
-  let transportPromise: Promise<EhbpTransport> | null = null;
+  let transportPromise: Promise<Transport> | null = null;
 
-  const getOrCreateTransport = async (): Promise<EhbpTransport> => {
+  const getOrCreateTransport = async (): Promise<Transport> => {
     if (!transportPromise) {
       const baseUrl = new URL(baseURL);
       const resolvedKeyOrigin = keyOrigin ? new URL(keyOrigin).origin : baseUrl.origin;
@@ -180,13 +179,13 @@ export function createUnverifiedEncryptedBodyFetch(baseURL: string, keyOrigin?: 
   };
 }
 
-async function getUnverifiedTransportForOrigin(origin: string, keyOrigin: string): Promise<EhbpTransport> {
+async function getUnverifiedTransportForOrigin(origin: string, keyOrigin: string): Promise<Transport> {
   const serverIdentity = await getServerIdentity(keyOrigin);
   const requestHost = new URL(origin).host;
   return new Transport(serverIdentity, requestHost);
 }
 
-async function getTransportForOrigin(origin: string, hpkePublicKeyHex: string): Promise<EhbpTransport> {
+async function getTransportForOrigin(origin: string, hpkePublicKeyHex: string): Promise<Transport> {
   const serverIdentity = await createIdentityFromPublicKeyHex(hpkePublicKeyHex);
   const requestHost = new URL(origin).host;
   return new Transport(serverIdentity, requestHost);
