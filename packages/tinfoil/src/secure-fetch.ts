@@ -2,8 +2,6 @@ import { isRealBrowser } from "./env.js";
 import { ConfigurationError } from "./verifier.js";
 import { createEncryptedBodyFetch, type SecureTransport } from "./encrypted-body-fetch.js";
 
-export type { SecureTransport } from "./encrypted-body-fetch.js";
-
 /**
  * Creates a secure fetch function with either HPKE encryption or TLS pinning.
  *
