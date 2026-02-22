@@ -138,13 +138,13 @@ cd unverified_client && npx ts-node main.ts
 ```
 
 **What it demonstrates:**
-- Creating an `UnverifiedClient`
+- Importing `UnverifiedClient` from `tinfoil/unsafe`
 - Making requests without attestation checks
 - Same API as `SecureClient`
 
 **When to use:** Local development, testing, CI/CD pipelines, or when connecting to non-enclave endpoints. **Never use in production** — this bypasses all security verification.
 
-> **Warning:** The `UnverifiedClient` does not verify enclave attestation. Only use for development and testing.
+> **Warning:** The `UnverifiedClient` is exported from `tinfoil/unsafe` (not the main `tinfoil` entry point) to prevent accidental production use. It does not verify enclave attestation. Only use for development and testing.
 
 ---
 
