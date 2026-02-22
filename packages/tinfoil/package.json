@@ -8,7 +8,8 @@
   "sideEffects": false,
   "browser": {
     "./dist/index.js": "./dist/index.browser.js",
-    "./dist/pinned-tls-fetch.js": "./dist/pinned-tls-fetch.browser.js"
+    "./dist/pinned-tls-fetch.js": "./dist/pinned-tls-fetch.browser.js",
+    "./dist/unsafe.js": "./dist/unsafe.browser.js"
   },
   "exports": {
     ".": {
@@ -16,6 +17,12 @@
       "browser": "./dist/index.browser.js",
       "import": "./dist/index.js",
       "default": "./dist/index.js"
+    },
+    "./unsafe": {
+      "types": "./dist/unsafe.d.ts",
+      "browser": "./dist/unsafe.browser.js",
+      "import": "./dist/unsafe.js",
+      "default": "./dist/unsafe.js"
     }
   },
   "scripts": {

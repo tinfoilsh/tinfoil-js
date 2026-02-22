@@ -217,7 +217,7 @@ Working examples are in [`packages/tinfoil/examples/`](packages/tinfoil/examples
 | [`ai-sdk/`](packages/tinfoil/examples/ai-sdk/) | Vercel AI SDK server-side integration |
 | [`ai-sdk-react/`](packages/tinfoil/examples/ai-sdk-react/) | Vercel AI SDK React/browser integration |
 | [`secure_client/`](packages/tinfoil/examples/secure_client/) | Direct SecureClient usage for custom HTTP |
-| [`unverified_client/`](packages/tinfoil/examples/unverified_client/) | Development/testing without attestation |
+| [`unverified_client/`](packages/tinfoil/examples/unverified_client/) | Development/testing without attestation (`tinfoil/unsafe`) |
 
 Run any example:
 

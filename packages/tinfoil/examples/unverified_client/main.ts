@@ -10,7 +10,7 @@
  *
  * Run: npx ts-node main.ts
  */
-import { UnverifiedClient } from "tinfoil";
+import { UnverifiedClient } from "tinfoil/unsafe";
 
 async function main() {
   try {
