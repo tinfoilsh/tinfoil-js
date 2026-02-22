@@ -88,11 +88,8 @@ async function createNodePinnedTlsFetch(baseURL: string, expectedFingerprintHex:
     // Resolve body
     let body: any = init?.body;
     if (!body && input instanceof Request) {
-      // If the original was a Request with a body, read it
-      try {
-        const buf = await (input as Request).arrayBuffer();
-        if (buf && (buf as ArrayBuffer).byteLength) body = Buffer.from(buf as ArrayBuffer);
-      } catch {}
+      const buf = await (input as Request).arrayBuffer();
+      if (buf && (buf as ArrayBuffer).byteLength) body = Buffer.from(buf as ArrayBuffer);
     }
     // Convert web streams to Node streams if needed
     if (body && typeof (body as any).getReader === "function") {
