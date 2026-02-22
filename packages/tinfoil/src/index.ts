@@ -26,6 +26,7 @@ export { createTinfoilAI } from "./ai-sdk-provider.js";
 export type { CreateTinfoilAIOptions } from "./ai-sdk-provider.js";
 export { SecureClient, type TransportMode } from "./secure-client.js";
 export type { SessionRecoveryToken } from "ehbp";
+export { serializeSessionRecoveryToken, deserializeSessionRecoveryToken, decryptResponseWithToken } from "ehbp";
 export { UnverifiedClient } from "./unverified-client.js";
 export { fetchRouter, fetchAttestationBundle, type FetchAttestationBundleOptions } from "./atc.js";
 
