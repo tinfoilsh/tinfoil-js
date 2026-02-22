@@ -11,6 +11,7 @@
  */
 import { fetchRouter } from "./atc.js";
 import { ConfigurationError } from "./verifier.js";
+import type { SecureTransport } from "./encrypted-body-fetch.js";
 
 interface UnverifiedClientOptions {
   /** Base URL for API requests. If not provided, derived from keyOrigin or fetched from router. */
@@ -21,7 +22,7 @@ interface UnverifiedClientOptions {
 
 export class UnverifiedClient {
   private initPromise: Promise<void> | null = null;
-  private _fetch: typeof fetch | null = null;
+  private _transport: SecureTransport | null = null;
 
   private baseURL?: string;
   private keyOrigin?: string;
@@ -72,7 +73,7 @@ export class UnverifiedClient {
 
     // Dynamically import to avoid loading ehbp/hpke modules at module load time
     const { createUnverifiedEncryptedBodyFetch } = await import("./encrypted-body-fetch.js");
-    this._fetch = createUnverifiedEncryptedBodyFetch(this.baseURL, this.keyOrigin);
+    this._transport = createUnverifiedEncryptedBodyFetch(this.baseURL, this.keyOrigin);
   }
 
   public async getVerificationDocument(): Promise<void> {
@@ -82,7 +83,7 @@ export class UnverifiedClient {
   get fetch(): typeof fetch {
     return async (input: RequestInfo | URL, init?: RequestInit) => {
       await this.ready();
-      return this._fetch!(input, init);
+      return this._transport!.fetch(input, init);
     };
   }
 }

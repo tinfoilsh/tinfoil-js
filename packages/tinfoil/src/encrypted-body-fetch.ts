@@ -148,7 +148,7 @@ export function createEncryptedBodyFetch(baseURL: string, hpkePublicKey: string,
  * @param baseURL - Base URL for API requests
  * @param keyOrigin - Origin URL for fetching the HPKE public key. If not provided, derived from baseURL.
  */
-export function createUnverifiedEncryptedBodyFetch(baseURL: string, keyOrigin?: string): typeof fetch {
+export function createUnverifiedEncryptedBodyFetch(baseURL: string, keyOrigin?: string): SecureTransport {
   console.warn(
     "[tinfoil] WARNING: createUnverifiedEncryptedBodyFetch is insecure. " +
     "The HPKE key is fetched from the server without attestation verification. " +
@@ -168,18 +168,28 @@ export function createUnverifiedEncryptedBodyFetch(baseURL: string, keyOrigin?: 
     return transportPromise;
   };
 
-  return async (input: RequestInfo | URL, init?: RequestInit) => {
-    const normalized = normalizeEncryptedBodyRequestArgs(input, init);
-    const targetUrl = new URL(normalized.url, baseURL);
+  return {
+    fetch: async (input: RequestInfo | URL, init?: RequestInit) => {
+      const normalized = normalizeEncryptedBodyRequestArgs(input, init);
+      const targetUrl = new URL(normalized.url, baseURL);
 
-    const headers = new Headers(normalized.init?.headers);
-    if (needsEnclaveHeader) {
-      headers.set(ENCLAVE_URL_HEADER, keyOrigin!);
-    }
-    const initWithEnclaveHeader = { ...normalized.init, headers };
+      const headers = new Headers(normalized.init?.headers);
+      if (needsEnclaveHeader) {
+        headers.set(ENCLAVE_URL_HEADER, keyOrigin!);
+      }
+      const initWithEnclaveHeader = { ...normalized.init, headers };
 
-    const transportInstance = await getOrCreateTransport();
-    return transportInstance.request(targetUrl.toString(), initWithEnclaveHeader);
+      const transportInstance = await getOrCreateTransport();
+      return transportInstance.request(targetUrl.toString(), initWithEnclaveHeader);
+    },
+
+    async getSessionRecoveryToken(): Promise<SessionRecoveryToken> {
+      if (!transportPromise) {
+        throw new Error('No session recovery token available — no request has been made yet');
+      }
+      const transport = await transportPromise;
+      return transport.getSessionRecoveryToken();
+    },
   };
 }
 
