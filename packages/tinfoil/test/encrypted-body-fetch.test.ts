@@ -219,8 +219,8 @@ describe("encrypted-body-fetch", () => {
         return new Response("ok");
       }) as typeof fetch;
 
-      const unverifiedFetch = createUnverifiedEncryptedBodyFetch("https://api.example.com");
-      await unverifiedFetch("/test");
+      const transport = createUnverifiedEncryptedBodyFetch("https://api.example.com");
+      await transport.fetch("/test");
 
       expect(keyFetched).toBe(true);
       expect(apiRequestMade).toBe(true);
@@ -244,19 +244,20 @@ describe("encrypted-body-fetch", () => {
         return new Response("ok");
       }) as typeof fetch;
 
-      const unverifiedFetch = createUnverifiedEncryptedBodyFetch(
+      const transport = createUnverifiedEncryptedBodyFetch(
         "https://api.example.com",
         "https://enclave.example.com"
       );
-      await unverifiedFetch("/test");
+      await transport.fetch("/test");
 
       expect(keyFetchedFromEnclave).toBe(true);
     });
 
-    it("returns a function with fetch signature", () => {
-      const customFetch = createUnverifiedEncryptedBodyFetch("https://api.example.com");
-      expect(typeof customFetch).toBe("function");
-      expect(customFetch.length).toBe(2);
+    it("returns a SecureTransport object", () => {
+      const transport = createUnverifiedEncryptedBodyFetch("https://api.example.com");
+      expect(typeof transport).toBe("object");
+      expect(typeof transport.fetch).toBe("function");
+      expect(typeof transport.getSessionRecoveryToken).toBe("function");
     });
   });
 });
