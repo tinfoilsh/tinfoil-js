@@ -1,10 +1,9 @@
 import { Verifier, ConfigurationError, FetchError, AttestationError, type VerificationDocument } from "./verifier.js";
 import type { AttestationBundle } from "./verifier.js";
 import { TINFOIL_CONFIG } from "./config.js";
-import { createSecureFetch, type SecureTransport } from "./secure-fetch.js";
+import { createSecureFetch } from "./secure-fetch.js";
 import { fetchAttestationBundle } from "./atc.js";
-import { decryptResponseWithToken } from "./encrypted-body-fetch.js";
-import type { SessionRecoveryToken } from "./encrypted-body-fetch.js";
+import { decryptResponseWithToken, type SecureTransport, type SessionRecoveryToken } from "./encrypted-body-fetch.js";
 
 /** Delay before retrying init on transient failure (ms). */
 const INIT_RETRY_DELAY_MS = 1000;
