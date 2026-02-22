@@ -4,9 +4,27 @@ export { TinfoilAI } from "./tinfoil-ai.js";
 export { TinfoilAI as default } from "./tinfoil-ai.js";
 export type { TinfoilAIOptions } from "./tinfoil-ai.js";
 
-export * from "./verifier.js";
-export * from "./ai-sdk-provider.js";
-export * from "./config.js";
+export {
+  TinfoilError,
+  ConfigurationError,
+  AttestationError,
+  Verifier,
+  assembleAttestationBundle,
+} from "./verifier.js";
+
+export type {
+  AttestationDocument,
+  AttestationMeasurement,
+  AttestationResponse,
+  AttestationBundle,
+  VerificationDocument,
+  VerificationStepState,
+  HardwareMeasurement,
+  VerifierOptions,
+  CertVerificationResult,
+} from "./verifier.js";
+export { createTinfoilAI } from "./ai-sdk-provider.js";
+export type { CreateTinfoilAIOptions } from "./ai-sdk-provider.js";
 export { SecureClient, type TransportMode } from "./secure-client.js";
 export type { SessionRecoveryToken } from "ehbp";
 export { UnverifiedClient } from "./unverified-client.js";
