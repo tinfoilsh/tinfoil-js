@@ -4,7 +4,7 @@ import type { AttestationBundle } from "./verifier.js";
 import { TINFOIL_CONFIG } from "./config.js";
 import { createSecureFetch } from "./secure-fetch.js";
 import { fetchAttestationBundle } from "./atc.js";
-import { decryptResponseWithToken, type SecureTransport, type SessionRecoveryToken } from "./encrypted-body-fetch.js";
+import type { SecureTransport, SessionRecoveryToken } from "./encrypted-body-fetch.js";
 
 /** Delay before retrying init on transient failure (ms). */
 const INIT_RETRY_DELAY_MS = 1000;
@@ -323,18 +323,5 @@ export class SecureClient {
       throw new Error('No session recovery token available — call fetch() first');
     }
     return this._transport.getSessionRecoveryToken();
-  }
-
-  /**
-   * Decrypt a stored encrypted response using a previously saved recovery token.
-   *
-   * The token is bound to a single request — it can only decrypt the response
-   * from the session it was extracted from.
-   */
-  static async decryptRecoveryResponse(
-    response: Response,
-    token: SessionRecoveryToken,
-  ): Promise<Response> {
-    return decryptResponseWithToken(response, token);
   }
 }
