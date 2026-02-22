@@ -319,6 +319,13 @@ export class SecureClient {
     };
   }
 
+  /**
+   * Returns the session recovery token for the most recent request.
+   *
+   * The token is overwritten on every request, so it must be captured
+   * immediately after the relevant `fetch()` resolves and before issuing
+   * another request on this client.
+   */
   public async getSessionRecoveryToken(): Promise<SessionRecoveryToken> {
     if (!this._transport) {
       throw new Error('No session recovery token available — call fetch() first');
@@ -326,6 +333,12 @@ export class SecureClient {
     return this._transport.getSessionRecoveryToken();
   }
 
+  /**
+   * Decrypt a stored encrypted response using a previously saved recovery token.
+   *
+   * The token is bound to a single request — it can only decrypt the response
+   * from the session it was extracted from.
+   */
   static async decryptRecoveryResponse(
     response: Response,
     token: SessionRecoveryToken,
