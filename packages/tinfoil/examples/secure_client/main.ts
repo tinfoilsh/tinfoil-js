@@ -6,7 +6,7 @@
  * or when integrating with non-OpenAI-compatible endpoints.
  *
  * Prerequisites:
- * - Set TINFOIL_API_KEY environment variable, or pass apiKey to constructor
+ * - Export your API key: export TINFOIL_API_KEY="<YOUR_API_KEY>"
  *
  * Run: npx ts-node main.ts
  */
@@ -20,9 +20,10 @@ async function main() {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
+        "Authorization": `Bearer ${process.env.TINFOIL_API_KEY}`,
       },
       body: JSON.stringify({
-        model: "gpt-oss-120b-free",
+        model: "gpt-oss-120b",
         messages: [{ role: "user", content: "Hello!" }],
       }),
     });

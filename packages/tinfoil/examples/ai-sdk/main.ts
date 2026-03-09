@@ -8,6 +8,7 @@ import { generateText, streamText } from "ai";
  * This is useful for Next.js apps, React Server Components, and other Vercel AI SDK features.
  * 
  * Prerequisites:
+ * - Export your API key: export TINFOIL_API_KEY="<YOUR_API_KEY>"
  * - Install the AI SDK: npm install ai
  * 
  * Related docs:
@@ -18,13 +19,13 @@ async function main() {
   try {
     // Create a Tinfoil provider for the AI SDK
     // This performs enclave verification automatically
-    const tinfoil = await createTinfoilAI();
+    const tinfoil = await createTinfoilAI(process.env.TINFOIL_API_KEY);
 
     // Example 1: Simple text generation
     console.log("=== Text Generation ===\n");
     
     const { text } = await generateText({
-      model: tinfoil("gpt-oss-120b-free"),
+      model: tinfoil("gpt-oss-120b"),
       prompt: "What is confidential computing in one sentence?",
     });
     
@@ -34,7 +35,7 @@ async function main() {
     console.log("\n=== Streaming Generation ===\n");
     
     const stream = streamText({
-      model: tinfoil("gpt-oss-120b-free"),
+      model: tinfoil("gpt-oss-120b"),
       prompt: "Write a haiku about data privacy.",
     });
 
@@ -48,7 +49,7 @@ async function main() {
     console.log("=== Chat with System Message ===\n");
     
     const { text: chatResponse } = await generateText({
-      model: tinfoil("gpt-oss-120b-free"),
+      model: tinfoil("gpt-oss-120b"),
       system: "You are a helpful assistant that explains technical concepts simply.",
       prompt: "What is end-to-end encryption?",
     });

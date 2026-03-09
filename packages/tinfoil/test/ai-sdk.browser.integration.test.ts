@@ -27,7 +27,7 @@ describe('AI SDK Browser Transport Tests', () => {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          model: 'gpt-oss-120b-free',
+          model: 'gpt-oss-120b',
           max_tokens: 5,
           messages: [{ role: 'user', content: 'Say hello' }],
         }),
@@ -53,7 +53,7 @@ describe('AI SDK Browser Transport Tests', () => {
           'Accept': 'text/event-stream',
         },
         body: JSON.stringify({
-          model: 'gpt-oss-120b-free',
+          model: 'gpt-oss-120b',
           max_tokens: 5,
           messages: [{ role: 'user', content: 'Count 1 2 3' }],
           stream: true,
@@ -98,7 +98,7 @@ describe('AI SDK Browser Transport Tests', () => {
           'X-Custom-Header': 'test-value', // Would be used by proxy
         },
         body: JSON.stringify({
-          model: 'gpt-oss-120b-free',
+          model: 'gpt-oss-120b',
           max_tokens: 5,
           messages: [{ role: 'user', content: 'Hello' }],
         }),
@@ -122,7 +122,7 @@ describe('AI SDK Browser Transport Tests', () => {
           'Accept': 'text/event-stream',
         },
         body: JSON.stringify({
-          model: 'gpt-oss-120b-free',
+          model: 'gpt-oss-120b',
           max_tokens: 5,
           messages: [{ role: 'user', content: 'Write a very long story' }],
           stream: true,
@@ -166,7 +166,7 @@ describe('AI SDK Browser Transport Tests', () => {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          model: 'gpt-oss-120b-free',
+          model: 'gpt-oss-120b',
           max_tokens: 5,
           messages: [{ role: 'user', content: 'Hello' }],
         }),
@@ -193,7 +193,7 @@ describe('AI SDK Browser Transport Tests', () => {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          model: 'gpt-oss-120b-free',
+          model: 'gpt-oss-120b',
           max_tokens: 5,
           messages: [{ role: 'user', content: 'Hello' }],
         }),

@@ -39,7 +39,7 @@ describe("Bun Integration", () => {
     });
 
     const completion = await client.chat.completions.create({
-      model: "gpt-oss-120b-free",
+      model: "gpt-oss-120b",
       messages: [{ role: "user", content: "Hello!" }],
     });
 
@@ -70,7 +70,7 @@ describe("Bun Integration", () => {
     });
 
     const completion = await client.chat.completions.create({
-      model: "gpt-oss-120b-free",
+      model: "gpt-oss-120b",
       messages: [{ role: "user", content: "Hello!" }],
     });
 

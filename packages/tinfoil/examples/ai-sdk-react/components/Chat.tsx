@@ -42,7 +42,7 @@ export function Chat() {
     // Model to use - must match your Tinfoil model catalog
     // See: https://docs.tinfoil.sh/models/catalog
     body: {
-      model: "gpt-oss-120b-free",
+      model: "gpt-oss-120b",
     },
     
     // Optional: Handle errors
