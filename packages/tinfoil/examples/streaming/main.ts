@@ -5,7 +5,7 @@
  * Useful for chat UIs where you want to display responses as they're generated.
  *
  * Prerequisites:
- * - Set TINFOIL_API_KEY environment variable, or pass apiKey to constructor
+ * - Export your API key: export TINFOIL_API_KEY="<YOUR_API_KEY>"
  *
  * Run: npx ts-node main.ts
  */
@@ -13,7 +13,9 @@ import { TinfoilAI } from "tinfoil";
 
 async function main() {
   try {
-    const client = new TinfoilAI();
+    const client = new TinfoilAI({
+      apiKey: process.env.TINFOIL_API_KEY,
+    });
 
     console.log("Streaming response:\n");
 
@@ -21,7 +23,7 @@ async function main() {
       messages: [
         { role: "user", content: "Write a short poem about secure computing." },
       ],
-      model: "gpt-oss-120b-free",
+      model: "gpt-oss-120b",
       stream: true,
     });
 

@@ -34,7 +34,7 @@ describe("Vercel AI SDK Integration Tests", () => {
       const { generateText } = await import("ai");
 
       const { text } = await generateText({
-        model: tinfoil("gpt-oss-120b-free"),
+        model: tinfoil("gpt-oss-120b"),
         prompt: "Say 'hello' and nothing else.",
         maxTokens: 5,
       });
@@ -48,7 +48,7 @@ describe("Vercel AI SDK Integration Tests", () => {
       const { streamText } = await import("ai");
 
       const stream = streamText({
-        model: tinfoil("gpt-oss-120b-free"),
+        model: tinfoil("gpt-oss-120b"),
         prompt: "Count from 1 to 3.",
         maxTokens: 5,
       });
@@ -68,7 +68,7 @@ describe("Vercel AI SDK Integration Tests", () => {
       const abortController = new AbortController();
 
       const stream = streamText({
-        model: tinfoil("gpt-oss-120b-free"),
+        model: tinfoil("gpt-oss-120b"),
         prompt: "Write a very long story about a dragon.",
         maxTokens: 5,
         abortSignal: abortController.signal,
@@ -96,7 +96,7 @@ describe("Vercel AI SDK Integration Tests", () => {
       const { generateText } = await import("ai");
 
       const { text } = await generateText({
-        model: tinfoil("gpt-oss-120b-free"),
+        model: tinfoil("gpt-oss-120b"),
         system: "You are a helpful assistant. Always respond with exactly one word.",
         prompt: "What color is the sky?",
         maxTokens: 5,
@@ -131,7 +131,7 @@ describe("Vercel AI SDK Integration Tests", () => {
       const { generateText } = await import("ai");
 
       const { text } = await generateText({
-        model: provider("gpt-oss-120b-free"),
+        model: provider("gpt-oss-120b"),
         prompt: "Say 'hello' and nothing else.",
         maxTokens: 5,
       });
@@ -144,7 +144,7 @@ describe("Vercel AI SDK Integration Tests", () => {
       const { streamText } = await import("ai");
 
       const stream = streamText({
-        model: provider("gpt-oss-120b-free"),
+        model: provider("gpt-oss-120b"),
         prompt: "Count from 1 to 3.",
         maxTokens: 5,
       });
@@ -172,7 +172,7 @@ describe("Vercel AI SDK Integration Tests", () => {
       });
 
       const { text } = await generateText({
-        model: tinfoil("gpt-oss-120b-free"),
+        model: tinfoil("gpt-oss-120b"),
         prompt: "Say 'proxy works' and nothing else.",
         maxTokens: 5,
       });

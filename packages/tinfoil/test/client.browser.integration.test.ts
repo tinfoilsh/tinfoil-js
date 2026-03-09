@@ -16,7 +16,7 @@ describe('Browser Client Integration Tests', () => {
 
       const completion = await client.chat.completions.create({
         messages: [{ role: 'user', content: 'Hello!' }],
-        model: 'gpt-oss-120b-free',
+        model: 'gpt-oss-120b',
         max_tokens: 5,
       });
 
@@ -61,7 +61,7 @@ describe('Browser Client Integration Tests', () => {
           { role: 'system', content: 'No matter what the user says, only respond with: Done.' },
           { role: 'user', content: 'Is this a test?' },
         ],
-        model: 'gpt-oss-120b-free',
+        model: 'gpt-oss-120b',
         max_tokens: 5,
         stream: true,
       });
@@ -90,7 +90,7 @@ describe('Browser Client Integration Tests', () => {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          model: 'gpt-oss-120b-free',
+          model: 'gpt-oss-120b',
           max_tokens: 5,
           messages: [{ role: 'user', content: 'Hello!' }],
         }),
@@ -139,7 +139,7 @@ describe('Browser Client Integration Tests', () => {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          model: 'gpt-oss-120b-free',
+          model: 'gpt-oss-120b',
           max_tokens: 5,
           messages: [{ role: 'user', content: 'Hello!' }],
         }),

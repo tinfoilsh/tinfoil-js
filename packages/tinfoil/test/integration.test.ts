@@ -38,7 +38,7 @@ describe("Examples Integration Tests", () => {
     it.skipIf(!RUN_INTEGRATION)("should create a TinfoilAI client and make a chat completion request", async () => {
       const completion = await sharedTinfoilClient.chat.completions.create({
         messages: [{ role: "user", content: "Hello!" }],
-        model: "gpt-oss-120b-free",
+        model: "gpt-oss-120b",
         max_tokens: 5,
       });
 
@@ -56,9 +56,9 @@ describe("Examples Integration Tests", () => {
     it.skipIf(!RUN_INTEGRATION)("should create a SecureClient and make a direct fetch request", async () => {
       const response = await sharedSecureClient.fetch("/v1/chat/completions", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", "Authorization": `Bearer ${process.env.TINFOIL_API_KEY}` },
         body: JSON.stringify({
-          model: "gpt-oss-120b-free",
+          model: "gpt-oss-120b",
           max_tokens: 5,
           messages: [{ role: "user", content: "Hello!" }],
         }),
@@ -85,9 +85,9 @@ describe("Examples Integration Tests", () => {
 
       const response = await client.fetch("/v1/chat/completions", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", "Authorization": `Bearer ${process.env.TINFOIL_API_KEY}` },
         body: JSON.stringify({
-          model: "gpt-oss-120b-free",
+          model: "gpt-oss-120b",
           max_tokens: 5,
           messages: [{ role: "user", content: "Hello!" }],
         }),
@@ -105,7 +105,7 @@ describe("Examples Integration Tests", () => {
           { role: "system", content: "No matter what the user says, only respond with: Done." },
           { role: "user", content: "Is this a test?" },
         ],
-        model: "gpt-oss-120b-free",
+        model: "gpt-oss-120b",
         max_tokens: 5,
         stream: true,
       });
@@ -216,9 +216,9 @@ describe("Examples Integration Tests", () => {
       // Reuses the shared default SecureClient (which uses default ehbp transport)
       const response = await sharedSecureClient.fetch("/v1/chat/completions", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", "Authorization": `Bearer ${process.env.TINFOIL_API_KEY}` },
         body: JSON.stringify({
-          model: "gpt-oss-120b-free",
+          model: "gpt-oss-120b",
           max_tokens: 5,
           messages: [{ role: "user", content: "Hello!" }],
         }),
@@ -237,9 +237,9 @@ describe("Examples Integration Tests", () => {
 
       const response = await client.fetch("/v1/chat/completions", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", "Authorization": `Bearer ${process.env.TINFOIL_API_KEY}` },
         body: JSON.stringify({
-          model: "gpt-oss-120b-free",
+          model: "gpt-oss-120b",
           max_tokens: 5,
           messages: [{ role: "user", content: "Hello!" }],
         }),
@@ -258,9 +258,9 @@ describe("Examples Integration Tests", () => {
 
       const response = await client.fetch("/v1/chat/completions", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", "Authorization": `Bearer ${process.env.TINFOIL_API_KEY}` },
         body: JSON.stringify({
-          model: "gpt-oss-120b-free",
+          model: "gpt-oss-120b",
           max_tokens: 5,
           messages: [{ role: "user", content: "Hello!" }],
         }),
@@ -283,7 +283,7 @@ describe("Examples Integration Tests", () => {
 
       const completion = await client.chat.completions.create({
         messages: [{ role: "user", content: "Hello!" }],
-        model: "gpt-oss-120b-free",
+        model: "gpt-oss-120b",
         max_tokens: 5,
       });
 
