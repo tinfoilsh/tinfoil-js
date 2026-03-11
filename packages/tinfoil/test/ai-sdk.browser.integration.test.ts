@@ -25,6 +25,7 @@ describe('AI SDK Browser Transport Tests', () => {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
+          'Authorization': `Bearer ${process.env.TINFOIL_API_KEY}`,
         },
         body: JSON.stringify({
           model: 'gpt-oss-120b',
@@ -51,6 +52,7 @@ describe('AI SDK Browser Transport Tests', () => {
         headers: {
           'Content-Type': 'application/json',
           'Accept': 'text/event-stream',
+          'Authorization': `Bearer ${process.env.TINFOIL_API_KEY}`,
         },
         body: JSON.stringify({
           model: 'gpt-oss-120b',
@@ -95,6 +97,7 @@ describe('AI SDK Browser Transport Tests', () => {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
+          'Authorization': `Bearer ${process.env.TINFOIL_API_KEY}`,
           'X-Custom-Header': 'test-value', // Would be used by proxy
         },
         body: JSON.stringify({
@@ -120,6 +123,7 @@ describe('AI SDK Browser Transport Tests', () => {
         headers: {
           'Content-Type': 'application/json',
           'Accept': 'text/event-stream',
+          'Authorization': `Bearer ${process.env.TINFOIL_API_KEY}`,
         },
         body: JSON.stringify({
           model: 'gpt-oss-120b',
@@ -164,6 +168,7 @@ describe('AI SDK Browser Transport Tests', () => {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
+          'Authorization': `Bearer ${process.env.TINFOIL_API_KEY}`,
         },
         body: JSON.stringify({
           model: 'gpt-oss-120b',
@@ -191,6 +196,7 @@ describe('AI SDK Browser Transport Tests', () => {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
+          'Authorization': `Bearer ${process.env.TINFOIL_API_KEY}`,
         },
         body: JSON.stringify({
           model: 'gpt-oss-120b',

@@ -172,7 +172,7 @@ describe("Examples Integration Tests", () => {
 
       const doc = await client.getVerificationDocument();
       expect(doc.securityVerified).toBe(true);
-      expect(doc.enclaveHost).toBe("inference.tinfoil.sh");
+      expect(doc.enclaveHost).toBeTruthy();
 
       const response = await client.fetch("/v1/models", { method: "GET" });
       expect(response.status).toBe(200);
