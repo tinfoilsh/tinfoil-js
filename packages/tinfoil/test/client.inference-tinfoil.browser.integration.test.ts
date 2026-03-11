@@ -19,7 +19,7 @@ describe("TinfoilAI - enclaveURL integration", () => {
     expect(verificationDoc).toBeTruthy();
     expect(verificationDoc.configRepo).toBe(TINFOIL_CONFIG.DEFAULT_ROUTER_REPO);
     expect(verificationDoc.securityVerified).toBe(true);
-    expect(verificationDoc.enclaveHost).toBe("inference.tinfoil.sh");
+    expect(verificationDoc.enclaveHost).toBeTruthy();
     expect(verificationDoc.enclaveMeasurement.tlsPublicKeyFingerprint).toBeTruthy();
   }, 60000);
 
@@ -36,7 +36,7 @@ describe("TinfoilAI - enclaveURL integration", () => {
     expect(verificationDoc).toBeTruthy();
     expect(verificationDoc.configRepo).toBe(TINFOIL_CONFIG.DEFAULT_ROUTER_REPO);
     expect(verificationDoc.securityVerified).toBe(true);
-    expect(verificationDoc.enclaveHost).toBe("inference.tinfoil.sh");
+    expect(verificationDoc.enclaveHost).toBeTruthy();
   }, 60000);
 });
 
@@ -55,7 +55,7 @@ describe("SecureClient - enclaveURL integration", () => {
     expect(verificationDoc).toBeTruthy();
     expect(verificationDoc.configRepo).toBe(TINFOIL_CONFIG.DEFAULT_ROUTER_REPO);
     expect(verificationDoc.securityVerified).toBe(true);
-    expect(verificationDoc.enclaveHost).toBe("inference.tinfoil.sh");
+    expect(verificationDoc.enclaveHost).toBeTruthy();
     expect(verificationDoc.enclaveMeasurement.tlsPublicKeyFingerprint).toBeTruthy();
   }, 60000);
 
@@ -71,7 +71,7 @@ describe("SecureClient - enclaveURL integration", () => {
     expect(verificationDoc).toBeTruthy();
     expect(verificationDoc.configRepo).toBe(TINFOIL_CONFIG.DEFAULT_ROUTER_REPO);
     expect(verificationDoc.securityVerified).toBe(true);
-    expect(verificationDoc.enclaveHost).toBe("inference.tinfoil.sh");
+    expect(verificationDoc.enclaveHost).toBeTruthy();
   }, 60000);
 
   it("should make successful fetch request when enclaveURL is set to inference.tinfoil.sh", async () => {

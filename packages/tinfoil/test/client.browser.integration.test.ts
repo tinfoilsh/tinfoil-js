@@ -88,6 +88,7 @@ describe('Browser Client Integration Tests', () => {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
+          'Authorization': `Bearer ${process.env.TINFOIL_API_KEY}`,
         },
         body: JSON.stringify({
           model: 'gpt-oss-120b',
@@ -137,6 +138,7 @@ describe('Browser Client Integration Tests', () => {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
+          'Authorization': `Bearer ${process.env.TINFOIL_API_KEY}`,
         },
         body: JSON.stringify({
           model: 'gpt-oss-120b',
