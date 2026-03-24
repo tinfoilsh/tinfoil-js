@@ -202,8 +202,13 @@ export class Report {
       throw new AttestationError('Invalid attestation report: Launch TCB field is malformed', { cause: e as Error });
     }
 
+    // 0x1F8-0x200: launch_mit_vector (valid field in v5+)
+    // 0x200-0x208: current_mit_vector (valid field in v5+)
+    // For v2/v3 these bytes are reserved MBZ; for v5+ they are valid fields.
+    // 0x208-0x2A0: Reserved before signature (must be zero for all versions)
+    const mbzBeforeSig = this.version < 5 ? 0x1f8 : 0x208;
     try {
-      mbz(data, 0x1f8, SIGNATURE_OFFSET);
+      mbz(data, mbzBeforeSig, SIGNATURE_OFFSET);
     } catch (e) {
       throw new AttestationError('Invalid attestation report: Reserved bytes before signature are not zeroed', { cause: e as Error });
     }
