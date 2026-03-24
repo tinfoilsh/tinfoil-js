@@ -10,8 +10,7 @@ import { AttestationError, FetchError, wrapOrThrow } from './errors.js';
 import { PredicateType } from './types.js';
 import type { AttestationBundle, AttestationDocument } from './types.js';
 
-const GITHUB_API = 'https://api-github-proxy.tinfoil.sh';
-const GITHUB_DL = 'https://github-proxy.tinfoil.sh';
+const GITHUB_PROXY = 'https://github-proxy.tinfoil.sh';
 const KDS = 'https://kds-proxy.tinfoil.sh';
 
 /**
@@ -34,8 +33,8 @@ export async function assembleAttestationBundle(
       return { format: doc.format as PredicateType, body: doc.body };
     }),
     withRetry(async () => {
-      const { tag_name } = await fetchJson(`${GITHUB_API}/repos/${configRepo}/releases/latest`);
-      return (await fetchText(`${GITHUB_DL}/${configRepo}/releases/download/${tag_name}/tinfoil.hash`)).trim();
+      const { tag_name } = await fetchJson(`${GITHUB_PROXY}/repos/${configRepo}/releases/latest`);
+      return (await fetchText(`${GITHUB_PROXY}/${configRepo}/releases/download/${tag_name}/tinfoil.hash`)).trim();
     }),
     withRetry(async () => {
       const data = await fetchJson(`https://${enclaveHost}/.well-known/tinfoil-certificate`);
@@ -45,7 +44,7 @@ export async function assembleAttestationBundle(
 
   // 2. Fetch Sigstore bundle (needs digest)
   const sigstoreBundle = await withRetry(async () => {
-    const data = await fetchJson(`${GITHUB_API}/repos/${configRepo}/attestations/sha256:${digest}`);
+    const data = await fetchJson(`${GITHUB_PROXY}/repos/${configRepo}/attestations/sha256:${digest}`);
     if (!data.attestations?.[0]?.bundle) {
       throw new FetchError(`No Sigstore bundle for ${configRepo} at digest ${digest}`);
     }
