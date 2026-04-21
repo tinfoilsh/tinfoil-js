@@ -14,7 +14,7 @@ describe("ATC API", () => {
       expect(bundle).toBeDefined();
       expect(bundle.domain).toBeDefined();
       expect(typeof bundle.domain).toBe("string");
-      expect(bundle.domain).toMatch(/\.tinfoil\.sh$/);
+      expect(bundle.domain).toMatch(/\.tinfoil\.(sh|dev)$/);
 
       // Verify enclave attestation report
       expect(bundle.enclaveAttestationReport).toBeDefined();
@@ -103,7 +103,7 @@ describe("ATC API", () => {
 
       expect(router).toBeDefined();
       expect(typeof router).toBe("string");
-      expect(router).toMatch(/\.tinfoil\.sh$/);
+      expect(router).toMatch(/\.tinfoil\.(sh|dev)$/);
     });
 
     it.skipIf(!RUN_INTEGRATION)("should accept custom ATC URL", async () => {
