@@ -1,6 +1,7 @@
 export enum PredicateType {
   SevGuestV1 = 'https://tinfoil.sh/predicate/sev-snp-guest/v1', // Deprecated
   SevGuestV2 = 'https://tinfoil.sh/predicate/sev-snp-guest/v2',
+  TdxGuestV2 = 'https://tinfoil.sh/predicate/tdx-guest/v2',
   SnpTdxMultiplatformV1 = 'https://tinfoil.sh/predicate/snp-tdx-multiplatform/v1',
 }
 
@@ -39,10 +40,13 @@ export interface AttestationResponse {
 }
 
 import { AttestationError } from './errors.js';
+import { RTMR3_ZERO } from './tdx/constants.js';
 
 /**
  * Compares two measurements for equality.
- * Handles cross-platform comparison between SnpTdxMultiplatformV1 and SevGuestV2.
+ * Handles cross-platform comparisons:
+ *   - SnpTdxMultiplatformV1 vs SevGuestV2 (SNP measurement)
+ *   - SnpTdxMultiplatformV1 vs TdxGuestV2 (RTMR1, RTMR2 + RTMR3 zero check)
  * @throws AttestationError if the measurement types are incompatible or registers don't match
  */
 export function compareMeasurements(a: AttestationMeasurement, b: AttestationMeasurement): void {
@@ -58,31 +62,81 @@ export function compareMeasurements(a: AttestationMeasurement, b: AttestationMea
   // Cross-platform: SnpTdxMultiplatformV1 vs SevGuestV2
   // MultiPlatform registers: [snp, rtmr1, rtmr2]
   // SevGuestV2 registers: [snp]
-  // Only compare the SNP measurement (first register of both)
   if (a.type === PredicateType.SnpTdxMultiplatformV1 && b.type === PredicateType.SevGuestV2) {
-    if (a.registers.length < 1 || b.registers.length < 1) {
-      throw new AttestationError('Invalid measurement data: Missing measurement registers');
-    }
-    if (a.registers[0] !== b.registers[0]) {
-      throw new AttestationError('Code measurement mismatch: The SNP measurement from the enclave does not match the expected measurement from the signed release');
-    }
+    compareMultiplatformVsSev(a, b);
+    return;
+  }
+  if (a.type === PredicateType.SevGuestV2 && b.type === PredicateType.SnpTdxMultiplatformV1) {
+    compareMultiplatformVsSev(b, a);
     return;
   }
 
-  // Reverse direction
-  if (a.type === PredicateType.SevGuestV2 && b.type === PredicateType.SnpTdxMultiplatformV1) {
-    if (a.registers.length < 1 || b.registers.length < 1) {
-      throw new AttestationError('Invalid measurement data: Missing measurement registers');
-    }
-    if (a.registers[0] !== b.registers[0]) {
-      throw new AttestationError('Code measurement mismatch: The SNP measurement from the enclave does not match the expected measurement from the signed release');
-    }
+  // Cross-platform: SnpTdxMultiplatformV1 vs TdxGuestV2
+  // MultiPlatform registers: [snp, rtmr1, rtmr2]
+  // TdxGuestV2 registers: [mrtd, rtmr0, rtmr1, rtmr2, rtmr3]
+  if (a.type === PredicateType.SnpTdxMultiplatformV1 && b.type === PredicateType.TdxGuestV2) {
+    compareMultiplatformVsTdx(a, b);
+    return;
+  }
+  if (a.type === PredicateType.TdxGuestV2 && b.type === PredicateType.SnpTdxMultiplatformV1) {
+    compareMultiplatformVsTdx(b, a);
     return;
   }
 
   throw new AttestationError(
     `Cannot compare measurements: Incompatible measurement types "${a.type}" and "${b.type}"`
   );
+}
+
+function compareMultiplatformVsSev(
+  multi: AttestationMeasurement,
+  sev: AttestationMeasurement,
+): void {
+  if (multi.registers.length < 1 || sev.registers.length < 1) {
+    throw new AttestationError('Invalid measurement data: Missing measurement registers');
+  }
+  if (multi.registers[0] !== sev.registers[0]) {
+    throw new AttestationError(
+      'Code measurement mismatch: The SNP measurement from the enclave does not match the expected measurement from the signed release'
+    );
+  }
+}
+
+function compareMultiplatformVsTdx(
+  multi: AttestationMeasurement,
+  tdx: AttestationMeasurement,
+): void {
+  if (multi.registers.length < 3) {
+    throw new AttestationError(
+      'Invalid measurement data: MultiPlatform measurement must have at least 3 registers'
+    );
+  }
+  if (tdx.registers.length < 5) {
+    throw new AttestationError(
+      'Invalid measurement data: TDX measurement must have exactly 5 registers'
+    );
+  }
+
+  // MultiPlatform[1] (RTMR1) must equal TDX[2] (RTMR1)
+  if (multi.registers[1] !== tdx.registers[2]) {
+    throw new AttestationError(
+      'Code measurement mismatch: RTMR1 from the enclave does not match the expected measurement from the signed release'
+    );
+  }
+
+  // MultiPlatform[2] (RTMR2) must equal TDX[3] (RTMR2)
+  if (multi.registers[2] !== tdx.registers[3]) {
+    throw new AttestationError(
+      'Code measurement mismatch: RTMR2 from the enclave does not match the expected measurement from the signed release'
+    );
+  }
+
+  // TDX[4] (RTMR3) must be all zeros
+  if (tdx.registers[4] !== RTMR3_ZERO) {
+    throw new AttestationError(
+      'Code measurement mismatch: RTMR3 must be all zeros'
+    );
+  }
 }
 
 /**
