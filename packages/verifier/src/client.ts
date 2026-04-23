@@ -1,4 +1,4 @@
-import { verifyAttestation as verifyAmdAttestation } from './attestation.js';
+import { verifyAttestation as verifyEnclaveAttestation } from './attestation.js';
 import { verifySigstoreBundle } from './sigstore.js';
 import { assembleAttestationBundle } from './bundle.js';
 import { verifyCertificate } from './cert-verify.js';
@@ -46,10 +46,10 @@ export class Verifier {
     };
 
     try {
-      // Step 1: Verify enclave attestation
-      let amdVerification: AttestationResponse;
+      // Step 1: Verify enclave attestation (SEV-SNP or TDX)
+      let enclaveVerification: AttestationResponse;
       try {
-        amdVerification = await verifyAmdAttestation(attestationDoc, vcek);
+        enclaveVerification = await verifyEnclaveAttestation(attestationDoc, vcek);
         steps.verifyEnclave = { status: 'success' };
       } catch (error) {
         steps.verifyEnclave = { status: 'failed', error: (error as Error).message };
@@ -70,7 +70,7 @@ export class Verifier {
 
       // Step 3: Compare measurements
       try {
-        compareMeasurements(codeMeasurements, amdVerification.measurement);
+        compareMeasurements(codeMeasurements, enclaveVerification.measurement);
         steps.compareMeasurements = { status: 'success' };
       } catch (error) {
         steps.compareMeasurements = { status: 'failed', error: (error as Error).message };
@@ -84,7 +84,7 @@ export class Verifier {
           enclaveCert,
           domain,
           attestationDoc,
-          amdVerification.hpkePublicKey || ''
+          enclaveVerification.hpkePublicKey || ''
         );
         steps.verifyCertificate = { status: 'success' };
       } catch (error) {
@@ -99,17 +99,17 @@ export class Verifier {
         enclaveHost: domain,
         releaseDigest: digest,
         codeMeasurement: codeMeasurements,
-        enclaveMeasurement: amdVerification,
-        tlsPublicKey: amdVerification.tlsPublicKeyFingerprint || '',
-        hpkePublicKey: amdVerification.hpkePublicKey || '',
+        enclaveMeasurement: enclaveVerification,
+        tlsPublicKey: enclaveVerification.tlsPublicKeyFingerprint || '',
+        hpkePublicKey: enclaveVerification.hpkePublicKey || '',
         codeFingerprint: await measurementFingerprint(codeMeasurements),
-        enclaveFingerprint: await measurementFingerprint(amdVerification.measurement),
+        enclaveFingerprint: await measurementFingerprint(enclaveVerification.measurement),
         selectedRouterEndpoint: domain,
         securityVerified: true,
         steps
       };
 
-      return amdVerification;
+      return enclaveVerification;
     } catch (error) {
       if (!this.verificationDocument) {
         this.saveFailedVerificationDocument(steps, domain);
