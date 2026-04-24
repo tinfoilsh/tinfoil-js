@@ -14,22 +14,22 @@
     "test:all": "npm run test && npm run test:integration && npm run test:browser && npm run test:browser:integration",
     "check:es2020": "npm run check:es2020 -ws --if-present",
     "clean": "npm run clean -ws --if-present",
-    "sync": "syncpack fix-mismatches",
-    "postinstall": "syncpack fix-mismatches",
+    "sync": "syncpack fix",
+    "postinstall": "syncpack fix",
     "version:verifier": "npm version -w @tinfoilsh/verifier",
     "version:tinfoil": "npm version -w tinfoil",
     "publish:verifier": "npm run build -w @tinfoilsh/verifier && npm publish -w @tinfoilsh/verifier --access public",
     "publish:tinfoil": "npm run build -w tinfoil && npm publish -w tinfoil --access public"
   },
   "devDependencies": {
-    "acorn": "^8.15.0",
-    "syncpack": "^13.0.4",
-    "typescript": "^5.9.2"
+    "acorn": "^8.16.0",
+    "syncpack": "^14.3.0",
+    "typescript": "^6.0.3"
   },
   "dependencies": {
     "@freedomofpress/crypto-browser": "^0.1.7",
-    "@freedomofpress/sigstore-browser": "^0.1.11",
-    "@freedomofpress/tuf-browser": "^0.1.8",
+    "@freedomofpress/sigstore-browser": "^0.1.13",
+    "@freedomofpress/tuf-browser": "^0.1.11",
     "ehbp": "^0.2.0"
   }
 }
