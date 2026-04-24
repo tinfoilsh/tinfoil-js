@@ -3,6 +3,7 @@ export enum PredicateType {
   SevGuestV2 = 'https://tinfoil.sh/predicate/sev-snp-guest/v2',
   TdxGuestV2 = 'https://tinfoil.sh/predicate/tdx-guest/v2',
   SnpTdxMultiplatformV1 = 'https://tinfoil.sh/predicate/snp-tdx-multiplatform/v1',
+  HardwareMeasurementsV1 = 'https://tinfoil.sh/predicate/hardware-measurements/v1',
 }
 
 export interface AttestationDocument {
@@ -141,15 +142,58 @@ function compareMultiplatformVsTdx(
 
 /**
  * Computes the fingerprint of a measurement.
- * If there is only one register, returns that register directly.
- * Otherwise, returns SHA-256 hash of type + all registers concatenated.
+ *
+ * When targetType is provided, resolves registers based on type mapping
+ * (matching Go's Fingerprint function). For SnpTdxMultiplatformV1 → TdxGuestV2,
+ * hardware measurement is required to supply MRTD and RTMR0.
+ *
+ * When targetType is omitted, uses the raw registers directly.
+ *
+ * Single-register results are returned directly; multi-register results are
+ * SHA-256 hashed with the measurement type URL prefix.
  */
-export async function measurementFingerprint(m: AttestationMeasurement): Promise<string> {
-  if (m.registers.length === 1) {
-    return m.registers[0];
+export async function measurementFingerprint(
+  m: AttestationMeasurement,
+  hw?: HardwareMeasurement | null,
+  targetType?: string,
+): Promise<string> {
+  let registers: string[];
+
+  if (targetType) {
+    switch (m.type) {
+      case PredicateType.SnpTdxMultiplatformV1:
+        switch (targetType) {
+          case PredicateType.SevGuestV2:
+            registers = [m.registers[0]];
+            break;
+          case PredicateType.TdxGuestV2:
+            if (!hw?.MRTD || !hw?.RTMR0) {
+              throw new AttestationError('hardware measurement required for TDX guest types');
+            }
+            registers = [hw.MRTD, hw.RTMR0, m.registers[1], m.registers[2], RTMR3_ZERO];
+            break;
+          default:
+            throw new AttestationError(`unsupported target type ${targetType}`);
+        }
+        break;
+      case PredicateType.TdxGuestV2:
+        registers = [m.registers[0], m.registers[1], m.registers[2], m.registers[3], m.registers[4]];
+        break;
+      case PredicateType.SevGuestV2:
+        registers = [m.registers[0]];
+        break;
+      default:
+        throw new AttestationError(`unsupported measurement type ${m.type}`);
+    }
+  } else {
+    registers = m.registers;
   }
 
-  const allData = m.type + m.registers.join('');
+  if (registers.length === 1) {
+    return registers[0];
+  }
+
+  const allData = m.type + registers.join('');
   const encoder = new TextEncoder();
   const hashBuffer = await crypto.subtle.digest('SHA-256', encoder.encode(allData));
   const hashArray = new Uint8Array(hashBuffer);
