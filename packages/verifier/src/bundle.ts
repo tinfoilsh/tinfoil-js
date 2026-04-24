@@ -51,25 +51,27 @@ export async function assembleAttestationBundle(
     return data.attestations[0].bundle;
   });
 
-  // 3. Parse attestation report
-  let report: Report;
-  try {
-    report = new Report(await decompressGzip(base64ToBytes(attestation.body)));
-  } catch (e) {
-    wrapOrThrow(e, AttestationError, 'Failed to parse attestation report');
-  }
+  // 3. Fetch VCEK certificate from AMD KDS (SEV-SNP only; TDX embeds certs in the quote)
+  let vcek = '';
+  if (attestation.format === PredicateType.SevGuestV2) {
+    let report: Report;
+    try {
+      report = new Report(await decompressGzip(base64ToBytes(attestation.body)));
+    } catch (e) {
+      wrapOrThrow(e, AttestationError, 'Failed to parse attestation report');
+    }
 
-  // 4. Fetch VCEK certificate from AMD KDS (needs parsed report)
-  const vcek = await withRetry(async () => {
-    const tcb = tcbFromInt(report.reportedTcb);
-    const chip = bytesToHex(report.chipId);
-    const der = await fetchBinary(
-      `${KDS}/vcek/v1/${report.productName}/${chip}?blSPL=${tcb.blSpl}&teeSPL=${tcb.teeSpl}&snpSPL=${tcb.snpSpl}&ucodeSPL=${tcb.ucodeSpl}`,
-    );
-    let bin = '';
-    for (let i = 0; i < der.length; i++) bin += String.fromCharCode(der[i]);
-    return btoa(bin);
-  });
+    vcek = await withRetry(async () => {
+      const tcb = tcbFromInt(report.reportedTcb);
+      const chip = bytesToHex(report.chipId);
+      const der = await fetchBinary(
+        `${KDS}/vcek/v1/${report.productName}/${chip}?blSPL=${tcb.blSpl}&teeSPL=${tcb.teeSpl}&snpSPL=${tcb.snpSpl}&ucodeSPL=${tcb.ucodeSpl}`,
+      );
+      let bin = '';
+      for (let i = 0; i < der.length; i++) bin += String.fromCharCode(der[i]);
+      return btoa(bin);
+    });
+  }
 
   return {
     domain: enclaveHost,

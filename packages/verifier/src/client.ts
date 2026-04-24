@@ -1,9 +1,10 @@
 import { verifyAttestation as verifyEnclaveAttestation } from './attestation.js';
-import { verifySigstoreBundle } from './sigstore.js';
+import { verifySigstoreBundle, fetchHardwareMeasurements } from './sigstore.js';
 import { assembleAttestationBundle } from './bundle.js';
 import { verifyCertificate } from './cert-verify.js';
-import { compareMeasurements, measurementFingerprint } from './types.js';
-import type { AttestationResponse, VerificationDocument, AttestationBundle } from './types.js';
+import { compareMeasurements, measurementFingerprint, PredicateType } from './types.js';
+import { verifyHardware } from './hardware.js';
+import type { AttestationResponse, VerificationDocument, AttestationBundle, HardwareMeasurement } from './types.js';
 import { ConfigurationError } from './errors.js';
 
 export interface VerifierOptions {
@@ -31,7 +32,29 @@ export class Verifier {
     }
     const domain = new URL(this.serverURL).hostname;
     const bundle = await assembleAttestationBundle(domain, this.configRepo);
-    return this.verifyBundle(bundle);
+    const result = await this.verifyBundle(bundle);
+
+    let matchedHw: HardwareMeasurement | null = null;
+
+    // Hardware verification for TDX enclaves (matches Go's Verify flow)
+    if (result.measurement.type === PredicateType.TdxGuestV2) {
+      const hwMeasurements = await fetchHardwareMeasurements();
+      matchedHw = verifyHardware(hwMeasurements, result.measurement);
+    }
+
+    // Recompute fingerprints with proper targetType (and hardware for TDX)
+    if (this.verificationDocument) {
+      const enclaveType = result.measurement.type;
+      this.verificationDocument.hardwareMeasurement = matchedHw ?? undefined;
+      this.verificationDocument.codeFingerprint = await measurementFingerprint(
+        this.verificationDocument.codeMeasurement, matchedHw, enclaveType,
+      );
+      this.verificationDocument.enclaveFingerprint = await measurementFingerprint(
+        result.measurement, matchedHw, enclaveType,
+      );
+    }
+
+    return result;
   }
 
   async verifyBundle(bundle: AttestationBundle): Promise<AttestationResponse> {

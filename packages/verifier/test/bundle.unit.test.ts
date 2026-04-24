@@ -143,7 +143,7 @@ describe("assembleAttestationBundle — retry logic", () => {
     // Return a response that will cause a parse error (not a FetchError)
     const mockFetch = vi.fn(async (url: string) => {
       if (url.includes("tinfoil-attestation")) {
-        return jsonResponse({ format: "sev-snp-guest/v2", body: "not-valid-base64!!!" });
+        return jsonResponse({ format: "https://tinfoil.sh/predicate/sev-snp-guest/v2", body: "not-valid-base64!!!" });
       }
       if (url.includes("releases/latest")) {
         return jsonResponse({ tag_name: "v1.0" });
