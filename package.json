@@ -26,6 +26,9 @@
     "syncpack": "^14.3.0",
     "typescript": "^6.0.3"
   },
+  "engines": {
+    "npm": ">=11.10.0"
+  },
   "dependencies": {
     "@freedomofpress/crypto-browser": "^0.1.7",
     "@freedomofpress/sigstore-browser": "^0.1.13",
