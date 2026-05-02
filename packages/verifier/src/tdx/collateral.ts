@@ -207,8 +207,9 @@ async function fetchTcbInfo(
     );
   }
 
+  const rawTcbInfo = extractRawJsonField(body, 'tcbInfo');
   await verifyCollateralSignature(
-    JSON.stringify(resp.tcbInfo),
+    rawTcbInfo,
     resp.signature,
     headers['tcb-info-issuer-chain'] || headers['sgx-tcb-info-issuer-chain'],
   );
@@ -229,8 +230,9 @@ async function fetchQeIdentity(
     );
   }
 
+  const rawEnclaveIdentity = extractRawJsonField(body, 'enclaveIdentity');
   await verifyCollateralSignature(
-    JSON.stringify(resp.enclaveIdentity),
+    rawEnclaveIdentity,
     resp.signature,
     headers['sgx-enclave-identity-issuer-chain'] || headers['enclave-identity-issuer-chain'],
   );
@@ -267,8 +269,13 @@ async function verifyCollateralSignature(
 
     signingCert = X509Certificate.parse(pems[0]);
 
-    // Verify the signing cert chain terminates at the trusted root
-    if (pems.length >= 2) {
+    // Verify the signing cert chains to the trusted Intel SGX Root CA
+    if (pems.length === 1) {
+      const signedByRoot = await signingCert.verify(trustedRoot);
+      if (!signedByRoot) {
+        throw new AttestationError('Collateral signing certificate not signed by Intel SGX Root CA');
+      }
+    } else if (pems.length >= 2) {
       const intermediateCert = X509Certificate.parse(pems[pems.length >= 3 ? 1 : 0]);
       const rootCert = pems.length >= 3 ? X509Certificate.parse(pems[2]) : trustedRoot;
 
@@ -442,7 +449,6 @@ function validateTdxModuleIdentity(
   quote: TdxQuote,
   tcbInfo: TcbInfoV3,
 ): void {
-  // Check against tdxModule (base identity)
   if (tcbInfo.tdxModule) {
     const expectedMrSigner = hexToBytes(tcbInfo.tdxModule.mrsigner);
     if (quote.body.mrSignerSeam.length !== expectedMrSigner.length) {
@@ -456,7 +462,6 @@ function validateTdxModuleIdentity(
       }
     }
 
-    // Validate SEAM attributes with mask
     const expectedAttributes = hexToBytes(tcbInfo.tdxModule.attributes);
     const attributesMask = hexToBytes(tcbInfo.tdxModule.attributesMask);
     for (let i = 0; i < Math.min(quote.body.seamAttributes.length, expectedAttributes.length); i++) {
@@ -465,54 +470,147 @@ function validateTdxModuleIdentity(
       }
     }
   }
+
+  const teeTcbSvn = quote.body.teeTcbSvn;
+  const moduleVersion = teeTcbSvn[1];
+
+  if (moduleVersion > 0) {
+    if (!tcbInfo.tdxModuleIdentities || tcbInfo.tdxModuleIdentities.length === 0) {
+      throw new AttestationError(
+        `TDX module version ${moduleVersion} requires tdxModuleIdentities in TCB Info, but none are present`
+      );
+    }
+
+    const identityId = 'TDX_' + moduleVersion.toString(16).padStart(2, '0');
+    const isvSvn = teeTcbSvn[0];
+
+    const matchingIdentity = tcbInfo.tdxModuleIdentities.find(id => id.id === identityId);
+    if (!matchingIdentity) {
+      throw new AttestationError(
+        `No TDX Module Identity found for ID "${identityId}" (module version ${moduleVersion})`
+      );
+    }
+
+    let matchedStatus: string | undefined;
+    for (const level of matchingIdentity.tcbLevels) {
+      if (isvSvn >= level.tcb.isvsvn) {
+        matchedStatus = level.tcbStatus;
+        break;
+      }
+    }
+
+    if (matchedStatus === undefined) {
+      throw new AttestationError(
+        `No matching TCB level for TDX Module Identity "${identityId}" with ISV SVN ${isvSvn}`
+      );
+    }
+
+    if (matchedStatus !== 'UpToDate') {
+      throw new AttestationError(
+        `TDX Module TCB status "${matchedStatus}" is not acceptable for module "${identityId}". Expected "UpToDate"`
+      );
+    }
+  }
 }
 
 // --- CRL Checking ---
 
+const ECDSA_SIGNATURE_OIDS: Record<string, string> = {
+  '1.2.840.10045.4.3.2': 'SHA-256',
+  '1.2.840.10045.4.3.3': 'SHA-384',
+  '1.2.840.10045.4.3.4': 'SHA-512',
+};
+
+function derEcdsaToP1363(derSig: Uint8Array, curveLen: number = 32): Uint8Array {
+  const asn1 = ASN1Obj.parseBuffer(derSig);
+  const r = asn1.subs[0].value;
+  const s = asn1.subs[1].value;
+
+  const result = new Uint8Array(curveLen * 2);
+
+  const rTrimmed = r[0] === 0 && r.length > curveLen ? r.subarray(1) : r;
+  const sTrimmed = s[0] === 0 && s.length > curveLen ? s.subarray(1) : s;
+
+  result.set(rTrimmed, curveLen - rTrimmed.length);
+  result.set(sTrimmed, curveLen * 2 - sTrimmed.length);
+
+  return result;
+}
+
+async function verifyCrlSignature(crlDer: Uint8Array, issuerCert: X509Certificate): Promise<void> {
+  const crl = ASN1Obj.parseBuffer(crlDer);
+
+  if (crl.subs.length < 3) {
+    throw new AttestationError('Invalid CRL structure: expected SEQUENCE with 3 elements');
+  }
+
+  const tbsCertListDer = crl.subs[0].toDER();
+  const sigAlgOid = crl.subs[1].subs[0].toOID();
+  const signatureRaw = crl.subs[2].value.subarray(1);
+
+  const hashName = ECDSA_SIGNATURE_OIDS[sigAlgOid];
+  if (!hashName) {
+    throw new AttestationError(`Unsupported CRL signature algorithm OID: ${sigAlgOid}`);
+  }
+
+  const p1363Sig = derEcdsaToP1363(signatureRaw);
+  const publicKey = await issuerCert.publicKeyObj;
+
+  const valid = await crypto.subtle.verify(
+    { name: 'ECDSA', hash: hashName },
+    publicKey,
+    new Uint8Array(p1363Sig).buffer as ArrayBuffer,
+    new Uint8Array(tbsCertListDer).buffer as ArrayBuffer,
+  );
+
+  if (!valid) {
+    throw new AttestationError('CRL signature verification failed: CRL was not signed by the expected CA');
+  }
+}
+
 function parseRevokedSerialsFromDer(crlDer: Uint8Array): Uint8Array[] {
   const serials: Uint8Array[] = [];
-  try {
-    const crl = ASN1Obj.parseBuffer(crlDer);
-    // CRL structure: SEQUENCE { tbsCertList, signatureAlgorithm, signature }
-    // tbsCertList: SEQUENCE { version?, signature, issuer, thisUpdate, nextUpdate?, revokedCertificates?, ... }
-    const tbsCertList = crl.subs[0];
+  const crl = ASN1Obj.parseBuffer(crlDer);
+  const tbsCertList = crl.subs[0];
 
-    // Find revokedCertificates — it's a SEQUENCE of SEQUENCE { serialNumber, revocationDate, ... }
-    // It's typically the 5th or 6th element depending on whether optional fields are present
-    for (const sub of tbsCertList.subs) {
-      // revokedCertificates is a SEQUENCE of SEQUENCEs (each containing a serial number)
-      if (sub.tag.number === 0x30 && sub.subs.length > 0 && sub.subs[0].tag.number === 0x30) {
-        for (const entry of sub.subs) {
-          if (entry.subs.length > 0) {
-            // First element is the serial number (INTEGER)
-            serials.push(entry.subs[0].value);
-          }
+  for (const sub of tbsCertList.subs) {
+    if (sub.tag.number === 0x30 && sub.subs.length > 0 && sub.subs[0].tag.number === 0x30) {
+      for (const entry of sub.subs) {
+        if (entry.subs.length > 0) {
+          serials.push(entry.subs[0].value);
         }
-        break;
       }
+      break;
     }
-  } catch {
-    // If we can't parse the CRL, return empty — the verification will proceed
-    // without revocation checking rather than failing on a parse error
   }
   return serials;
+}
+
+function getPckCaType(chain: PckCertificateChain): string {
+  const cn = chain.intermediate.subjectDN.get('CN') ?? '';
+  if (cn.includes('Platform')) return 'platform';
+  return 'processor';
 }
 
 async function fetchAndCheckCrls(
   chain: PckCertificateChain,
   opts: CollateralOptions,
 ): Promise<void> {
-  // Fetch PCK CRL (processor CA)
-  const pckCrlUrl = `${INTEL_PCS_BASE_URL}${PCS_PCK_CRL_PATH}?ca=processor&encoding=der`;
+  const caType = getPckCaType(chain);
+  const pckCrlUrl = `${INTEL_PCS_BASE_URL}${PCS_PCK_CRL_PATH}?ca=${caType}&encoding=der`;
   const [pckCrlDer, rootCrlDer] = await Promise.all([
     fetchCollateralBinary(pckCrlUrl, opts),
     fetchCollateralBinary(PCS_ROOT_CA_CRL_URL, opts),
   ]);
 
+  await Promise.all([
+    verifyCrlSignature(pckCrlDer, chain.intermediate),
+    verifyCrlSignature(rootCrlDer, chain.root),
+  ]);
+
   const pckRevokedSerials = parseRevokedSerialsFromDer(pckCrlDer);
   const rootRevokedSerials = parseRevokedSerialsFromDer(rootCrlDer);
 
-  // Combine all revoked serials for checking against the chain
   const allRevokedSerials = [...pckRevokedSerials, ...rootRevokedSerials];
   chain.checkRevocation(allRevokedSerials);
 }
@@ -523,13 +621,17 @@ export async function validateCollateral(
   quote: TdxQuote,
   chain: PckCertificateChain,
   pckExtensions: PckExtensions,
-  opts: CollateralOptions = { proxyHost: TDX_PROXY_HOST, cachePrefetchMs: 3600_000 },
+  opts: CollateralOptions = {},
 ): Promise<void> {
+  const resolvedOpts: CollateralOptions = {
+    proxyHost: opts.proxyHost ?? TDX_PROXY_HOST,
+    cachePrefetchMs: opts.cachePrefetchMs ?? 3600_000,
+  };
   // Fetch all collateral in parallel
   const [tcbInfoResp, qeIdentityResp] = await Promise.all([
-    fetchTcbInfo(pckExtensions.fmspc, opts),
-    fetchQeIdentity(opts),
-    fetchAndCheckCrls(chain, opts),
+    fetchTcbInfo(pckExtensions.fmspc, resolvedOpts),
+    fetchQeIdentity(resolvedOpts),
+    fetchAndCheckCrls(chain, resolvedOpts),
   ]);
 
   const tcbInfo = tcbInfoResp.tcbInfo;
@@ -554,6 +656,55 @@ export async function validateCollateral(
       `The platform's TCB may be outdated or revoked. Acceptable statuses: ${[...ACCEPTABLE_TCB_STATUSES].join(', ')}`
     );
   }
+}
+
+// --- Raw JSON extraction ---
+
+function extractRawJsonField(body: string, fieldName: string): string {
+  const key = `"${fieldName}"`;
+  const keyIndex = body.indexOf(key);
+  if (keyIndex === -1) {
+    throw new AttestationError(`Field "${fieldName}" not found in collateral response`);
+  }
+
+  let pos = keyIndex + key.length;
+  while (pos < body.length && body[pos] !== ':') pos++;
+  pos++;
+  while (pos < body.length && (body[pos] === ' ' || body[pos] === '\t' || body[pos] === '\n' || body[pos] === '\r')) pos++;
+
+  if (pos >= body.length || body[pos] !== '{') {
+    throw new AttestationError(`Expected object value for field "${fieldName}"`);
+  }
+
+  let depth = 0;
+  let inString = false;
+  let escape = false;
+  const start = pos;
+
+  for (; pos < body.length; pos++) {
+    const ch = body[pos];
+    if (escape) {
+      escape = false;
+      continue;
+    }
+    if (inString) {
+      if (ch === '\\') escape = true;
+      else if (ch === '"') inString = false;
+      continue;
+    }
+    if (ch === '"') {
+      inString = true;
+    } else if (ch === '{') {
+      depth++;
+    } else if (ch === '}') {
+      depth--;
+      if (depth === 0) {
+        return body.substring(start, pos + 1);
+      }
+    }
+  }
+
+  throw new AttestationError(`Unterminated object value for field "${fieldName}"`);
 }
 
 // --- Utilities ---
