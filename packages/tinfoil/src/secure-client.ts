@@ -221,6 +221,17 @@ export class SecureClient {
         : undefined,
     });
 
+    if (this.config.enclaveURL) {
+      const configuredHost = new URL(this.config.enclaveURL).hostname.toLowerCase();
+      const bundleDomain = bundle.domain.toLowerCase();
+
+      if (configuredHost !== bundleDomain) {
+        throw new Error(
+          `Attestation bundle domain mismatch: expected "${configuredHost}" but got "${bundleDomain}"`,
+        );
+      }
+    }
+
     // Resolve enclaveURL: user-provided config takes precedence, otherwise from bundle
     this.resolvedEnclaveURL = this.config.enclaveURL ?? `https://${bundle.domain}`;
 
