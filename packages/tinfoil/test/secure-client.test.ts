@@ -33,6 +33,13 @@ const verifyMock = vi.fn(async () => ({
 
 const mockFetch = vi.fn(async () => new Response(JSON.stringify({ message: "success" })));
 const mockGetSessionRecoveryToken = vi.fn(async () => ({ exportedSecret: new Uint8Array(), requestEnc: new Uint8Array() }));
+const fetchAttestationBundleMock = vi.fn(async () => ({
+  domain: "test-router.tinfoil.sh",
+  enclaveAttestationReport: { format: "test", body: "test" },
+  digest: "test-digest",
+  sigstoreBundle: {},
+  vcek: "test-vcek",
+}));
 const createSecureFetchMock = vi.fn(
   async (_baseURL: string, hpkePublicKey: string | undefined) => {
     if (hpkePublicKey) {
@@ -86,13 +93,7 @@ vi.mock("../src/secure-fetch.js", () => ({
 }));
 
 vi.mock("../src/atc.js", () => ({
-  fetchAttestationBundle: vi.fn(async () => ({
-    domain: "test-router.tinfoil.sh",
-    enclaveAttestationReport: { format: "test", body: "test" },
-    digest: "test-digest",
-    sigstoreBundle: {},
-    vcek: "test-vcek",
-  })),
+  fetchAttestationBundle: fetchAttestationBundleMock,
   fetchRouter: vi.fn(async () => "test-router.tinfoil.sh"),
 }));
 
@@ -160,6 +161,27 @@ describe("SecureClient", () => {
     // Only one attestation should have happened
     expect(verifyMock).toHaveBeenCalledTimes(1);
     expect(createSecureFetchMock).toHaveBeenCalledTimes(1);
+  });
+
+
+  it("should reject mismatched bundle domain for custom enclaveURL", async () => {
+    fetchAttestationBundleMock.mockResolvedValueOnce({
+      domain: "attested-different.example",
+      enclaveAttestationReport: { format: "test", body: "test" },
+      digest: "test-digest",
+      sigstoreBundle: {},
+      vcek: "test-vcek",
+    });
+
+    const { SecureClient } = await import("../src/secure-client");
+
+    const client = new SecureClient({
+      enclaveURL: "https://requested-enclave.example",
+    });
+
+    await expect(client.ready()).rejects.toThrow("Attestation bundle domain mismatch");
+    expect(verifyMock).not.toHaveBeenCalled();
+    expect(createSecureFetchMock).not.toHaveBeenCalled();
   });
 
   it("should return pending verification document before ready()", async () => {
@@ -469,6 +491,14 @@ describe("SecureClient", () => {
       const { SecureClient } = await import("../src/secure-client");
       const { fetchAttestationBundle } = await import("../src/atc.js");
 
+      fetchAttestationBundleMock.mockResolvedValueOnce({
+        domain: "my-enclave.example.com",
+        enclaveAttestationReport: { format: "test", body: "test" },
+        digest: "test-digest",
+        sigstoreBundle: {},
+        vcek: "test-vcek",
+      });
+
       const client = new SecureClient({
         enclaveURL: "https://my-enclave.example.com",
         configRepo: "custom/repo",
@@ -568,6 +598,14 @@ describe("SecureClient", () => {
     it("Case 3: custom enclave — enclaveURL from config, baseURL derived", async () => {
       const { SecureClient } = await import("../src/secure-client");
 
+      fetchAttestationBundleMock.mockResolvedValueOnce({
+        domain: "my-enclave.example.com",
+        enclaveAttestationReport: { format: "test", body: "test" },
+        digest: "test-digest",
+        sigstoreBundle: {},
+        vcek: "test-vcek",
+      });
+
       const client = new SecureClient({
         enclaveURL: "https://my-enclave.example.com",
       });
@@ -586,6 +624,14 @@ describe("SecureClient", () => {
 
     it("Case 4: proxy + custom enclave — both from config", async () => {
       const { SecureClient } = await import("../src/secure-client");
+
+      fetchAttestationBundleMock.mockResolvedValueOnce({
+        domain: "my-enclave.example.com",
+        enclaveAttestationReport: { format: "test", body: "test" },
+        digest: "test-digest",
+        sigstoreBundle: {},
+        vcek: "test-vcek",
+      });
 
       const client = new SecureClient({
         baseURL: "https://my-proxy.com/api/",
@@ -606,6 +652,22 @@ describe("SecureClient", () => {
 
     it("Case 4: reset preserves proxy + custom enclave config", async () => {
       const { SecureClient } = await import("../src/secure-client");
+
+      fetchAttestationBundleMock
+        .mockResolvedValueOnce({
+          domain: "my-enclave.example.com",
+          enclaveAttestationReport: { format: "test", body: "test" },
+          digest: "test-digest",
+          sigstoreBundle: {},
+          vcek: "test-vcek",
+        })
+        .mockResolvedValueOnce({
+          domain: "my-enclave.example.com",
+          enclaveAttestationReport: { format: "test", body: "test" },
+          digest: "test-digest",
+          sigstoreBundle: {},
+          vcek: "test-vcek",
+        });
 
       const client = new SecureClient({
         baseURL: "https://my-proxy.com/api/",
