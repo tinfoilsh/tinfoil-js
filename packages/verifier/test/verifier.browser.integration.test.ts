@@ -189,7 +189,7 @@ describe('Browser Integration Tests', () => {
 
     it('should allow comparison between SNP and multiplatform types', () => {
       const a = { type: PredicateType.SevGuestV2, registers: ['abc123'] };
-      const b = { type: PredicateType.SnpTdxMultiplatformV1, registers: ['abc123'] };
+      const b = { type: PredicateType.SnpTdxMultiplatformV1, registers: ['abc123', 'rtmr1', 'rtmr2'] };
       expect(() => compareMeasurements(a, b)).not.toThrow();
     });
   });

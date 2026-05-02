@@ -1,10 +1,11 @@
-import { verifyAttestation as verifyAmdAttestation } from './attestation.js';
-import { verifySigstoreBundle } from './sigstore.js';
+import { verifyAttestation as verifyEnclaveAttestation } from './attestation.js';
+import { verifySigstoreBundle, fetchHardwareMeasurements } from './sigstore.js';
 import { assembleAttestationBundle } from './bundle.js';
 import { verifyCertificate } from './cert-verify.js';
-import { compareMeasurements, measurementFingerprint } from './types.js';
-import type { AttestationResponse, VerificationDocument, AttestationBundle } from './types.js';
-import { ConfigurationError } from './errors.js';
+import { compareMeasurements, measurementFingerprint, PredicateType } from './types.js';
+import { verifyHardware } from './hardware.js';
+import type { AttestationResponse, VerificationDocument, AttestationBundle, AttestationMeasurement, HardwareMeasurement } from './types.js';
+import { AttestationError, ConfigurationError } from './errors.js';
 
 export interface VerifierOptions {
   /** Server URL for fetching attestation. Required when using verify(), optional when using verifyBundle(). */
@@ -31,14 +32,74 @@ export class Verifier {
     }
     const domain = new URL(this.serverURL).hostname;
     const bundle = await assembleAttestationBundle(domain, this.configRepo);
-    return this.verifyBundle(bundle);
+    const { enclaveVerification, codeMeasurements, steps, digest } = await this.coreVerify(bundle);
+
+    let matchedHw: HardwareMeasurement | null = null;
+
+    if (enclaveVerification.measurement.type === PredicateType.TdxGuestV2) {
+      const hwMeasurements = await fetchHardwareMeasurements();
+      matchedHw = verifyHardware(hwMeasurements, enclaveVerification.measurement);
+    }
+
+    const enclaveType = enclaveVerification.measurement.type;
+    const codeFingerprint = await measurementFingerprint(codeMeasurements, matchedHw, enclaveType);
+    const enclaveFingerprint = await measurementFingerprint(enclaveVerification.measurement, matchedHw, enclaveType);
+
+    this.verificationDocument = {
+      configRepo: this.configRepo,
+      enclaveHost: domain,
+      releaseDigest: digest,
+      codeMeasurement: codeMeasurements,
+      enclaveMeasurement: enclaveVerification,
+      tlsPublicKey: enclaveVerification.tlsPublicKeyFingerprint || '',
+      hpkePublicKey: enclaveVerification.hpkePublicKey || '',
+      hardwareMeasurement: matchedHw ?? undefined,
+      codeFingerprint,
+      enclaveFingerprint,
+      selectedRouterEndpoint: domain,
+      securityVerified: true,
+      steps
+    };
+
+    return enclaveVerification;
   }
 
   async verifyBundle(bundle: AttestationBundle): Promise<AttestationResponse> {
+    const { enclaveVerification, codeMeasurements, steps, domain, digest } = await this.coreVerify(bundle);
+
+    const enclaveType = enclaveVerification.measurement.type;
+    const codeFingerprint = await measurementFingerprint(codeMeasurements, null, enclaveType);
+    const enclaveFingerprint = await measurementFingerprint(enclaveVerification.measurement, null, enclaveType);
+
+    this.verificationDocument = {
+      configRepo: this.configRepo,
+      enclaveHost: domain,
+      releaseDigest: digest,
+      codeMeasurement: codeMeasurements,
+      enclaveMeasurement: enclaveVerification,
+      tlsPublicKey: enclaveVerification.tlsPublicKeyFingerprint || '',
+      hpkePublicKey: enclaveVerification.hpkePublicKey || '',
+      codeFingerprint,
+      enclaveFingerprint,
+      selectedRouterEndpoint: domain,
+      securityVerified: true,
+      steps
+    };
+
+    return enclaveVerification;
+  }
+
+  private async coreVerify(bundle: AttestationBundle): Promise<{
+    enclaveVerification: AttestationResponse;
+    codeMeasurements: AttestationMeasurement;
+    steps: VerificationDocument['steps'];
+    domain: string;
+    digest: string;
+  }> {
     const { enclaveAttestationReport: attestationDoc, vcek, digest, sigstoreBundle, domain, enclaveCert } = bundle;
 
     const steps: VerificationDocument['steps'] = {
-      fetchDigest: { status: 'success' }, // Already fetched by caller
+      fetchDigest: { status: 'success' },
       verifyCode: { status: 'pending' },
       verifyEnclave: { status: 'pending' },
       compareMeasurements: { status: 'pending' },
@@ -46,10 +107,10 @@ export class Verifier {
     };
 
     try {
-      // Step 1: Verify enclave attestation
-      let amdVerification: AttestationResponse;
+      // Step 1: Verify enclave attestation (SEV-SNP or TDX)
+      let enclaveVerification: AttestationResponse;
       try {
-        amdVerification = await verifyAmdAttestation(attestationDoc, vcek);
+        enclaveVerification = await verifyEnclaveAttestation(attestationDoc, vcek);
         steps.verifyEnclave = { status: 'success' };
       } catch (error) {
         steps.verifyEnclave = { status: 'failed', error: (error as Error).message };
@@ -70,7 +131,7 @@ export class Verifier {
 
       // Step 3: Compare measurements
       try {
-        compareMeasurements(codeMeasurements, amdVerification.measurement);
+        compareMeasurements(codeMeasurements, enclaveVerification.measurement);
         steps.compareMeasurements = { status: 'success' };
       } catch (error) {
         steps.compareMeasurements = { status: 'failed', error: (error as Error).message };
@@ -80,11 +141,14 @@ export class Verifier {
 
       // Step 4: Verify certificate
       try {
+        if (!enclaveCert) {
+          throw new AttestationError('Enclave certificate is required');
+        }
         await verifyCertificate(
           enclaveCert,
           domain,
           attestationDoc,
-          amdVerification.hpkePublicKey || ''
+          enclaveVerification.hpkePublicKey || ''
         );
         steps.verifyCertificate = { status: 'success' };
       } catch (error) {
@@ -93,23 +157,7 @@ export class Verifier {
         throw error;
       }
 
-      // Build successful verification document
-      this.verificationDocument = {
-        configRepo: this.configRepo,
-        enclaveHost: domain,
-        releaseDigest: digest,
-        codeMeasurement: codeMeasurements,
-        enclaveMeasurement: amdVerification,
-        tlsPublicKey: amdVerification.tlsPublicKeyFingerprint || '',
-        hpkePublicKey: amdVerification.hpkePublicKey || '',
-        codeFingerprint: await measurementFingerprint(codeMeasurements),
-        enclaveFingerprint: await measurementFingerprint(amdVerification.measurement),
-        selectedRouterEndpoint: domain,
-        securityVerified: true,
-        steps
-      };
-
-      return amdVerification;
+      return { enclaveVerification, codeMeasurements, steps, domain, digest };
     } catch (error) {
       if (!this.verificationDocument) {
         this.saveFailedVerificationDocument(steps, domain);
