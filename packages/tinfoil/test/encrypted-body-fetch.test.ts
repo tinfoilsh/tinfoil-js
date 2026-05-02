@@ -156,6 +156,26 @@ describe("encrypted-body-fetch", () => {
 
       expect(apiRequestMade).toBe(true);
     });
+
+
+    it("rejects insecure browser contexts for verified transport", async () => {
+      const originalWindow = (globalThis as { window?: Window }).window;
+      const key = await (await Identity.generate()).getPublicKeyHex();
+
+      vi.stubGlobal("window", {} as Window);
+      vi.stubGlobal("isSecureContext", false);
+
+      try {
+        await expect(encryptedBodyRequest("https://api.example.com/test", key)).rejects.toThrow(
+          /secure browser context/
+        );
+      } finally {
+        vi.unstubAllGlobals();
+        if (originalWindow !== undefined) {
+          vi.stubGlobal("window", originalWindow);
+        }
+      }
+    });
   });
 
   describe("createEncryptedBodyFetch", () => {
@@ -253,6 +273,22 @@ describe("encrypted-body-fetch", () => {
       expect(keyFetchedFromEnclave).toBe(true);
     });
 
+
+    it("rejects insecure browser contexts", async () => {
+      const originalWindow = (globalThis as { window?: Window }).window;
+      vi.stubGlobal("window", {} as Window);
+      vi.stubGlobal("isSecureContext", false);
+
+      try {
+        const transport = createUnverifiedEncryptedBodyFetch("https://api.example.com");
+        await expect(transport.fetch("/test")).rejects.toThrow(/secure browser context/);
+      } finally {
+        vi.unstubAllGlobals();
+        if (originalWindow !== undefined) {
+          vi.stubGlobal("window", originalWindow);
+        }
+      }
+    });
     it("returns a SecureTransport object", () => {
       const transport = createUnverifiedEncryptedBodyFetch("https://api.example.com");
       expect(typeof transport).toBe("object");

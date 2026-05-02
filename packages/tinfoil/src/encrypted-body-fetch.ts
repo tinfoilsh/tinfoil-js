@@ -96,6 +96,13 @@ export async function encryptedBodyRequest(
 
 const ENCLAVE_URL_HEADER = 'X-Tinfoil-Enclave-Url';
 
+
+function assertSecureBrowserContext(): void {
+  if (typeof window !== "undefined" && globalThis.isSecureContext === false) {
+    throw new ConfigurationError("EHBP encryption requires a secure browser context: Use HTTPS or localhost");
+  }
+}
+
 export function createEncryptedBodyFetch(baseURL: string, hpkePublicKey: string, enclaveURL?: string): SecureTransport {
   const baseOrigin = new URL(baseURL).origin;
   const needsEnclaveHeader = !!enclaveURL && new URL(enclaveURL).origin !== baseOrigin;
@@ -194,12 +201,14 @@ export function createUnverifiedEncryptedBodyFetch(baseURL: string, keyOrigin?: 
 }
 
 async function getUnverifiedTransportForOrigin(origin: string, keyOrigin: string): Promise<Transport> {
+  assertSecureBrowserContext();
   const serverIdentity = await getServerIdentity(keyOrigin);
   const requestHost = new URL(origin).host;
   return new Transport(serverIdentity, requestHost);
 }
 
 async function getTransportForOrigin(origin: string, hpkePublicKeyHex: string): Promise<Transport> {
+  assertSecureBrowserContext();
   const serverIdentity = await createIdentityFromPublicKeyHex(hpkePublicKeyHex);
   const requestHost = new URL(origin).host;
   return new Transport(serverIdentity, requestHost);
