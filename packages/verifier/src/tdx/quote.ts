@@ -23,6 +23,8 @@ export interface TdxQuoteHeader {
   version: number;
   attestationKeyType: number;
   teeType: number;
+  qeSvn: number;
+  pceSvn: number;
   qeVendorId: Uint8Array;
   userData: Uint8Array;
 }
@@ -96,6 +98,9 @@ function parseHeader(data: Uint8Array): TdxQuoteHeader {
     );
   }
 
+  const qeSvn = view.getUint16(0x08, true);
+  const pceSvn = view.getUint16(0x0A, true);
+
   const qeVendorId = data.slice(0x0C, 0x1C);
   if (!uint8ArrayEqual(qeVendorId, INTEL_QE_VENDOR_ID)) {
     throw new AttestationError(
@@ -105,7 +110,7 @@ function parseHeader(data: Uint8Array): TdxQuoteHeader {
 
   const userData = data.slice(0x1C, 0x30);
 
-  return { version, attestationKeyType, teeType, qeVendorId, userData };
+  return { version, attestationKeyType, teeType, qeSvn, pceSvn, qeVendorId, userData };
 }
 
 function parseBody(data: Uint8Array): TdQuoteBody {

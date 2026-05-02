@@ -40,9 +40,10 @@ async function verifyAndExtractPayload(
     GitHubWorkflowRepository,
   } = await import('@freedomofpress/sigstore-browser');
 
-  const verifier = new SigstoreVerifier();
-  // Use bundled Sigstore trusted root instead of fetching via TUF
-  // This avoids CORS issues in browsers since tuf-repo-cdn.sigstore.dev doesn't support CORS
+  const verifier = new SigstoreVerifier({
+    ctlogThreshold: 1,
+    tlogThreshold: 1,
+  });
   await verifier.loadSigstoreRoot(sigstoreTrustedRoot);
 
   const bundle = bundleJson as any;
@@ -60,9 +61,13 @@ async function verifyAndExtractPayload(
     throw new AttestationError(`Unsupported Sigstore payload type: "${payloadType}". Only in-toto statements (application/vnd.in-toto+json) are supported`);
   }
 
-  if (digest !== payload.subject[0].digest.sha256) {
+  const bundleDigest = payload.subject?.[0]?.digest?.sha256;
+  if (!bundleDigest) {
+    throw new AttestationError('Invalid Sigstore bundle: Payload is missing subject digest');
+  }
+  if (digest !== bundleDigest) {
     throw new AttestationError(
-      `Release digest mismatch: The release digest from GitHub (${digest}) does not match the digest in the sigstore bundle (${payload.subject[0].digest.sha256})`
+      `Release digest mismatch: The release digest from GitHub (${digest}) does not match the digest in the sigstore bundle (${bundleDigest})`
     );
   }
 
