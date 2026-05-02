@@ -37,6 +37,7 @@ jobs:
     runs-on: ubuntu-latest
     needs: publish_verifier
     permissions:
+      contents: read
       id-token: write
     steps:
       - name: Checkout
