@@ -27,6 +27,9 @@ export default defineConfig({
       ],
     },
   },
+  optimizeDeps: {
+    include: ['openai'],
+  },
   resolve: {
     alias: {
       'tinfoil': resolve(__dirname, 'src/index.browser.ts'),
