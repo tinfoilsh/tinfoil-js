@@ -192,7 +192,8 @@ export function base64ToBytes(base64: string): Uint8Array {
 export async function decompressGzip(data: Uint8Array): Promise<Uint8Array> {
   // Use DecompressionStream if available (browsers, Node.js 18+)
   if (typeof DecompressionStream !== 'undefined') {
-    const stream = new Response(data.buffer as ArrayBuffer).body;
+    const safeBuf = new Uint8Array(data).buffer as ArrayBuffer;
+    const stream = new Response(safeBuf).body;
     if (!stream) {
       throw new Error('Failed to create stream from data');
     }
@@ -202,7 +203,11 @@ export async function decompressGzip(data: Uint8Array): Promise<Uint8Array> {
     return new Uint8Array(decompressed);
   }
 
-  // Fallback to Node.js/Bun zlib
-  const { gunzipSync } = await import('zlib');
-  return new Uint8Array(gunzipSync(data));
+  // Fallback to Node.js/Bun zlib (not available in browsers)
+  if (typeof process !== 'undefined' && process.versions?.node) {
+    const { gunzipSync } = await import('zlib');
+    return new Uint8Array(gunzipSync(data));
+  }
+
+  throw new Error('Gzip decompression is not supported in this environment: DecompressionStream is unavailable');
 }

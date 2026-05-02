@@ -93,7 +93,12 @@ function compareMultiplatformVsSev(
   multi: AttestationMeasurement,
   sev: AttestationMeasurement,
 ): void {
-  if (multi.registers.length < 1 || sev.registers.length < 1) {
+  if (multi.registers.length < 3) {
+    throw new AttestationError(
+      'Invalid measurement data: MultiPlatform measurement must have at least 3 registers'
+    );
+  }
+  if (sev.registers.length < 1) {
     throw new AttestationError('Invalid measurement data: Missing measurement registers');
   }
   if (multi.registers[0] !== sev.registers[0]) {
