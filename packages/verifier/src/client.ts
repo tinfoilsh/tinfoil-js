@@ -2,7 +2,7 @@ import { verifyAttestation as verifyAmdAttestation } from './attestation.js';
 import { verifySigstoreBundle } from './sigstore.js';
 import { assembleAttestationBundle } from './bundle.js';
 import { verifyCertificate } from './cert-verify.js';
-import { compareMeasurements, measurementFingerprint } from './types.js';
+import { compareMeasurements, measurementFingerprint, measurementFingerprintForTarget } from './types.js';
 import type { AttestationResponse, VerificationDocument, AttestationBundle } from './types.js';
 import { ConfigurationError } from './errors.js';
 
@@ -102,7 +102,17 @@ export class Verifier {
         enclaveMeasurement: amdVerification,
         tlsPublicKey: amdVerification.tlsPublicKeyFingerprint || '',
         hpkePublicKey: amdVerification.hpkePublicKey || '',
-        codeFingerprint: await measurementFingerprint(codeMeasurements),
+        // Code fingerprint is computed *against* the enclave's target type
+        // so a SnpTdxMultiPlatformV1 code measurement projects down to the
+        // SEV-SNP register layout when the enclave is SEV-SNP — see SPEC §7.2
+        // cross-platform fingerprinting. Without this projection the code
+        // fingerprint would be a SHA-256 hash while the enclave fingerprint
+        // is the raw SNP register, breaking the equality the GroundTruth
+        // contract asserts.
+        codeFingerprint: await measurementFingerprintForTarget(
+          codeMeasurements,
+          amdVerification.measurement.type,
+        ),
         enclaveFingerprint: await measurementFingerprint(amdVerification.measurement),
         selectedRouterEndpoint: domain,
         securityVerified: true,
