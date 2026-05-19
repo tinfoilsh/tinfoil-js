@@ -130,6 +130,10 @@ export async function verifySigstore(raw: unknown): Promise<VerifyResult> {
           cert_oidc_issuer: v.certOidcIssuer,
           cert_workflow_repository: v.certWorkflowRepository,
           cert_workflow_signer_uri: v.certWorkflowSignerUri,
+          rekor_log_id_hex: v.rekorLogIdHex,
+          rekor_integrated_time_unix: v.rekorIntegratedTimeUnix,
+          tlog_entry_count: v.tlogEntryCount,
+          sct_count: v.sctCount,
         },
       },
     };

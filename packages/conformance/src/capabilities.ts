@@ -46,7 +46,10 @@ export interface Capabilities {
   stages_supported: string[];
   sigstore: {
     trust_root_loading: 'configurable' | 'embedded-only';
-    verification_time_override: 'supported' | 'system-clock-only';
+    verification_time_override:
+      | 'supported'
+      | 'system-clock-only'
+      | 'bundle-supplied-only';
     policy_fields_configurable: Record<string, boolean>;
     predicate_types_understood: string[];
   };
@@ -64,11 +67,10 @@ export function capabilities(): Capabilities {
     stages_supported: ['verify-sigstore'],
     sigstore: {
       trust_root_loading: 'configurable',
-      // The JS verifier path is hermetic on the system clock —
-      // @freedomofpress/sigstore-browser scopes cert chain validity to
-      // cert.NotBefore from the bundle, not new Date(). The supplied
-      // verification_time_unix is currently informational. See known_quirks.
-      verification_time_override: 'supported',
+      // sigstore-browser scopes cert chain validity to bundle-supplied times
+      // (cert.NotBefore, Rekor integratedTime) — hermetic on the system clock
+      // by construction. The fixture's verification_time_unix isn't consulted.
+      verification_time_override: 'bundle-supplied-only',
       policy_fields_configurable: {
         oidc_issuer: true,
         workflow_ref_prefix: true,
@@ -89,10 +91,6 @@ export function capabilities(): Capabilities {
     transport_modes_supported: ['tls-pinning', 'ehbp'],
     flow_modes_supported: ['bundle'],
     known_quirks: {
-      'sigstore.verification_time_supplied_but_ignored':
-        '@freedomofpress/sigstore-browser uses cert NotBefore from bundle for chain-validity scoping; verification_time_unix is informational',
-      'sigstore.cert_output_fields_empty':
-        'cert_oidc_issuer / cert_workflow_repository / cert_workflow_signer_uri are emitted as empty strings until a sigstore-browser exposes the parsed cert post-verifyDsse',
       'sigstore.dcode_substring_match':
         'cert-verify.ts uses .includes() for .hpke./.hatt. SAN filtering (recon finding, separate fix)',
       'inference.ehbp_unverified_mode_exists':

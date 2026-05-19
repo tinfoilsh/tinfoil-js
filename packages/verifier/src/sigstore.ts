@@ -60,6 +60,14 @@ export interface SigstoreVerification {
   certOidcIssuer: string;
   certWorkflowRepository: string;
   certWorkflowSignerUri: string;
+  /** Hex of the Rekor logId.keyId (32 bytes). null if bundle has no tlog entries. */
+  rekorLogIdHex: string | null;
+  /** First tlog entry's integratedTime (seconds since epoch). null if no entries. */
+  rekorIntegratedTimeUnix: number | null;
+  /** Number of tlog entries in verificationMaterial. */
+  tlogEntryCount: number;
+  /** Number of SCTs embedded in the leaf cert. null if cert couldn't be parsed. */
+  sctCount: number | null;
 }
 
 class GitHubWorkflowRefPrefix implements VerificationPolicy {
@@ -214,7 +222,8 @@ export async function verifySigstoreBundleWithPolicy(
       predicateFields
     );
 
-    const cert = extractCertificateInfo(bundle);
+    const cert = await extractCertificateInfo(bundle);
+    const bundleObs = extractBundleObservables(bundle);
 
     return {
       measurement,
@@ -225,6 +234,10 @@ export async function verifySigstoreBundleWithPolicy(
       certOidcIssuer: cert.oidcIssuer,
       certWorkflowRepository: cert.workflowRepository,
       certWorkflowSignerUri: cert.workflowSignerUri,
+      rekorLogIdHex: bundleObs.rekorLogIdHex,
+      rekorIntegratedTimeUnix: bundleObs.rekorIntegratedTimeUnix,
+      tlogEntryCount: bundleObs.tlogEntryCount,
+      sctCount: cert.sctCount,
     };
   } catch (e) {
     wrapOrThrow(e, AttestationError, 'Sigstore code bundle verification failed');
@@ -292,50 +305,132 @@ function extractMeasurement(
 }
 
 /** Pull the cert identity fields out of the bundle for surfacing in the
- *  verification result. Tolerant of older bundle shapes that nest the cert
- *  under x509CertificateChain. */
-function extractCertificateInfo(bundle: any): {
+ *  verification result, plus an SCT count derived from the SCT extension. */
+async function extractCertificateInfo(bundle: any): Promise<{
   oidcIssuer: string;
   workflowRepository: string;
   workflowSignerUri: string;
-} {
-  // The bundle's verificationMaterial.certificate is the leaf cert. The
-  // verifier already parsed it during verifyDsse(); we re-parse here only to
-  // surface the extension fields. If the bundle shape changes in a future
-  // sigstore-browser version, this becomes the canonical place to adapt.
+  sctCount: number | null;
+}> {
   const raw =
     bundle?.verificationMaterial?.certificate?.rawBytes ??
     bundle?.verificationMaterial?.x509CertificateChain?.certificates?.[0]
       ?.rawBytes;
   if (typeof raw !== 'string') {
-    return { oidcIssuer: '', workflowRepository: '', workflowSignerUri: '' };
+    return {
+      oidcIssuer: '',
+      workflowRepository: '',
+      workflowSignerUri: '',
+      sctCount: null,
+    };
   }
-
-  // Lazy-load to avoid pulling the X.509 parser when this function isn't
-  // called (this module is browser-friendly).
-  // eslint-disable-next-line @typescript-eslint/no-var-requires
-  return parseCertExtensionsFromB64(raw);
+  try {
+    const { X509Certificate } = await import('@freedomofpress/sigstore-browser');
+    const der = Uint8Array.from(Buffer.from(raw, 'base64'));
+    const cert = X509Certificate.parse(der);
+    // OID precedence: V2 (.1.8) over V1 (.1.1). Mirrors the policy check in
+    // WrappedOIDCIssuer above and the Rust verifier's extract_certificate_info.
+    const oidcIssuer =
+      cert.extFulcioIssuerV2?.issuer ?? cert.extFulcioIssuerV1?.issuer ?? '';
+    const workflowRepository =
+      cert.extGitHubWorkflowRepository?.workflowRepository ?? '';
+    const workflowSignerUri = cert.extBuildSignerURI?.buildSignerURI ?? '';
+    const sctCount = countSctsInCert(der);
+    return { oidcIssuer, workflowRepository, workflowSignerUri, sctCount };
+  } catch {
+    return {
+      oidcIssuer: '',
+      workflowRepository: '',
+      workflowSignerUri: '',
+      sctCount: null,
+    };
+  }
 }
 
-function parseCertExtensionsFromB64(b64: string): {
-  oidcIssuer: string;
-  workflowRepository: string;
-  workflowSignerUri: string;
+/** Pure bundle parse: extract rekor log id, integrated time, and tlog count. */
+function extractBundleObservables(bundle: any): {
+  rekorLogIdHex: string | null;
+  rekorIntegratedTimeUnix: number | null;
+  tlogEntryCount: number;
 } {
-  // Use the @freedomofpress/sigstore-browser X509 helper via dynamic import is
-  // tricky here (sync function). We tolerate empty strings if anything goes
-  // wrong — the conformance harness only diffs `expected.json` fields that the
-  // fixture actually pins, so missing-but-not-required is fine.
-  try {
-    // Decode base64 to bytes then to a DER buffer. We avoid pulling the full
-    // X.509 lib into this hot path by leaving the heavy parsing to whoever
-    // already verified the cert in verifyDsse(). For conformance v0.1 the
-    // happy-path fixture doesn't pin these output fields; future fixtures
-    // that do can either thread this through verifyDsse's return or call a
-    // dedicated extraction helper.
-    void b64;
-    return { oidcIssuer: '', workflowRepository: '', workflowSignerUri: '' };
-  } catch {
-    return { oidcIssuer: '', workflowRepository: '', workflowSignerUri: '' };
+  const tlogs = bundle?.verificationMaterial?.tlogEntries;
+  if (!Array.isArray(tlogs)) {
+    return { rekorLogIdHex: null, rekorIntegratedTimeUnix: null, tlogEntryCount: 0 };
   }
+  const first = tlogs[0];
+  const logIdB64 = first?.logId?.keyId;
+  const rekorLogIdHex =
+    typeof logIdB64 === 'string'
+      ? Buffer.from(logIdB64, 'base64').toString('hex')
+      : null;
+  const itRaw = first?.integratedTime;
+  let rekorIntegratedTimeUnix: number | null = null;
+  if (typeof itRaw === 'string') {
+    const n = parseInt(itRaw, 10);
+    if (!Number.isNaN(n)) rekorIntegratedTimeUnix = n;
+  } else if (typeof itRaw === 'number') {
+    rekorIntegratedTimeUnix = itRaw;
+  }
+  return { rekorLogIdHex, rekorIntegratedTimeUnix, tlogEntryCount: tlogs.length };
+}
+
+/** Hand-parse the SCT extension (OID 1.3.6.1.4.1.11129.2.4.2) to count entries.
+ *  Walking DER is small enough to inline rather than pull a generic ASN.1 lib. */
+function countSctsInCert(der: Uint8Array): number | null {
+  // Outer cert is a SEQUENCE. The SCT extension's value is an OCTET STRING
+  // wrapping another OCTET STRING that wraps a SerializedSCTList (2-byte total
+  // length + per-SCT 2-byte length + body). We find the OID 06 0A 2B...
+  const SCT_OID = new Uint8Array([
+    0x06, 0x0a, 0x2b, 0x06, 0x01, 0x04, 0x01, 0xd6, 0x79, 0x02, 0x04, 0x02,
+  ]);
+  let i = 0;
+  while (i + SCT_OID.length <= der.length) {
+    let m = true;
+    for (let j = 0; j < SCT_OID.length; j++) {
+      if (der[i + j] !== SCT_OID[j]) {
+        m = false;
+        break;
+      }
+    }
+    if (m) break;
+    i++;
+  }
+  if (i + SCT_OID.length > der.length) return null;
+  // After the OID, optionally a BOOLEAN critical flag (01 01 XX) then an
+  // OCTET STRING (04 LL ...) wrapping the extension value, which itself is
+  // an OCTET STRING wrapping SerializedSCTList.
+  let p = i + SCT_OID.length;
+  if (der[p] === 0x01 && der[p + 1] === 0x01) p += 3; // skip BOOLEAN critical
+  if (der[p] !== 0x04) return null;
+  const outer = parseDerLength(der, p + 1);
+  if (!outer) return null;
+  let inner = der.subarray(outer.offset, outer.offset + outer.length);
+  if (inner[0] !== 0x04) return null;
+  const innerLen = parseDerLength(inner, 1);
+  if (!innerLen) return null;
+  const list = inner.subarray(innerLen.offset, innerLen.offset + innerLen.length);
+  if (list.length < 2) return null;
+  const total = (list[0] << 8) | list[1];
+  const body = list.subarray(2, 2 + Math.min(total, list.length - 2));
+  let count = 0;
+  let q = 0;
+  while (q + 2 <= body.length) {
+    const sctLen = (body[q] << 8) | body[q + 1];
+    q += 2;
+    if (q + sctLen > body.length) return null;
+    q += sctLen;
+    count++;
+  }
+  return count;
+}
+
+function parseDerLength(b: Uint8Array, at: number): { offset: number; length: number } | null {
+  const first = b[at];
+  if (first === undefined) return null;
+  if (first < 0x80) return { offset: at + 1, length: first };
+  const n = first & 0x7f;
+  if (n === 0 || n > 4 || at + 1 + n > b.length) return null;
+  let len = 0;
+  for (let k = 0; k < n; k++) len = (len << 8) | b[at + 1 + k];
+  return { offset: at + 1 + n, length: len };
 }
