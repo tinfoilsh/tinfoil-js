@@ -194,6 +194,12 @@ function classifyError(raw: string): { code: string; spec_ref: string } {
   }
   // Order matters: most specific first. Use word boundaries / contextual
   // phrases to avoid false positives — e.g. "CA" must not match "verifiCAtion".
+  if (
+    /outside (of )?the certificate validity|outside certificate validity window|certificate has expired|certificate is expired/i.test(
+      raw,
+    )
+  )
+    return { code: 'CERT_EXPIRED', spec_ref: '5.2' };
   if (/does not contain a DSSE envelope|No dsseEnvelope|Bundle does not contain/i.test(raw))
     return { code: 'BUNDLE_MALFORMED', spec_ref: '5.2' };
   if (/(not enough tlog entries|tlog entries:\s*\d+|too many tlog entries|tlog count|Expected exactly \d+ tlog)/i.test(raw))
