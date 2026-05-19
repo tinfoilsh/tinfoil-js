@@ -81,11 +81,14 @@ export async function verifySigstore(raw: unknown): Promise<VerifyResult> {
       Buffer.from(input.trust_root_b64, 'base64').toString('utf-8'),
     );
   } catch (e) {
+    // Trust root that decodes but doesn't parse is a *substantive* verification
+    // failure (the trust root provided isn't usable), not a malformed CLI
+    // envelope. Mirror the Rust binary's behavior: exit 10, TRUST_ROOT_INVALID.
     return reject(
       'TRUST_ROOT_INVALID',
       '5.1',
-      `trust_root_b64 not valid base64+JSON: ${(e as Error).message}`,
-      EXIT_BAD_INPUT,
+      `trust_root_b64 contents not valid JSON: ${(e as Error).message}`,
+      EXIT_REJECT,
     );
   }
 
@@ -131,10 +134,33 @@ export async function verifySigstore(raw: unknown): Promise<VerifyResult> {
       },
     };
   } catch (e) {
-    const msg = (e as Error).message ?? String(e);
-    const { code, spec_ref } = classifyError(msg);
-    return reject(code, spec_ref, msg, EXIT_REJECT);
+    // wrapOrThrow stuffs the underlying cause into err.cause; walk the chain
+    // so the classifier sees the most-specific message (sigstore-browser's
+    // internal error) rather than the outer "verification failed" wrapper.
+    const fullMessage = flattenErrorChain(e);
+    const { code, spec_ref } = classifyError(fullMessage);
+    return reject(code, spec_ref, fullMessage, EXIT_REJECT);
   }
+}
+
+/** Flatten an error and its .cause chain into a single space-joined string,
+ *  so the classifier sees the underlying sigstore-browser message even when
+ *  it's been wrapped by wrapOrThrow. */
+function flattenErrorChain(e: unknown): string {
+  const parts: string[] = [];
+  let cur: any = e;
+  for (let i = 0; i < 8 && cur != null; i++) {
+    if (cur instanceof Error) {
+      if (cur.message) parts.push(cur.message);
+      cur = (cur as any).cause;
+    } else if (typeof cur === 'string') {
+      parts.push(cur);
+      break;
+    } else {
+      break;
+    }
+  }
+  return parts.join(' | ');
 }
 
 function reject(
@@ -166,13 +192,21 @@ function classifyError(raw: string): { code: string; spec_ref: string } {
   for (const [prefix, code, spec_ref] of PREFIX_MAP) {
     if (raw.includes(prefix)) return { code, spec_ref };
   }
-  if (/(SCT|Signed Certificate Timestamp).*duplicate/i.test(raw))
+  // Order matters: most specific first. Use word boundaries / contextual
+  // phrases to avoid false positives — e.g. "CA" must not match "verifiCAtion".
+  if (/does not contain a DSSE envelope|No dsseEnvelope|Bundle does not contain/i.test(raw))
+    return { code: 'BUNDLE_MALFORMED', spec_ref: '5.2' };
+  if (/(not enough tlog entries|tlog entries:\s*\d+|too many tlog entries|tlog count|Expected exactly \d+ tlog)/i.test(raw))
+    return { code: 'TLOG_COUNT_OUT_OF_RANGE', spec_ref: '5.2' };
+  if (/duplicate (SCT|log)/i.test(raw))
     return { code: 'SCT_DUPLICATE_LOG', spec_ref: '5.2' };
   if (/SCT|Signed Certificate Timestamp/i.test(raw))
     return { code: 'SCT_INSUFFICIENT', spec_ref: '5.2' };
+  if (/No.*Rekor key|Trusted log IDs|Unknown.*log/i.test(raw))
+    return { code: 'REKOR_KEY_NOT_TRUSTED', spec_ref: '5.1' };
   if (/Rekor|tlog|inclusion proof|checkpoint/i.test(raw))
     return { code: 'REKOR_INCLUSION_INVALID', spec_ref: '5.2' };
-  if (/Fulcio|CA|certificate chain|chain validation/i.test(raw))
+  if (/\b(Fulcio|CAs?)\b|certificate chain|chain validation|No valid CAs/i.test(raw))
     return { code: 'FULCIO_CHAIN_INVALID', spec_ref: '5.2' };
   if (/DSSE.*signature|signature.*invalid|verify signature/i.test(raw))
     return { code: 'DSSE_SIGNATURE_INVALID', spec_ref: '5.2' };
