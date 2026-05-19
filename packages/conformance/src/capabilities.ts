@@ -61,21 +61,21 @@ export function capabilities(): Capabilities {
     schema_version: '1',
     sdk: 'tinfoil-js',
     sdk_version: sdkVersion,
-    // verify-sigstore is intentionally NOT listed yet — this is the stub
-    // commit. Wiring it up requires extending @tinfoilsh/verifier to accept
-    // an inline trust root and a fixed verification time, instead of
-    // delegating those to @freedomofpress/sigstore-browser internals.
-    stages_supported: [],
+    stages_supported: ['verify-sigstore'],
     sigstore: {
-      trust_root_loading: 'embedded-only',
-      verification_time_override: 'system-clock-only',
+      trust_root_loading: 'configurable',
+      // The JS verifier path is hermetic on the system clock —
+      // @freedomofpress/sigstore-browser scopes cert chain validity to
+      // cert.NotBefore from the bundle, not new Date(). The supplied
+      // verification_time_unix is currently informational. See known_quirks.
+      verification_time_override: 'supported',
       policy_fields_configurable: {
-        oidc_issuer: false,
-        workflow_ref_prefix: false,
+        oidc_issuer: true,
+        workflow_ref_prefix: true,
         workflow_repository: true,
-        predicate_types_allowed: false,
-        in_toto_statement_types_allowed: false,
-        payload_type: false,
+        predicate_types_allowed: true,
+        in_toto_statement_types_allowed: true,
+        payload_type: true,
         tlog_entries_min: false,
         tlog_entries_max: false,
         sct_min: false,
@@ -89,9 +89,12 @@ export function capabilities(): Capabilities {
     transport_modes_supported: ['tls-pinning', 'ehbp'],
     flow_modes_supported: ['bundle'],
     known_quirks: {
-      'sigstore.predicate_partial_extraction':
-        'JS extracts only snp_measurement from SnpTdxMultiPlatformV1 — drops rtmr1/rtmr2 (recon finding, to be fixed)',
-      'sigstore.dcode_substring_match': true,
+      'sigstore.verification_time_supplied_but_ignored':
+        '@freedomofpress/sigstore-browser uses cert NotBefore from bundle for chain-validity scoping; verification_time_unix is informational',
+      'sigstore.cert_output_fields_empty':
+        'cert_oidc_issuer / cert_workflow_repository / cert_workflow_signer_uri are emitted as empty strings until a sigstore-browser exposes the parsed cert post-verifyDsse',
+      'sigstore.dcode_substring_match':
+        'cert-verify.ts uses .includes() for .hpke./.hatt. SAN filtering (recon finding, separate fix)',
       'inference.ehbp_unverified_mode_exists':
         'createUnverifiedEncryptedBodyFetch bypasses attestation — must NEVER be used in production',
     },
