@@ -86,7 +86,8 @@ export function capabilities(): Capabilities {
       predicate_types_understood: [
         'https://tinfoil.sh/predicate/snp-tdx-multiplatform/v1',
       ],
-    },
+      legacy_bundle_format_supported: true,
+    } as any,
     platforms_supported: ['sev-snp'],
     transport_modes_supported: ['tls-pinning', 'ehbp'],
     flow_modes_supported: ['bundle'],
