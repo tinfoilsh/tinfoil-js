@@ -7,6 +7,8 @@ import type {
 } from '@freedomofpress/sigstore-browser';
 import sigstoreTrustedRoot from './sigstore-trusted-root.js';
 import { AttestationError, wrapOrThrow } from './errors.js';
+import { base64ToBytes } from './attestation.js';
+import { bytesToHex } from './dcode.js';
 
 /**
  * Tinfoil Sigstore policy — one field per SPEC §5 clause. All Tinfoil-specific
@@ -326,7 +328,7 @@ async function extractCertificateInfo(bundle: any): Promise<{
   }
   try {
     const { X509Certificate } = await import('@freedomofpress/sigstore-browser');
-    const der = Uint8Array.from(Buffer.from(raw, 'base64'));
+    const der = base64ToBytes(raw);
     const cert = X509Certificate.parse(der);
     // OID precedence: V2 (.1.8) over V1 (.1.1). Mirrors the policy check in
     // WrappedOIDCIssuer above and the Rust verifier's extract_certificate_info.
@@ -360,9 +362,7 @@ function extractBundleObservables(bundle: any): {
   const first = tlogs[0];
   const logIdB64 = first?.logId?.keyId;
   const rekorLogIdHex =
-    typeof logIdB64 === 'string'
-      ? Buffer.from(logIdB64, 'base64').toString('hex')
-      : null;
+    typeof logIdB64 === 'string' ? bytesToHex(base64ToBytes(logIdB64)) : null;
   const itRaw = first?.integratedTime;
   let rekorIntegratedTimeUnix: number | null = null;
   if (typeof itRaw === 'string') {
