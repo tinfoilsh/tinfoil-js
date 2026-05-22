@@ -67,7 +67,7 @@ export function capabilities(): Capabilities {
     schema_version: '1',
     sdk: 'tinfoil-js',
     sdk_version: sdkVersion,
-    stages_supported: ['verify-sigstore', 'verify-measurement'],
+    stages_supported: ['verify-sigstore', 'verify-measurement', 'verify-hardware-measurements'],
     sigstore: {
       trust_root_loading: 'configurable',
       // sigstore-browser scopes cert chain validity to bundle-supplied times
