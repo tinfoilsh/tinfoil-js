@@ -17,6 +17,7 @@
  */
 
 import { capabilities } from './capabilities.js';
+import { verifyMeasurement } from './verify-measurement.js';
 import { verifySigstore } from './verify-sigstore.js';
 
 const EXIT = {
@@ -77,6 +78,19 @@ async function main(): Promise<number> {
         return EXIT.badInput;
       }
       const { exitCode, body } = await verifySigstore(parsed);
+      process.stdout.write(JSON.stringify(body, null, 2) + '\n');
+      return exitCode;
+    }
+    case 'verify-measurement': {
+      const raw = await readStdin();
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(raw);
+      } catch (e) {
+        process.stderr.write(`input is not valid JSON: ${(e as Error).message}\n`);
+        return EXIT.badInput;
+      }
+      const { exitCode, body } = await verifyMeasurement(parsed);
       process.stdout.write(JSON.stringify(body, null, 2) + '\n');
       return exitCode;
     }

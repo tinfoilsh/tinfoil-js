@@ -53,6 +53,9 @@ export interface Capabilities {
     policy_fields_configurable: Record<string, boolean>;
     predicate_types_understood: string[];
   };
+  measurement: {
+    compare_multiplatform_to_tdx_supported: boolean;
+  };
   platforms_supported: ('sev-snp' | 'tdx')[];
   transport_modes_supported: ('tls-pinning' | 'ehbp')[];
   flow_modes_supported: ('standard' | 'bundle' | 'pinned')[];
@@ -64,7 +67,7 @@ export function capabilities(): Capabilities {
     schema_version: '1',
     sdk: 'tinfoil-js',
     sdk_version: sdkVersion,
-    stages_supported: ['verify-sigstore'],
+    stages_supported: ['verify-sigstore', 'verify-measurement'],
     sigstore: {
       trust_root_loading: 'configurable',
       // sigstore-browser scopes cert chain validity to bundle-supplied times
@@ -94,6 +97,13 @@ export function capabilities(): Capabilities {
       checks_only_subject_0: true,
       in_toto_statement_tolerates_extra_fields: true,
     } as any,
+    measurement: {
+      // tinfoil-js's compareMeasurements only handles same-type and MP↔SEV.
+      // The MP↔TDX path (SPEC §7.3.2 and its §7.3.4 reverse) throws
+      // "Incompatible measurement types". Declared honestly until the lib gains
+      // the TDX path; gated fixtures skip cleanly meanwhile.
+      compare_multiplatform_to_tdx_supported: false,
+    },
     platforms_supported: ['sev-snp'],
     transport_modes_supported: ['tls-pinning', 'ehbp'],
     flow_modes_supported: ['bundle'],
