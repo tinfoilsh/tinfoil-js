@@ -1,6 +1,6 @@
 # @tinfoilsh/conformance
 
-Tinfoil cross-SDK conformance binary for the JS SDK. Implements the CLI contract defined in [tinfoil-conformance](https://github.com/lsd-cat/tinfoil-conformance).
+Tinfoil cross-SDK conformance binary for the JS SDK. Implements the CLI contract defined in [tinfoil-conformance](https://github.com/tinfoilsh/tinfoil-conformance).
 
 ## Build
 
