@@ -56,6 +56,10 @@ export interface Capabilities {
   measurement: {
     compare_multiplatform_to_tdx_supported: boolean;
   };
+  attestation_tdx: {
+    supported: boolean;
+    injected_collateral_supported: boolean;
+  };
   platforms_supported: ('sev-snp' | 'tdx')[];
   transport_modes_supported: ('tls-pinning' | 'ehbp')[];
   flow_modes_supported: ('standard' | 'bundle' | 'pinned')[];
@@ -103,6 +107,14 @@ export function capabilities(): Capabilities {
       // "Incompatible measurement types". Declared honestly until the lib gains
       // the TDX path; gated fixtures skip cleanly meanwhile.
       compare_multiplatform_to_tdx_supported: false,
+    },
+    attestation_tdx: {
+      // @tinfoilsh/verifier doesn't include a TDX path today —
+      // PredicateType.TdxGuestV2 isn't in the enum, and compareMeasurements
+      // doesn't handle TDX targets. Declared false so attestation-tdx
+      // fixtures skip cleanly until a TDX-aware verifier ships.
+      supported: false,
+      injected_collateral_supported: false,
     },
     platforms_supported: ['sev-snp'],
     transport_modes_supported: ['tls-pinning', 'ehbp'],
