@@ -93,6 +93,14 @@ describe("ATC API", () => {
 
       await expect(fetchAttestationBundle({ atcBaseUrl: "https://invalid.example.com" })).rejects.toThrow();
     });
+
+    it("should reject a non-HTTPS ATC URL", async () => {
+      const { fetchAttestationBundle } = await import("../src/atc");
+
+      await expect(fetchAttestationBundle({ atcBaseUrl: "http://atc.example.com" })).rejects.toThrow(
+        /must use HTTPS/
+      );
+    });
   });
 
   describe("fetchRouter", () => {

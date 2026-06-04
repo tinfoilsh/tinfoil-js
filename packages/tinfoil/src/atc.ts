@@ -1,6 +1,6 @@
 import { TINFOIL_CONFIG } from "./config.js";
 import type { AttestationBundle } from "./verifier.js";
-import { FetchError } from "./verifier.js";
+import { ConfigurationError, FetchError } from "./verifier.js";
 
 export interface FetchAttestationBundleOptions {
   atcBaseUrl?: string;
@@ -17,6 +17,11 @@ export interface FetchAttestationBundleOptions {
  */
 export async function fetchAttestationBundle(options: FetchAttestationBundleOptions = {}): Promise<AttestationBundle> {
   const baseUrl = options.atcBaseUrl ?? TINFOIL_CONFIG.ATC_BASE_URL;
+  // The bundle is the entire trust root; fetching it over plaintext would let an
+  // attacker substitute it (MITM).
+  if (!baseUrl.startsWith("https://")) {
+    throw new ConfigurationError(`attestation bundle URL must use HTTPS. Got: ${baseUrl}`);
+  }
   const url = `${baseUrl}/attestation`;
 
   const usePost = !!(options.enclaveURL || options.configRepo);

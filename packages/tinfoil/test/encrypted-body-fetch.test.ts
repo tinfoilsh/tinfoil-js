@@ -184,6 +184,61 @@ describe("encrypted-body-fetch", () => {
       expect(typeof transport.getSessionRecoveryToken).toBe("function");
     });
 
+    it("rejects a non-HTTPS baseURL", () => {
+      expect(() => createEncryptedBodyFetch("http://api.example.com", "mockkey123")).toThrow(
+        /baseURL must use HTTPS/
+      );
+    });
+
+    it("refuses requests to an origin outside the enclave/proxy", async () => {
+      const transport = createEncryptedBodyFetch("https://api.example.com", "mockkey123");
+      await expect(transport.fetch("https://evil.example.com/steal")).rejects.toThrow(
+        /refusing to send request/
+      );
+    });
+
+    it("allows requests to the baseURL origin", async () => {
+      const serverIdentity = await Identity.generate();
+      const keyHex = await serverIdentity.getPublicKeyHex();
+
+      let apiRequestMade = false;
+      const originalFetch = globalThis.fetch;
+      globalThis.fetch = vi.fn(async (input: RequestInfo | URL) => {
+        const url = input instanceof Request ? input.url : input.toString();
+        if (url.includes("api.example.com")) apiRequestMade = true;
+        return new Response("ok");
+      }) as typeof fetch;
+
+      try {
+        const transport = createEncryptedBodyFetch("https://api.example.com", keyHex);
+        await transport.fetch("/test");
+        expect(apiRequestMade).toBe(true);
+      } finally {
+        globalThis.fetch = originalFetch;
+      }
+    });
+
+    it("allows requests to the enclave origin when routing through a proxy", async () => {
+      const serverIdentity = await Identity.generate();
+      const keyHex = await serverIdentity.getPublicKeyHex();
+
+      const originalFetch = globalThis.fetch;
+      globalThis.fetch = vi.fn(async () => new Response("ok")) as typeof fetch;
+
+      try {
+        const transport = createEncryptedBodyFetch(
+          "https://proxy.example.com",
+          keyHex,
+          "https://enclave.example.com"
+        );
+        await expect(
+          transport.fetch("https://enclave.example.com/test")
+        ).resolves.toBeInstanceOf(Response);
+      } finally {
+        globalThis.fetch = originalFetch;
+      }
+    });
+
   });
 
   describe("createUnverifiedEncryptedBodyFetch", () => {
