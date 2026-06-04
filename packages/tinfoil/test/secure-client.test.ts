@@ -471,6 +471,30 @@ describe("SecureClient", () => {
         new SecureClient({ baseURL: "https://proxy.example.com", transport: "tls" });
       }).toThrow("baseURL is only supported with the 'ehbp' transport");
     });
+
+    it("should throw ConfigurationError for an empty baseURL instead of failing later", async () => {
+      const { SecureClient } = await import("../src/secure-client");
+
+      expect(() => {
+        new SecureClient({ baseURL: "" });
+      }).toThrow("baseURL must use HTTPS");
+    });
+
+    it("should throw ConfigurationError for an empty enclaveURL", async () => {
+      const { SecureClient } = await import("../src/secure-client");
+
+      expect(() => {
+        new SecureClient({ enclaveURL: "" });
+      }).toThrow("enclaveURL must use HTTPS");
+    });
+
+    it("should throw ConfigurationError for an empty attestationBundleURL", async () => {
+      const { SecureClient } = await import("../src/secure-client");
+
+      expect(() => {
+        new SecureClient({ attestationBundleURL: "" });
+      }).toThrow("attestationBundleURL must use HTTPS");
+    });
   });
 
   describe("attestation bundle paths", () => {
