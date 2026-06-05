@@ -52,11 +52,18 @@ const EXIT_ACCEPT = 0;
 const EXIT_REJECT = 10;
 const EXIT_BAD_INPUT = 30;
 
-/** Rejection triple shared by verify-sigstore and verify-full's chaining. */
+/** Rejection triple shared by verify-sigstore and verify-full's chaining.
+ *  exitCode carries the harness exit semantics: EXIT_BAD_INPUT (30) for
+ *  literal input-envelope parse failures (the CLI got something it couldn't
+ *  parse at all), EXIT_REJECT (10) for substantive verification failures
+ *  (the lib examined the bundle/trust-root and rejected it). verify-full
+ *  ignores this field since the wrapping `verify-full` stage always uses
+ *  EXIT_REJECT for any sub-stage failure. */
 export interface SigstoreRejection {
   code: string;
   spec_ref: string;
   message: string;
+  exitCode: number;
 }
 
 /** Inner verify-sigstore: returns the SigstoreVerification on success or a
@@ -68,7 +75,7 @@ export async function runVerifySigstoreInner(
 ): Promise<{ ok: true; v: Awaited<ReturnType<typeof verifySigstoreBundleWithPolicy>> } | { ok: false; rej: SigstoreRejection }> {
   const sv = input.schema_version ?? '1';
   if (sv !== '1') {
-    return { ok: false, rej: { code: 'BUNDLE_MALFORMED', spec_ref: '5.2', message: 'input.schema_version != "1"' } };
+    return { ok: false, rej: { code: 'BUNDLE_MALFORMED', spec_ref: '5.2', message: 'input.schema_version != "1"', exitCode: EXIT_BAD_INPUT } };
   }
   let bundle: unknown;
   try {
@@ -76,7 +83,7 @@ export async function runVerifySigstoreInner(
       Buffer.from(input.bundle_b64, 'base64').toString('utf-8'),
     );
   } catch (e) {
-    return { ok: false, rej: { code: 'BUNDLE_MALFORMED', spec_ref: '5.2', message: `bundle_b64 not valid base64+JSON: ${(e as Error).message}` } };
+    return { ok: false, rej: { code: 'BUNDLE_MALFORMED', spec_ref: '5.2', message: `bundle_b64 not valid base64+JSON: ${(e as Error).message}`, exitCode: EXIT_BAD_INPUT } };
   }
   let trustRoot: any;
   try {
@@ -84,7 +91,10 @@ export async function runVerifySigstoreInner(
       Buffer.from(input.trust_root_b64, 'base64').toString('utf-8'),
     );
   } catch (e) {
-    return { ok: false, rej: { code: 'TRUST_ROOT_INVALID', spec_ref: '5.1', message: `trust_root_b64 contents not valid JSON: ${(e as Error).message}` } };
+    // Trust root that decodes but doesn't parse is a *substantive*
+    // verification failure (the trust root isn't usable), not a malformed
+    // CLI envelope. Mirror the original behavior: exit 10.
+    return { ok: false, rej: { code: 'TRUST_ROOT_INVALID', spec_ref: '5.1', message: `trust_root_b64 contents not valid JSON: ${(e as Error).message}`, exitCode: EXIT_REJECT } };
   }
   const policy: SigstorePolicy = {
     ...defaultSigstorePolicy(input.repo),
@@ -112,7 +122,8 @@ export async function runVerifySigstoreInner(
   } catch (e) {
     const fullMessage = flattenErrorChain(e);
     const { code, spec_ref } = classifyError(fullMessage);
-    return { ok: false, rej: { code, spec_ref, message: fullMessage } };
+    // Lib-thrown errors are substantive verification failures → EXIT_REJECT.
+    return { ok: false, rej: { code, spec_ref, message: fullMessage, exitCode: EXIT_REJECT } };
   }
 }
 
@@ -128,10 +139,7 @@ export async function verifySigstore(raw: unknown): Promise<VerifyResult> {
   }
   const result = await runVerifySigstoreInner(input);
   if (!result.ok) {
-    // Distinguish bad-input from genuine reject by the rejection code.
-    const exitCode =
-      result.rej.code === 'BUNDLE_MALFORMED' ? EXIT_BAD_INPUT : EXIT_REJECT;
-    return reject(result.rej.code, result.rej.spec_ref, result.rej.message, exitCode);
+    return reject(result.rej.code, result.rej.spec_ref, result.rej.message, result.rej.exitCode);
   }
   const v = result.v;
   return {
