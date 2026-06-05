@@ -17,6 +17,7 @@
  */
 
 import { capabilities } from './capabilities.js';
+import { verifyAttestationSev } from './verify-attestation-sev.js';
 import { verifyHardwareMeasurements } from './verify-hardware-measurements.js';
 import { verifyMeasurement } from './verify-measurement.js';
 import { verifySigstore } from './verify-sigstore.js';
@@ -105,6 +106,19 @@ async function main(): Promise<number> {
         return EXIT.badInput;
       }
       const { exitCode, body } = await verifyHardwareMeasurements(parsed);
+      process.stdout.write(JSON.stringify(body, null, 2) + '\n');
+      return exitCode;
+    }
+    case 'verify-attestation-sev': {
+      const raw = await readStdin();
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(raw);
+      } catch (e) {
+        process.stderr.write(`input is not valid JSON: ${(e as Error).message}\n`);
+        return EXIT.badInput;
+      }
+      const { exitCode, body } = await verifyAttestationSev(parsed);
       process.stdout.write(JSON.stringify(body, null, 2) + '\n');
       return exitCode;
     }

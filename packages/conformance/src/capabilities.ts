@@ -60,6 +60,13 @@ export interface Capabilities {
     supported: boolean;
     injected_collateral_supported: boolean;
   };
+  attestation_sev: {
+    supported: boolean;
+    injected_collateral_supported: boolean;
+    extended_checks_supported: boolean;
+    verification_time_override: 'supported' | 'system-clock-only';
+    amd_root_ca_injection_supported: boolean;
+  };
   platforms_supported: ('sev-snp' | 'tdx')[];
   transport_modes_supported: ('tls-pinning' | 'ehbp')[];
   flow_modes_supported: ('standard' | 'bundle' | 'pinned')[];
@@ -71,7 +78,12 @@ export function capabilities(): Capabilities {
     schema_version: '1',
     sdk: 'tinfoil-js',
     sdk_version: sdkVersion,
-    stages_supported: ['verify-sigstore', 'verify-measurement', 'verify-hardware-measurements'],
+    stages_supported: [
+      'verify-sigstore',
+      'verify-measurement',
+      'verify-hardware-measurements',
+      'verify-attestation-sev',
+    ],
     sigstore: {
       trust_root_loading: 'configurable',
       // sigstore-browser scopes cert chain validity to bundle-supplied times
@@ -115,6 +127,27 @@ export function capabilities(): Capabilities {
       // fixtures skip cleanly until a TDX-aware verifier ships.
       supported: false,
       injected_collateral_supported: false,
+    },
+    attestation_sev: {
+      // @tinfoilsh/verifier exposes verifyAttestation(doc, vcekBase64) with
+      // embedded ARK/ASK constants for Genoa. VCEK is supplied inline.
+      supported: true,
+      injected_collateral_supported: true,
+      // The conformance binary enforces every policy.expected_*_hex pin
+      // (measurement, host_data, report_data, id_key_digest,
+      // author_key_digest) and policy.enforce_spec_defaults checks
+      // (DEBUG bit, reserved-MBO/MBZ) post-lib-verification.
+      extended_checks_supported: true,
+      // CertificateChain.verifyChain() uses `new Date()` unconditionally —
+      // fixtures pinning verification_check_date_unix outside the real-now
+      // window aren't honored. Fixture 240-vcek-expired gates on
+      // verification_time_override=supported and skips cleanly here.
+      verification_time_override: 'system-clock-only',
+      // ARK_CERT / ASK_CERT are frozen bytes constants bundled into
+      // @tinfoilsh/verifier's CertificateChain. No public injection API.
+      // Phase 4B-SEV synth-chain fixtures (600-604, 700-703) skip cleanly
+      // on JS until the verifier exposes a trust-root override.
+      amd_root_ca_injection_supported: false,
     },
     platforms_supported: ['sev-snp'],
     transport_modes_supported: ['tls-pinning', 'ehbp'],
