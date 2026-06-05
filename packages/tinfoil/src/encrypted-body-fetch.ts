@@ -97,8 +97,20 @@ export async function encryptedBodyRequest(
 const ENCLAVE_URL_HEADER = 'X-Tinfoil-Enclave-Url';
 
 export function createEncryptedBodyFetch(baseURL: string, hpkePublicKey: string, enclaveURL?: string): SecureTransport {
-  const baseOrigin = new URL(baseURL).origin;
+  const base = new URL(baseURL);
+  if (base.protocol !== 'https:') {
+    throw new ConfigurationError(`baseURL must use HTTPS. Got: ${baseURL}`);
+  }
+  const baseOrigin = base.origin;
   const needsEnclaveHeader = !!enclaveURL && new URL(enclaveURL).origin !== baseOrigin;
+
+  // Bind requests to the verified enclave and the configured proxy. EHBP only
+  // seals the body, so request headers (which may carry the API key) travel in
+  // plaintext; sending them to any other origin would leak them.
+  const allowedOrigins = new Set<string>([baseOrigin]);
+  if (enclaveURL) {
+    allowedOrigins.add(new URL(enclaveURL).origin);
+  }
 
   let transportPromise: Promise<Transport> | null = null;
 
@@ -113,6 +125,11 @@ export function createEncryptedBodyFetch(baseURL: string, hpkePublicKey: string,
     fetch: async (input: RequestInfo | URL, init?: RequestInit) => {
       const normalized = normalizeEncryptedBodyRequestArgs(input, init);
       const targetUrl = new URL(normalized.url, baseURL);
+      if (!allowedOrigins.has(targetUrl.origin)) {
+        throw new ConfigurationError(
+          `refusing to send request to ${targetUrl.origin}: this client is bound to the verified enclave/proxy`
+        );
+      }
 
       const headers = new Headers(normalized.init?.headers);
       if (needsEnclaveHeader) {

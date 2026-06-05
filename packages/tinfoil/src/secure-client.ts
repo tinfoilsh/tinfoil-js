@@ -130,8 +130,24 @@ export class SecureClient {
   private resolvedBaseURL?: string;
 
   constructor(options: SecureClientOptions = {}) {
-    if (options.enclaveURL && !options.enclaveURL.startsWith("https://")) {
+    // Validate every provided URL, including the empty string: URL resolution
+    // keeps "" (via ??) rather than falling back, so an unguarded empty value
+    // would surface later as a confusing "Invalid URL" instead of a clear error.
+    if (options.enclaveURL !== undefined && !options.enclaveURL.startsWith("https://")) {
       throw new ConfigurationError(`enclaveURL must use HTTPS. Got: ${options.enclaveURL}`);
+    }
+    // A proxy base URL and the attestation bundle URL both carry security-critical
+    // traffic (plaintext headers and the entire trust root), so they must be HTTPS.
+    if (options.baseURL !== undefined && !options.baseURL.startsWith("https://")) {
+      throw new ConfigurationError(`baseURL must use HTTPS. Got: ${options.baseURL}`);
+    }
+    if (options.attestationBundleURL !== undefined && !options.attestationBundleURL.startsWith("https://")) {
+      throw new ConfigurationError(`attestationBundleURL must use HTTPS. Got: ${options.attestationBundleURL}`);
+    }
+    // Routing through a proxy base URL relies on EHBP sealing the body to the
+    // enclave; TLS certificate pinning would reject the proxy's certificate.
+    if (options.baseURL && options.transport === 'tls') {
+      throw new ConfigurationError("baseURL is only supported with the 'ehbp' transport");
     }
     if (options.configRepo && !options.enclaveURL) {
       throw new ConfigurationError("configRepo requires enclaveURL — without it, ATC always uses the default router repo.");

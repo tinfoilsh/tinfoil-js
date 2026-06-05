@@ -447,6 +447,54 @@ describe("SecureClient", () => {
       expect(consoleSpy).not.toHaveBeenCalled();
       consoleSpy.mockRestore();
     });
+
+    it("should throw ConfigurationError when baseURL is not HTTPS", async () => {
+      const { SecureClient } = await import("../src/secure-client");
+
+      expect(() => {
+        new SecureClient({ baseURL: "http://proxy.example.com" });
+      }).toThrow("baseURL must use HTTPS");
+    });
+
+    it("should throw ConfigurationError when attestationBundleURL is not HTTPS", async () => {
+      const { SecureClient } = await import("../src/secure-client");
+
+      expect(() => {
+        new SecureClient({ attestationBundleURL: "http://atc.example.com" });
+      }).toThrow("attestationBundleURL must use HTTPS");
+    });
+
+    it("should throw ConfigurationError when baseURL is combined with the tls transport", async () => {
+      const { SecureClient } = await import("../src/secure-client");
+
+      expect(() => {
+        new SecureClient({ baseURL: "https://proxy.example.com", transport: "tls" });
+      }).toThrow("baseURL is only supported with the 'ehbp' transport");
+    });
+
+    it("should throw ConfigurationError for an empty baseURL instead of failing later", async () => {
+      const { SecureClient } = await import("../src/secure-client");
+
+      expect(() => {
+        new SecureClient({ baseURL: "" });
+      }).toThrow("baseURL must use HTTPS");
+    });
+
+    it("should throw ConfigurationError for an empty enclaveURL", async () => {
+      const { SecureClient } = await import("../src/secure-client");
+
+      expect(() => {
+        new SecureClient({ enclaveURL: "" });
+      }).toThrow("enclaveURL must use HTTPS");
+    });
+
+    it("should throw ConfigurationError for an empty attestationBundleURL", async () => {
+      const { SecureClient } = await import("../src/secure-client");
+
+      expect(() => {
+        new SecureClient({ attestationBundleURL: "" });
+      }).toThrow("attestationBundleURL must use HTTPS");
+    });
   });
 
   describe("attestation bundle paths", () => {
