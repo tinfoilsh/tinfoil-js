@@ -83,6 +83,7 @@ export function capabilities(): Capabilities {
       'verify-measurement',
       'verify-hardware-measurements',
       'verify-attestation-sev',
+      'verify-full',
     ],
     sigstore: {
       trust_root_loading: 'configurable',
@@ -151,7 +152,7 @@ export function capabilities(): Capabilities {
     },
     platforms_supported: ['sev-snp'],
     transport_modes_supported: ['tls-pinning', 'ehbp'],
-    flow_modes_supported: ['bundle'],
+    flow_modes_supported: ['standard', 'bundle', 'pinned'],
     known_quirks: {
       'sigstore.dcode_substring_match':
         'cert-verify.ts uses .includes() for .hpke./.hatt. SAN filtering (recon finding, separate fix)',

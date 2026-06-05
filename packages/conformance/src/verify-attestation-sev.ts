@@ -339,6 +339,66 @@ function classifyLibError(err: unknown): { code: string; specRef: string } {
   return { code: 'QV_RESULT_TERMINAL_UNSPECIFIED', specRef: '3' };
 }
 
+export interface SevRejection {
+  code: string;
+  specRef: string;
+  message: string;
+}
+
+export interface SevSuccess {
+  ok: true;
+  report: Uint8Array;
+  bodyFields: Record<string, unknown>;
+  measurement: { type: string; registers: string[] };
+}
+
+/** Inner SEV verification: parses input, calls @tinfoilsh/verifier, runs
+ *  policy enforcement, and returns either a SevSuccess (decoded fields) or
+ *  a rejection triple. Shared by cmd_verify_attestation_sev and verify-full's
+ *  chaining. The verify-full envelope's nested attestation_sev block omits
+ *  schema_version; treat missing as "1". */
+export async function runVerifyAttestationSevInner(
+  input: Input,
+): Promise<SevSuccess | { ok: false; rej: SevRejection }> {
+  const sv = input.schema_version ?? '1';
+  if (sv !== '1') {
+    return { ok: false, rej: { code: 'REPORT_FORMAT_UNSUPPORTED', specRef: '3.1', message: 'schema_version != "1"' } };
+  }
+  if (!input.attestation_doc_b64 || !input.vcek_der_b64) {
+    return { ok: false, rej: { code: 'REPORT_FORMAT_UNSUPPORTED', specRef: '3.1', message: 'attestation_doc_b64 and vcek_der_b64 are required' } };
+  }
+  let report: Uint8Array;
+  try {
+    const gzBytes = Buffer.from(input.attestation_doc_b64, 'base64');
+    report = new Uint8Array(gunzipSync(gzBytes));
+  } catch (e) {
+    return { ok: false, rej: { code: 'REPORT_FORMAT_UNSUPPORTED', specRef: '3.1', message: `gzip decompress failed: ${(e as Error).message}` } };
+  }
+  if (report.length < 1184) {
+    return { ok: false, rej: { code: 'REPORT_TRUNCATED', specRef: '3.1', message: `SEV report is ${report.length} bytes, expected ≥1184` } };
+  }
+  const doc: AttestationDocument = {
+    format: PredicateType.SevGuestV2,
+    body: input.attestation_doc_b64,
+  };
+  try {
+    await verifyAttestation(doc, input.vcek_der_b64);
+  } catch (e) {
+    const { code, specRef } = classifyLibError(e);
+    return { ok: false, rej: { code, specRef, message: (e as Error).message ?? String(e) } };
+  }
+  const policyViolation = enforcePolicy(report, input.policy);
+  if (policyViolation) {
+    return { ok: false, rej: policyViolation };
+  }
+  const bodyFields = decodeBodyFields(report) as Record<string, unknown>;
+  const measurement = {
+    type: 'https://tinfoil.sh/predicate/sev-snp-guest/v2',
+    registers: [bodyFields.measurement_hex as string],
+  };
+  return { ok: true, report, bodyFields, measurement };
+}
+
 export async function verifyAttestationSev(raw: unknown): Promise<VerifyResult> {
   if (typeof raw !== 'object' || raw === null) {
     return reject(
@@ -349,6 +409,8 @@ export async function verifyAttestationSev(raw: unknown): Promise<VerifyResult> 
     );
   }
   const input = raw as Input;
+  // cmd_verify_attestation_sev requires schema_version explicitly (the
+  // verify-full envelope's attestation_sev sub-block omits it).
   if (input.schema_version !== '1') {
     return reject(
       'REPORT_FORMAT_UNSUPPORTED',
@@ -357,65 +419,18 @@ export async function verifyAttestationSev(raw: unknown): Promise<VerifyResult> 
       EXIT_BAD_INPUT,
     );
   }
-  if (!input.attestation_doc_b64 || !input.vcek_der_b64) {
-    return reject(
-      'REPORT_FORMAT_UNSUPPORTED',
-      '3.1',
-      'attestation_doc_b64 and vcek_der_b64 are required',
-      EXIT_BAD_INPUT,
-    );
+  const result = await runVerifyAttestationSevInner(input);
+  if (!result.ok) {
+    return reject(result.rej.code, result.rej.specRef, result.rej.message);
   }
-
-  // Decompress locally so we can decode body_fields after lib verification.
-  let report: Uint8Array;
-  try {
-    const gzBytes = Buffer.from(input.attestation_doc_b64, 'base64');
-    report = new Uint8Array(gunzipSync(gzBytes));
-  } catch (e) {
-    return reject(
-      'REPORT_FORMAT_UNSUPPORTED',
-      '3.1',
-      `gzip decompress failed: ${(e as Error).message}`,
-    );
-  }
-  if (report.length < 1184) {
-    return reject(
-      'REPORT_TRUNCATED',
-      '3.1',
-      `SEV report is ${report.length} bytes, expected ≥1184`,
-    );
-  }
-
-  // Build an AttestationDocument the exported verifier API understands.
-  const doc: AttestationDocument = {
-    format: PredicateType.SevGuestV2,
-    body: input.attestation_doc_b64,
-  };
-
-  try {
-    await verifyAttestation(doc, input.vcek_der_b64);
-  } catch (e) {
-    const { code, specRef } = classifyLibError(e);
-    return reject(code, specRef, (e as Error).message ?? String(e));
-  }
-
-  const policyViolation = enforcePolicy(report, input.policy);
-  if (policyViolation) {
-    return reject(policyViolation.code, policyViolation.specRef, policyViolation.message);
-  }
-
-  const bodyFields = decodeBodyFields(report);
   return {
     exitCode: EXIT_ACCEPT,
     body: {
       stage: 'verify-attestation-sev',
       accepted: true,
       outputs: {
-        measurement: {
-          type: 'https://tinfoil.sh/predicate/sev-snp-guest/v2',
-          registers: [bodyFields.measurement_hex],
-        },
-        body_fields: bodyFields,
+        measurement: result.measurement,
+        body_fields: result.bodyFields,
       },
     },
   };

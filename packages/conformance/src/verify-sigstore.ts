@@ -52,46 +52,40 @@ const EXIT_ACCEPT = 0;
 const EXIT_REJECT = 10;
 const EXIT_BAD_INPUT = 30;
 
-export async function verifySigstore(raw: unknown): Promise<VerifyResult> {
-  if (typeof raw !== 'object' || raw === null) {
-    return reject('BUNDLE_MALFORMED', '5.2', 'input is not a JSON object', EXIT_BAD_INPUT);
-  }
-  const input = raw as Input;
-  if (input.schema_version !== '1') {
-    return reject('BUNDLE_MALFORMED', '5.2', 'input.schema_version != "1"', EXIT_BAD_INPUT);
-  }
+/** Rejection triple shared by verify-sigstore and verify-full's chaining. */
+export interface SigstoreRejection {
+  code: string;
+  spec_ref: string;
+  message: string;
+}
 
+/** Inner verify-sigstore: returns the SigstoreVerification on success or a
+ *  rejection triple on failure. Shared between cmd_verify_sigstore and
+ *  verify-full's chaining. The verify-full envelope's nested sigstore block
+ *  omits schema_version (the envelope carries it); treat missing as "1". */
+export async function runVerifySigstoreInner(
+  input: Input,
+): Promise<{ ok: true; v: Awaited<ReturnType<typeof verifySigstoreBundleWithPolicy>> } | { ok: false; rej: SigstoreRejection }> {
+  const sv = input.schema_version ?? '1';
+  if (sv !== '1') {
+    return { ok: false, rej: { code: 'BUNDLE_MALFORMED', spec_ref: '5.2', message: 'input.schema_version != "1"' } };
+  }
   let bundle: unknown;
   try {
     bundle = JSON.parse(
       Buffer.from(input.bundle_b64, 'base64').toString('utf-8'),
     );
   } catch (e) {
-    return reject(
-      'BUNDLE_MALFORMED',
-      '5.2',
-      `bundle_b64 not valid base64+JSON: ${(e as Error).message}`,
-      EXIT_BAD_INPUT,
-    );
+    return { ok: false, rej: { code: 'BUNDLE_MALFORMED', spec_ref: '5.2', message: `bundle_b64 not valid base64+JSON: ${(e as Error).message}` } };
   }
-
   let trustRoot: any;
   try {
     trustRoot = JSON.parse(
       Buffer.from(input.trust_root_b64, 'base64').toString('utf-8'),
     );
   } catch (e) {
-    // Trust root that decodes but doesn't parse is a *substantive* verification
-    // failure (the trust root provided isn't usable), not a malformed CLI
-    // envelope. Mirror the Rust binary's behavior: exit 10, TRUST_ROOT_INVALID.
-    return reject(
-      'TRUST_ROOT_INVALID',
-      '5.1',
-      `trust_root_b64 contents not valid JSON: ${(e as Error).message}`,
-      EXIT_REJECT,
-    );
+    return { ok: false, rej: { code: 'TRUST_ROOT_INVALID', spec_ref: '5.1', message: `trust_root_b64 contents not valid JSON: ${(e as Error).message}` } };
   }
-
   const policy: SigstorePolicy = {
     ...defaultSigstorePolicy(input.repo),
     oidcIssuer: input.policy.oidc_issuer,
@@ -107,7 +101,6 @@ export async function verifySigstore(raw: unknown): Promise<VerifyResult> {
         : input.policy.in_toto_statement_types_allowed,
     payloadType: input.policy.payload_type,
   };
-
   try {
     const v = await verifySigstoreBundleWithPolicy(
       bundle,
@@ -115,36 +108,53 @@ export async function verifySigstore(raw: unknown): Promise<VerifyResult> {
       policy,
       trustRoot,
     );
-    return {
-      exitCode: EXIT_ACCEPT,
-      body: {
-        stage: 'verify-sigstore',
-        accepted: true,
-        outputs: {
-          predicate_type: v.predicateType,
-          in_toto_statement_type: v.inTotoStatementType,
-          subject_name: v.subjectName,
-          subject_digest_sha256_hex: v.subjectDigestSha256Hex,
-          measurement: v.measurement,
-          // cert_* fields left empty in v0.1 — known_quirks documents this.
-          cert_oidc_issuer: v.certOidcIssuer,
-          cert_workflow_repository: v.certWorkflowRepository,
-          cert_workflow_signer_uri: v.certWorkflowSignerUri,
-          rekor_log_id_hex: v.rekorLogIdHex,
-          rekor_integrated_time_unix: v.rekorIntegratedTimeUnix,
-          tlog_entry_count: v.tlogEntryCount,
-          sct_count: v.sctCount,
-        },
-      },
-    };
+    return { ok: true, v };
   } catch (e) {
-    // wrapOrThrow stuffs the underlying cause into err.cause; walk the chain
-    // so the classifier sees the most-specific message (sigstore-browser's
-    // internal error) rather than the outer "verification failed" wrapper.
     const fullMessage = flattenErrorChain(e);
     const { code, spec_ref } = classifyError(fullMessage);
-    return reject(code, spec_ref, fullMessage, EXIT_REJECT);
+    return { ok: false, rej: { code, spec_ref, message: fullMessage } };
   }
+}
+
+export async function verifySigstore(raw: unknown): Promise<VerifyResult> {
+  if (typeof raw !== 'object' || raw === null) {
+    return reject('BUNDLE_MALFORMED', '5.2', 'input is not a JSON object', EXIT_BAD_INPUT);
+  }
+  const input = raw as Input;
+  // cmd_verify_sigstore requires schema_version explicitly (the verify-full
+  // envelope's sigstore sub-block omits it; the inner helper defaults to "1").
+  if (input.schema_version !== '1') {
+    return reject('BUNDLE_MALFORMED', '5.2', 'input.schema_version != "1"', EXIT_BAD_INPUT);
+  }
+  const result = await runVerifySigstoreInner(input);
+  if (!result.ok) {
+    // Distinguish bad-input from genuine reject by the rejection code.
+    const exitCode =
+      result.rej.code === 'BUNDLE_MALFORMED' ? EXIT_BAD_INPUT : EXIT_REJECT;
+    return reject(result.rej.code, result.rej.spec_ref, result.rej.message, exitCode);
+  }
+  const v = result.v;
+  return {
+    exitCode: EXIT_ACCEPT,
+    body: {
+      stage: 'verify-sigstore',
+      accepted: true,
+      outputs: {
+        predicate_type: v.predicateType,
+        in_toto_statement_type: v.inTotoStatementType,
+        subject_name: v.subjectName,
+        subject_digest_sha256_hex: v.subjectDigestSha256Hex,
+        measurement: v.measurement,
+        cert_oidc_issuer: v.certOidcIssuer,
+        cert_workflow_repository: v.certWorkflowRepository,
+        cert_workflow_signer_uri: v.certWorkflowSignerUri,
+        rekor_log_id_hex: v.rekorLogIdHex,
+        rekor_integrated_time_unix: v.rekorIntegratedTimeUnix,
+        tlog_entry_count: v.tlogEntryCount,
+        sct_count: v.sctCount,
+      },
+    },
+  };
 }
 
 /** Flatten an error and its .cause chain into a single space-joined string,
