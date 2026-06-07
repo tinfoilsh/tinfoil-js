@@ -2,9 +2,9 @@
  * Capabilities for tinfoil-js. Read by the harness once per SDK and used
  * to auto-skip fixtures that target unsupported stages.
  *
- * Keep this in lockstep with what verify-* actually implements. Until
- * verify-sigstore is wired to @tinfoilsh/verifier, it MUST NOT appear in
- * stages_supported — fixtures will then be cleanly skipped.
+ * Keep this in lockstep with what verify-* actually implements. A stage can
+ * appear here when the adapter command exists; finer-grained feature support
+ * belongs in the per-stage capability fields below.
  */
 
 // Pinned to the workspace version of @tinfoilsh/verifier so the dashboard
@@ -59,6 +59,13 @@ export interface Capabilities {
   attestation_tdx: {
     supported: boolean;
     injected_collateral_supported: boolean;
+    verification_time_override: 'supported' | 'system-clock-only';
+    tcb_evaluation_supported: boolean;
+    public_api_hooks_supported: boolean;
+    accepts_non_terminal_tcb_statuses: boolean;
+    extended_td_checks_supported: boolean;
+    enforces_tcb_evaluation_data_number_minimum: boolean;
+    policy_fields_supported: Record<string, boolean>;
   };
   attestation_sev: {
     supported: boolean;
@@ -83,6 +90,7 @@ export function capabilities(): Capabilities {
       'verify-measurement',
       'verify-hardware-measurements',
       'verify-attestation-sev',
+      'verify-attestation-tdx',
       'verify-full',
     ],
     sigstore: {
@@ -128,10 +136,32 @@ export function capabilities(): Capabilities {
       // fixtures skip cleanly until a TDX-aware verifier ships.
       supported: false,
       injected_collateral_supported: false,
+      verification_time_override: 'system-clock-only',
+      tcb_evaluation_supported: false,
+      public_api_hooks_supported: false,
+      accepts_non_terminal_tcb_statuses: false,
+      extended_td_checks_supported: false,
+      enforces_tcb_evaluation_data_number_minimum: false,
+      policy_fields_supported: {
+        accepted_qv_results: false,
+        expected_fmspc_hex: false,
+        expected_td_attributes_hex: false,
+        expected_xfam_hex: false,
+        expected_mr_signer_seam_hex: false,
+        expected_seam_attributes_hex: false,
+        expected_mrtd_hex: false,
+        expected_mr_config_id_hex: false,
+        expected_mr_owner_hex: false,
+        expected_mr_owner_config_hex: false,
+        expected_rtmr3_hex: false,
+        expected_report_data_hex: false,
+        expected_qe_vendor_id_hex: false,
+        expected_mrseam_allowlist: false,
+        enforce_spec_defaults: false,
+        min_tee_tcb_svn_hex: false,
+      },
     },
     attestation_sev: {
-      // @tinfoilsh/verifier exposes verifyAttestation(doc, vcekBase64) with
-      // embedded ARK/ASK constants for Genoa. VCEK is supplied inline.
       supported: true,
       injected_collateral_supported: true,
       // The conformance binary enforces every policy.expected_*_hex pin
@@ -139,16 +169,8 @@ export function capabilities(): Capabilities {
       // author_key_digest) and policy.enforce_spec_defaults checks
       // (DEBUG bit, reserved-MBO/MBZ) post-lib-verification.
       extended_checks_supported: true,
-      // CertificateChain.verifyChain() uses `new Date()` unconditionally —
-      // fixtures pinning verification_check_date_unix outside the real-now
-      // window aren't honored. Fixture 240-vcek-expired gates on
-      // verification_time_override=supported and skips cleanly here.
-      verification_time_override: 'system-clock-only',
-      // ARK_CERT / ASK_CERT are frozen bytes constants bundled into
-      // @tinfoilsh/verifier's CertificateChain. No public injection API.
-      // Phase 4B-SEV synth-chain fixtures (600-604, 700-703) skip cleanly
-      // on JS until the verifier exposes a trust-root override.
-      amd_root_ca_injection_supported: false,
+      verification_time_override: 'supported',
+      amd_root_ca_injection_supported: true,
     },
     platforms_supported: ['sev-snp'],
     transport_modes_supported: ['tls-pinning', 'ehbp'],

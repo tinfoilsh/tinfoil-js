@@ -31,6 +31,8 @@ const EXIT = {
   internal: 1,
 } as const;
 
+const VERIFY_ATTESTATION_TDX = 'verify-attestation-tdx';
+
 async function readStdin(): Promise<string> {
   const chunks: Buffer[] = [];
   for await (const chunk of process.stdin) {
@@ -45,8 +47,28 @@ function printHelp(): void {
       `Subcommands:\n` +
       `  capabilities      Print SDK capabilities JSON\n` +
       `  verify-sigstore   Verify a Sigstore bundle (SPEC §5)\n\n` +
+      `  verify-attestation-tdx  Report TDX verifier support status\n\n` +
       `I/O contract: stdin JSON, stdout JSON. See tinfoil-conformance/schemas/.\n`,
   );
+}
+
+function unsupportedTdx(): number {
+  process.stdout.write(
+    JSON.stringify(
+      {
+        stage: VERIFY_ATTESTATION_TDX,
+        accepted: false,
+        rejection: {
+          code: 'UNSUPPORTED',
+          spec_ref: '4',
+          message: 'this branch exposes the conformance adapter surface, but @tinfoilsh/verifier has no TDX verifier implementation',
+        },
+      },
+      null,
+      2,
+    ) + '\n',
+  );
+  return EXIT.unsupported;
 }
 
 async function main(): Promise<number> {
@@ -123,6 +145,8 @@ async function main(): Promise<number> {
       process.stdout.write(JSON.stringify(body, null, 2) + '\n');
       return exitCode;
     }
+    case VERIFY_ATTESTATION_TDX:
+      return unsupportedTdx();
     case 'verify-full': {
       const raw = await readStdin();
       let parsed: unknown;

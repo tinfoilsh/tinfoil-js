@@ -298,6 +298,15 @@ function classifyLibError(err: unknown): { code: string; specRef: string } {
 
   // Order: specific patterns before generic. "report signature" must win
   // over "vcek" since the lib phrases sig failures as "report ... VCEK key".
+  if (msg.includes('debug mode')) {
+    return { code: 'GUEST_POLICY_DEBUG_SET', specRef: '3.7' };
+  }
+  if (msg.includes('migration agent')) {
+    return { code: 'GUEST_POLICY_MIGRATE_MA_SET', specRef: '3.7' };
+  }
+  if (msg.includes('reserved bit') || msg.includes('reserved-mbo') || msg.includes('reserved-mbz')) {
+    return { code: 'GUEST_POLICY_RESERVED_BIT_SET', specRef: '3.7' };
+  }
   if (msg.includes('expired') || msg.includes('not yet valid')) {
     return { code: 'VCEK_EXPIRED', specRef: '3.3.3' };
   }
@@ -337,6 +346,13 @@ function classifyLibError(err: unknown): { code: string; specRef: string } {
     return { code: 'REPORT_FORMAT_UNSUPPORTED', specRef: '3.1' };
   }
   return { code: 'QV_RESULT_TERMINAL_UNSPECIFIED', specRef: '3' };
+}
+
+function verificationDate(input: Input): Date | undefined {
+  if (typeof input.expiration_check_date_unix === 'number' && Number.isFinite(input.expiration_check_date_unix)) {
+    return new Date(input.expiration_check_date_unix * 1000);
+  }
+  return undefined;
 }
 
 export interface SevRejection {
@@ -382,7 +398,13 @@ export async function runVerifyAttestationSevInner(
     body: input.attestation_doc_b64,
   };
   try {
-    await verifyAttestation(doc, input.vcek_der_b64);
+    await verifyAttestation(doc, input.vcek_der_b64, {
+      sev: {
+        trustedArkPem: input.amd_root_ca_pem,
+        trustedAskPem: input.ask_pem,
+        now: verificationDate(input),
+      },
+    });
   } catch (e) {
     const { code, specRef } = classifyLibError(e);
     return { ok: false, rej: { code, specRef, message: (e as Error).message ?? String(e) } };

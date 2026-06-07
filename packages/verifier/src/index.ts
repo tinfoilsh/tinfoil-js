@@ -8,6 +8,10 @@ export {
 
 // Verification
 export { verifyAttestation } from './attestation.js';
+export type {
+  AttestationVerificationOptions,
+  SevAttestationVerificationOptions,
+} from './attestation.js';
 export { assembleAttestationBundle } from './bundle.js';
 export { Verifier } from './client.js';
 export { PredicateType, compareMeasurements, measurementFingerprint, measurementFingerprintForTarget, hashAttestationDocument } from './types.js';

@@ -67,6 +67,9 @@ function normalize(m: MeasurementInput):
  */
 function classify(err: unknown, source: AttestationMeasurement, target: AttestationMeasurement): { code: string; spec_ref: string } {
   const msg = (err as Error).message || '';
+  if (/rtmr3|rtmr_3/i.test(msg)) {
+    return { code: 'MEASUREMENT_RTMR3_NONZERO', spec_ref: '7.3.2' };
+  }
   if (/Incompatible measurement types/i.test(msg)) {
     return { code: 'MEASUREMENT_TYPE_COMBINATION_UNSUPPORTED', spec_ref: '7.3.5' };
   }
