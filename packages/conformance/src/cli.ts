@@ -364,6 +364,7 @@ function capabilities(): number {
       injected_collateral_supported: true,
       verification_time_override: 'supported',
       tcb_evaluation_supported: false,
+      public_api_hooks_supported: false,
       accepts_non_terminal_tcb_statuses: false,
       extended_td_checks_supported: true,
       enforces_tcb_evaluation_data_number_minimum: false,
