@@ -37,16 +37,15 @@ export class PckCertificateChain {
     return new PckCertificateChain(pckLeaf, intermediate, root, trustedRoot);
   }
 
-  async verifyChain(): Promise<void> {
+  async verifyChain(atDate: Date = new Date()): Promise<void> {
     try {
-      const now = new Date();
-      if (!this.pckLeaf.validForDate(now)) {
+      if (!this.pckLeaf.validForDate(atDate)) {
         throw new AttestationError('PCK leaf certificate has expired or is not yet valid');
       }
-      if (!this.intermediate.validForDate(now)) {
+      if (!this.intermediate.validForDate(atDate)) {
         throw new AttestationError('PCK intermediate CA certificate has expired or is not yet valid');
       }
-      if (!this.trustedRoot.validForDate(now)) {
+      if (!this.trustedRoot.validForDate(atDate)) {
         throw new AttestationError('Intel SGX Root CA certificate has expired or is not yet valid');
       }
 
