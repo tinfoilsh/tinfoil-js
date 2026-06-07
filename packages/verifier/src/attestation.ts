@@ -11,7 +11,14 @@ import { verifyQuoteSignature, verifyQeReportSignature, verifyQeReportDataBindin
 import { validateTdxQuote, defaultTdxValidationOptions } from './tdx/validation.js';
 import { parsePckExtensions } from './tdx/pck-extensions.js';
 import { validateCollateral } from './tdx/collateral.js';
+import type { CollateralOptions } from './tdx/collateral.js';
 import { AttestationError, wrapOrThrow } from './errors.js';
+
+export interface TdxAttestationVerificationOptions extends CollateralOptions {}
+
+export interface AttestationVerificationOptions {
+  tdx?: TdxAttestationVerificationOptions;
+}
 
 /**
  * Checks the attestation document against its trust root
@@ -19,14 +26,19 @@ import { AttestationError, wrapOrThrow } from './errors.js';
  *
  * @param doc - The attestation document to verify
  * @param vcekBase64 - VCEK certificate in base64-encoded DER format (required for SEV, ignored for TDX)
+ * @param options - Optional verification hooks and policy inputs. Defaults preserve production behavior.
  * @returns The verification result
  * @throws Error if verification fails or format is unsupported
  */
-export async function verifyAttestation(doc: AttestationDocument, vcekBase64: string): Promise<AttestationResponse> {
+export async function verifyAttestation(
+  doc: AttestationDocument,
+  vcekBase64: string,
+  options: AttestationVerificationOptions = {},
+): Promise<AttestationResponse> {
   if (doc.format === PredicateType.SevGuestV2) {
     return verifySevAttestationV2(doc.body, base64ToBytes(vcekBase64));
   } else if (doc.format === PredicateType.TdxGuestV2) {
-    return verifyTdxAttestationV2(doc.body);
+    return verifyTdxAttestationV2(doc.body, options.tdx);
   } else {
     throw new AttestationError(`Unsupported attestation document format: "${doc.format}". Supported formats: SEV-SNP Guest V2, TDX Guest V2`);
   }
@@ -109,7 +121,10 @@ async function verifySevReport(attestationDoc: string, isCompressed: boolean, vc
   return report;
 }
 
-async function verifyTdxAttestationV2(attestationDoc: string): Promise<AttestationResponse> {
+async function verifyTdxAttestationV2(
+  attestationDoc: string,
+  options: TdxAttestationVerificationOptions = {},
+): Promise<AttestationResponse> {
   let attDocBytes: Uint8Array;
   try {
     attDocBytes = base64ToBytes(attestationDoc);
@@ -127,8 +142,8 @@ async function verifyTdxAttestationV2(attestationDoc: string): Promise<Attestati
   }
 
   // Verify PCK certificate chain against Intel SGX Root CA
-  const chain = PckCertificateChain.fromPemChain(quote.pckCertChain);
-  await chain.verifyChain();
+  const chain = PckCertificateChain.fromPemChain(quote.pckCertChain, options.trustedRootPem);
+  await chain.verifyChain(options.now);
 
   // Verify quote signature using attestation key
   await verifyQuoteSignature(quote);
@@ -149,7 +164,7 @@ async function verifyTdxAttestationV2(attestationDoc: string): Promise<Attestati
   // Parse PCK extensions and validate collateral (TCB Info, QE Identity, CRLs)
   const pckExtensions = parsePckExtensions(chain.pckLeaf);
   try {
-    await validateCollateral(quote, chain, pckExtensions);
+    await validateCollateral(quote, chain, pckExtensions, options);
   } catch (e) {
     wrapOrThrow(e, AttestationError, 'TDX collateral validation failed');
   }

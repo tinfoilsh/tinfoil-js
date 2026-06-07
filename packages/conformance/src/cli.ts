@@ -1,13 +1,18 @@
 #!/usr/bin/env node
 
 import { readFileSync } from 'node:fs';
+import { gzipSync } from 'node:zlib';
 import {
+  evaluateCollateral,
   PckCertificateChain,
+  PredicateType,
   parsePckExtensions,
   parseTdxQuote,
+  verifyAttestation,
   verifyQeReportDataBinding,
   verifyQeReportSignature,
   verifyQuoteSignature,
+  type CollateralValidationResult,
   type TdxQuote,
 } from '@tinfoilsh/verifier';
 
@@ -89,6 +94,74 @@ function classifyTdxError(error: unknown): [string, string] {
   if ((msg.includes('qe report') || msg.includes('qe_report')) && msg.includes('signature')) {
     return ['QE_REPORT_SIGNATURE_INVALID', '4.4'];
   }
+  if (
+    msg.includes('ak') && (msg.includes('bind') || msg.includes('report data')) ||
+    msg.includes('attestation key') && msg.includes('not endorsed')
+  ) {
+    return ['AK_BINDING_INVALID', '4.5'];
+  }
+  if (msg.includes('pck crl') && msg.includes('expired')) {
+    return ['PCK_CRL_EXPIRED', '4.7.4'];
+  }
+  if ((msg.includes('root crl') || msg.includes('root ca crl')) && msg.includes('expired')) {
+    return ['ROOT_CRL_EXPIRED', '4.7.4'];
+  }
+  if (msg.includes('tcb info') && (msg.includes('expired') || msg.includes('not yet valid'))) {
+    return ['TCB_INFO_EXPIRED', '4.7'];
+  }
+  if (msg.includes('qe identity') && (msg.includes('expired') || msg.includes('not yet valid'))) {
+    return ['QE_IDENTITY_EXPIRED', '4.7'];
+  }
+  if (msg.includes('tcbevaluationdatanumber') || msg.includes('tcb evaluation data number')) {
+    return ['TCB_EVAL_DATA_NUMBER_TOO_LOW', '4.7.11'];
+  }
+  if (msg.includes('qv result') && msg.includes('not accepted')) {
+    return ['QV_RESULT_NOT_ACCEPTED_BY_POLICY', '4.7.7'];
+  }
+  if (msg.includes('qe identity id invalid')) {
+    return ['QE_IDENTITY_ID_INVALID', '4.7.9'];
+  }
+  if (msg.includes('qe identity version invalid')) {
+    return ['QE_IDENTITY_VERSION_INVALID', '4.7.9'];
+  }
+  if (msg.includes('qe identity') && msg.includes('mrsigner')) {
+    return ['QE_IDENTITY_MRSIGNER_MISMATCH', '4.7.9'];
+  }
+  if (
+    msg.includes('qe miscselect') ||
+    msg.includes('qe attributes') ||
+    msg.includes('isv_prod_id') ||
+    msg.includes('isv prod')
+  ) {
+    return ['QE_IDENTITY_FIELD_MISMATCH', '4.7.9'];
+  }
+  if (msg.includes('collateral signature verification failed')) {
+    return ['QV_RESULT_TERMINAL_UNSPECIFIED', '4.1.2'];
+  }
+  if (msg.includes('tcb info') && (msg.includes('chain') || msg.includes('certificate') || msg.includes('root'))) {
+    return ['TCB_INFO_CHAIN_INVALID', '4.7.3'];
+  }
+  if (msg.includes('tcb info') && msg.includes('signature')) {
+    return ['TCB_INFO_SIGNATURE_INVALID', '4.7'];
+  }
+  if (msg.includes('qe identity') && msg.includes('signature')) {
+    return ['QE_IDENTITY_SIGNATURE_INVALID', '4.7'];
+  }
+  if (msg.includes('intermediate') && msg.includes('revoked')) {
+    return ['INTERMEDIATE_REVOKED', '4.7.4'];
+  }
+  if (msg.includes('pck') && msg.includes('revoked')) {
+    return ['PCK_REVOKED', '4.7.4'];
+  }
+  if (msg.includes('tcb status') || msg.includes('no matching tcb')) {
+    return ['TCB_REVOKED', '4.7.7'];
+  }
+  if (msg.includes('pck crl') && msg.includes('signature')) {
+    return ['PCK_REVOKED', '4.7.4'];
+  }
+  if (msg.includes('root crl') && msg.includes('signature')) {
+    return ['PCK_CHAIN_INVALID', '4.7.4'];
+  }
   if (msg.includes('expired') || msg.includes('not yet valid')) {
     return ['PCK_EXPIRED', '4.2'];
   }
@@ -103,12 +176,6 @@ function classifyTdxError(error: unknown): [string, string] {
   }
   if (msg.includes('qe report') || msg.includes('qe_report')) {
     return ['QE_REPORT_SIGNATURE_INVALID', '4.4'];
-  }
-  if (
-    msg.includes('ak') && (msg.includes('bind') || msg.includes('report data')) ||
-    msg.includes('attestation key') && msg.includes('not endorsed')
-  ) {
-    return ['AK_BINDING_INVALID', '4.5'];
   }
   if (msg.includes('signature')) {
     return ['QUOTE_SIGNATURE_INVALID', '4.3'];
@@ -152,6 +219,26 @@ function decodeTdAttributes(tdAttrs: Uint8Array): JsonRecord {
 function policyString(policy: JsonRecord, field: string): string | undefined {
   const value = policy[field];
   return typeof value === 'string' ? value : undefined;
+}
+
+function policyStringArray(policy: JsonRecord, field: string): string[] | undefined {
+  const value = policy[field];
+  return Array.isArray(value) && value.every(item => typeof item === 'string')
+    ? value
+    : undefined;
+}
+
+function recordString(record: JsonRecord, field: string): string | undefined {
+  const value = record[field];
+  return typeof value === 'string' ? value : undefined;
+}
+
+function collateralRecord(input: JsonRecord): JsonRecord {
+  return isRecord(input.collateral) ? input.collateral : {};
+}
+
+function trustedRootPem(input: JsonRecord): string | undefined {
+  return recordString(collateralRecord(input), 'intel_root_ca_pem');
 }
 
 function expectedHexMatches(expectedHex: string | undefined, got: Uint8Array): boolean {
@@ -238,8 +325,80 @@ function verificationDate(input: JsonRecord): Date {
   return new Date();
 }
 
+function fixtureTextResponse(body: string, headers: Record<string, string> = {}): Response {
+  return new Response(body, { status: 200, headers });
+}
+
+function fixtureDerResponse(base64: string | undefined, headers: Record<string, string> = {}): Response {
+  if (base64 === undefined) {
+    return new Response('missing injected DER collateral', { status: 404 });
+  }
+  return new Response(Buffer.from(base64, 'base64'), { status: 200, headers });
+}
+
+function chainHeader(pem: string | undefined): string | undefined {
+  return pem === undefined ? undefined : encodeURIComponent(pem);
+}
+
+function headersWith(name: string, value: string | undefined): Record<string, string> {
+  return value === undefined ? {} : { [name]: value };
+}
+
+function requestUrl(resource: RequestInfo | URL): string {
+  if (typeof resource === 'string') {
+    return resource;
+  }
+  if (resource instanceof URL) {
+    return resource.toString();
+  }
+  return resource.url;
+}
+
+function fixtureCollateralFetch(input: JsonRecord): typeof fetch {
+  const collateral = collateralRecord(input);
+
+  return (async (resource: RequestInfo | URL): Promise<Response> => {
+    const url = requestUrl(resource);
+
+    if (url.includes('/qe/identity')) {
+      const body = recordString(collateral, 'qe_identity_json');
+      if (body === undefined) {
+        return new Response('missing injected QE Identity collateral', { status: 404 });
+      }
+      return fixtureTextResponse(body, headersWith(
+        'SGX-Enclave-Identity-Issuer-Chain',
+        chainHeader(recordString(collateral, 'qe_identity_issuer_chain_pem')),
+      ));
+    }
+
+    if (url.includes('/tcb')) {
+      const body = recordString(collateral, 'tcb_info_json');
+      if (body === undefined) {
+        return new Response('missing injected TCB Info collateral', { status: 404 });
+      }
+      return fixtureTextResponse(body, headersWith(
+        'TCB-Info-Issuer-Chain',
+        chainHeader(recordString(collateral, 'tcb_info_issuer_chain_pem')),
+      ));
+    }
+
+    if (url.includes('/pckcrl')) {
+      return fixtureDerResponse(recordString(collateral, 'pck_crl_der_b64'), headersWith(
+        'SGX-PCK-Crl-Issuer-Chain',
+        chainHeader(recordString(collateral, 'pck_crl_issuer_chain_pem')),
+      ));
+    }
+
+    if (url.includes('IntelSGXRootCA.der')) {
+      return fixtureDerResponse(recordString(collateral, 'root_crl_der_b64'));
+    }
+
+    return new Response(`no injected collateral for ${url}`, { status: 404 });
+  }) as typeof fetch;
+}
+
 async function structurallyVerifyQuote(quote: TdxQuote, input: JsonRecord): Promise<PckCertificateChain> {
-  const chain = PckCertificateChain.fromPemChain(quote.pckCertChain);
+  const chain = PckCertificateChain.fromPemChain(quote.pckCertChain, trustedRootPem(input));
   await chain.verifyChain(verificationDate(input));
   await verifyQuoteSignature(quote);
   await verifyQeReportSignature(quote, chain);
@@ -247,14 +406,14 @@ async function structurallyVerifyQuote(quote: TdxQuote, input: JsonRecord): Prom
   return chain;
 }
 
-function accepted(quote: TdxQuote): number {
+function accepted(quote: TdxQuote, qvResult: string = 'OK'): number {
   return emit({
     stage: STAGE,
     accepted: true,
     outputs: {
       quote_version: quote.header.version,
       tee_type: quote.header.teeType === 0x81 ? 'TDX' : `0x${quote.header.teeType.toString(16).padStart(8, '0')}`,
-      qv_result: 'OK',
+      qv_result: qvResult,
       measurement: {
         type: TDX_GUEST_V2_URI,
         registers: [
@@ -289,6 +448,49 @@ function accepted(quote: TdxQuote): number {
   }, EXIT_ACCEPT);
 }
 
+async function verifyPublicApiTdx(input: JsonRecord, policy: JsonRecord, rawQuote: Buffer): Promise<number> {
+  try {
+    await verifyAttestation(
+      {
+        format: PredicateType.TdxGuestV2,
+        body: gzipSync(rawQuote).toString('base64'),
+      },
+      '',
+      {
+        tdx: {
+          proxyHost: '',
+          cachePrefetchMs: 0,
+          fetch: fixtureCollateralFetch(input),
+          trustedRootPem: trustedRootPem(input),
+          now: verificationDate(input),
+          minTcbEvaluationDataNumber: typeof policy.min_tcb_evaluation_data_number === 'number'
+            ? policy.min_tcb_evaluation_data_number
+            : 0,
+          acceptedQvResults: policyStringArray(policy, 'accepted_qv_results'),
+        },
+      },
+    );
+  } catch (error) {
+    const [code, ref] = classifyTdxError(error);
+    return reject(code, ref, messageOf(error));
+  }
+
+  let quote: TdxQuote;
+  try {
+    quote = parseTdxQuote(rawQuote);
+  } catch (error) {
+    const [code, ref] = classifyTdxError(error);
+    return reject(code, ref, messageOf(error));
+  }
+
+  const extendedPolicyFailure = enforceExtendedPolicy(quote, policy);
+  if (extendedPolicyFailure) {
+    return reject(extendedPolicyFailure[0], '4.8', extendedPolicyFailure[1]);
+  }
+
+  return accepted(quote);
+}
+
 async function verifyAttestationTdx(): Promise<number> {
   let input: unknown;
   try {
@@ -307,6 +509,11 @@ async function verifyAttestationTdx(): Promise<number> {
   }
 
   const rawQuote = Buffer.from(input.quote_b64, 'base64');
+  const policy = isRecord(input.policy) ? input.policy : {};
+  if (input.execution_mode === 'public_api') {
+    return verifyPublicApiTdx(input, policy, rawQuote);
+  }
+
   let quote: TdxQuote;
   try {
     quote = parseTdxQuote(rawQuote);
@@ -323,7 +530,6 @@ async function verifyAttestationTdx(): Promise<number> {
     return reject(code, ref, messageOf(error));
   }
 
-  const policy = isRecord(input.policy) ? input.policy : {};
   if (typeof policy.expected_fmspc_hex === 'string') {
     try {
       const extensions = parsePckExtensions(chain.pckLeaf);
@@ -340,8 +546,30 @@ async function verifyAttestationTdx(): Promise<number> {
     }
   }
 
+  let collateralResult: CollateralValidationResult | undefined;
   if (policy.tcb_evaluation_required === true) {
-    return unsupported('TDX collateral TCB evaluation is not implemented in the JS conformance adapter yet');
+    try {
+      const extensions = parsePckExtensions(chain.pckLeaf);
+      collateralResult = await evaluateCollateral(
+        quote,
+        chain,
+        extensions,
+        {
+          proxyHost: '',
+          cachePrefetchMs: 0,
+          fetch: fixtureCollateralFetch(input),
+          trustedRootPem: trustedRootPem(input),
+          now: verificationDate(input),
+          minTcbEvaluationDataNumber: typeof policy.min_tcb_evaluation_data_number === 'number'
+            ? policy.min_tcb_evaluation_data_number
+            : 0,
+          acceptedQvResults: policyStringArray(policy, 'accepted_qv_results'),
+        },
+      );
+    } catch (error) {
+      const [code, ref] = classifyTdxError(error);
+      return reject(code, ref, messageOf(error));
+    }
   }
 
   const extendedPolicyFailure = enforceExtendedPolicy(quote, policy);
@@ -349,7 +577,7 @@ async function verifyAttestationTdx(): Promise<number> {
     return reject(extendedPolicyFailure[0], '4.8', extendedPolicyFailure[1]);
   }
 
-  return accepted(quote);
+  return accepted(quote, collateralResult?.qvResult ?? 'OK');
 }
 
 function capabilities(): number {
@@ -363,13 +591,13 @@ function capabilities(): number {
       supported: true,
       injected_collateral_supported: true,
       verification_time_override: 'supported',
-      tcb_evaluation_supported: false,
-      public_api_hooks_supported: false,
-      accepts_non_terminal_tcb_statuses: false,
+      tcb_evaluation_supported: true,
+      public_api_hooks_supported: true,
+      accepts_non_terminal_tcb_statuses: true,
       extended_td_checks_supported: true,
-      enforces_tcb_evaluation_data_number_minimum: false,
+      enforces_tcb_evaluation_data_number_minimum: true,
       policy_fields_supported: {
-        accepted_qv_results: false,
+        accepted_qv_results: true,
         expected_fmspc_hex: true,
         expected_td_attributes_hex: true,
         expected_xfam_hex: true,

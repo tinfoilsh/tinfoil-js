@@ -106,6 +106,17 @@ interface CacheEntry {
 export interface CollateralOptions {
   proxyHost?: string;
   cachePrefetchMs?: number;
+  fetch?: typeof fetch;
+  trustedRootPem?: string;
+  now?: Date;
+  minTcbEvaluationDataNumber?: number;
+  acceptedQvResults?: string[];
+}
+
+export interface CollateralValidationResult {
+  tcbStatus: string;
+  advisoryIDs: string[];
+  qvResult: string;
 }
 
 // --- Cache ---
@@ -134,7 +145,7 @@ async function fetchCollateral(
 
   let response: Response;
   try {
-    response = await fetch(fetchUrl);
+    response = await (opts.fetch ?? fetch)(fetchUrl);
   } catch (e) {
     throw new FetchError(`Failed to fetch collateral from ${url}`, { cause: e as Error });
   }
@@ -163,7 +174,7 @@ async function fetchCollateralBinary(
 
   let response: Response;
   try {
-    response = await fetch(fetchUrl);
+    response = await (opts.fetch ?? fetch)(fetchUrl);
   } catch (e) {
     throw new FetchError(`Failed to fetch collateral from ${url}`, { cause: e as Error });
   }
@@ -197,22 +208,30 @@ async function fetchTcbInfo(
   fmspc: string,
   opts: CollateralOptions,
 ): Promise<TcbInfoResponse> {
-  const url = `${INTEL_PCS_BASE_URL}${PCS_TCB_INFO_PATH}?fmspc=${fmspc}&tcbEvaluationDataNumber=${MINIMUM_TCB_EVALUATION_DATA_NUMBER}`;
+  const minTcbEvaluationDataNumber = minimumTcbEvaluationDataNumber(opts);
+  const url = `${INTEL_PCS_BASE_URL}${PCS_TCB_INFO_PATH}?fmspc=${fmspc}&tcbEvaluationDataNumber=${minTcbEvaluationDataNumber}`;
   const { body, headers } = await fetchCollateral(url, opts);
   const resp = JSON.parse(body) as TcbInfoResponse;
 
-  if (resp.tcbInfo.tcbEvaluationDataNumber < MINIMUM_TCB_EVALUATION_DATA_NUMBER) {
+  assertJsonFreshness('TCB Info', resp.tcbInfo.issueDate, resp.tcbInfo.nextUpdate, validationTime(opts));
+
+  if (resp.tcbInfo.tcbEvaluationDataNumber < minTcbEvaluationDataNumber) {
     throw new AttestationError(
-      `TCB Info tcbEvaluationDataNumber ${resp.tcbInfo.tcbEvaluationDataNumber} is below minimum ${MINIMUM_TCB_EVALUATION_DATA_NUMBER}`
+      `TCB Info tcbEvaluationDataNumber ${resp.tcbInfo.tcbEvaluationDataNumber} is below minimum ${minTcbEvaluationDataNumber}`
     );
   }
 
   const rawTcbInfo = extractRawJsonField(body, 'tcbInfo');
-  await verifyCollateralSignature(
-    rawTcbInfo,
-    resp.signature,
-    headers['tcb-info-issuer-chain'] || headers['sgx-tcb-info-issuer-chain'],
-  );
+  try {
+    await verifyCollateralSignature(
+      rawTcbInfo,
+      resp.signature,
+      headers['tcb-info-issuer-chain'] || headers['sgx-tcb-info-issuer-chain'],
+      opts.trustedRootPem,
+    );
+  } catch (e) {
+    throw new AttestationError(`TCB Info signature or chain verification failed: ${errorMessage(e)}`, { cause: e as Error });
+  }
 
   return resp;
 }
@@ -220,22 +239,35 @@ async function fetchTcbInfo(
 async function fetchQeIdentity(
   opts: CollateralOptions,
 ): Promise<QeIdentityResponse> {
-  const url = `${INTEL_PCS_BASE_URL}${PCS_QE_IDENTITY_PATH}?tcbEvaluationDataNumber=${MINIMUM_TCB_EVALUATION_DATA_NUMBER}`;
+  const minTcbEvaluationDataNumber = minimumTcbEvaluationDataNumber(opts);
+  const url = `${INTEL_PCS_BASE_URL}${PCS_QE_IDENTITY_PATH}?tcbEvaluationDataNumber=${minTcbEvaluationDataNumber}`;
   const { body, headers } = await fetchCollateral(url, opts);
   const resp = JSON.parse(body) as QeIdentityResponse;
 
-  if (resp.enclaveIdentity.tcbEvaluationDataNumber < MINIMUM_TCB_EVALUATION_DATA_NUMBER) {
+  assertJsonFreshness(
+    'QE Identity',
+    resp.enclaveIdentity.issueDate,
+    resp.enclaveIdentity.nextUpdate,
+    validationTime(opts),
+  );
+
+  if (resp.enclaveIdentity.tcbEvaluationDataNumber < minTcbEvaluationDataNumber) {
     throw new AttestationError(
-      `QE Identity tcbEvaluationDataNumber ${resp.enclaveIdentity.tcbEvaluationDataNumber} is below minimum ${MINIMUM_TCB_EVALUATION_DATA_NUMBER}`
+      `QE Identity tcbEvaluationDataNumber ${resp.enclaveIdentity.tcbEvaluationDataNumber} is below minimum ${minTcbEvaluationDataNumber}`
     );
   }
 
   const rawEnclaveIdentity = extractRawJsonField(body, 'enclaveIdentity');
-  await verifyCollateralSignature(
-    rawEnclaveIdentity,
-    resp.signature,
-    headers['sgx-enclave-identity-issuer-chain'] || headers['enclave-identity-issuer-chain'],
-  );
+  try {
+    await verifyCollateralSignature(
+      rawEnclaveIdentity,
+      resp.signature,
+      headers['sgx-enclave-identity-issuer-chain'] || headers['enclave-identity-issuer-chain'],
+      opts.trustedRootPem,
+    );
+  } catch (e) {
+    throw new AttestationError(`QE Identity signature or chain verification failed: ${errorMessage(e)}`, { cause: e as Error });
+  }
 
   return resp;
 }
@@ -246,12 +278,13 @@ async function verifyCollateralSignature(
   jsonBody: string,
   signatureHex: string,
   issuerChainHeader?: string,
+  trustedRootPem: string = INTEL_SGX_ROOT_CA_PEM,
 ): Promise<void> {
   if (!signatureHex) {
     throw new AttestationError('Collateral response missing signature');
   }
 
-  const trustedRoot = X509Certificate.parse(INTEL_SGX_ROOT_CA_PEM);
+  const trustedRoot = X509Certificate.parse(trustedRootPem);
 
   let signingCert: X509Certificate;
   if (issuerChainHeader) {
@@ -328,12 +361,9 @@ function matchTcbLevel(
   quoteTdxSvns: Uint8Array,
   tcbLevels: TcbLevel[],
 ): { status: string; advisoryIDs: string[] } {
-  // TDX TCB SVN components from the quote body's teeTcbSvn field
-  // The first 16 bytes are mapped to tdxtcbcomponents
-  const tdxSvns: number[] = [];
-  for (let i = 0; i < 16; i++) {
-    tdxSvns.push(quoteTdxSvns[i] ?? 0);
-  }
+  // When a TDX module major version is present, bytes 0-1 are checked through
+  // tdxModuleIdentities; the platform TCB level comparison starts at byte 2.
+  const tdxComponentStart = quoteTdxSvns[1] && quoteTdxSvns[1] > 0 ? 2 : 0;
 
   for (const level of tcbLevels) {
     let matches = true;
@@ -354,9 +384,10 @@ function matchTcbLevel(
     if (pckPcesvn < level.tcb.pcesvn) continue;
 
     // Check TDX TCB components (from quote body's teeTcbSvn)
-    for (let i = 0; i < 16; i++) {
+    for (let i = tdxComponentStart; i < 16; i++) {
       const required = level.tcb.tdxtcbcomponents?.[i]?.svn ?? 0;
-      if (tdxSvns[i] < required) {
+      const actual = quoteTdxSvns[i] ?? 0;
+      if (actual < required) {
         matches = false;
         break;
       }
@@ -379,6 +410,13 @@ function validateQeIdentity(
   qeReport: TdxQuote['qeReport'],
   identity: QeIdentityV2,
 ): void {
+  if (identity.id !== 'TD_QE') {
+    throw new AttestationError(`QE Identity ID invalid: expected TD_QE, got ${identity.id}`);
+  }
+  if (identity.version !== 2) {
+    throw new AttestationError(`QE Identity version invalid: expected 2, got ${identity.version}`);
+  }
+
   // Validate MISCSELECT (with mask)
   const expectedMiscSelect = parseInt(identity.miscselect, 16);
   const miscSelectMask = parseInt(identity.miscselectMask, 16);
@@ -574,7 +612,7 @@ function parseRevokedSerialsFromDer(crlDer: Uint8Array): Uint8Array[] {
   const tbsCertList = crl.subs[0];
 
   for (const sub of tbsCertList.subs) {
-    if (sub.tag.number === 0x30 && sub.subs.length > 0 && sub.subs[0].tag.number === 0x30) {
+    if (sub.tag.number === 0x10 && sub.subs.length > 0 && sub.subs[0].tag.number === 0x10) {
       for (const entry of sub.subs) {
         if (entry.subs.length > 0) {
           serials.push(entry.subs[0].value);
@@ -584,6 +622,59 @@ function parseRevokedSerialsFromDer(crlDer: Uint8Array): Uint8Array[] {
     }
   }
   return serials;
+}
+
+function parseAsn1Time(obj: ASN1Obj): Date {
+  const text = new TextDecoder().decode(obj.value);
+  let year: number;
+  let offset: number;
+
+  if (obj.tag.number === 0x17) {
+    const twoDigitYear = Number.parseInt(text.slice(0, 2), 10);
+    year = twoDigitYear >= 50 ? 1900 + twoDigitYear : 2000 + twoDigitYear;
+    offset = 2;
+  } else if (obj.tag.number === 0x18) {
+    year = Number.parseInt(text.slice(0, 4), 10);
+    offset = 4;
+  } else {
+    throw new AttestationError(`Unsupported ASN.1 time tag ${obj.tag.number}`);
+  }
+
+  const month = Number.parseInt(text.slice(offset, offset + 2), 10) - 1;
+  const day = Number.parseInt(text.slice(offset + 2, offset + 4), 10);
+  const hour = Number.parseInt(text.slice(offset + 4, offset + 6), 10);
+  const minute = Number.parseInt(text.slice(offset + 6, offset + 8), 10);
+  const second = Number.parseInt(text.slice(offset + 8, offset + 10), 10);
+
+  return new Date(Date.UTC(year, month, day, hour, minute, second));
+}
+
+function parseCrlNextUpdate(crlDer: Uint8Array): Date {
+  const crl = ASN1Obj.parseBuffer(crlDer);
+  const tbsCertList = crl.subs[0];
+  if (!tbsCertList) {
+    throw new AttestationError('Invalid CRL structure: missing TBSCertList');
+  }
+
+  let pos = 0;
+  if (tbsCertList.subs[pos]?.tag.number === 0x02) {
+    pos++;
+  }
+  pos += 3; // signature, issuer, thisUpdate
+
+  const nextUpdate = tbsCertList.subs[pos];
+  if (!nextUpdate || (nextUpdate.tag.number !== 0x17 && nextUpdate.tag.number !== 0x18)) {
+    throw new AttestationError('CRL missing nextUpdate');
+  }
+
+  return parseAsn1Time(nextUpdate);
+}
+
+function assertCrlFreshness(label: string, crlDer: Uint8Array, now: Date): void {
+  const nextUpdate = parseCrlNextUpdate(crlDer);
+  if (nextUpdate.getTime() <= now.getTime()) {
+    throw new AttestationError(`${label} has expired: nextUpdate ${nextUpdate.toISOString()} <= ${now.toISOString()}`);
+  }
 }
 
 function getPckCaType(chain: PckCertificateChain): string {
@@ -603,9 +694,17 @@ async function fetchAndCheckCrls(
     fetchCollateralBinary(PCS_ROOT_CA_CRL_URL, opts),
   ]);
 
+  const now = validationTime(opts);
+  assertCrlFreshness('PCK CRL', pckCrlDer, now);
+  assertCrlFreshness('Root CRL', rootCrlDer, now);
+
   await Promise.all([
-    verifyCrlSignature(pckCrlDer, chain.intermediate),
-    verifyCrlSignature(rootCrlDer, chain.root),
+    verifyCrlSignature(pckCrlDer, chain.intermediate).catch((e: unknown) => {
+      throw new AttestationError(`PCK CRL signature verification failed: ${errorMessage(e)}`, { cause: e as Error });
+    }),
+    verifyCrlSignature(rootCrlDer, chain.root).catch((e: unknown) => {
+      throw new AttestationError(`Root CRL signature verification failed: ${errorMessage(e)}`, { cause: e as Error });
+    }),
   ]);
 
   const pckRevokedSerials = parseRevokedSerialsFromDer(pckCrlDer);
@@ -617,15 +716,20 @@ async function fetchAndCheckCrls(
 
 // --- Main Entry Point ---
 
-export async function validateCollateral(
+export async function evaluateCollateral(
   quote: TdxQuote,
   chain: PckCertificateChain,
   pckExtensions: PckExtensions,
   opts: CollateralOptions = {},
-): Promise<void> {
+): Promise<CollateralValidationResult> {
   const resolvedOpts: CollateralOptions = {
     proxyHost: opts.proxyHost ?? TDX_PROXY_HOST,
     cachePrefetchMs: opts.cachePrefetchMs ?? 3600_000,
+    fetch: opts.fetch,
+    trustedRootPem: opts.trustedRootPem,
+    now: opts.now,
+    minTcbEvaluationDataNumber: opts.minTcbEvaluationDataNumber,
+    acceptedQvResults: opts.acceptedQvResults,
   };
   // Fetch all collateral in parallel
   const [tcbInfoResp, qeIdentityResp] = await Promise.all([
@@ -643,7 +747,7 @@ export async function validateCollateral(
   validateQeIdentity(quote.qeReport, qeIdentityResp.enclaveIdentity);
 
   // Match TCB level and reject unacceptable statuses
-  const { status } = matchTcbLevel(
+  const { status, advisoryIDs } = matchTcbLevel(
     pckExtensions.sgxTcbComponentSvns,
     pckExtensions.pcesvn,
     quote.body.teeTcbSvn,
@@ -656,6 +760,27 @@ export async function validateCollateral(
       `The platform's TCB may be outdated or revoked. Acceptable statuses: ${[...ACCEPTABLE_TCB_STATUSES].join(', ')}`
     );
   }
+
+  const qvResult = qvResultForTcbStatus(status);
+  if (resolvedOpts.acceptedQvResults && resolvedOpts.acceptedQvResults.length > 0) {
+    const accepted = new Set(resolvedOpts.acceptedQvResults.map(normalizeQvResult));
+    if (!accepted.has(normalizeQvResult(qvResult))) {
+      throw new AttestationError(
+        `QV result ${qvResult} from TCB status ${status} not accepted by policy`
+      );
+    }
+  }
+
+  return { tcbStatus: status, advisoryIDs, qvResult };
+}
+
+export async function validateCollateral(
+  quote: TdxQuote,
+  chain: PckCertificateChain,
+  pckExtensions: PckExtensions,
+  opts: CollateralOptions = {},
+): Promise<void> {
+  await evaluateCollateral(quote, chain, pckExtensions, opts);
 }
 
 // --- Raw JSON extraction ---
@@ -721,4 +846,50 @@ function bytesToHexLocal(bytes: Uint8Array): string {
   return Array.from(bytes)
     .map(b => b.toString(16).padStart(2, '0'))
     .join('');
+}
+
+function validationTime(opts: CollateralOptions): Date {
+  return opts.now ?? new Date();
+}
+
+function minimumTcbEvaluationDataNumber(opts: CollateralOptions): number {
+  return opts.minTcbEvaluationDataNumber ?? MINIMUM_TCB_EVALUATION_DATA_NUMBER;
+}
+
+function assertJsonFreshness(label: string, issueDate: string, nextUpdate: string, now: Date): void {
+  const issuedAt = new Date(issueDate);
+  const expiresAt = new Date(nextUpdate);
+
+  if (Number.isNaN(issuedAt.getTime()) || Number.isNaN(expiresAt.getTime())) {
+    throw new AttestationError(`${label} has invalid issueDate or nextUpdate`);
+  }
+  if (issuedAt.getTime() > now.getTime()) {
+    throw new AttestationError(`${label} is not yet valid: issueDate ${issuedAt.toISOString()} > ${now.toISOString()}`);
+  }
+  if (expiresAt.getTime() <= now.getTime()) {
+    throw new AttestationError(`${label} has expired: nextUpdate ${expiresAt.toISOString()} <= ${now.toISOString()}`);
+  }
+}
+
+function qvResultForTcbStatus(status: string): string {
+  switch (status) {
+    case 'UpToDate':
+      return 'OK';
+    case 'SWHardeningNeeded':
+      return 'SW_HARDENING_NEEDED';
+    case 'ConfigurationNeeded':
+      return 'CONFIGURATION_NEEDED';
+    case 'ConfigurationAndSWHardeningNeeded':
+      return 'CONFIGURATION_AND_SW_HARDENING_NEEDED';
+    default:
+      return status.replace(/([a-z0-9])([A-Z])/g, '$1_$2').toUpperCase();
+  }
+}
+
+function normalizeQvResult(result: string): string {
+  return result.trim().toUpperCase();
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }

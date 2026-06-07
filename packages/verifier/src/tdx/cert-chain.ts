@@ -11,14 +11,17 @@ export class PckCertificateChain {
     private trustedRoot: X509Certificate,
   ) {}
 
-  static fromPemChain(pems: string[]): PckCertificateChain {
+  static fromPemChain(
+    pems: string[],
+    trustedRootPem: string = INTEL_SGX_ROOT_CA_PEM,
+  ): PckCertificateChain {
     if (pems.length < 2) {
       throw new AttestationError(
         `Invalid PCK certificate chain: expected at least 2 certificates, got ${pems.length}`
       );
     }
 
-    const trustedRoot = X509Certificate.parse(INTEL_SGX_ROOT_CA_PEM);
+    const trustedRoot = X509Certificate.parse(trustedRootPem);
 
     let pckLeaf: X509Certificate;
     let intermediate: X509Certificate;
