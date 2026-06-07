@@ -87,10 +87,11 @@ async function verifyReportSignature(
  */
 export async function verifyAttestation(
   chain: CertificateChain,
-  report: Report
+  report: Report,
+  options: { now?: Date } = {},
 ): Promise<boolean> {
   // Verify certificate chain
-  const isChainValid = await chain.verifyChain();
+  const isChainValid = await chain.verifyChain(options.now);
   if (!isChainValid) {
     throw new AttestationError('AMD certificate chain verification failed: The chain from ARK to ASK to VCEK could not be verified');
   }

@@ -38,7 +38,14 @@ export class CertificateChain {
     public vcek: X509Certificate
   ) {}
 
-  static async fromReport(report: Report, vcekDer: Uint8Array): Promise<CertificateChain> {
+  static async fromReport(
+    report: Report,
+    vcekDer: Uint8Array,
+    options: {
+      arkPem?: string;
+      askPem?: string;
+    } = {},
+  ): Promise<CertificateChain> {
     if (report.productName !== 'Genoa') {
       throw new AttestationError(`Unsupported processor: ${report.productName}. This verifier only supports AMD EPYC Genoa processors`);
     }
@@ -47,14 +54,14 @@ export class CertificateChain {
       throw new AttestationError('Unsupported signing key: This verifier only supports VCEK-signed attestation reports');
     }
 
-    const ark = X509Certificate.parse(ARK_CERT);
-    const ask = X509Certificate.parse(ASK_CERT);
+    const ark = X509Certificate.parse(options.arkPem ?? ARK_CERT);
+    const ask = X509Certificate.parse(options.askPem ?? ASK_CERT);
     const vcekCert = X509Certificate.parse(vcekDer);
 
     return new CertificateChain(ark, ask, vcekCert);
   }
 
-  async verifyChain(): Promise<boolean> {
+  async verifyChain(atDate: Date = new Date()): Promise<boolean> {
     try {
       // Validate certificate formats
       this.validateArkFormat();
@@ -62,14 +69,13 @@ export class CertificateChain {
       this.validateVcekFormat();
 
       // Validate certificate validity periods
-      const now = new Date();
-      if (!this.ark.validForDate(now)) {
+      if (!this.ark.validForDate(atDate)) {
         throw new AttestationError('AMD Root Key (ARK) certificate has expired or is not yet valid');
       }
-      if (!this.ask.validForDate(now)) {
+      if (!this.ask.validForDate(atDate)) {
         throw new AttestationError('AMD SEV Key (ASK) certificate has expired or is not yet valid');
       }
-      if (!this.vcek.validForDate(now)) {
+      if (!this.vcek.validForDate(atDate)) {
         throw new AttestationError('VCEK certificate has expired or is not yet valid');
       }
 
@@ -294,4 +300,3 @@ export class CertificateChain {
     return this.vcek.publicKeyObj;
   }
 }
-

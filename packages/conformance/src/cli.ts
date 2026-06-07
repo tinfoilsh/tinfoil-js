@@ -15,6 +15,11 @@ import {
   type CollateralValidationResult,
   type TdxQuote,
 } from '@tinfoilsh/verifier';
+import { verifyAttestationSev } from './verify-attestation-sev.js';
+import { verifyFull } from './verify-full.js';
+import { verifyHardwareMeasurements } from './verify-hardware-measurements.js';
+import { verifyMeasurement } from './verify-measurement.js';
+import { verifySigstore } from './verify-sigstore.js';
 
 const EXIT_ACCEPT = 0;
 const EXIT_REJECT = 10;
@@ -53,6 +58,19 @@ function unsupported(message: string): number {
     accepted: false,
     rejection: { code: 'UNSUPPORTED', spec_ref: '4.7', message },
   }, EXIT_UNSUPPORTED);
+}
+
+async function runJsonStage(
+  handler: (parsed: unknown) => Promise<{ exitCode: number; body: unknown }>,
+): Promise<number> {
+  let input: unknown;
+  try {
+    input = JSON.parse(readFileSync(0, 'utf8'));
+  } catch (error) {
+    return badInput(`input is not valid JSON: ${messageOf(error)}`);
+  }
+  const { exitCode, body } = await handler(input);
+  return emit(body as JsonRecord, exitCode);
 }
 
 function messageOf(error: unknown): string {
@@ -585,8 +603,50 @@ function capabilities(): number {
     schema_version: '1',
     sdk: 'tinfoil-js',
     sdk_version: '1.1.3-tdx',
-    stages_supported: [STAGE],
-    platforms_supported: ['tdx'],
+    stages_supported: [
+      'verify-sigstore',
+      'verify-measurement',
+      'verify-hardware-measurements',
+      'verify-attestation-sev',
+      STAGE,
+      'verify-full',
+    ],
+    sigstore: {
+      trust_root_loading: 'configurable',
+      verification_time_override: 'bundle-supplied-only',
+      policy_fields_configurable: {
+        oidc_issuer: true,
+        workflow_ref_prefix: true,
+        workflow_repository: true,
+        predicate_types_allowed: true,
+        in_toto_statement_types_allowed: true,
+        payload_type: true,
+        tlog_entries_min: false,
+        tlog_entries_max: false,
+        sct_min: false,
+        observer_timestamps_min: false,
+      },
+      predicate_types_understood: [
+        'https://tinfoil.sh/predicate/snp-tdx-multiplatform/v1',
+      ],
+      legacy_bundle_format_supported: true,
+      accepts_multi_tlog_entries: true,
+      oidc_issuer_v2_preferred: true,
+      scts_count_distinguish_missing_vs_duplicate: true,
+      rejects_duplicate_sct_log: true,
+      checks_only_subject_0: true,
+      in_toto_statement_tolerates_extra_fields: true,
+    },
+    measurement: {
+      compare_multiplatform_to_tdx_supported: true,
+    },
+    attestation_sev: {
+      supported: true,
+      injected_collateral_supported: true,
+      extended_checks_supported: true,
+      verification_time_override: 'supported',
+      amd_root_ca_injection_supported: true,
+    },
     attestation_tdx: {
       supported: true,
       injected_collateral_supported: true,
@@ -615,6 +675,15 @@ function capabilities(): number {
         min_tee_tcb_svn_hex: true,
       },
     },
+    platforms_supported: ['sev-snp', 'tdx'],
+    transport_modes_supported: ['tls-pinning', 'ehbp'],
+    flow_modes_supported: ['standard', 'bundle', 'pinned'],
+    known_quirks: {
+      'sigstore.dcode_substring_match':
+        'cert-verify.ts uses .includes() for .hpke./.hatt. SAN filtering (recon finding, separate fix)',
+      'inference.ehbp_unverified_mode_exists':
+        'createUnverifiedEncryptedBodyFetch bypasses attestation — must NEVER be used in production',
+    },
   }, EXIT_ACCEPT);
 }
 
@@ -623,8 +692,23 @@ async function main(): Promise<number> {
   if (command === 'capabilities') {
     return capabilities();
   }
+  if (command === 'verify-sigstore') {
+    return runJsonStage(verifySigstore);
+  }
+  if (command === 'verify-measurement') {
+    return runJsonStage(verifyMeasurement);
+  }
+  if (command === 'verify-hardware-measurements') {
+    return runJsonStage(verifyHardwareMeasurements);
+  }
+  if (command === 'verify-attestation-sev') {
+    return runJsonStage(verifyAttestationSev);
+  }
   if (command === STAGE) {
     return verifyAttestationTdx();
+  }
+  if (command === 'verify-full') {
+    return runJsonStage(verifyFull);
   }
   return badInput(`unknown command: ${command ?? '<missing>'}`);
 }

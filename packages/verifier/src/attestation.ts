@@ -16,7 +16,14 @@ import { AttestationError, wrapOrThrow } from './errors.js';
 
 export interface TdxAttestationVerificationOptions extends CollateralOptions {}
 
+export interface SevAttestationVerificationOptions {
+  trustedArkPem?: string;
+  trustedAskPem?: string;
+  now?: Date;
+}
+
 export interface AttestationVerificationOptions {
+  sev?: SevAttestationVerificationOptions;
   tdx?: TdxAttestationVerificationOptions;
 }
 
@@ -36,7 +43,7 @@ export async function verifyAttestation(
   options: AttestationVerificationOptions = {},
 ): Promise<AttestationResponse> {
   if (doc.format === PredicateType.SevGuestV2) {
-    return verifySevAttestationV2(doc.body, base64ToBytes(vcekBase64));
+    return verifySevAttestationV2(doc.body, base64ToBytes(vcekBase64), options.sev);
   } else if (doc.format === PredicateType.TdxGuestV2) {
     return verifyTdxAttestationV2(doc.body, options.tdx);
   } else {
@@ -52,8 +59,12 @@ export async function verifyAttestation(
  * @returns Verification result
  * @throws Error if verification fails
  */
-async function verifySevAttestationV2(attestationDoc: string, vcekDer: Uint8Array): Promise<AttestationResponse> {
-  const report = await verifySevReport(attestationDoc, true, vcekDer);
+async function verifySevAttestationV2(
+  attestationDoc: string,
+  vcekDer: Uint8Array,
+  options: SevAttestationVerificationOptions = {},
+): Promise<AttestationResponse> {
+  const report = await verifySevReport(attestationDoc, true, vcekDer, options);
 
   const measurement = {
     type: PredicateType.SevGuestV2,
@@ -80,7 +91,12 @@ async function verifySevAttestationV2(attestationDoc: string, vcekDer: Uint8Arra
  * @returns The parsed and verified report
  * @throws Error if verification fails
  */
-async function verifySevReport(attestationDoc: string, isCompressed: boolean, vcekDer: Uint8Array): Promise<Report> {
+async function verifySevReport(
+  attestationDoc: string,
+  isCompressed: boolean,
+  vcekDer: Uint8Array,
+  options: SevAttestationVerificationOptions = {},
+): Promise<Report> {
   let attDocBytes: Uint8Array;
   try {
     attDocBytes = base64ToBytes(attestationDoc);
@@ -99,11 +115,14 @@ async function verifySevReport(attestationDoc: string, isCompressed: boolean, vc
     throw new AttestationError('Failed to parse SEV-SNP attestation report', { cause: e as Error });
   }
 
-  const chain = await CertificateChain.fromReport(report, vcekDer);
+  const chain = await CertificateChain.fromReport(report, vcekDer, {
+    arkPem: options.trustedArkPem,
+    askPem: options.trustedAskPem,
+  });
 
   let res: boolean;
   try {
-    res = await verifyAttestationInternal(chain, report);
+    res = await verifyAttestationInternal(chain, report, { now: options.now });
   } catch (e) {
     wrapOrThrow(e, AttestationError, 'Attestation cryptographic verification failed');
   }
