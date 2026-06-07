@@ -8,7 +8,11 @@ export {
 
 // Verification
 export { verifyAttestation } from './attestation.js';
-export type { AttestationVerificationOptions, TdxAttestationVerificationOptions } from './attestation.js';
+export type {
+  AttestationVerificationOptions,
+  SevAttestationVerificationOptions,
+  TdxAttestationVerificationOptions,
+} from './attestation.js';
 export { assembleAttestationBundle } from './bundle.js';
 export { Verifier } from './client.js';
 export { PredicateType, compareMeasurements, measurementFingerprint, hashAttestationDocument } from './types.js';
@@ -17,6 +21,18 @@ export { verifyHardware } from './hardware.js';
 export { fetchHardwareMeasurements } from './sigstore.js';
 export type { VerifierOptions } from './client.js';
 export { verifyCertificate, type CertVerificationResult } from './cert-verify.js';
+
+// Sigstore mid-level entry point + policy. Used by the SDK's standard path
+// and the cross-SDK conformance binary.
+export {
+  verifySigstoreBundle,
+  verifySigstoreBundleWithPolicy,
+  defaultSigstorePolicy,
+} from './sigstore.js';
+export type {
+  SigstorePolicy,
+  SigstoreVerification,
+} from './sigstore.js';
 
 // TDX exports
 export { parseTdxQuote } from './tdx/quote.js';
