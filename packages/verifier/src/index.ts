@@ -20,6 +20,12 @@ export { verifyCertificate, type CertVerificationResult } from './cert-verify.js
 // TDX exports
 export { parseTdxQuote } from './tdx/quote.js';
 export type { TdxQuote, TdxQuoteHeader, TdQuoteBody, QeReport } from './tdx/quote.js';
+export { PckCertificateChain } from './tdx/cert-chain.js';
+export {
+  verifyQuoteSignature,
+  verifyQeReportSignature,
+  verifyQeReportDataBinding,
+} from './tdx/verify.js';
 export { validateTdxQuote, defaultTdxValidationOptions } from './tdx/validation.js';
 export type { TdxValidationOptions } from './tdx/validation.js';
 export { parsePckExtensions } from './tdx/pck-extensions.js';

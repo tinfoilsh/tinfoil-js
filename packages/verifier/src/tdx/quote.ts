@@ -159,10 +159,15 @@ function parseQeReport(data: Uint8Array): QeReport {
 
 function parsePemCertificates(pemData: string): string[] {
   const certs: string[] = [];
+  const beginCount = pemData.match(/-----BEGIN CERTIFICATE-----/g)?.length ?? 0;
+  const endCount = pemData.match(/-----END CERTIFICATE-----/g)?.length ?? 0;
   const regex = /-----BEGIN CERTIFICATE-----[\s\S]*?-----END CERTIFICATE-----/g;
   let match;
   while ((match = regex.exec(pemData)) !== null) {
     certs.push(match[0]);
+  }
+  if (beginCount !== endCount || certs.length !== beginCount) {
+    throw new AttestationError('Invalid PCK cert chain: malformed PEM certificate block');
   }
   return certs;
 }
@@ -186,9 +191,10 @@ export function parseTdxQuote(rawQuote: Uint8Array): TdxQuote {
   const signedDataSize = sdView.getUint32(TDX_SIGNED_DATA_SIZE_OFFSET, true);
 
   const signedDataStart = TDX_SIGNED_DATA_SIZE_OFFSET + 4;
-  if (rawQuote.length < signedDataStart + signedDataSize) {
+  const signedDataEnd = signedDataStart + signedDataSize;
+  if (rawQuote.length < signedDataEnd) {
     throw new AttestationError(
-      `TDX quote truncated: signed data extends beyond buffer (need ${signedDataStart + signedDataSize}, have ${rawQuote.length})`
+      `TDX quote truncated: signed data extends beyond buffer (need ${signedDataEnd}, have ${rawQuote.length})`
     );
   }
 
@@ -215,6 +221,11 @@ export function parseTdxQuote(rawQuote: Uint8Array): TdxQuote {
   const certDataEnd = offset + certDataSize;
   if (rawQuote.length < certDataEnd) {
     throw new AttestationError('TDX quote truncated: certification data extends beyond buffer');
+  }
+  if (certDataEnd > signedDataEnd) {
+    throw new AttestationError(
+      `TDX quote truncated: certification data extends beyond signed data (need ${certDataEnd}, signed data ends ${signedDataEnd})`
+    );
   }
 
   // QE Report (384 bytes)
@@ -247,7 +258,18 @@ export function parseTdxQuote(rawQuote: Uint8Array): TdxQuote {
   const pckCertChainSize = pccView.getUint32(2, true);
   offset += 6;
 
+  if (offset + pckCertChainSize > certDataEnd) {
+    throw new AttestationError('TDX quote truncated: PCK cert chain extends beyond certification data');
+  }
+
   const pckCertChainRaw = rawQuote.slice(offset, offset + pckCertChainSize);
+  offset += pckCertChainSize;
+  if (offset !== certDataEnd || certDataEnd !== signedDataEnd) {
+    throw new AttestationError(
+      `TDX quote certification data size mismatch: parsed ${offset - signedDataStart} bytes, declared signed data size ${signedDataSize}`
+    );
+  }
+
   // Remove null bytes that may be present in the PEM data
   const pckCertChainStr = new TextDecoder().decode(pckCertChainRaw).replace(/\0/g, '');
   const pckCertChain = parsePemCertificates(pckCertChainStr);

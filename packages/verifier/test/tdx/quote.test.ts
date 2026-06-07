@@ -7,6 +7,7 @@ import {
   TDX_TEE_TYPE,
   INTEL_QE_VENDOR_ID,
   RTMR_COUNT,
+  TDX_SIGNED_DATA_SIZE_OFFSET,
 } from '../../src/tdx/constants.js';
 import { TDX_ATTESTATION_DOC, TDX_EXPECTED } from './fixtures.js';
 
@@ -137,5 +138,28 @@ describe('TDX Quote Parsing', () => {
     // Corrupt QE vendor ID (at offset 0x0C)
     modified[0x0C] = 0xFF;
     expect(() => parseTdxQuote(modified)).toThrow('QE Vendor ID');
+  });
+
+  it('rejects signed data size that does not cover certification data', async () => {
+    const rawQuote = await decompressFixture();
+    const modified = new Uint8Array(rawQuote);
+    const view = new DataView(modified.buffer);
+    const signedDataSize = view.getUint32(TDX_SIGNED_DATA_SIZE_OFFSET, true);
+
+    view.setUint32(TDX_SIGNED_DATA_SIZE_OFFSET, signedDataSize - 1, true);
+
+    expect(() => parseTdxQuote(modified)).toThrow('certification data extends beyond signed data');
+  });
+
+  it('rejects malformed PEM blocks in the PCK cert chain', async () => {
+    const rawQuote = await decompressFixture();
+    const modified = new Uint8Array(rawQuote);
+    const footer = Buffer.from('-----END CERTIFICATE-----');
+    const footerOffset = Buffer.from(modified).lastIndexOf(footer);
+
+    expect(footerOffset).toBeGreaterThanOrEqual(0);
+    modified[footerOffset + footer.length - 3] = '2'.charCodeAt(0);
+
+    expect(() => parseTdxQuote(modified)).toThrow('malformed PEM certificate block');
   });
 });
