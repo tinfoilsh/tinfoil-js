@@ -8,6 +8,7 @@ export {
 
 // Verification
 export { verifyAttestation } from './attestation.js';
+export type { AttestationVerificationOptions, TdxAttestationVerificationOptions } from './attestation.js';
 export { assembleAttestationBundle } from './bundle.js';
 export { Verifier } from './client.js';
 export { PredicateType, compareMeasurements, measurementFingerprint, hashAttestationDocument } from './types.js';
@@ -30,5 +31,5 @@ export { validateTdxQuote, defaultTdxValidationOptions } from './tdx/validation.
 export type { TdxValidationOptions } from './tdx/validation.js';
 export { parsePckExtensions } from './tdx/pck-extensions.js';
 export type { PckExtensions } from './tdx/pck-extensions.js';
-export { validateCollateral } from './tdx/collateral.js';
-export type { CollateralOptions } from './tdx/collateral.js';
+export { evaluateCollateral, validateCollateral } from './tdx/collateral.js';
+export type { CollateralOptions, CollateralValidationResult } from './tdx/collateral.js';
