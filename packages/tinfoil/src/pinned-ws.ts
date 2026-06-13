@@ -22,13 +22,15 @@ export interface SecureWebSocketOptions {
  * enclave public key. Standard certificate chain and hostname validation
  * still apply on top of the pin.
  */
-export async function pinnedWsClientOptions(expectedFingerprintHex: string): Promise<WS.ClientOptions> {
+export async function pinnedWsClientOptions(
+  expectedFingerprintHex: string,
+): Promise<WS.ClientOptions> {
   // Bun substitutes its own native implementation for the `ws` package, which
   // does not honor checkServerIdentity — the pin would be silently skipped.
   if (isBun()) {
     throw new ConfigurationError(
       "WebSocket TLS pinning is not supported on Bun: Bun replaces the 'ws' package " +
-      "with a native implementation that does not honor checkServerIdentity."
+        "with a native implementation that does not honor checkServerIdentity.",
     );
   }
 
@@ -38,7 +40,10 @@ export async function pinnedWsClientOptions(expectedFingerprintHex: string): Pro
   // ws forwards checkServerIdentity verbatim to tls.connect, whose contract is
   // Error | undefined; @types/ws mistypes the return as boolean (a falsy return
   // would mean success under the real contract, so the cast is load-bearing).
-  const checkServerIdentity = (host: string, cert: import("tls").PeerCertificate): Error | undefined => {
+  const checkServerIdentity = (
+    host: string,
+    cert: import("tls").PeerCertificate,
+  ): Error | undefined => {
     const result = fingerprintCheck(host, cert);
     if (result) return result;
     return tls.checkServerIdentity(host, cert);
@@ -46,7 +51,9 @@ export async function pinnedWsClientOptions(expectedFingerprintHex: string): Pro
 
   return {
     rejectUnauthorized: true,
-    checkServerIdentity: checkServerIdentity as unknown as NonNullable<WS.ClientOptions["checkServerIdentity"]>,
+    checkServerIdentity: checkServerIdentity as unknown as NonNullable<
+      WS.ClientOptions["checkServerIdentity"]
+    >,
   };
 }
 
@@ -62,7 +69,9 @@ export async function createPinnedWebSocket(
 ): Promise<WS.WebSocket> {
   const parsed = new URL(url);
   if (parsed.protocol !== "wss:") {
-    throw new ConfigurationError(`Insecure connection rejected: only wss:// is allowed. Got ${url}`);
+    throw new ConfigurationError(
+      `Insecure connection rejected: only wss:// is allowed. Got ${url}`,
+    );
   }
 
   const pinnedOptions = await pinnedWsClientOptions(expectedFingerprintHex);

@@ -16,6 +16,6 @@ export async function createPinnedRealtimeWS(
 ): Promise<OpenAIRealtimeWS> {
   throw new ConfigurationError(
     "Verified realtime connections are not supported in browser environments: browsers do not " +
-    "expose TLS certificate details, so the connection cannot be pinned to the attested enclave key."
+      "expose TLS certificate details, so the connection cannot be pinned to the attested enclave key.",
   );
 }

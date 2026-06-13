@@ -18,7 +18,9 @@ const BROWSER_ERROR =
   "Verified WebSockets are not supported in browser environments: browsers do not " +
   "expose TLS certificate details, so the connection cannot be pinned to the attested enclave key.";
 
-export async function pinnedWsClientOptions(expectedFingerprintHex: string): Promise<WS.ClientOptions> {
+export async function pinnedWsClientOptions(
+  expectedFingerprintHex: string,
+): Promise<WS.ClientOptions> {
   throw new ConfigurationError(BROWSER_ERROR);
 }
 
