@@ -212,10 +212,8 @@ export class TinfoilAI {
   /**
    * Opens a realtime WebSocket session with the verified enclave.
    *
-   * Returns an `OpenAIRealtimeWS` from the OpenAI SDK, connected directly to
-   * the enclave with the TLS connection pinned to the attested enclave key.
-   * EHBP does not apply to WebSocket frames, so pinning is what binds the
-   * connection to the attestation.
+   * Returns an `OpenAIRealtimeWS` from the OpenAI SDK, connected to the
+   * enclave with the TLS connection pinned to the attested enclave key.
    *
    * Node.js only. Not supported with a proxy `baseURL`.
    *

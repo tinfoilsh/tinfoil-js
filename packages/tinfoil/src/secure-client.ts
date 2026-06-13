@@ -398,9 +398,7 @@ export class SecureClient {
    * Opens a WebSocket to the verified enclave with the TLS connection pinned
    * to the attested enclave key.
    *
-   * Node.js only. The connection goes directly to the enclave; EHBP does not
-   * apply to WebSocket frames, so pinning is what binds the connection to the
-   * attestation.
+   * Node.js only. Not supported with a proxy `baseURL`.
    *
    * The returned socket is a standard `ws` WebSocket in the CONNECTING state;
    * pinning failures surface as an `error` event.
