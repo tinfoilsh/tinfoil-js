@@ -31,7 +31,7 @@
     "build": "tsc",
     "test": "vitest run",
     "test:integration": "RUN_TINFOIL_INTEGRATION=true npm test",
-    "test:bun": "bun test --timeout 30000 ./test/bun-compat.bun.ts",
+    "test:bun": "bun test --timeout 30000 ./test/bun-compat.bun.ts ./test/bun-ws-tls.bun.ts",
     "test:bun:integration": "RUN_TINFOIL_INTEGRATION=true bun test ./test/integration.bun.ts",
     "test:browser": "vitest run --config vite.config.browser.ts",
     "test:browser:integration": "vitest run --config vite.config.browser-test.ts",
