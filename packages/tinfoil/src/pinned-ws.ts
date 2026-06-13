@@ -38,8 +38,8 @@ export async function pinnedWsClientOptions(
   const fingerprintCheck = createCheckServerIdentity(expectedFingerprintHex);
 
   // ws forwards checkServerIdentity verbatim to tls.connect, whose contract is
-  // Error | undefined; @types/ws mistypes the return as boolean (a falsy return
-  // would mean success under the real contract, so the cast is load-bearing).
+  // Error | undefined. @types/ws mistypes the return as boolean. Honoring this
+  // would invert the check, so this cast here is necessary.
   const checkServerIdentity = (
     host: string,
     cert: import("tls").PeerCertificate,
