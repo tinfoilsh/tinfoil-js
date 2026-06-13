@@ -14,6 +14,8 @@ import type {
 import { SecureClient, type TransportMode } from "./secure-client.js";
 import { type VerificationDocument } from "./verifier.js";
 import { isRealBrowser } from "./env.js";
+import type * as WS from "ws";
+import type { OpenAIRealtimeWS } from "openai/realtime/ws";
 
 function createAsyncProxy<T extends object>(promise: Promise<T>): T {
   return new Proxy({} as T, {
@@ -205,6 +207,34 @@ export class TinfoilAI {
   public async getVerificationDocument(): Promise<VerificationDocument> {
     await this.ready();
     return this.secureClient.getVerificationDocument();
+  }
+
+  /**
+   * Opens a realtime WebSocket session with the verified enclave.
+   *
+   * Returns an `OpenAIRealtimeWS` from the OpenAI SDK, connected directly to
+   * the enclave with the TLS connection pinned to the attested enclave key.
+   * EHBP does not apply to WebSocket frames, so pinning is what binds the
+   * connection to the attestation.
+   *
+   * Node.js only. Not supported with a proxy `baseURL`.
+   *
+   * @example
+   * ```typescript
+   * const rt = await client.realtime({ model: "voxtral-mini-4b-realtime" });
+   * rt.on("session.created", (event) => { ... });
+   * rt.send({ type: "input_audio_buffer.append", audio: base64Chunk });
+   * ```
+   */
+  public async realtime(props: { model: string; options?: WS.ClientOptions }): Promise<OpenAIRealtimeWS> {
+    const client = await this.ensureReady();
+    const pinnedOptions = await this.secureClient.getPinnedWebSocketOptions();
+    const { createPinnedRealtimeWS } = await import("./realtime.js");
+    return createPinnedRealtimeWS(
+      props,
+      { apiKey: client.apiKey as string, baseURL: client.baseURL },
+      pinnedOptions,
+    );
   }
 
   get chat(): Chat {

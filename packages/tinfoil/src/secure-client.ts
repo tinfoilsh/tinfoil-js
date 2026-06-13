@@ -5,6 +5,11 @@ import { TINFOIL_CONFIG } from "./config.js";
 import { createSecureFetch } from "./secure-fetch.js";
 import { fetchAttestationBundle } from "./atc.js";
 import type { SecureTransport, SessionRecoveryToken } from "./encrypted-body-fetch.js";
+import type { SecureWebSocketOptions } from "./pinned-ws.js";
+import type * as WS from "ws";
+import { isRealBrowser } from "./env.js";
+
+export type { SecureWebSocketOptions } from "./pinned-ws.js";
 
 /** Delay before retrying init on transient failure (ms). */
 const INIT_RETRY_DELAY_MS = 1000;
@@ -128,6 +133,7 @@ export class SecureClient {
   private _transport: SecureTransport | null = null;
   private resolvedEnclaveURL?: string;
   private resolvedBaseURL?: string;
+  private attestedTlsPublicKeyFingerprint?: string;
 
   constructor(options: SecureClientOptions = {}) {
     // Validate every provided URL, including the empty string: URL resolution
@@ -201,6 +207,7 @@ export class SecureClient {
     this.verificationDocument = createPendingVerificationDocument(this.config.configRepo);
     this.resolvedEnclaveURL = undefined;
     this.resolvedBaseURL = undefined;
+    this.attestedTlsPublicKeyFingerprint = undefined;
   }
 
   /**
@@ -249,6 +256,7 @@ export class SecureClient {
 
     try {
       const attestation = await verifier.verifyBundle(bundle);
+      this.attestedTlsPublicKeyFingerprint = attestation.tlsPublicKeyFingerprint;
       this._transport = await this.createTransport(attestation.hpkePublicKey, attestation.tlsPublicKeyFingerprint);
     } finally {
       // Always capture the verifier's doc (success or partial-failure)
@@ -339,5 +347,96 @@ export class SecureClient {
       throw new Error('No session recovery token available — call fetch() first');
     }
     return this._transport.getSessionRecoveryToken();
+  }
+
+  /**
+   * Verifies the WebSocket preconditions and returns the attested TLS
+   * public key fingerprint to pin against.
+   *
+   * WebSockets can't be covered by EHBP (it only seals HTTP bodies), so they
+   * are secured by connecting directly to the enclave with the TLS connection
+   * pinned to the attested key. That rules out browsers (no TLS cert access)
+   * and proxy baseURLs (the proxy's certificate would not match the pin).
+   */
+  private async requireWebSocketCapability(): Promise<string> {
+    if (isRealBrowser()) {
+      throw new ConfigurationError(
+        "Verified WebSockets are not supported in browser environments: browsers do not " +
+        "expose TLS certificate details, so the connection cannot be pinned to the attested enclave key."
+      );
+    }
+    if (this.config.baseURL) {
+      throw new ConfigurationError(
+        "WebSockets are not supported with a proxy baseURL: the connection is pinned to the " +
+        "enclave's attested TLS key, which a TLS-terminating proxy cannot present. " +
+        "Use a client without baseURL for realtime connections."
+      );
+    }
+
+    await this.ready();
+
+    if (!this.attestedTlsPublicKeyFingerprint) {
+      throw new AttestationError("Attestation did not include a TLS public key fingerprint");
+    }
+    return this.attestedTlsPublicKeyFingerprint;
+  }
+
+  /**
+   * Returns `ws` client options that pin the TLS connection to the attested
+   * enclave key, for wiring verified WebSockets into other libraries.
+   *
+   * Node.js only. Standard certificate chain and hostname validation still
+   * apply on top of the pin.
+   */
+  public async getPinnedWebSocketOptions(): Promise<WS.ClientOptions> {
+    const fingerprint = await this.requireWebSocketCapability();
+    const { pinnedWsClientOptions } = await import("./pinned-ws.js");
+    return pinnedWsClientOptions(fingerprint);
+  }
+
+  /**
+   * Opens a WebSocket to the verified enclave with the TLS connection pinned
+   * to the attested enclave key.
+   *
+   * Node.js only. The connection goes directly to the enclave; EHBP does not
+   * apply to WebSocket frames, so pinning is what binds the connection to the
+   * attestation.
+   *
+   * The returned socket is a standard `ws` WebSocket in the CONNECTING state;
+   * pinning failures surface as an `error` event.
+   *
+   * @param path - Path (and query) relative to the enclave URL, e.g.
+   *   `/v1/realtime?model=voxtral-mini-4b-realtime`
+   *
+   * @example
+   * ```typescript
+   * const socket = await client.createWebSocket(
+   *   "/v1/realtime?model=voxtral-mini-4b-realtime",
+   *   { wsOptions: { headers: { Authorization: `Bearer ${apiKey}` } } },
+   * );
+   * socket.on("open", () => { ... });
+   * ```
+   */
+  public async createWebSocket(path: string, options?: SecureWebSocketOptions): Promise<WS.WebSocket> {
+    const fingerprint = await this.requireWebSocketCapability();
+
+    const enclaveHost = new URL(this.resolvedEnclaveURL!).host;
+    const target = new URL(path, this.resolvedEnclaveURL);
+    if (target.protocol === "https:") {
+      target.protocol = "wss:";
+    }
+    if (target.protocol !== "wss:") {
+      throw new ConfigurationError(`Insecure connection rejected: only wss:// is allowed. Got ${target.toString()}`);
+    }
+    // The Authorization header would travel to whatever host the URL names,
+    // so refuse anything other than the verified enclave.
+    if (target.host !== enclaveHost) {
+      throw new ConfigurationError(
+        `refusing WebSocket connection to ${target.host}: this client is bound to the verified enclave ${enclaveHost}`
+      );
+    }
+
+    const { createPinnedWebSocket } = await import("./pinned-ws.js");
+    return createPinnedWebSocket(target.toString(), fingerprint, options);
   }
 }

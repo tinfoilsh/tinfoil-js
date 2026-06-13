@@ -3,29 +3,40 @@ import type { ReadableStream as NodeWebReadableStream } from "stream/web";
 import { ConfigurationError, AttestationError } from "./verifier.js";
 import { isBun } from "./env.js";
 
-function createCheckServerIdentity(expectedFingerprintHex: string): (host: string, cert: any) => Error | undefined {
+export function createCheckServerIdentity(
+  expectedFingerprintHex: string,
+): (host: string, cert: any) => Error | undefined {
   return (host: string, cert: any): Error | undefined => {
     const raw = cert?.raw as Buffer | undefined;
     if (!raw) {
-      return new AttestationError("TLS pinning failed: Certificate raw bytes are unavailable");
+      return new AttestationError(
+        "TLS pinning failed: Certificate raw bytes are unavailable",
+      );
     }
     const x509 = new X509Certificate(raw);
     const publicKeyDer = x509.publicKey.export({ type: "spki", format: "der" });
     const fp = createHash("sha256").update(publicKeyDer).digest("hex");
     if (fp !== expectedFingerprintHex) {
-      return new AttestationError("TLS pinning failed: Server certificate public key does not match the attested key");
+      return new AttestationError(
+        "TLS pinning failed: Server certificate public key does not match the attested key",
+      );
     }
     return undefined;
   };
 }
 
-async function createBunPinnedTlsFetch(baseURL: string, expectedFingerprintHex: string): Promise<typeof fetch> {
+async function createBunPinnedTlsFetch(
+  baseURL: string,
+  expectedFingerprintHex: string,
+): Promise<typeof fetch> {
   const tls = await import("tls");
   const fingerprintCheck = createCheckServerIdentity(expectedFingerprintHex);
 
   const parsedBase = new URL(baseURL);
   if (parsedBase.protocol !== "https:") {
-    throw new ConfigurationError(`Insecure connection rejected: HTTP is not allowed. Use HTTPS for ${baseURL}`);
+    throw new ConfigurationError(
+      `Insecure connection rejected: HTTP is not allowed. Use HTTPS for ${baseURL}`,
+    );
   }
 
   return (async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -37,10 +48,16 @@ async function createBunPinnedTlsFetch(baseURL: string, expectedFingerprintHex: 
 
     const url = makeURL(input);
     if (url.protocol !== "https:") {
-      throw new ConfigurationError(`Insecure connection rejected: HTTP is not allowed. Use HTTPS for ${url.toString()}`);
+      throw new ConfigurationError(
+        `Insecure connection rejected: HTTP is not allowed. Use HTTPS for ${url.toString()}`,
+      );
     }
 
-    const fetchInit: RequestInit & { tls?: { checkServerIdentity: (host: string, cert: any) => Error | undefined } } = {
+    const fetchInit: RequestInit & {
+      tls?: {
+        checkServerIdentity: (host: string, cert: any) => Error | undefined;
+      };
+    } = {
       ...init,
       // eslint-disable-next-line @typescript-eslint/ban-ts-comment
       // @ts-ignore - Bun-specific option
@@ -57,7 +74,10 @@ async function createBunPinnedTlsFetch(baseURL: string, expectedFingerprintHex: 
   }) as typeof fetch;
 }
 
-async function createNodePinnedTlsFetch(baseURL: string, expectedFingerprintHex: string): Promise<typeof fetch> {
+async function createNodePinnedTlsFetch(
+  baseURL: string,
+  expectedFingerprintHex: string,
+): Promise<typeof fetch> {
   const https = await import("https");
   const tls = await import("tls");
   const { Readable } = await import("stream");
@@ -74,11 +94,17 @@ async function createNodePinnedTlsFetch(baseURL: string, expectedFingerprintHex:
 
     const url = makeURL(input);
     if (url.protocol !== "https:") {
-      throw new ConfigurationError(`Insecure connection rejected: HTTP is not allowed. Use HTTPS for ${url.toString()}`);
+      throw new ConfigurationError(
+        `Insecure connection rejected: HTTP is not allowed. Use HTTPS for ${url.toString()}`,
+      );
     }
 
     // Gather method and headers
-    const method = (init?.method || (input as any).method || "GET").toUpperCase();
+    const method = (
+      init?.method ||
+      (input as any).method ||
+      "GET"
+    ).toUpperCase();
     const headers = new Headers(init?.headers || (input as any)?.headers || {});
     const headerObj: Record<string, string> = {};
     headers.forEach((v, k) => {
@@ -89,7 +115,8 @@ async function createNodePinnedTlsFetch(baseURL: string, expectedFingerprintHex:
     let body: any = init?.body;
     if (!body && input instanceof Request) {
       const buf = await (input as Request).arrayBuffer();
-      if (buf && (buf as ArrayBuffer).byteLength) body = Buffer.from(buf as ArrayBuffer);
+      if (buf && (buf as ArrayBuffer).byteLength)
+        body = Buffer.from(buf as ArrayBuffer);
     }
     // Convert web streams to Node streams if needed
     if (body && typeof (body as any).getReader === "function") {
@@ -102,7 +129,8 @@ async function createNodePinnedTlsFetch(baseURL: string, expectedFingerprintHex:
       body = Buffer.from(body.buffer, body.byteOffset, body.byteLength);
     }
 
-    const requestOptions: import("https").RequestOptions & import("tls").ConnectionOptions = {
+    const requestOptions: import("https").RequestOptions &
+      import("tls").ConnectionOptions = {
       protocol: url.protocol,
       hostname: url.hostname,
       port: url.port ? Number(url.port) : 443,
@@ -118,39 +146,49 @@ async function createNodePinnedTlsFetch(baseURL: string, expectedFingerprintHex:
 
     const { signal } = init || {};
 
-    const res = await new Promise<import("http").IncomingMessage>((resolve, reject) => {
-      const req = https.request(requestOptions, resolve);
-      req.on("error", reject);
-      if (signal) {
-        if ((signal as AbortSignal).aborted) {
-          req.destroy(new Error("Request aborted"));
-          return;
+    const res = await new Promise<import("http").IncomingMessage>(
+      (resolve, reject) => {
+        const req = https.request(requestOptions, resolve);
+        req.on("error", reject);
+        if (signal) {
+          if ((signal as AbortSignal).aborted) {
+            req.destroy(new Error("Request aborted"));
+            return;
+          }
+          (signal as AbortSignal).addEventListener("abort", () =>
+            req.destroy(new Error("Request aborted")),
+          );
         }
-        (signal as AbortSignal).addEventListener("abort", () => req.destroy(new Error("Request aborted")));
-      }
-      if (body === undefined || body === null) {
-        req.end();
-      } else if (typeof body === "string" || Buffer.isBuffer(body) || ArrayBuffer.isView(body)) {
-        req.end(body as any);
-      } else if (typeof (body as any).pipe === "function") {
-        (body as any).pipe(req);
-      } else {
-        // Fallback: try to serialize objects
-        req.end(String(body));
-      }
-    });
+        if (body === undefined || body === null) {
+          req.end();
+        } else if (
+          typeof body === "string" ||
+          Buffer.isBuffer(body) ||
+          ArrayBuffer.isView(body)
+        ) {
+          req.end(body as any);
+        } else if (typeof (body as any).pipe === "function") {
+          (body as any).pipe(req);
+        } else {
+          // Fallback: try to serialize objects
+          req.end(String(body));
+        }
+      },
+    );
 
     const responseHeaders = new Headers();
     for (const [k, v] of Object.entries(res.headers)) {
       if (Array.isArray(v)) {
-        v.forEach(item => responseHeaders.append(k, item));
+        v.forEach((item) => responseHeaders.append(k, item));
       } else if (v != null) {
         responseHeaders.set(k, String(v));
       }
     }
 
     // Convert Node stream to Web ReadableStream
-    const webStream = Readable.toWeb(res as unknown as import("stream").Readable) as unknown as ReadableStream;
+    const webStream = Readable.toWeb(
+      res as unknown as import("stream").Readable,
+    ) as unknown as ReadableStream;
     return new Response(webStream, {
       status: res.statusCode || 0,
       statusText: res.statusMessage || "",
@@ -159,7 +197,10 @@ async function createNodePinnedTlsFetch(baseURL: string, expectedFingerprintHex:
   }) as typeof fetch;
 }
 
-export async function createPinnedTlsFetch(baseURL: string, expectedFingerprintHex: string): Promise<typeof fetch> {
+export async function createPinnedTlsFetch(
+  baseURL: string,
+  expectedFingerprintHex: string,
+): Promise<typeof fetch> {
   if (isBun()) {
     return createBunPinnedTlsFetch(baseURL, expectedFingerprintHex);
   }

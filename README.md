@@ -8,9 +8,7 @@ A TypeScript client for verifiably private AI inference with the [Tinfoil API](h
 
 Tinfoil runs LLMs inside [secure enclaves](https://docs.tinfoil.sh/cc/how-it-works)—isolated environments on hardware where even Tinfoil cannot access your data. This SDK encrypts your requests using [HPKE (RFC 9180)](https://www.rfc-editor.org/rfc/rfc9180.html) via the [EHBP](https://github.com/tinfoilsh/encrypted-http-body-protocol) protocol, so that only the verified enclave can decrypt them.
 
-
 It also supports TLS certificate pinning as an alternative transport mode, where all connections are encrypted and terminated to a verified secure enclave.
-
 
 ## Installation
 
@@ -19,8 +17,6 @@ npm install tinfoil
 ```
 
 Requires Node 20+. Works in browsers with ES2020 support, Electron, and Bun (see [Bun Support](#bun-support)).
-
-
 
 ## Quick Start
 
@@ -39,30 +35,26 @@ const completion = await client.chat.completions.create({
 });
 ```
 
-
-
 ## Browser Usage
 
 Use `bearerToken` for browser authentication (e.g., JWT from your auth system):
 
 ```typescript
-import { TinfoilAI } from 'tinfoil';
+import { TinfoilAI } from "tinfoil";
 
 const client = new TinfoilAI({
-  bearerToken: 'your-jwt-token' // From your auth system
+  bearerToken: "your-jwt-token", // From your auth system
 });
 
 await client.ready(); // Wait for verification to complete
 
 const completion = await client.chat.completions.create({
-  model: 'llama3-3-70b',
-  messages: [{ role: 'user', content: 'Hello!' }]
+  model: "llama3-3-70b",
+  messages: [{ role: "user", content: "Hello!" }],
 });
 ```
 
 > **Warning:** Never use `apiKey` in browser code—it exposes your key in page source. Use `bearerToken` with your backend authentication. If you must use `apiKey` instead of `bearerToken` in the browser, set `dangerouslyAllowBrowser: true`.
-
-
 
 ## Using with OpenAI SDK
 
@@ -87,7 +79,24 @@ const completion = await openai.chat.completions.create({
 });
 ```
 
+## Realtime API (WebSockets)
 
+Open a realtime WebSocket session (e.g. streaming speech-to-text) with the connection pinned to the attested enclave key. Returns an [`OpenAIRealtimeWS`](https://github.com/openai/openai-node) client from the OpenAI SDK:
+
+```typescript
+import { TinfoilAI } from "tinfoil";
+
+const client = new TinfoilAI({ apiKey: "<YOUR_API_KEY>" });
+
+const rt = await client.realtime({ model: "voxtral-mini-4b-realtime" });
+
+rt.on("session.created", (event) => console.log(event));
+rt.send({ type: "input_audio_buffer.append", audio: base64AudioChunk });
+```
+
+For lower-level control, `SecureClient.createWebSocket()` opens a pinned `ws` socket to any enclave path, and `SecureClient.getPinnedWebSocketOptions()` returns pinning options for wiring into other WebSocket-based libraries.
+
+WebSocket frames are not covered by EHBP (which seals HTTP bodies), so realtime connections go directly to the enclave over TLS pinned to the attested key — the same guarantee as the `tls` transport mode. Node.js only: browsers cannot pin TLS connections, and a proxy `baseURL` cannot present the enclave's certificate (both are rejected with a `ConfigurationError`).
 
 ## Using with Vercel AI SDK
 
@@ -144,8 +153,6 @@ const transport = new DefaultChatTransport({
 
 See the [Vercel AI Browser SDK Example](packages/tinfoil/examples/ai-sdk-react/) for complete React patterns with `useChat`, context providers, and error handling.
 
-
-
 ## How Verification Works
 
 When you create a client, the SDK **automatically**:
@@ -187,6 +194,7 @@ console.log(doc.steps); // fetchDigest, verifyCode, verifyEnclave, compareMeasur
 ## Proxy Support
 
 Route requests through your own backend while keeping request bodies encrypted end-to-end. This lets you:
+
 - Keep API keys on your server
 - Add authentication, rate limiting, logging
 - The proxy sees headers/URLs but **cannot decrypt request or response bodies**
@@ -204,19 +212,17 @@ await client.ready();
 
 For full proxy server implementation (Go example, CORS config, header handling), see the [Encrypted Request Proxying guide](https://docs.tinfoil.sh/guides/proxy-server).
 
-
-
 ## Examples
 
 Working examples are in [`packages/tinfoil/examples/`](packages/tinfoil/examples/):
 
-| Example | Description |
-|---------|-------------|
-| [`chat/`](packages/tinfoil/examples/chat/) | Basic chat completion with TinfoilAI |
-| [`streaming/`](packages/tinfoil/examples/streaming/) | Server-sent events streaming |
-| [`ai-sdk/`](packages/tinfoil/examples/ai-sdk/) | Vercel AI SDK server-side integration |
-| [`ai-sdk-react/`](packages/tinfoil/examples/ai-sdk-react/) | Vercel AI SDK React/browser integration |
-| [`secure_client/`](packages/tinfoil/examples/secure_client/) | Direct SecureClient usage for custom HTTP |
+| Example                                                              | Description                                                |
+| -------------------------------------------------------------------- | ---------------------------------------------------------- |
+| [`chat/`](packages/tinfoil/examples/chat/)                           | Basic chat completion with TinfoilAI                       |
+| [`streaming/`](packages/tinfoil/examples/streaming/)                 | Server-sent events streaming                               |
+| [`ai-sdk/`](packages/tinfoil/examples/ai-sdk/)                       | Vercel AI SDK server-side integration                      |
+| [`ai-sdk-react/`](packages/tinfoil/examples/ai-sdk-react/)           | Vercel AI SDK React/browser integration                    |
+| [`secure_client/`](packages/tinfoil/examples/secure_client/)         | Direct SecureClient usage for custom HTTP                  |
 | [`unverified_client/`](packages/tinfoil/examples/unverified_client/) | Development/testing without attestation (`tinfoil/unsafe`) |
 
 Run any example:
@@ -225,8 +231,6 @@ Run any example:
 cd packages/tinfoil/examples/chat
 npx ts-node main.ts
 ```
-
-
 
 ## Documentation
 
@@ -259,18 +263,14 @@ npx ts-node main.ts
 - [Status](https://docs.tinfoil.sh/resources/status) — Service status
 - [Changelog](https://docs.tinfoil.sh/resources/changelog) — What's new
 
-
-
 ## Project Structure
 
 This is a monorepo with two packages:
 
-| Package | Description |
-|---------|-------------|
-| `packages/tinfoil` | Main SDK (published as `tinfoil`) |
+| Package             | Description                                               |
+| ------------------- | --------------------------------------------------------- |
+| `packages/tinfoil`  | Main SDK (published as `tinfoil`)                         |
 | `packages/verifier` | Attestation verifier (published as `@tinfoilsh/verifier`) |
-
-
 
 ## Development
 
@@ -288,8 +288,6 @@ npm run test:integration    # Integration tests (real network requests)
 npm run test:browser        # Browser tests
 npm run test:bun -w tinfoil # Bun tests
 ```
-
-
 
 ## Reporting Vulnerabilities
 

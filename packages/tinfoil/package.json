@@ -9,6 +9,8 @@
   "browser": {
     "./dist/index.js": "./dist/index.browser.js",
     "./dist/pinned-tls-fetch.js": "./dist/pinned-tls-fetch.browser.js",
+    "./dist/pinned-ws.js": "./dist/pinned-ws.browser.js",
+    "./dist/realtime.js": "./dist/realtime.browser.js",
     "./dist/unsafe.js": "./dist/unsafe.browser.js"
   },
   "exports": {
@@ -62,8 +64,10 @@
     "@ai-sdk/openai-compatible": "^2.0.41",
     "@freedomofpress/sigstore-browser": "^0.1.13",
     "@tinfoilsh/verifier": "1.1.3",
+    "@types/ws": "^8.18.1",
     "ehbp": "^0.2.0",
-    "openai": "^6.34.0"
+    "openai": "^6.34.0",
+    "ws": "^8.21.0"
   },
   "peerDependencies": {
     "ai": "^6.0.168"
