@@ -5,7 +5,6 @@
  * secure-client.ts throws before reaching this code. This stub exists to
  * satisfy bundlers.
  */
-/* eslint-disable @typescript-eslint/no-unused-vars */
 import type * as WS from "ws";
 import { ConfigurationError } from "./verifier.js";
 
@@ -19,15 +18,15 @@ const BROWSER_ERROR =
   "expose TLS certificate details, so the connection cannot be pinned to the attested enclave key.";
 
 export async function pinnedWsClientOptions(
-  expectedFingerprintHex: string,
+  _expectedFingerprintHex: string,
 ): Promise<WS.ClientOptions> {
   throw new ConfigurationError(BROWSER_ERROR);
 }
 
 export async function createPinnedWebSocket(
-  url: string,
-  expectedFingerprintHex: string,
-  options?: SecureWebSocketOptions,
+  _url: string,
+  _expectedFingerprintHex: string,
+  _options?: SecureWebSocketOptions,
 ): Promise<WS.WebSocket> {
   throw new ConfigurationError(BROWSER_ERROR);
 }

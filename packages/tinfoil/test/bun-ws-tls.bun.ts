@@ -151,7 +151,6 @@ describe("Bun WebSocket TLS pinning capability", () => {
   it("production createCheckServerIdentity pins correctly over node:tls", async () => {
     if (!isBun) return;
 
-    // Capture the live leaf key, then drive the real production pin function.
     const probed = await tlsProbe(() => undefined);
     expect(probed.certRaw).toBeDefined();
     const correctFp = spkiFingerprint(probed.certRaw!);

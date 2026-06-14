@@ -18,6 +18,40 @@ export interface SecureWebSocketOptions {
 }
 
 /**
+ * `ws` options that can bypass or weaken the pinned TLS identity check.
+ */
+const FORBIDDEN_WS_OPTION_KEYS = [
+  "createConnection",
+  "agent",
+  "followRedirects",
+  "session",
+  "socket",
+  "servername",
+  "pskCallback",
+] as const;
+
+type HardenedWebSocketOptions = WS.ClientOptions & {
+  session?: undefined;
+  socket?: undefined;
+  servername?: undefined;
+  pskCallback?: undefined;
+};
+
+/**
+ * Removes caller-supplied `ws` options that can bypass or weaken the TLS pin.
+ */
+export function stripUnsafeWebSocketOptions(
+  wsOptions?: WS.ClientOptions,
+): WS.ClientOptions | undefined {
+  if (!wsOptions) return wsOptions;
+  const sanitized: WS.ClientOptions = { ...wsOptions };
+  for (const key of FORBIDDEN_WS_OPTION_KEYS) {
+    delete (sanitized as Record<string, unknown>)[key];
+  }
+  return sanitized;
+}
+
+/**
  * Returns `ws` client options that pin the TLS connection to the attested
  * enclave public key. Standard certificate chain and hostname validation
  * still apply on top of the pin.
@@ -49,12 +83,20 @@ export async function pinnedWsClientOptions(
     return tls.checkServerIdentity(host, cert);
   };
 
-  return {
+  const pinnedOptions: HardenedWebSocketOptions = {
     rejectUnauthorized: true,
+    createConnection: undefined,
+    agent: undefined,
+    followRedirects: false,
+    session: undefined,
+    socket: undefined,
+    servername: undefined,
+    pskCallback: undefined,
     checkServerIdentity: checkServerIdentity as unknown as NonNullable<
       WS.ClientOptions["checkServerIdentity"]
     >,
   };
+  return pinnedOptions;
 }
 
 /**
@@ -77,7 +119,7 @@ export async function createPinnedWebSocket(
   const pinnedOptions = await pinnedWsClientOptions(expectedFingerprintHex);
   const { WebSocket } = await import("ws");
   return new WebSocket(parsed, options?.protocols, {
-    ...options?.wsOptions,
+    ...stripUnsafeWebSocketOptions(options?.wsOptions),
     ...pinnedOptions,
   });
 }

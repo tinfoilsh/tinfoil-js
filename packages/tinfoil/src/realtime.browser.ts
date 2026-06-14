@@ -4,15 +4,14 @@
  * The runtime check in secure-client.ts throws before reaching this code.
  * This stub exists to satisfy bundlers.
  */
-/* eslint-disable @typescript-eslint/no-unused-vars */
 import type * as WS from "ws";
 import type { OpenAIRealtimeWS } from "openai/realtime/ws";
 import { ConfigurationError } from "./verifier.js";
 
 export async function createPinnedRealtimeWS(
-  props: { model: string; options?: WS.ClientOptions },
-  client: { apiKey: string; baseURL: string },
-  pinnedOptions: WS.ClientOptions,
+  _props: { model: string; options?: WS.ClientOptions },
+  _client: { apiKey: string; baseURL: string },
+  _pinnedOptions: WS.ClientOptions,
 ): Promise<OpenAIRealtimeWS> {
   throw new ConfigurationError(
     "Verified realtime connections are not supported in browser environments: browsers do not " +

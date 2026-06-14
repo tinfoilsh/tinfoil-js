@@ -1,5 +1,6 @@
 import type * as WS from "ws";
 import type { OpenAIRealtimeWS } from "openai/realtime/ws";
+import { stripUnsafeWebSocketOptions } from "./pinned-ws.js";
 
 /**
  * Constructs an OpenAI realtime WebSocket client with TLS pinning injected.
@@ -15,7 +16,7 @@ export async function createPinnedRealtimeWS(
   return new OpenAIRealtimeWS(
     {
       model: props.model,
-      options: { ...props.options, ...pinnedOptions },
+      options: { ...stripUnsafeWebSocketOptions(props.options), ...pinnedOptions },
     },
     client,
   );

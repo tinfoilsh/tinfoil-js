@@ -225,8 +225,8 @@ export class TinfoilAI {
    * ```
    */
   public async realtime(props: { model: string; options?: WS.ClientOptions }): Promise<OpenAIRealtimeWS> {
-    const client = await this.ensureReady();
     const pinnedOptions = await this.secureClient.getPinnedWebSocketOptions();
+    const client = await this.ensureReady();
     const { createPinnedRealtimeWS } = await import("./realtime.js");
     return createPinnedRealtimeWS(
       props,
