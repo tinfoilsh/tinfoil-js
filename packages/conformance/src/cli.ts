@@ -648,6 +648,10 @@ function capabilities(): number {
       extended_checks_supported: true,
       verification_time_override: 'supported',
       amd_root_ca_injection_supported: true,
+      // The SEV adapter already calls the verifier's public entrypoint
+      // verifyAttestation, so execution_mode=public_api fixtures exercise the
+      // public surface through the same path.
+      public_api_hooks_supported: true,
     },
     attestation_tdx: {
       supported: true,
