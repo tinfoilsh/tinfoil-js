@@ -73,6 +73,7 @@ export interface Capabilities {
     extended_checks_supported: boolean;
     verification_time_override: 'supported' | 'system-clock-only';
     amd_root_ca_injection_supported: boolean;
+    public_api_hooks_supported: boolean;
   };
   platforms_supported: ('sev-snp' | 'tdx')[];
   transport_modes_supported: ('tls-pinning' | 'ehbp')[];
@@ -175,6 +176,11 @@ export function capabilities(): Capabilities {
       extended_checks_supported: true,
       verification_time_override: 'supported',
       amd_root_ca_injection_supported: true,
+      // The SEV adapter already calls the verifier's public entrypoint
+      // verifyAttestation (with injected VCEK + embedded ARK/ASK), so
+      // execution_mode=public_api fixtures exercise the public surface
+      // through the same path.
+      public_api_hooks_supported: true,
     },
     platforms_supported: ['sev-snp'],
     transport_modes_supported: ['tls-pinning', 'ehbp'],
