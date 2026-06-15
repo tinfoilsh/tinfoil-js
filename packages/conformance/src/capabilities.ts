@@ -77,6 +77,9 @@ export interface Capabilities {
   platforms_supported: ('sev-snp' | 'tdx')[];
   transport_modes_supported: ('tls-pinning' | 'ehbp')[];
   flow_modes_supported: ('standard' | 'bundle' | 'pinned')[];
+  ehbp: {
+    key_binding_supported: boolean;
+  };
   known_quirks: Record<string, unknown>;
 }
 
@@ -92,6 +95,7 @@ export function capabilities(): Capabilities {
       'verify-attestation-sev',
       'verify-attestation-tdx',
       'verify-full',
+      'verify-ehbp-key-binding',
     ],
     sigstore: {
       trust_root_loading: 'configurable',
@@ -175,6 +179,11 @@ export function capabilities(): Capabilities {
     platforms_supported: ['sev-snp'],
     transport_modes_supported: ['tls-pinning', 'ehbp'],
     flow_modes_supported: ['standard', 'bundle', 'pinned'],
+    // SPEC §14.2 EHBP key binding: the transport HPKE key must equal the
+    // attested key from report_data[32:64]. The SDK binds by construction
+    // (createEncryptedBodyFetch uses only the attested key) and also
+    // explicitly compares in cert-verify (verifyCertificate).
+    ehbp: { key_binding_supported: true },
     known_quirks: {
       'sigstore.dcode_substring_match':
         'cert-verify.ts uses .includes() for .hpke./.hatt. SAN filtering (recon finding, separate fix)',

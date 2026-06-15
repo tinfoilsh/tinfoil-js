@@ -18,6 +18,7 @@
 
 import { capabilities } from './capabilities.js';
 import { verifyAttestationSev } from './verify-attestation-sev.js';
+import { verifyEhbpKeyBinding } from './verify-ehbp-key-binding.js';
 import { verifyFull } from './verify-full.js';
 import { verifyHardwareMeasurements } from './verify-hardware-measurements.js';
 import { verifyMeasurement } from './verify-measurement.js';
@@ -157,6 +158,19 @@ async function main(): Promise<number> {
         return EXIT.badInput;
       }
       const { exitCode, body } = await verifyFull(parsed);
+      process.stdout.write(JSON.stringify(body, null, 2) + '\n');
+      return exitCode;
+    }
+    case 'verify-ehbp-key-binding': {
+      const raw = await readStdin();
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(raw);
+      } catch (e) {
+        process.stderr.write(`input is not valid JSON: ${(e as Error).message}\n`);
+        return EXIT.badInput;
+      }
+      const { exitCode, body } = await verifyEhbpKeyBinding(parsed);
       process.stdout.write(JSON.stringify(body, null, 2) + '\n');
       return exitCode;
     }

@@ -59,14 +59,35 @@ async function verifySevAttestationV2(
     registers: [bytesToHex(report.measurement)],
   };
 
-  const keys = report.reportData;
-  const tlsKeyFp = bytesToHex(keys.slice(0, 32));
-  const hpkePublicKey = bytesToHex(keys.slice(32, 64));
+  const { tlsPublicKeyFingerprint, hpkePublicKey } = extractReportDataKeys(
+    report.reportData,
+  );
 
   return {
     measurement,
-    tlsPublicKeyFingerprint: tlsKeyFp,
+    tlsPublicKeyFingerprint,
     hpkePublicKey,
+  };
+}
+
+/**
+ * Extract the Tinfoil transport keys from a 64-byte attestation report_data
+ * per Tinfoil SPEC §14.2: [0:32] = TLS SPKI fingerprint, [32:64] = HPKE X25519
+ * public key. This is the same slice the SEV/TDX verifiers apply to a verified
+ * report, exposed so the EHBP key-binding check exercises the real offset.
+ *
+ * @throws Error if reportData is not exactly 64 bytes.
+ */
+export function extractReportDataKeys(reportData: Uint8Array): {
+  tlsPublicKeyFingerprint: string;
+  hpkePublicKey: string;
+} {
+  if (reportData.length !== 64) {
+    throw new Error(`report_data must be 64 bytes, got ${reportData.length}`);
+  }
+  return {
+    tlsPublicKeyFingerprint: bytesToHex(reportData.slice(0, 32)),
+    hpkePublicKey: bytesToHex(reportData.slice(32, 64)),
   };
 }
 

@@ -7,7 +7,7 @@ export {
 } from './errors.js';
 
 // Verification
-export { verifyAttestation } from './attestation.js';
+export { verifyAttestation, extractReportDataKeys } from './attestation.js';
 export type {
   AttestationVerificationOptions,
   SevAttestationVerificationOptions,
