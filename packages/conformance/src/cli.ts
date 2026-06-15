@@ -16,6 +16,7 @@ import {
   type TdxQuote,
 } from '@tinfoilsh/verifier';
 import { verifyAttestationSev } from './verify-attestation-sev.js';
+import { verifyEhbpKeyBinding } from './verify-ehbp-key-binding.js';
 import { verifyFull } from './verify-full.js';
 import { verifyHardwareMeasurements } from './verify-hardware-measurements.js';
 import { verifyMeasurement } from './verify-measurement.js';
@@ -610,6 +611,7 @@ function capabilities(): number {
       'verify-attestation-sev',
       STAGE,
       'verify-full',
+      'verify-ehbp-key-binding',
     ],
     sigstore: {
       trust_root_loading: 'configurable',
@@ -678,6 +680,11 @@ function capabilities(): number {
     platforms_supported: ['sev-snp', 'tdx'],
     transport_modes_supported: ['tls-pinning', 'ehbp'],
     flow_modes_supported: ['standard', 'bundle', 'pinned'],
+    // SPEC §14.2 EHBP key binding: the transport HPKE key must equal the
+    // attested key from report_data[32:64]. The SDK binds by construction
+    // (createEncryptedBodyFetch uses only the attested key) and explicitly
+    // compares in cert-verify (verifyCertificate).
+    ehbp: { key_binding_supported: true },
     known_quirks: {
       'sigstore.dcode_substring_match':
         'cert-verify.ts uses .includes() for .hpke./.hatt. SAN filtering (recon finding, separate fix)',
@@ -709,6 +716,9 @@ async function main(): Promise<number> {
   }
   if (command === 'verify-full') {
     return runJsonStage(verifyFull);
+  }
+  if (command === 'verify-ehbp-key-binding') {
+    return runJsonStage(verifyEhbpKeyBinding);
   }
   return badInput(`unknown command: ${command ?? '<missing>'}`);
 }
