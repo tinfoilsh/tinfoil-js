@@ -3,7 +3,7 @@ import type { ReadableStream as NodeWebReadableStream } from "stream/web";
 import { ConfigurationError, AttestationError } from "./verifier.js";
 import { isBun } from "./env.js";
 
-function createCheckServerIdentity(expectedFingerprintHex: string): (host: string, cert: any) => Error | undefined {
+export function createCheckServerIdentity(expectedFingerprintHex: string): (host: string, cert: any) => Error | undefined {
   return (host: string, cert: any): Error | undefined => {
     const raw = cert?.raw as Buffer | undefined;
     if (!raw) {

@@ -25,10 +25,22 @@ export type {
 } from "./verifier.js";
 export { createTinfoilAI } from "./ai-sdk-provider.js";
 export type { CreateTinfoilAIOptions } from "./ai-sdk-provider.js";
-export { SecureClient, type TransportMode } from "./secure-client.js";
+export {
+  SecureClient,
+  type TransportMode,
+  type SecureWebSocketOptions,
+} from "./secure-client.js";
 export type { SessionRecoveryToken } from "ehbp";
-export { serializeSessionRecoveryToken, deserializeSessionRecoveryToken, decryptResponseWithToken } from "ehbp";
-export { fetchRouter, fetchAttestationBundle, type FetchAttestationBundleOptions } from "./atc.js";
+export {
+  serializeSessionRecoveryToken,
+  deserializeSessionRecoveryToken,
+  decryptResponseWithToken,
+} from "ehbp";
+export {
+  fetchRouter,
+  fetchAttestationBundle,
+  type FetchAttestationBundleOptions,
+} from "./atc.js";
 
 // Re-export OpenAI utility types and classes that users might need
 // Using public exports from the main OpenAI package instead of deep imports
