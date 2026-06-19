@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import { EventEmitter } from "events";
 
 const MOCK_MEASUREMENT_TYPE = "https://tinfoil.sh/predicate/sev-snp-guest/v2";
 const MOCK_FINGERPRINT = "ab".repeat(32);
@@ -42,7 +43,7 @@ vi.mock("../src/atc.js", () => ({
   fetchRouter: vi.fn(async () => "enclave.example.com"),
 }));
 
-const createPinnedWebSocketMock = vi.fn(async () => ({ mock: "socket" }));
+const createPinnedWebSocketMock = vi.fn(async () => new EventEmitter());
 const pinnedWsClientOptionsMock = vi.fn(async () => ({
   rejectUnauthorized: true,
 }));
@@ -53,10 +54,12 @@ vi.mock("../src/pinned-ws.js", () => ({
 }));
 
 import { SecureClient } from "../src/secure-client.js";
-import { ConfigurationError } from "../src/verifier.js";
+import { ConfigurationError, AttestationError } from "../src/verifier.js";
+import { fetchAttestationBundle } from "../src/atc.js";
 
 beforeEach(() => {
   createPinnedWebSocketMock.mockClear();
+  vi.mocked(fetchAttestationBundle).mockClear();
 });
 
 describe("SecureClient.createWebSocket", () => {
@@ -105,6 +108,35 @@ describe("SecureClient.createWebSocket", () => {
       client.createWebSocket("wss://evil.example.com/v1/realtime"),
     ).rejects.toThrow(/bound to the verified enclave/);
     expect(createPinnedWebSocketMock).not.toHaveBeenCalled();
+  });
+
+  it("re-attests after a TLS pin failure", async () => {
+    const client = new SecureClient();
+    const socket = await client.createWebSocket("/v1/realtime?model=test-model");
+    expect(fetchAttestationBundle).toHaveBeenCalledTimes(1);
+
+    // A stale pin (enclave rotated its TLS key) surfaces as an `error` event;
+    // the client should drop its cached attestation so the next call re-attests.
+    socket.emit(
+      "error",
+      new AttestationError(
+        "TLS pinning failed: Server certificate public key does not match the attested key",
+      ),
+    );
+
+    await client.createWebSocket("/v1/realtime?model=test-model");
+    expect(fetchAttestationBundle).toHaveBeenCalledTimes(2);
+  });
+
+  it("keeps the cached attestation on an unrelated socket error", async () => {
+    const client = new SecureClient();
+    const socket = await client.createWebSocket("/v1/realtime?model=test-model");
+    expect(fetchAttestationBundle).toHaveBeenCalledTimes(1);
+
+    socket.emit("error", new Error("ECONNRESET"));
+
+    await client.createWebSocket("/v1/realtime?model=test-model");
+    expect(fetchAttestationBundle).toHaveBeenCalledTimes(1);
   });
 });
 
