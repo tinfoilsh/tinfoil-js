@@ -401,7 +401,8 @@ export class SecureClient {
    * Node.js only. Not supported with a proxy `baseURL`.
    *
    * The returned socket is a standard `ws` WebSocket in the CONNECTING state;
-   * pinning failures surface as an `error` event.
+   * pinning failures surface as an `error` event. A pin failure drops the cached
+   * attestation, so the next createWebSocket() re-attests and recovers.
    *
    * @param path - Path (and query) relative to the enclave URL, e.g.
    *   `/v1/realtime?model=voxtral-mini-4b-realtime`
@@ -435,6 +436,16 @@ export class SecureClient {
     }
 
     const { createPinnedWebSocket } = await import("./pinned-ws.js");
-    return createPinnedWebSocket(target.toString(), fingerprint, options);
+    const socket = await createPinnedWebSocket(target.toString(), fingerprint, options);
+
+    // The TLS key is cached only for performance; on a pin failure (e.g. the enclave
+    // rotated its key) drop it so the next call re-attests against the current key.
+    socket.once("error", (err: Error) => {
+      if (err instanceof AttestationError) {
+        this.reset();
+      }
+    });
+
+    return socket;
   }
 }
