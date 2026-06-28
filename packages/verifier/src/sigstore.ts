@@ -157,6 +157,18 @@ export async function verifySigstoreBundleWithPolicy(
 
     const bundle = bundleJson as any;
 
+    // SPEC §5.2: only the v0.3 single-certificate bundle layout is accepted.
+    // Reject the legacy v0.1/v0.2 layout, which conveys the signing cert under
+    // verificationMaterial.x509CertificateChain (and may also carry CA certs —
+    // a misuse vector the v0.3 single-certificate form avoids). Matches
+    // tinfoil-go / -rs.
+    if (bundle?.verificationMaterial?.x509CertificateChain) {
+      throw new AttestationError(
+        'BUNDLE_MALFORMED: legacy bundle format not supported: the ' +
+          'x509CertificateChain layout requires the v0.3 single-certificate form'
+      );
+    }
+
     const certPolicy = new AllOf([
       new WrappedOIDCIssuer(policy.oidcIssuer),
       new WrappedGitHubWorkflowRepository(policy.workflowRepository),
