@@ -127,7 +127,8 @@ export function capabilities(): Capabilities {
       scts_count_distinguish_missing_vs_duplicate: true,
       rejects_duplicate_sct_log: true,
       checks_only_subject_0: true,
-      in_toto_statement_tolerates_extra_fields: true,
+      // rejects statements with unknown top-level fields (SPEC §5.4), matching go
+      in_toto_statement_tolerates_extra_fields: false,
     } as any,
     measurement: {
       // tinfoil-js's compareMeasurements only handles same-type and MP↔SEV.
