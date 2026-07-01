@@ -190,6 +190,18 @@ export async function verifySigstoreBundleWithPolicy(
 
     const payload = JSON.parse(new TextDecoder().decode(payloadBytes));
 
+    // SPEC §5.4: the in-toto statement MUST contain only the recognized
+    // top-level fields; reject unknown ones, matching tinfoil-go/-rs/-py.
+    {
+      const allowed = new Set(['_type', 'subject', 'predicateType', 'predicate']);
+      const extra = Object.keys(payload).filter((k) => !allowed.has(k));
+      if (extra.length > 0) {
+        throw new AttestationError(
+          `BUNDLE_MALFORMED: in-toto statement has unknown top-level field(s): ${extra.sort().join(', ')}`
+        );
+      }
+    }
+
     const statementType: string | undefined = payload._type;
     if (
       policy.inTotoStatementTypesAllowed !== null &&
