@@ -57,6 +57,16 @@ export async function verifySigstoreBundle(
 
     const bundle = bundleJson as any;
 
+    // SPEC §5.2: only the v0.3 single-certificate bundle layout is accepted.
+    // Reject the legacy v0.1/v0.2 layout, which conveys the signing cert under
+    // verificationMaterial.x509CertificateChain (and may also carry CA certs —
+    // a misuse vector the v0.3 single-certificate form avoids).
+    if (bundle?.verificationMaterial?.x509CertificateChain) {
+      throw new AttestationError(
+        'Legacy x509CertificateChain bundle format is not supported; only the v0.3 single-certificate format is accepted'
+      );
+    }
+
     // Create policy for GitHub Actions certificate identity
     const policy = new AllOf([
       new OIDCIssuer(GITHUB_OIDC_ISSUER),
