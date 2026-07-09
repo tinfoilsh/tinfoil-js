@@ -24,25 +24,15 @@ describe('TDX End-to-End Attestation Verification', () => {
     );
 
     // MRTD
-    expect(result.measurement.registers[0]).toBe(
-      '7357a10d2e2724dffe68813e3cc4cfcde6814d749f2fb62e3953e54f6e0b50a219786afe2cd478f684b52c61837e1114'
-    );
+    expect(result.measurement.registers[0]).toBe(TDX_EXPECTED.registers[0]);
     // RTMR0
-    expect(result.measurement.registers[1]).toBe(
-      '18945fe4f04d952afb91035b74c2527e38458fd972bee01b7ba02004dc0f2fec2ec90825702956cb76f52f5c1d9f5021'
-    );
+    expect(result.measurement.registers[1]).toBe(TDX_EXPECTED.registers[1]);
     // RTMR1
-    expect(result.measurement.registers[2]).toBe(
-      '896d8b9138548e63779a121b8c2b1a087ddaa39901e1fd096319ff0005b9699fe04dd13adb33063a1d65dd4bcdc2f5b1'
-    );
+    expect(result.measurement.registers[2]).toBe(TDX_EXPECTED.registers[2]);
     // RTMR2
-    expect(result.measurement.registers[3]).toBe(
-      '96a980ecd429079996c94413bc4c4c2bfcf652d626b6daf2a520206ead5065dd53001c2b583a5fbe41921581e25f669c'
-    );
+    expect(result.measurement.registers[3]).toBe(TDX_EXPECTED.registers[3]);
     // RTMR3 (all zeros)
-    expect(result.measurement.registers[4]).toBe(
-      '000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000'
-    );
+    expect(result.measurement.registers[4]).toBe(TDX_EXPECTED.registers[4]);
   });
 
   it('rejects unsupported format', async () => {
