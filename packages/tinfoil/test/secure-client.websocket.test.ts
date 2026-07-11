@@ -54,7 +54,7 @@ vi.mock("../src/pinned-ws.js", () => ({
 }));
 
 import { SecureClient } from "../src/secure-client.js";
-import { ConfigurationError, AttestationError } from "../src/verifier.js";
+import { AttestationError } from "../src/verifier.js";
 import { fetchAttestationBundle } from "../src/atc.js";
 
 beforeEach(() => {
@@ -89,17 +89,17 @@ describe("SecureClient.createWebSocket", () => {
     );
   });
 
-  it("rejects when a proxy baseURL is configured", async () => {
+  it("connects directly to the enclave when a proxy baseURL is configured", async () => {
     const client = new SecureClient({
       baseURL: "https://proxy.example.com/v1/",
     });
-    await expect(client.createWebSocket("/v1/realtime")).rejects.toThrow(
-      ConfigurationError,
+    await client.createWebSocket("/v1/realtime");
+
+    expect(createPinnedWebSocketMock).toHaveBeenCalledWith(
+      "wss://enclave.example.com/v1/realtime",
+      MOCK_FINGERPRINT,
+      undefined,
     );
-    await expect(client.createWebSocket("/v1/realtime")).rejects.toThrow(
-      /proxy baseURL/,
-    );
-    expect(createPinnedWebSocketMock).not.toHaveBeenCalled();
   });
 
   it("rejects absolute URLs pointing at another host", async () => {
@@ -149,12 +149,13 @@ describe("SecureClient.getPinnedWebSocketOptions", () => {
     expect(options).toEqual({ rejectUnauthorized: true });
   });
 
-  it("rejects when a proxy baseURL is configured", async () => {
+  it("returns pinned options when a proxy baseURL is configured", async () => {
     const client = new SecureClient({
       baseURL: "https://proxy.example.com/v1/",
     });
-    await expect(client.getPinnedWebSocketOptions()).rejects.toThrow(
-      ConfigurationError,
-    );
+    await expect(client.getPinnedWebSocketOptions()).resolves.toEqual({
+      rejectUnauthorized: true,
+    });
+    expect(pinnedWsClientOptionsMock).toHaveBeenCalledWith(MOCK_FINGERPRINT);
   });
 });

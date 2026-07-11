@@ -32,8 +32,8 @@ export type TransportMode = 'ehbp' | 'tls';
 export interface SecureClientOptions {
   /**
    * Override the base URL for API requests.
-   * When set, requests are sent to this URL instead of directly to the enclave.
-   * Useful for proxying requests through your own backend.
+   * This may be a proxy URL when using EHBP or a custom path on the enclave
+   * origin when using TLS pinning.
    * @see https://docs.tinfoil.sh/guides/proxy-server
    */
   baseURL?: string;
@@ -136,24 +136,27 @@ export class SecureClient {
   private attestedTlsPublicKeyFingerprint?: string;
 
   constructor(options: SecureClientOptions = {}) {
-    // Validate every provided URL, including the empty string: URL resolution
+    // Validate provided URLs, including the empty string: URL resolution
     // keeps "" (via ??) rather than falling back, so an unguarded empty value
     // would surface later as a confusing "Invalid URL" instead of a clear error.
+    if (options.baseURL !== undefined) {
+      let baseURL: URL;
+      try {
+        baseURL = new URL(options.baseURL);
+      } catch (cause) {
+        throw new ConfigurationError(`baseURL must be a valid HTTP(S) URL. Got: ${options.baseURL}`, {
+          cause: cause as Error,
+        });
+      }
+      if (baseURL.protocol !== "http:" && baseURL.protocol !== "https:") {
+        throw new ConfigurationError(`baseURL must be a valid HTTP(S) URL. Got: ${options.baseURL}`);
+      }
+    }
     if (options.enclaveURL !== undefined && !options.enclaveURL.startsWith("https://")) {
       throw new ConfigurationError(`enclaveURL must use HTTPS. Got: ${options.enclaveURL}`);
     }
-    // A proxy base URL and the attestation bundle URL both carry security-critical
-    // traffic (plaintext headers and the entire trust root), so they must be HTTPS.
-    if (options.baseURL !== undefined && !options.baseURL.startsWith("https://")) {
-      throw new ConfigurationError(`baseURL must use HTTPS. Got: ${options.baseURL}`);
-    }
     if (options.attestationBundleURL !== undefined && !options.attestationBundleURL.startsWith("https://")) {
       throw new ConfigurationError(`attestationBundleURL must use HTTPS. Got: ${options.attestationBundleURL}`);
-    }
-    // Routing through a proxy base URL relies on EHBP sealing the body to the
-    // enclave; TLS certificate pinning would reject the proxy's certificate.
-    if (options.baseURL && options.transport === 'tls') {
-      throw new ConfigurationError("baseURL is only supported with the 'ehbp' transport");
     }
     if (options.configRepo && !options.enclaveURL) {
       throw new ConfigurationError("configRepo requires enclaveURL — without it, ATC always uses the default router repo.");
@@ -247,8 +250,16 @@ export class SecureClient {
     // Resolve enclaveURL: user-provided config takes precedence, otherwise from bundle
     this.resolvedEnclaveURL = this.config.enclaveURL ?? `https://${bundle.domain}`;
 
-    // Resolve baseURL: user-provided config (proxy) takes precedence, otherwise from enclave
-    this.resolvedBaseURL = this.config.baseURL ?? `${this.resolvedEnclaveURL}/v1/`;
+    // Resolve baseURL: user-provided config takes precedence, otherwise use the enclave API
+    this.resolvedBaseURL = this.config.baseURL ?? this.getEnclaveBaseURL();
+
+    if (
+      this.config.transport === 'tls' &&
+      this.config.baseURL &&
+      new URL(this.resolvedBaseURL!).origin !== new URL(this.resolvedEnclaveURL).origin
+    ) {
+      throw new ConfigurationError("TLS transport requires baseURL to use the verified enclave origin");
+    }
 
     const verifier = new Verifier({
       configRepo: this.config.configRepo,
@@ -288,6 +299,13 @@ export class SecureClient {
    */
   public getEnclaveURL(): string | undefined {
     return this.resolvedEnclaveURL;
+  }
+
+  /**
+   * Get the direct API base URL of the enclave, or undefined before ready().
+   */
+  public getEnclaveBaseURL(): string | undefined {
+    return this.resolvedEnclaveURL ? `${this.resolvedEnclaveURL}/v1/` : undefined;
   }
 
   private async createTransport(hpkePublicKey?: string, tlsPublicKeyFingerprint?: string): Promise<SecureTransport> {
@@ -355,8 +373,8 @@ export class SecureClient {
    *
    * WebSockets can't be covered by EHBP (it only seals HTTP bodies), so they
    * are secured by connecting directly to the enclave with the TLS connection
-   * pinned to the attested key. That rules out browsers (no TLS cert access)
-   * and proxy baseURLs (the proxy's certificate would not match the pin).
+   * pinned to the attested key. That rules out browsers, which do not expose
+   * TLS certificate details.
    */
   private async requireWebSocketCapability(): Promise<string> {
     if (isRealBrowser()) {
@@ -365,14 +383,6 @@ export class SecureClient {
         "expose TLS certificate details, so the connection cannot be pinned to the attested enclave key."
       );
     }
-    if (this.config.baseURL) {
-      throw new ConfigurationError(
-        "WebSockets are not supported with a proxy baseURL: the connection is pinned to the " +
-        "enclave's attested TLS key, which a TLS-terminating proxy cannot present. " +
-        "Use a client without baseURL for realtime connections."
-      );
-    }
-
     await this.ready();
 
     if (!this.attestedTlsPublicKeyFingerprint) {
@@ -398,7 +408,7 @@ export class SecureClient {
    * Opens a WebSocket to the verified enclave with the TLS connection pinned
    * to the attested enclave key.
    *
-   * Node.js only. Not supported with a proxy `baseURL`.
+   * Node.js only. Connections are made directly to the verified enclave.
    *
    * The returned socket is a standard `ws` WebSocket in the CONNECTING state;
    * pinning failures surface as an `error` event. A pin failure drops the cached

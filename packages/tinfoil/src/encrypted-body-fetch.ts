@@ -24,10 +24,6 @@ async function createIdentityFromPublicKeyHex(publicKeyHex: string): Promise<Ide
 export async function getServerIdentity(enclaveURL: string): Promise<Identity> {
   const keysURL = new URL(PROTOCOL.KEYS_PATH, enclaveURL);
 
-  if (keysURL.protocol !== 'https:') {
-    throw new ConfigurationError(`HTTPS is required for key retrieval. Got ${keysURL.protocol}`);
-  }
-
   const response = await fetch(keysURL.toString());
 
   if (!response.ok) {
@@ -98,9 +94,6 @@ const ENCLAVE_URL_HEADER = 'X-Tinfoil-Enclave-Url';
 
 export function createEncryptedBodyFetch(baseURL: string, hpkePublicKey: string, enclaveURL?: string): SecureTransport {
   const base = new URL(baseURL);
-  if (base.protocol !== 'https:') {
-    throw new ConfigurationError(`baseURL must use HTTPS. Got: ${baseURL}`);
-  }
   const baseOrigin = base.origin;
   const needsEnclaveHeader = !!enclaveURL && new URL(enclaveURL).origin !== baseOrigin;
 
