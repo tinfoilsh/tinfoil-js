@@ -34,6 +34,7 @@ const verifyMock = vi.fn(async () => ({
 
 const mockFetch = vi.fn(async () => new Response(null));
 const createSecureFetchMock = vi.fn(async () => ({ fetch: mockFetch, getSessionRecoveryToken: vi.fn() }));
+const createPinnedRealtimeWSMock = vi.fn(async () => ({}));
 
 vi.mock("../src/verifier.js", () => ({
   Verifier: class {
@@ -69,6 +70,10 @@ vi.mock("../src/verifier.js", () => ({
 
 vi.mock("../src/secure-fetch.js", () => ({
   createSecureFetch: createSecureFetchMock,
+}));
+
+vi.mock("../src/realtime.js", () => ({
+  createPinnedRealtimeWS: createPinnedRealtimeWSMock,
 }));
 
 vi.mock("../src/atc.js", () => ({
@@ -113,6 +118,25 @@ describe("Secure transport integration", () => {
     const provider = await createTinfoilAI("api-key");
 
     expect(provider).toBeTruthy();
+  });
+
+  it("connects realtime sessions directly to the enclave when using a proxy", async () => {
+    const { TinfoilAI } = await import("../src/tinfoil-ai");
+    const client = new TinfoilAI({
+      apiKey: "test",
+      baseURL: "http://localhost:3000/v1/",
+    });
+
+    await client.realtime({ model: "test-model" });
+
+    expect(createPinnedRealtimeWSMock).toHaveBeenCalledWith(
+      { model: "test-model" },
+      {
+        apiKey: "test",
+        baseURL: "https://test-router.tinfoil.sh/v1/",
+      },
+      expect.any(Object),
+    );
   });
 
   it("TinfoilAI throws when no API key is available (no env var)", async () => {

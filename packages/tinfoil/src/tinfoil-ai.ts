@@ -215,7 +215,7 @@ export class TinfoilAI {
    * Returns an `OpenAIRealtimeWS` from the OpenAI SDK, connected to the
    * enclave with the TLS connection pinned to the attested enclave key.
    *
-   * Node.js only. Not supported with a proxy `baseURL`.
+   * Node.js only. Connections are made directly to the verified enclave.
    *
    * @example
    * ```typescript
@@ -230,7 +230,7 @@ export class TinfoilAI {
     const { createPinnedRealtimeWS } = await import("./realtime.js");
     return createPinnedRealtimeWS(
       props,
-      { apiKey: client.apiKey as string, baseURL: client.baseURL },
+      { apiKey: client.apiKey as string, baseURL: this.secureClient.getEnclaveBaseURL()! },
       pinnedOptions,
     );
   }

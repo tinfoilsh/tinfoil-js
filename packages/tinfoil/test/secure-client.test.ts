@@ -26,21 +26,17 @@ const mockVerificationDocument = {
 };
 
 const verifyMock = vi.fn(async () => ({
-  tlsPublicKeyFingerprint: undefined,
+  tlsPublicKeyFingerprint: "mock-tls-public-key-fingerprint",
   hpkePublicKey: "mock-hpke-public-key",
   measurement: { type: MOCK_MEASUREMENT_TYPE, registers: [] },
 }));
 
 const mockFetch = vi.fn(async () => new Response(JSON.stringify({ message: "success" })));
 const mockGetSessionRecoveryToken = vi.fn(async () => ({ exportedSecret: new Uint8Array(), requestEnc: new Uint8Array() }));
-const createSecureFetchMock = vi.fn(
-  async (_baseURL: string, hpkePublicKey: string | undefined) => {
-    if (hpkePublicKey) {
-      return { fetch: mockFetch, getSessionRecoveryToken: mockGetSessionRecoveryToken };
-    }
-    throw new Error("TLS-only verification not supported in tests");
-  },
-);
+const createSecureFetchMock = vi.fn(async () => ({
+  fetch: mockFetch,
+  getSessionRecoveryToken: mockGetSessionRecoveryToken,
+}));
 
 vi.mock("../src/verifier.js", () => ({
   Verifier: class {
@@ -301,12 +297,14 @@ describe("SecureClient", () => {
       await client.ready();
       expect(client.getBaseURL()).toBe("https://test-router.tinfoil.sh/v1/");
       expect(client.getEnclaveURL()).toBe("https://test-router.tinfoil.sh");
+      expect(client.getEnclaveBaseURL()).toBe("https://test-router.tinfoil.sh/v1/");
 
       client.reset();
 
       // Derived state should be cleared
       expect(client.getBaseURL()).toBeUndefined();
       expect(client.getEnclaveURL()).toBeUndefined();
+      expect(client.getEnclaveBaseURL()).toBeUndefined();
 
       await client.ready();
 
@@ -464,12 +462,33 @@ describe("SecureClient", () => {
       }).toThrow("attestationBundleURL must use HTTPS");
     });
 
-    it("should throw ConfigurationError when baseURL is combined with the tls transport", async () => {
+    it("should allow TLS transport with a baseURL on the enclave origin", async () => {
       const { SecureClient } = await import("../src/secure-client");
 
-      expect(() => {
-        new SecureClient({ baseURL: "https://proxy.example.com", transport: "tls" });
-      }).toThrow("baseURL is only supported with the 'ehbp' transport");
+      const client = new SecureClient({
+        baseURL: "https://test-router.tinfoil.sh/custom/",
+        transport: "tls",
+      });
+      await expect(client.ready()).resolves.toBeUndefined();
+      expect(createSecureFetchMock).toHaveBeenCalledWith(
+        "https://test-router.tinfoil.sh/custom/",
+        undefined,
+        "mock-tls-public-key-fingerprint",
+        "https://test-router.tinfoil.sh",
+      );
+    });
+
+    it("should reject TLS transport with a proxy baseURL", async () => {
+      const { SecureClient } = await import("../src/secure-client");
+
+      const client = new SecureClient({
+        baseURL: "https://proxy.example.com",
+        transport: "tls",
+      });
+      await expect(client.ready()).rejects.toThrow(
+        "TLS transport requires baseURL to use the verified enclave origin",
+      );
+      expect(createSecureFetchMock).not.toHaveBeenCalled();
     });
 
     it("should throw ConfigurationError for an empty enclaveURL", async () => {

@@ -4,10 +4,23 @@ import { Identity, PROTOCOL } from "ehbp";
 
 describe("encrypted-body-fetch", () => {
   describe("getServerIdentity", () => {
-    it("rejects non-HTTPS URLs", async () => {
-      await expect(getServerIdentity("http://example.com/v1")).rejects.toThrow(
-        /HTTPS is required for key retrieval/
-      );
+    it("retrieves keys from a non-HTTPS URL", async () => {
+      const mockIdentity = await Identity.generate();
+      const publicConfig = await mockIdentity.marshalConfig();
+      const fetchMock = vi.fn(async () => new Response(publicConfig as unknown as BodyInit, {
+        status: 200,
+        headers: { "content-type": PROTOCOL.KEYS_MEDIA_TYPE },
+      }));
+
+      const originalFetch = globalThis.fetch;
+      globalThis.fetch = fetchMock as typeof fetch;
+
+      try {
+        await expect(getServerIdentity("http://localhost:3000/v1")).resolves.toBeInstanceOf(Identity);
+        expect(fetchMock).toHaveBeenCalledWith("http://localhost:3000/.well-known/hpke-keys");
+      } finally {
+        globalThis.fetch = originalFetch;
+      }
     });
 
     it("rejects invalid content-type", async () => {
@@ -272,7 +285,7 @@ describe("encrypted-body-fetch", () => {
         return new Response("ok");
       }) as typeof fetch;
 
-      const transport = createUnverifiedEncryptedBodyFetch("https://api.example.com");
+      const transport = createUnverifiedEncryptedBodyFetch("http://api.example.com");
       await transport.fetch("/test");
 
       expect(keyFetched).toBe(true);

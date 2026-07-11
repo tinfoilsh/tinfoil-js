@@ -24,10 +24,6 @@ async function createIdentityFromPublicKeyHex(publicKeyHex: string): Promise<Ide
 export async function getServerIdentity(enclaveURL: string): Promise<Identity> {
   const keysURL = new URL(PROTOCOL.KEYS_PATH, enclaveURL);
 
-  if (keysURL.protocol !== 'https:') {
-    throw new ConfigurationError(`HTTPS is required for key retrieval. Got ${keysURL.protocol}`);
-  }
-
   const response = await fetch(keysURL.toString());
 
   if (!response.ok) {
