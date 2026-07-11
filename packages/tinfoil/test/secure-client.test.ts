@@ -454,6 +454,17 @@ describe("SecureClient", () => {
       }).not.toThrow();
     });
 
+    it.each(["", "not a URL", "ftp://proxy.example.com"])(
+      "should throw ConfigurationError for invalid baseURL %j",
+      async (baseURL) => {
+        const { SecureClient } = await import("../src/secure-client");
+
+        expect(() => {
+          new SecureClient({ baseURL });
+        }).toThrow("baseURL must be a valid HTTP(S) URL");
+      },
+    );
+
     it("should throw ConfigurationError when attestationBundleURL is not HTTPS", async () => {
       const { SecureClient } = await import("../src/secure-client");
 

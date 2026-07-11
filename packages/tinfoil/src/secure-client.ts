@@ -136,9 +136,22 @@ export class SecureClient {
   private attestedTlsPublicKeyFingerprint?: string;
 
   constructor(options: SecureClientOptions = {}) {
-    // Validate security-critical URLs, including the empty string: URL resolution
+    // Validate provided URLs, including the empty string: URL resolution
     // keeps "" (via ??) rather than falling back, so an unguarded empty value
     // would surface later as a confusing "Invalid URL" instead of a clear error.
+    if (options.baseURL !== undefined) {
+      let baseURL: URL;
+      try {
+        baseURL = new URL(options.baseURL);
+      } catch (cause) {
+        throw new ConfigurationError(`baseURL must be a valid HTTP(S) URL. Got: ${options.baseURL}`, {
+          cause: cause as Error,
+        });
+      }
+      if (baseURL.protocol !== "http:" && baseURL.protocol !== "https:") {
+        throw new ConfigurationError(`baseURL must be a valid HTTP(S) URL. Got: ${options.baseURL}`);
+      }
+    }
     if (options.enclaveURL !== undefined && !options.enclaveURL.startsWith("https://")) {
       throw new ConfigurationError(`enclaveURL must use HTTPS. Got: ${options.enclaveURL}`);
     }
