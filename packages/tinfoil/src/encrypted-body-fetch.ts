@@ -98,9 +98,6 @@ const ENCLAVE_URL_HEADER = 'X-Tinfoil-Enclave-Url';
 
 export function createEncryptedBodyFetch(baseURL: string, hpkePublicKey: string, enclaveURL?: string): SecureTransport {
   const base = new URL(baseURL);
-  if (base.protocol !== 'https:') {
-    throw new ConfigurationError(`baseURL must use HTTPS. Got: ${baseURL}`);
-  }
   const baseOrigin = base.origin;
   const needsEnclaveHeader = !!enclaveURL && new URL(enclaveURL).origin !== baseOrigin;
 

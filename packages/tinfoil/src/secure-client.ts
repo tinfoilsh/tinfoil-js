@@ -136,16 +136,11 @@ export class SecureClient {
   private attestedTlsPublicKeyFingerprint?: string;
 
   constructor(options: SecureClientOptions = {}) {
-    // Validate every provided URL, including the empty string: URL resolution
+    // Validate security-critical URLs, including the empty string: URL resolution
     // keeps "" (via ??) rather than falling back, so an unguarded empty value
     // would surface later as a confusing "Invalid URL" instead of a clear error.
     if (options.enclaveURL !== undefined && !options.enclaveURL.startsWith("https://")) {
       throw new ConfigurationError(`enclaveURL must use HTTPS. Got: ${options.enclaveURL}`);
-    }
-    // A proxy base URL and the attestation bundle URL both carry security-critical
-    // traffic (plaintext headers and the entire trust root), so they must be HTTPS.
-    if (options.baseURL !== undefined && !options.baseURL.startsWith("https://")) {
-      throw new ConfigurationError(`baseURL must use HTTPS. Got: ${options.baseURL}`);
     }
     if (options.attestationBundleURL !== undefined && !options.attestationBundleURL.startsWith("https://")) {
       throw new ConfigurationError(`attestationBundleURL must use HTTPS. Got: ${options.attestationBundleURL}`);

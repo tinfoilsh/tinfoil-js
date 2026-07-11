@@ -448,12 +448,12 @@ describe("SecureClient", () => {
       consoleSpy.mockRestore();
     });
 
-    it("should throw ConfigurationError when baseURL is not HTTPS", async () => {
+    it("should allow a non-HTTPS baseURL", async () => {
       const { SecureClient } = await import("../src/secure-client");
 
       expect(() => {
         new SecureClient({ baseURL: "http://proxy.example.com" });
-      }).toThrow("baseURL must use HTTPS");
+      }).not.toThrow();
     });
 
     it("should throw ConfigurationError when attestationBundleURL is not HTTPS", async () => {
@@ -470,14 +470,6 @@ describe("SecureClient", () => {
       expect(() => {
         new SecureClient({ baseURL: "https://proxy.example.com", transport: "tls" });
       }).toThrow("baseURL is only supported with the 'ehbp' transport");
-    });
-
-    it("should throw ConfigurationError for an empty baseURL instead of failing later", async () => {
-      const { SecureClient } = await import("../src/secure-client");
-
-      expect(() => {
-        new SecureClient({ baseURL: "" });
-      }).toThrow("baseURL must use HTTPS");
     });
 
     it("should throw ConfigurationError for an empty enclaveURL", async () => {

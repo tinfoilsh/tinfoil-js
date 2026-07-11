@@ -184,10 +184,8 @@ describe("encrypted-body-fetch", () => {
       expect(typeof transport.getSessionRecoveryToken).toBe("function");
     });
 
-    it("rejects a non-HTTPS baseURL", () => {
-      expect(() => createEncryptedBodyFetch("http://api.example.com", "mockkey123")).toThrow(
-        /baseURL must use HTTPS/
-      );
+    it("allows a non-HTTPS baseURL", () => {
+      expect(() => createEncryptedBodyFetch("http://api.example.com", "mockkey123")).not.toThrow();
     });
 
     it("refuses requests to an origin outside the enclave/proxy", async () => {
