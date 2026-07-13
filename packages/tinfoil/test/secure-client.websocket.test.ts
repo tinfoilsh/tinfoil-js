@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { EventEmitter } from "events";
 
 const MOCK_MEASUREMENT_TYPE = "https://tinfoil.sh/predicate/sev-snp-guest/v2";
@@ -60,6 +60,12 @@ import { fetchAttestationBundle } from "../src/atc.js";
 beforeEach(() => {
   createPinnedWebSocketMock.mockClear();
   vi.mocked(fetchAttestationBundle).mockClear();
+  // Pin the user cache secret so client init never touches ~/.tinfoil.
+  vi.stubEnv("TINFOIL_USER_CACHE_SECRET", "test-secret");
+});
+
+afterEach(() => {
+  vi.unstubAllEnvs();
 });
 
 describe("SecureClient.createWebSocket", () => {

@@ -1,5 +1,6 @@
 import { Identity, Transport, PROTOCOL, type SessionRecoveryToken } from "ehbp";
 import { ConfigurationError, FetchError } from "./verifier.js";
+import { injectUserCacheSecretIntoRequestInit } from "./user-cache-secret.js";
 
 export type { SessionRecoveryToken } from "ehbp";
 export { decryptResponseWithToken } from "ehbp";
@@ -92,7 +93,7 @@ export async function encryptedBodyRequest(
 
 const ENCLAVE_URL_HEADER = 'X-Tinfoil-Enclave-Url';
 
-export function createEncryptedBodyFetch(baseURL: string, hpkePublicKey: string, enclaveURL?: string): SecureTransport {
+export function createEncryptedBodyFetch(baseURL: string, hpkePublicKey: string, enclaveURL?: string, userCacheSecret: string = ""): SecureTransport {
   const base = new URL(baseURL);
   const baseOrigin = base.origin;
   const needsEnclaveHeader = !!enclaveURL && new URL(enclaveURL).origin !== baseOrigin;
@@ -128,7 +129,14 @@ export function createEncryptedBodyFetch(baseURL: string, hpkePublicKey: string,
       if (needsEnclaveHeader) {
         headers.set(ENCLAVE_URL_HEADER, enclaveURL!);
       }
-      const initWithHeader = { ...normalized.init, headers };
+      // The prompt-cache scoping field is added here — inside the origin
+      // guard and before the EHBP transport seals the body — so it is
+      // encrypted with the rest of the request.
+      const initWithHeader = await injectUserCacheSecretIntoRequestInit(
+        { ...normalized.init, headers },
+        targetUrl.pathname,
+        userCacheSecret,
+      );
 
       const transportInstance = await getOrCreateTransport();
       return encryptedBodyRequest(targetUrl.toString(), hpkePublicKey, initWithHeader, transportInstance);

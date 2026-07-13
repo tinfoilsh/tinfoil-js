@@ -6,6 +6,7 @@ import { fileURLToPath } from "url";
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 const RUN_INTEGRATION = process.env.RUN_TINFOIL_INTEGRATION === "true";
+const TEST_USER_CACHE_SECRET = "javascript-live-integration-cache-secret";
 
 /**
  * Integration tests for the Tinfoil SDK.
@@ -24,7 +25,10 @@ describe("Examples Integration Tests", () => {
     const { TinfoilAI } = await import("../src/tinfoil-ai");
     const { SecureClient } = await import("../src/secure-client");
 
-    sharedTinfoilClient = new TinfoilAI({ apiKey: process.env.TINFOIL_API_KEY });
+    sharedTinfoilClient = new TinfoilAI({
+      apiKey: process.env.TINFOIL_API_KEY,
+      userCacheSecret: TEST_USER_CACHE_SECRET,
+    });
     sharedSecureClient = new SecureClient();
 
     // Attest both in parallel
@@ -35,7 +39,7 @@ describe("Examples Integration Tests", () => {
   });
 
   describe("Basic Chat Example", () => {
-    it.skipIf(!RUN_INTEGRATION)("should create a TinfoilAI client and make a chat completion request", async () => {
+    it.skipIf(!RUN_INTEGRATION)("should make a chat completion request with a cache secret", async () => {
       const completion = await sharedTinfoilClient.chat.completions.create({
         messages: [{ role: "user", content: "Hello!" }],
         model: "gpt-oss-120b",

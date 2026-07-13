@@ -1,3 +1,5 @@
+import type { SecureTransport } from "../src/encrypted-body-fetch";
+
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 const MOCK_MEASUREMENT_TYPE = "https://tinfoil.sh/predicate/sev-snp-guest/v1";
@@ -33,8 +35,16 @@ const verifyMock = vi.fn(async () => ({
 
 const mockFetch = vi.fn(async () => new Response(JSON.stringify({ message: "success" })));
 const mockGetSessionRecoveryToken = vi.fn(async () => ({ exportedSecret: new Uint8Array(), requestEnc: new Uint8Array() }));
-const createSecureFetchMock = vi.fn(async () => ({
-  fetch: mockFetch,
+const createSecureFetchMock = vi.fn<
+  (
+    baseURL: string,
+    hpkePublicKey?: string,
+    tlsPublicKeyFingerprint?: string,
+    enclaveURL?: string,
+    userCacheSecret?: string,
+  ) => Promise<SecureTransport>
+>(async () => ({
+  fetch: mockFetch as typeof fetch,
   getSessionRecoveryToken: mockGetSessionRecoveryToken,
 }));
 
@@ -95,6 +105,13 @@ vi.mock("../src/atc.js", () => ({
 describe("SecureClient", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    // Pin the user cache secret so transport creation resolves it from the
+    // environment instead of touching ~/.tinfoil.
+    vi.stubEnv("TINFOIL_USER_CACHE_SECRET", "test-secret");
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
   });
 
   it("should create a client and initialize securely", async () => {
@@ -113,6 +130,7 @@ describe("SecureClient", () => {
       "mock-hpke-public-key",
       undefined,
       "https://test-router.tinfoil.sh",
+      "test-secret",
     );
   });
 
@@ -486,6 +504,7 @@ describe("SecureClient", () => {
         undefined,
         "mock-tls-public-key-fingerprint",
         "https://test-router.tinfoil.sh",
+        "test-secret",
       );
     });
 
@@ -516,6 +535,38 @@ describe("SecureClient", () => {
       expect(() => {
         new SecureClient({ attestationBundleURL: "" });
       }).toThrow("attestationBundleURL must use HTTPS");
+    });
+  });
+
+  describe("userCacheSecret option", () => {
+    it("beats the environment variable", async () => {
+      const { SecureClient } = await import("../src/secure-client");
+
+      const client = new SecureClient({ userCacheSecret: "option-secret" });
+      await client.ready();
+
+      expect(createSecureFetchMock).toHaveBeenCalledWith(
+        "https://test-router.tinfoil.sh/v1/",
+        "mock-hpke-public-key",
+        undefined,
+        "https://test-router.tinfoil.sh",
+        "option-secret",
+      );
+    });
+
+    it("explicit empty disables injection despite the environment", async () => {
+      const { SecureClient } = await import("../src/secure-client");
+
+      const client = new SecureClient({ userCacheSecret: "" });
+      await client.ready();
+
+      expect(createSecureFetchMock).toHaveBeenCalledWith(
+        "https://test-router.tinfoil.sh/v1/",
+        "mock-hpke-public-key",
+        undefined,
+        "https://test-router.tinfoil.sh",
+        "",
+      );
     });
   });
 
@@ -579,6 +630,51 @@ describe("SecureClient", () => {
       expect(await response.json()).toEqual({ ok: true });
     });
 
+    it("should retry eligible requests with the injected cache secret", async () => {
+      const { SecureClient } = await import("../src/secure-client");
+      const { withUserCacheSecret } = await import("../src/user-cache-secret");
+      const { KeyConfigMismatchError } = await import("ehbp");
+
+      const firstAttempt = vi.fn(async () => {
+        throw new KeyConfigMismatchError("Key config mismatch");
+      }) as typeof fetch;
+      const recoveredAttempt = vi.fn(async () =>
+        new Response(JSON.stringify({ ok: true }))
+      ) as typeof fetch;
+      createSecureFetchMock
+        .mockImplementationOnce(async (baseURL, _hpke, _tls, _enclave, secret) => {
+          return {
+            fetch: withUserCacheSecret(firstAttempt, baseURL!, secret!),
+            getSessionRecoveryToken: mockGetSessionRecoveryToken,
+          };
+        })
+        .mockImplementationOnce(async (baseURL, _hpke, _tls, _enclave, secret) => {
+          return {
+            fetch: withUserCacheSecret(recoveredAttempt, baseURL!, secret!),
+            getSessionRecoveryToken: mockGetSessionRecoveryToken,
+          };
+        });
+
+      const client = new SecureClient({
+        baseURL: "https://test.example.com/",
+      });
+      const response = await client.fetch("/v1/chat/completions", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ model: "m" }),
+      });
+
+      expect(await response.json()).toEqual({ ok: true });
+      expect(firstAttempt).toHaveBeenCalledTimes(1);
+      expect(recoveredAttempt).toHaveBeenCalledTimes(1);
+      for (const [, init] of [
+        ...vi.mocked(firstAttempt).mock.calls,
+        ...vi.mocked(recoveredAttempt).mock.calls,
+      ]) {
+        expect(JSON.parse(init!.body as string).user_cache_secret).toBe("test-secret");
+      }
+    });
+
     it("should propagate non-KeyConfigMismatchError errors", async () => {
       const { SecureClient } = await import("../src/secure-client");
 
@@ -613,6 +709,7 @@ describe("SecureClient", () => {
         "mock-hpke-public-key",
         undefined,
         "https://test-router.tinfoil.sh",
+        "test-secret",
       );
     });
 
@@ -632,6 +729,7 @@ describe("SecureClient", () => {
         "mock-hpke-public-key",
         undefined,
         "https://test-router.tinfoil.sh",
+        "test-secret",
       );
     });
 
@@ -651,6 +749,7 @@ describe("SecureClient", () => {
         "mock-hpke-public-key",
         undefined,
         "https://my-enclave.example.com",
+        "test-secret",
       );
     });
 
@@ -671,6 +770,7 @@ describe("SecureClient", () => {
         "mock-hpke-public-key",
         undefined,
         "https://my-enclave.example.com",
+        "test-secret",
       );
     });
 

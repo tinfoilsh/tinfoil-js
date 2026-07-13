@@ -11,7 +11,8 @@
     "./dist/pinned-tls-fetch.js": "./dist/pinned-tls-fetch.browser.js",
     "./dist/pinned-ws.js": "./dist/pinned-ws.browser.js",
     "./dist/realtime.js": "./dist/realtime.browser.js",
-    "./dist/unsafe.js": "./dist/unsafe.browser.js"
+    "./dist/unsafe.js": "./dist/unsafe.browser.js",
+    "./dist/user-cache-secret-store.js": "./dist/user-cache-secret-store.browser.js"
   },
   "exports": {
     ".": {

@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 const MOCK_MEASUREMENT_TYPE = "https://tinfoil.sh/predicate/sev-snp-guest/v1";
 
@@ -90,6 +90,13 @@ vi.mock("../src/atc.js", () => ({
 describe("Secure transport integration", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    // Pin the user cache secret so transport creation resolves it from the
+    // environment instead of touching ~/.tinfoil.
+    vi.stubEnv("TINFOIL_USER_CACHE_SECRET", "test-secret");
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
   });
 
   it("configures the OpenAI SDK to use the encrypted body transport", async () => {
@@ -109,7 +116,8 @@ describe("Secure transport integration", () => {
       testBaseURL,
       "mock-hpke-public-key",
       undefined,
-      "https://test-router.tinfoil.sh"
+      "https://test-router.tinfoil.sh",
+      "test-secret"
     );
   });
 

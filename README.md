@@ -153,6 +153,36 @@ const transport = new DefaultChatTransport({
 
 See the [Vercel AI Browser SDK Example](packages/tinfoil/examples/ai-sdk-react/) for complete React patterns with `useChat`, context providers, and error handling.
 
+## Prompt Cache Scoping
+
+The inference router partitions its prompt cache per API identity, so your cached prompts are never observable by other tenants. Within your tenant, the SDK scopes caching further with a `user_cache_secret`: requests carrying the same secret share cached prompt prefixes, requests carrying different secrets cannot observe each other's cache timing. The secret never reaches the model — the router consumes it to derive the cache namespace and strips it from the request.
+
+By default the SDK generates a random secret and persists it at `~/.tinfoil/user_cache_secret` (mode `0600`, shared with the other Tinfoil SDKs on the same machine), so caching just works with per-machine scoping. You can control it explicitly:
+
+```typescript
+// Pin the secret for this client (e.g. one stable value per end user).
+// SecureClient and createTinfoilAI accept the same option.
+const client = new TinfoilAI({ userCacheSecret: secret });
+
+// Or provision it via the environment (Node.js)
+//   TINFOIL_USER_CACHE_SECRET=<secret>   use this value
+//   TINFOIL_USER_CACHE_SECRET=           (set but empty) disable: tenant-wide caching
+
+// Servers that hold many end users' conversations should scope per request;
+// a `user_cache_secret` field set in the request body always wins over the
+// client-level secret:
+const completion = await client.chat.completions.create({
+  model: "llama3-3-70b",
+  messages: [{ role: "user", content: "Hello!" }],
+  user_cache_secret: perUserSecret,
+} as TinfoilAI.Chat.ChatCompletionCreateParams);
+
+// Opt out entirely (tenant-wide caching, no file written)
+const optedOut = new TinfoilAI({ userCacheSecret: "" });
+```
+
+If the secret cannot be persisted (no home directory, read-only filesystem, or a browser — browsers have no filesystem), the SDK falls back to an in-memory secret and warns once: cache continuity then resets on every restart. Containerized deployments should set `TINFOIL_USER_CACHE_SECRET` explicitly — one value per end user if requests are per-user, or empty to keep tenant-wide caching across replicas.
+
 ## How Verification Works
 
 When you create a client, the SDK **automatically**:
