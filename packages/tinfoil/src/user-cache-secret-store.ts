@@ -144,8 +144,7 @@ export function loadOrPersistUserCacheSecret(generateSecret: () => string): stri
 
   const secret = generateSecret();
   if (secret === "") {
-    // CSPRNG failure (the generator already warned): tenant-wide caching,
-    // nothing worth persisting.
+    // The generator already reported the CSPRNG failure.
     return "";
   }
 

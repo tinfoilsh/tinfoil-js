@@ -166,22 +166,18 @@ const client = new TinfoilAI({ userCacheSecret: secret });
 
 // Or provision it via the environment (Node.js)
 //   TINFOIL_USER_CACHE_SECRET=<secret>   use this value
-//   TINFOIL_USER_CACHE_SECRET=           (set but empty) disable: tenant-wide caching
 
 // Servers that hold many end users' conversations should scope per request;
-// a `user_cache_secret` field set in the request body always wins over the
+// a non-empty `user_cache_secret` field set in the request body wins over the
 // client-level secret:
 const completion = await client.chat.completions.create({
   model: "llama3-3-70b",
   messages: [{ role: "user", content: "Hello!" }],
   user_cache_secret: perUserSecret,
 } as TinfoilAI.Chat.ChatCompletionCreateParams);
-
-// Opt out entirely (tenant-wide caching, no file written)
-const optedOut = new TinfoilAI({ userCacheSecret: "" });
 ```
 
-If the secret cannot be persisted (no home directory, read-only filesystem, or a browser — browsers have no filesystem), the SDK falls back to an in-memory secret and warns once: cache continuity then resets on every restart. Containerized deployments should set `TINFOIL_USER_CACHE_SECRET` explicitly — one value per end user if requests are per-user, or empty to keep tenant-wide caching across replicas.
+Empty client or environment values are treated as unset. If the secret cannot be persisted (no home directory, read-only filesystem, or a browser — browsers have no filesystem), the SDK falls back to an in-memory secret and warns once: cache continuity then resets on every restart. Containerized deployments should set `TINFOIL_USER_CACHE_SECRET` to a stable non-empty value wherever cache sharing is intended.
 
 ## How Verification Works
 

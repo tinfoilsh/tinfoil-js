@@ -101,9 +101,9 @@ export interface TinfoilAIOptions {
    * Secret scoping the router's prompt cache for this client's requests
    * (e.g. one stable value per end user). Defaults to the
    * TINFOIL_USER_CACHE_SECRET environment variable, otherwise to a generated
-   * secret persisted at `~/.tinfoil/user_cache_secret`. Pass an empty string
-   * to disable prompt-cache scoping (tenant-wide caching). A
-   * `user_cache_secret` field set in a request body always wins.
+   * secret persisted at `~/.tinfoil/user_cache_secret`. Empty values are
+   * treated as unset. A non-empty `user_cache_secret` field set in a request
+   * body always wins.
    */
   userCacheSecret?: string;
 

@@ -67,10 +67,9 @@ export interface SecureClientOptions {
    *
    * Defaults to the TINFOIL_USER_CACHE_SECRET environment variable when set,
    * otherwise to a generated secret persisted at `~/.tinfoil/user_cache_secret`
-   * (shared with the other Tinfoil SDKs on the same machine). Pass an empty
-   * string to disable prompt-cache scoping entirely (tenant-wide caching).
-   * A `user_cache_secret` field already present in a request body always
-   * wins over this option.
+   * (shared with the other Tinfoil SDKs on the same machine). Empty values are
+   * treated as unset. A non-empty `user_cache_secret` field already present in
+   * a request body wins over this option.
    */
   userCacheSecret?: string;
 }
@@ -331,7 +330,7 @@ export class SecureClient {
     // The prompt-cache scoping secret: the userCacheSecret option wins, then
     // the TINFOIL_USER_CACHE_SECRET environment variable, then the secret
     // persisted at ~/.tinfoil/user_cache_secret (generated on first use).
-    // Empty means disabled; resolution never throws.
+    // Empty values fall through to the persisted or generated default.
     const userCacheSecret = await resolveUserCacheSecret(this.config.userCacheSecret);
 
     if (this.config.transport === 'tls') {

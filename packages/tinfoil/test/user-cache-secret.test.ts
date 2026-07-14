@@ -142,9 +142,9 @@ describe("resolveUserCacheSecret", () => {
     await expect(resolveUserCacheSecret("explicit")).resolves.toBe("explicit");
   });
 
-  it("explicit empty counts as set: disables provisioning even with the environment set", async () => {
+  it("treats an explicit empty value as unset", async () => {
     vi.stubEnv("TINFOIL_USER_CACHE_SECRET", "from-env");
-    await expect(resolveUserCacheSecret("")).resolves.toBe("");
+    await expect(resolveUserCacheSecret("")).resolves.toBe("from-env");
   });
 
   it("environment beats generation and touches no file", async () => {
@@ -158,15 +158,12 @@ describe("resolveUserCacheSecret", () => {
     ).toBe(false);
   });
 
-  it("environment set but empty disables generation and touches no file", async () => {
+  it("treats an empty environment value as unset", async () => {
     const home = stubTempHome();
     vi.stubEnv("TINFOIL_USER_CACHE_SECRET", "");
 
-    await expect(resolveUserCacheSecret()).resolves.toBe("");
-    expect(
-      existsSync(join(home, USER_CACHE_SECRET_DIR_NAME)),
-      "a disabled secret must not create the secret file",
-    ).toBe(false);
+    await expect(resolveUserCacheSecret()).resolves.toMatch(/^[0-9a-f]{64}$/);
+    expect(existsSync(join(home, USER_CACHE_SECRET_DIR_NAME))).toBe(true);
   });
 
   it("generates a 256-bit hex secret, persists it at 0600, and reuses it", async () => {
@@ -408,7 +405,7 @@ describe("withUserCacheSecret", () => {
     expect(calls[0].init).toBe(init);
   });
 
-  it("an empty secret disables injection entirely", async () => {
+  it("does not inject when secret resolution is unavailable", async () => {
     const { calls, fetch: inner } = captureFetch();
     const secureFetch = withUserCacheSecret(inner, BASE_URL, "");
     expect(secureFetch).toBe(inner);
@@ -420,8 +417,8 @@ describe("withUserCacheSecret", () => {
 
   it.each([
     ["explicit per-request secret", '{"model":"m","user_cache_secret":"end-user-7"}'],
-    ["explicit empty opt-out", '{"model":"m","user_cache_secret":""}'],
-  ])("never clobbers a pre-existing field: %s", async (_name, raw) => {
+    ["explicit null", '{"model":"m","user_cache_secret":null}'],
+  ])("never clobbers a non-empty or non-string field: %s", async (_name, raw) => {
     const { calls, fetch: inner } = captureFetch();
     const secureFetch = withUserCacheSecret(inner, BASE_URL, "client-level");
 
@@ -430,6 +427,25 @@ describe("withUserCacheSecret", () => {
       calls[0].init!.body,
       "a body that already carries the field must pass through byte-identical",
     ).toBe(raw);
+  });
+
+  it.each([
+    [
+      "ordinary key",
+      '{"large":9007199254740993,"user_cache_secret":"","nested":{"value":1}}  ',
+      '{"large":9007199254740993,"user_cache_secret":"client-level","nested":{"value":1}}  ',
+    ],
+    [
+      "escaped key",
+      '{"user_cache_secre\\u0074":""}',
+      '{"user_cache_secre\\u0074":"client-level"}',
+    ],
+  ])("replaces an empty per-request field: %s", async (_name, raw, expected) => {
+    const { calls, fetch: inner } = captureFetch();
+    const secureFetch = withUserCacheSecret(inner, BASE_URL, "client-level");
+
+    await secureFetch("https://enclave.example.com/v1/chat/completions", postJSON(raw));
+    expect(calls[0].init!.body).toBe(expected);
   });
 
   it.each([

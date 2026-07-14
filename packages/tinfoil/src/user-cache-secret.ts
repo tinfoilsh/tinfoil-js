@@ -10,8 +10,7 @@ import { isRealBrowser } from "./env.js";
  *
  * Resolution order, mirroring the other Tinfoil clients:
  *
- *  1. an explicit per-request `user_cache_secret` field in the body (never
- *     overwritten here),
+ *  1. a non-empty per-request `user_cache_secret` field in the body,
  *  2. the `userCacheSecret` client option,
  *  3. the TINFOIL_USER_CACHE_SECRET environment variable,
  *  4. a generated secret persisted at ~/.tinfoil/user_cache_secret (0600),
@@ -26,16 +25,13 @@ import { isRealBrowser } from "./env.js";
 
 /**
  * The router-only request-body field. A non-empty string scopes the prompt
- * cache to that secret; an absent or empty value leaves the request in the
- * tenant-wide namespace.
+ * cache to that secret.
  */
 export const USER_CACHE_SECRET_FIELD = "user_cache_secret";
 
 /**
- * Provisions the secret via the environment. Setting it to an empty string
- * disables generation entirely (tenant-wide caching), which is the right
- * call for pooled multi-user deployments that would otherwise mint a fresh
- * namespace per container.
+ * Provisions the secret via the environment. An empty value is treated as
+ * unset.
  */
 export const USER_CACHE_SECRET_ENV = "TINFOIL_USER_CACHE_SECRET";
 
@@ -53,19 +49,16 @@ const USER_CACHE_SECRET_PATHS = [
 ];
 
 /**
- * Resolves the client-level secret: the explicit option wins (an explicit
- * empty string disables provisioning), then the environment, then the
- * persisted (or generated) secret. An empty result means injection is
- * disabled. Never throws.
+ * Resolves the client-level secret: a non-empty explicit option wins, then a
+ * non-empty environment value, then the persisted (or generated) secret.
+ * Never throws.
  */
 export async function resolveUserCacheSecret(explicit?: string): Promise<string> {
-  if (explicit !== undefined) {
+  if (explicit !== undefined && explicit !== "") {
     return explicit;
   }
-  // A set-but-empty variable counts as set: it disables generation, which is
-  // what pooled multi-user deployments want. Browser bundles have no process.
   const env = typeof process !== "undefined" ? process.env?.[USER_CACHE_SECRET_ENV] : undefined;
-  if (env !== undefined) {
+  if (env !== undefined && env !== "") {
     return env;
   }
   return loadOrGenerateUserCacheSecret();
@@ -78,10 +71,8 @@ function newUserCacheSecret(): string {
     crypto.getRandomValues(bytes);
     return Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
   } catch {
-    // Never fall back to a weak secret: no secret means tenant-wide caching,
-    // which is safe.
     console.warn(
-      "[tinfoil] could not generate a user cache secret; requests stay in the tenant-wide cache namespace",
+      "[tinfoil] could not generate a user cache secret; automatic prompt-cache scoping is unavailable",
     );
     return "";
   }
@@ -136,8 +127,8 @@ async function loadOrGenerateUserCacheSecret(): Promise<string> {
 /**
  * Adds the field to a JSON-object body. Returns null — forward the original
  * body untouched — for non-object bodies, trailing data, or a body that
- * already carries the field (an explicit per-request value, including an
- * explicit empty string, always wins).
+ * already carries a non-empty or non-string field. An empty string is
+ * replaced with the resolved client secret.
  */
 export function injectUserCacheSecret(raw: string, secret: string): string | null {
   let parsed: unknown;
@@ -154,7 +145,15 @@ export function injectUserCacheSecret(raw: string, secret: string): string | nul
     return null;
   }
   if (Object.prototype.hasOwnProperty.call(parsed, USER_CACHE_SECRET_FIELD)) {
-    return null;
+    const existing = (parsed as Record<string, unknown>)[USER_CACHE_SECRET_FIELD];
+    if (existing !== "") {
+      return null;
+    }
+    const range = topLevelValueRange(raw, USER_CACHE_SECRET_FIELD);
+    if (range === null) {
+      return null;
+    }
+    return raw.slice(0, range[0]) + JSON.stringify(secret) + raw.slice(range[1]);
   }
   // Splice the field into the original text instead of re-serializing the
   // parsed object: parsing round-trips numbers through float64, which would
@@ -164,6 +163,119 @@ export function injectUserCacheSecret(raw: string, secret: string): string | nul
   const field = `${JSON.stringify(USER_CACHE_SECRET_FIELD)}:${JSON.stringify(secret)}`;
   const separator = Object.keys(parsed).length > 0 ? "," : "";
   return raw.slice(0, end) + separator + field + raw.slice(end);
+}
+
+function topLevelValueRange(raw: string, field: string): [number, number] | null {
+  let index = skipWhitespace(raw, 0);
+  if (raw[index] !== "{") {
+    return null;
+  }
+  index += 1;
+
+  while (index < raw.length) {
+    index = skipWhitespace(raw, index);
+    if (raw[index] === "}") {
+      return null;
+    }
+    const keyEnd = stringEnd(raw, index);
+    if (keyEnd === null) {
+      return null;
+    }
+    let key: unknown;
+    try {
+      key = JSON.parse(raw.slice(index, keyEnd));
+    } catch {
+      return null;
+    }
+    index = skipWhitespace(raw, keyEnd);
+    if (raw[index] !== ":") {
+      return null;
+    }
+    const valueStart = skipWhitespace(raw, index + 1);
+    const valueEnd = jsonValueEnd(raw, valueStart);
+    if (valueEnd === null) {
+      return null;
+    }
+    if (key === field) {
+      return [valueStart, valueEnd];
+    }
+    index = skipWhitespace(raw, valueEnd);
+    if (raw[index] === ",") {
+      index += 1;
+    } else if (raw[index] === "}") {
+      return null;
+    } else {
+      return null;
+    }
+  }
+  return null;
+}
+
+function skipWhitespace(raw: string, start: number): number {
+  let index = start;
+  while (index < raw.length && /\s/.test(raw[index])) {
+    index += 1;
+  }
+  return index;
+}
+
+function stringEnd(raw: string, start: number): number | null {
+  if (raw[start] !== "\"") {
+    return null;
+  }
+  let escaped = false;
+  for (let index = start + 1; index < raw.length; index += 1) {
+    if (escaped) {
+      escaped = false;
+    } else if (raw[index] === "\\") {
+      escaped = true;
+    } else if (raw[index] === "\"") {
+      return index + 1;
+    }
+  }
+  return null;
+}
+
+function jsonValueEnd(raw: string, start: number): number | null {
+  if (raw[start] === "\"") {
+    return stringEnd(raw, start);
+  }
+  if (raw[start] === "{" || raw[start] === "[") {
+    let depth = 0;
+    let inString = false;
+    let escaped = false;
+    for (let index = start; index < raw.length; index += 1) {
+      const character = raw[index];
+      if (inString) {
+        if (escaped) {
+          escaped = false;
+        } else if (character === "\\") {
+          escaped = true;
+        } else if (character === "\"") {
+          inString = false;
+        }
+      } else if (character === "\"") {
+        inString = true;
+      } else if (character === "{" || character === "[") {
+        depth += 1;
+      } else if (character === "}" || character === "]") {
+        depth -= 1;
+        if (depth === 0) {
+          return index + 1;
+        }
+      }
+    }
+    return null;
+  }
+
+  let end = start;
+  while (end < raw.length && raw[end] !== "," && raw[end] !== "}") {
+    end += 1;
+  }
+  while (end > start && /\s/.test(raw[end - 1])) {
+    end -= 1;
+  }
+  return end > start ? end : null;
 }
 
 /**
@@ -245,7 +357,7 @@ export async function injectUserCacheSecretIntoRequestInit(
  * Wraps a fetch function so eligible request bodies carry the secret. The
  * wrapper sits directly above the sealing fetch (the TLS connection pinned
  * to the attested key), so the injected field never travels outside the
- * protected channel. An empty secret disables injection entirely.
+ * protected channel.
  */
 export function withUserCacheSecret(
   inner: typeof fetch,
