@@ -34,5 +34,19 @@
     "@freedomofpress/sigstore-browser": "^0.1.14",
     "@freedomofpress/tuf-browser": "^0.1.11",
     "ehbp": "^0.2.5"
+  },
+  "syncpack": {
+    "versionGroups": [
+      {
+        "label": "ai peer range stays wide so v6 consumers keep working",
+        "dependencies": [
+          "ai"
+        ],
+        "dependencyTypes": [
+          "peer"
+        ],
+        "isIgnored": true
+      }
+    ]
   }
 }

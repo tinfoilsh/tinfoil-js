@@ -70,7 +70,7 @@
     "ws": "^8.21.0"
   },
   "peerDependencies": {
-    "ai": "^7.0.19"
+    "ai": "^6.0.168 || ^7.0.0"
   },
   "peerDependenciesMeta": {
     "ai": {
