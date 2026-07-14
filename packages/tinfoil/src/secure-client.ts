@@ -60,16 +60,17 @@ export interface SecureClientOptions {
 
   /**
    * Secret scoping the router's prompt cache for this client's requests.
-   * Requests carrying the same secret share cached prompt prefixes; requests
-   * carrying different secrets cannot observe each other's cache timing. The
-   * router consumes the secret to derive the cache namespace and strips it —
-   * it never reaches the model.
+   * Under the same authenticated API identity, requests carrying the same
+   * secret share cached prompt prefixes; requests carrying different
+   * identities or secrets cannot observe each other's cache timing. The router
+   * consumes the secret to derive the cache namespace and strips it — it never
+   * reaches the model.
    *
    * Defaults to the TINFOIL_USER_CACHE_SECRET environment variable when set,
    * otherwise to a generated secret persisted at `~/.tinfoil/user_cache_secret`
-   * (shared with the other Tinfoil SDKs on the same machine). Empty values are
-   * treated as unset. A non-empty `user_cache_secret` field already present in
-   * a request body wins over this option.
+   * (shared with other Tinfoil SDKs using the same home directory). Empty
+   * values are treated as unset. A non-empty `user_cache_secret` field already
+   * present in a request body wins over this option.
    */
   userCacheSecret?: string;
 }

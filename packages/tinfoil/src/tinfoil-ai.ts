@@ -102,8 +102,8 @@ export interface TinfoilAIOptions {
    * (e.g. one stable value per end user). Defaults to the
    * TINFOIL_USER_CACHE_SECRET environment variable, otherwise to a generated
    * secret persisted at `~/.tinfoil/user_cache_secret`. Empty values are
-   * treated as unset. A non-empty `user_cache_secret` field set in a request
-   * body always wins.
+   * treated as unset. A non-empty string field set in a request body wins; an
+   * empty per-request string is replaced with this value.
    */
   userCacheSecret?: string;
 

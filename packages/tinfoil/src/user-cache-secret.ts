@@ -14,7 +14,7 @@ import { isRealBrowser } from "./env.js";
  *  2. the `userCacheSecret` client option,
  *  3. the TINFOIL_USER_CACHE_SECRET environment variable,
  *  4. a generated secret persisted at ~/.tinfoil/user_cache_secret (0600),
- *     shared with the other Tinfoil SDKs on the same machine. Runtimes
+ *     shared with other Tinfoil SDKs using the same home directory. Runtimes
  *     without a filesystem (browsers, edge runtimes) fall back to a
  *     process-lifetime in-memory secret.
  *
