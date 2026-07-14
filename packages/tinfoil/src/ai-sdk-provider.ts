@@ -22,8 +22,8 @@ export interface CreateTinfoilAIOptions {
   /**
    * Secret scoping the router's prompt cache for this provider's requests.
    * Defaults to the TINFOIL_USER_CACHE_SECRET environment variable, otherwise
-   * to a generated secret persisted at `~/.tinfoil/user_cache_secret`. Empty
-   * values are treated as unset.
+   * attempts to generate a secret persisted at
+   * `~/.tinfoil/user_cache_secret`. Empty values are treated as unset.
    */
   userCacheSecret?: string;
 }

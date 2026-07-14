@@ -449,6 +449,25 @@ describe("withUserCacheSecret", () => {
   });
 
   it.each([
+    [
+      "ordinary keys",
+      '{"user_cache_secret":"first","user_cache_secret":""}',
+      '{"user_cache_secret":"first","user_cache_secret":"client-level"}',
+    ],
+    [
+      "escaped final key",
+      '{"user_cache_secret":"first","user_cache_secre\\u0074":""}',
+      '{"user_cache_secret":"first","user_cache_secre\\u0074":"client-level"}',
+    ],
+  ])("replaces only the effective duplicate field: %s", async (_name, raw, expected) => {
+    const { calls, fetch: inner } = captureFetch();
+    const secureFetch = withUserCacheSecret(inner, BASE_URL, "client-level");
+
+    await secureFetch("https://enclave.example.com/v1/chat/completions", postJSON(raw));
+    expect(calls[0].init!.body).toBe(expected);
+  });
+
+  it.each([
     "not json",
     "[1,2,3]",
     "null",
@@ -504,7 +523,7 @@ describe("withUserCacheSecret", () => {
     expect(calls[0].init!.body).toBe(stream);
   });
 
-  it("forwards a Request body unchanged", async () => {
+  it("injects into a Request body without consuming the original", async () => {
     const { calls, fetch: inner } = captureFetch();
     const secureFetch = withUserCacheSecret(inner, BASE_URL, "s1");
     const request = new Request(
@@ -515,7 +534,33 @@ describe("withUserCacheSecret", () => {
     await secureFetch(request);
 
     expect(calls[0].input).toBe(request);
-    expect(calls[0].init).toBeUndefined();
+    const sent = calls[0].init!;
+    expect(JSON.parse(sent.body as string)).toEqual({
+      model: "m",
+      user_cache_secret: "s1",
+    });
+    expect(new Headers(sent.headers).get("content-type")).toBe("application/json");
+    expect(request.bodyUsed).toBe(false);
+  });
+
+  it("uses init headers with an inherited Request body", async () => {
+    const { calls, fetch: inner } = captureFetch();
+    const secureFetch = withUserCacheSecret(inner, BASE_URL, "s1");
+    const request = new Request(
+      "https://enclave.example.com/v1/chat/completions",
+      postJSON('{"model":"request"}', { "X-Source": "request" }),
+    );
+
+    await secureFetch(request, {
+      headers: {
+        "Content-Type": "application/json",
+        "X-Source": "init",
+      },
+    });
+
+    const sent = calls[0].init!;
+    expect(JSON.parse(sent.body as string)[USER_CACHE_SECRET_FIELD]).toBe("s1");
+    expect(new Headers(sent.headers).get("x-source")).toBe("init");
     expect(request.bodyUsed).toBe(false);
   });
 

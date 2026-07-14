@@ -159,7 +159,7 @@ The inference router partitions prompt-prefix caches using both the authenticate
 
 `user_cache_secret` is sensitive application data used only for cache partitioning. It is not an API credential or encryption key. Do not log or expose it unnecessarily: a caller who can send requests with the same API identity and secret joins that cache namespace and can observe its cache-hit timing. The SDK adds it to eligible request bodies before they are protected for transport to the verified enclave, and the router removes it before forwarding the request to the model.
 
-By default, Node.js generates a random secret and persists it at `~/.tinfoil/user_cache_secret`, requesting mode `0600` where supported. Tinfoil SDKs using the same home directory reuse this value. Browsers use a runtime-lifetime value instead. This default is suitable for a single-user application, but it does not separate end users who share one application process, runtime, or home directory. You can control the scope explicitly:
+By default, Node.js attempts to generate a random secret and persists it at `~/.tinfoil/user_cache_secret`, requesting mode `0600` where supported. Tinfoil SDKs using the same home directory reuse this value. Browsers attempt to use a runtime-lifetime value instead. This default is suitable for a single-user application, but it does not separate end users who share one application process, runtime, or home directory. You can control the scope explicitly:
 
 ```typescript
 // Pin a stable, non-empty, opaque secret for this client.
@@ -179,9 +179,9 @@ const completion = await client.chat.completions.create({
 } as TinfoilAI.Chat.ChatCompletionCreateParams);
 ```
 
-Resolution order is a non-empty per-request string, a non-empty client value, a non-empty `TINFOIL_USER_CACHE_SECRET`, then the generated default. Empty client or environment values are treated as unset, and an empty per-request string is replaced with the resolved client value. The SDK leaves non-string values unchanged, and applications should not use them for cache scoping.
+Resolution order is a non-empty per-request string, a non-empty client value, a non-empty `TINFOIL_USER_CACHE_SECRET`, then an attempted generated default. Empty client or environment values are treated as unset, and an empty per-request string is replaced with the resolved client value. The SDK leaves non-string values unchanged, and applications should not use them for cache scoping.
 
-Multi-user services must provide a stable, non-empty, opaque value for each user (or group whose members may share cache-hit timing) on every eligible request. Do not use a raw user identifier, API key, or encryption key. A single client, environment, or generated value groups all requests using it under the same API identity. If persistence is unavailable, the SDK uses an in-memory value and cache continuity ends when that process or runtime exits.
+Multi-user services must provide a stable, non-empty, opaque value for each user (or group whose members may share cache-hit timing) on every eligible request. Do not use a raw user identifier, API key, or encryption key. A single client, environment, or generated value groups all requests using it under the same API identity. If persistence is unavailable and secure random generation succeeds, the SDK uses an in-memory value and cache continuity ends when that process or runtime exits. If secure random generation also fails, automatic prompt-cache scoping is unavailable.
 
 ## How Verification Works
 

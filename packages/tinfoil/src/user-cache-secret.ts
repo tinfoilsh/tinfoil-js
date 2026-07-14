@@ -13,10 +13,11 @@ import { isRealBrowser } from "./env.js";
  *  1. a non-empty per-request `user_cache_secret` field in the body,
  *  2. the `userCacheSecret` client option,
  *  3. the TINFOIL_USER_CACHE_SECRET environment variable,
- *  4. a generated secret persisted at ~/.tinfoil/user_cache_secret (0600),
- *     shared with other Tinfoil SDKs using the same home directory. Runtimes
- *     without a filesystem (browsers, edge runtimes) fall back to a
- *     process-lifetime in-memory secret.
+ *  4. an attempted generated secret persisted at
+ *     ~/.tinfoil/user_cache_secret (0600), shared with other Tinfoil SDKs
+ *     using the same home directory. Runtimes without a filesystem (browsers,
+ *     edge runtimes) use a process-lifetime in-memory secret when secure
+ *     random generation succeeds.
  *
  * Injection happens inside the secure transport — before the EHBP transport
  * encrypts the body, or on the way into the TLS connection pinned to the
@@ -50,8 +51,8 @@ const USER_CACHE_SECRET_PATHS = [
 
 /**
  * Resolves the client-level secret: a non-empty explicit option wins, then a
- * non-empty environment value, then the persisted (or generated) secret.
- * Never throws.
+ * non-empty environment value, then an attempted persisted (or generated)
+ * secret. Never throws.
  */
 export async function resolveUserCacheSecret(explicit?: string): Promise<string> {
   if (explicit !== undefined && explicit !== "") {
@@ -79,10 +80,11 @@ function newUserCacheSecret(): string {
 }
 
 /**
- * The process-lifetime fallback for when the secret cannot be persisted. An
- * unpersisted secret still isolates this process's cache namespace, but
- * continuity is lost on restart — like a session ID, it silently resets the
- * namespace every deploy — so the fallback warns once per process.
+ * The process-lifetime fallback for when the secret cannot be persisted. When
+ * secure random generation succeeds, an unpersisted secret still isolates
+ * this process's cache namespace, but continuity is lost on restart — like a
+ * session ID, it silently resets the namespace every deploy — so the fallback
+ * warns once per process.
  */
 let ephemeralUserCacheSecret: string | undefined;
 
@@ -103,8 +105,8 @@ function getEphemeralUserCacheSecret(): string {
 /**
  * Returns the secret persisted under the user's home directory, generating
  * and persisting one on first use. Without a usable filesystem (browsers,
- * edge runtimes, an unwritable home directory) it falls back to the
- * process-lifetime in-memory secret.
+ * edge runtimes, an unwritable home directory) it uses a process-lifetime
+ * in-memory secret when secure random generation succeeds.
  */
 async function loadOrGenerateUserCacheSecret(): Promise<string> {
   if (!isRealBrowser()) {
@@ -167,6 +169,7 @@ export function injectUserCacheSecret(raw: string, secret: string): string | nul
 
 function topLevelValueRange(raw: string, field: string): [number, number] | null {
   let index = skipWhitespace(raw, 0);
+  let matchingRange: [number, number] | null = null;
   if (raw[index] !== "{") {
     return null;
   }
@@ -197,13 +200,13 @@ function topLevelValueRange(raw: string, field: string): [number, number] | null
       return null;
     }
     if (key === field) {
-      return [valueStart, valueEnd];
+      matchingRange = [valueStart, valueEnd];
     }
     index = skipWhitespace(raw, valueEnd);
     if (raw[index] === ",") {
       index += 1;
     } else if (raw[index] === "}") {
-      return null;
+      return matchingRange;
     } else {
       return null;
     }
@@ -376,10 +379,33 @@ export function withUserCacheSecret(
       return inner(input, init);
     }
     const normalized = input instanceof Request && init?.body !== undefined
-      ? { method: input.method, headers: input.headers, ...init }
+      ? {
+          ...init,
+          method: init.method ?? input.method,
+          headers: init.headers ?? input.headers,
+        }
       : init;
+    let requestInit = normalized;
+    if (
+      input instanceof Request &&
+      init?.body === undefined &&
+      input.body !== null &&
+      (init?.method ?? input.method).toUpperCase() === "POST" &&
+      USER_CACHE_SECRET_PATHS.some((path) => pathname.endsWith(path))
+    ) {
+      try {
+        requestInit = {
+          ...init,
+          method: init?.method ?? input.method,
+          headers: init?.headers ?? input.headers,
+          body: await input.clone().arrayBuffer(),
+        };
+      } catch {
+        return inner(input, init);
+      }
+    }
     const injected = await injectUserCacheSecretIntoRequestInit(
-      normalized,
+      requestInit,
       pathname,
       secret,
     );
