@@ -96,7 +96,17 @@ export interface TinfoilAIOptions {
 
   /** URL to fetch the attestation bundle from. */
   attestationBundleURL?: string;
-  
+
+  /**
+   * Secret scoping the router's prompt cache for this client's requests
+   * (e.g. one stable value per end user). Defaults to the
+   * TINFOIL_USER_CACHE_SECRET environment variable, otherwise to a generated
+   * secret persisted at `~/.tinfoil/user_cache_secret`. Pass an empty string
+   * to disable prompt-cache scoping (tenant-wide caching). A
+   * `user_cache_secret` field set in a request body always wins.
+   */
+  userCacheSecret?: string;
+
   /** Additional OpenAI client options (passed through to underlying client) */
   [key: string]: any;
 }
@@ -155,6 +165,7 @@ export class TinfoilAI {
       configRepo: options.configRepo,
       transport: options.transport,
       attestationBundleURL: options.attestationBundleURL,
+      userCacheSecret: options.userCacheSecret,
     });
   }
 

@@ -4,6 +4,9 @@ import { resolve } from "path";
 import { playwright } from "@vitest/browser-playwright";
 
 export default defineConfig({
+  optimizeDeps: {
+    include: ["openai"],
+  },
   define: {
     'process.env.TINFOIL_API_KEY': JSON.stringify(process.env.TINFOIL_API_KEY ?? ''),
   },

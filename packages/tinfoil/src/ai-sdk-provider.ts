@@ -18,6 +18,14 @@ export interface CreateTinfoilAIOptions {
 
   /** URL to fetch the attestation bundle from. */
   attestationBundleURL?: string;
+
+  /**
+   * Secret scoping the router's prompt cache for this provider's requests.
+   * Defaults to the TINFOIL_USER_CACHE_SECRET environment variable, otherwise
+   * to a generated secret persisted at `~/.tinfoil/user_cache_secret`. Pass
+   * an empty string to disable prompt-cache scoping (tenant-wide caching).
+   */
+  userCacheSecret?: string;
 }
 
 /**
@@ -64,6 +72,7 @@ export async function createTinfoilAI(apiKey?: string, options: CreateTinfoilAIO
     baseURL: options.baseURL,
     configRepo: options.configRepo,
     attestationBundleURL: options.attestationBundleURL,
+    userCacheSecret: options.userCacheSecret,
   });
 
   await secureClient.ready();

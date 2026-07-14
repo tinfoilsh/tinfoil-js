@@ -3,6 +3,7 @@ import { Verifier, ConfigurationError, FetchError, AttestationError, type Verifi
 import type { AttestationBundle } from "./verifier.js";
 import { TINFOIL_CONFIG } from "./config.js";
 import { createSecureFetch } from "./secure-fetch.js";
+import { resolveUserCacheSecret } from "./user-cache-secret.js";
 import { fetchAttestationBundle } from "./atc.js";
 import type { SecureTransport, SessionRecoveryToken } from "./encrypted-body-fetch.js";
 import type { SecureWebSocketOptions } from "./pinned-ws.js";
@@ -56,6 +57,22 @@ export interface SecureClientOptions {
 
   /** URL to fetch the attestation bundle from. */
   attestationBundleURL?: string;
+
+  /**
+   * Secret scoping the router's prompt cache for this client's requests.
+   * Requests carrying the same secret share cached prompt prefixes; requests
+   * carrying different secrets cannot observe each other's cache timing. The
+   * router consumes the secret to derive the cache namespace and strips it —
+   * it never reaches the model.
+   *
+   * Defaults to the TINFOIL_USER_CACHE_SECRET environment variable when set,
+   * otherwise to a generated secret persisted at `~/.tinfoil/user_cache_secret`
+   * (shared with the other Tinfoil SDKs on the same machine). Pass an empty
+   * string to disable prompt-cache scoping entirely (tenant-wide caching).
+   * A `user_cache_secret` field already present in a request body always
+   * wins over this option.
+   */
+  userCacheSecret?: string;
 }
 
 function createPendingVerificationDocument(configRepo: string): VerificationDocument {
@@ -125,6 +142,7 @@ export class SecureClient {
     readonly configRepo: string;
     readonly transport: TransportMode;
     readonly attestationBundleURL?: string;
+    readonly userCacheSecret?: string;
   };
 
   // --- Derived state (cleared on reset) ---
@@ -170,6 +188,7 @@ export class SecureClient {
       configRepo: options.configRepo ?? TINFOIL_CONFIG.DEFAULT_ROUTER_REPO,
       transport: options.transport || 'ehbp',
       attestationBundleURL: options.attestationBundleURL,
+      userCacheSecret: options.userCacheSecret,
     };
     this.verificationDocument = createPendingVerificationDocument(this.config.configRepo);
   }
@@ -309,11 +328,17 @@ export class SecureClient {
   }
 
   private async createTransport(hpkePublicKey?: string, tlsPublicKeyFingerprint?: string): Promise<SecureTransport> {
+    // The prompt-cache scoping secret: the userCacheSecret option wins, then
+    // the TINFOIL_USER_CACHE_SECRET environment variable, then the secret
+    // persisted at ~/.tinfoil/user_cache_secret (generated on first use).
+    // Empty means disabled; resolution never throws.
+    const userCacheSecret = await resolveUserCacheSecret(this.config.userCacheSecret);
+
     if (this.config.transport === 'tls') {
-      return await createSecureFetch(this.resolvedBaseURL!, undefined, tlsPublicKeyFingerprint, this.resolvedEnclaveURL);
+      return await createSecureFetch(this.resolvedBaseURL!, undefined, tlsPublicKeyFingerprint, this.resolvedEnclaveURL, userCacheSecret);
     }
 
-    return await createSecureFetch(this.resolvedBaseURL!, hpkePublicKey, undefined, this.resolvedEnclaveURL);
+    return await createSecureFetch(this.resolvedBaseURL!, hpkePublicKey, undefined, this.resolvedEnclaveURL, userCacheSecret);
   }
 
   /**

@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 const MOCK_MEASUREMENT_TYPE = "https://tinfoil.sh/predicate/sev-snp-guest/v1";
 
@@ -93,6 +93,13 @@ vi.mock("../src/atc.js", () => ({
 describe("SecureClient (browser)", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    // Pin the user cache secret so transport creation resolves it from the
+    // (possibly polyfilled) environment instead of a filesystem.
+    vi.stubEnv("TINFOIL_USER_CACHE_SECRET", "test-secret");
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
   });
 
   it("should reject initialization when HPKE is not available in browser", async () => {

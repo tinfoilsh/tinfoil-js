@@ -1,6 +1,6 @@
 {
   "name": "tinfoil",
-  "version": "1.1.8",
+  "version": "1.1.9",
   "description": "Tinfoil secure OpenAI client wrapper",
   "type": "module",
   "main": "dist/index.js",
@@ -11,7 +11,8 @@
     "./dist/pinned-tls-fetch.js": "./dist/pinned-tls-fetch.browser.js",
     "./dist/pinned-ws.js": "./dist/pinned-ws.browser.js",
     "./dist/realtime.js": "./dist/realtime.browser.js",
-    "./dist/unsafe.js": "./dist/unsafe.browser.js"
+    "./dist/unsafe.js": "./dist/unsafe.browser.js",
+    "./dist/user-cache-secret-store.js": "./dist/user-cache-secret-store.browser.js"
   },
   "exports": {
     ".": {
@@ -62,7 +63,7 @@
   "dependencies": {
     "@ai-sdk/openai-compatible": "^2.0.41",
     "@freedomofpress/sigstore-browser": "^0.1.13",
-    "@tinfoilsh/verifier": "1.1.8",
+    "@tinfoilsh/verifier": "1.1.9",
     "@types/ws": "^8.18.1",
     "ehbp": "^0.2.0",
     "openai": "^6.34.0",
