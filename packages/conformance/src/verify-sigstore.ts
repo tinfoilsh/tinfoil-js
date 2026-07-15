@@ -230,6 +230,12 @@ function classifyError(raw: string): { code: string; spec_ref: string } {
     return { code: 'SCT_DUPLICATE_LOG', spec_ref: '5.2' };
   if (/SCT|Signed Certificate Timestamp/i.test(raw))
     return { code: 'SCT_INSUFFICIENT', spec_ref: '5.2' };
+  // Must precede the Rekor catch-all below: sigstore-browser's observer-timestamp
+  // guard message ("Rekor v2 bundles require a timestamp for verification.")
+  // contains "Rekor", but the failure is a missing observer timestamp, not an
+  // inclusion-proof problem. Match the timestamp phrasing first (SPEC §5.2).
+  if (/require[sd]? (a |an )?timestamp|observer timestamp|no verifiable timestamp/i.test(raw))
+    return { code: 'OBSERVER_TIMESTAMP_INSUFFICIENT', spec_ref: '5.2' };
   if (/No.*Rekor key|Trusted log IDs|Unknown.*log/i.test(raw))
     return { code: 'REKOR_KEY_NOT_TRUSTED', spec_ref: '5.1' };
   if (/Rekor|tlog|inclusion proof|checkpoint/i.test(raw))
