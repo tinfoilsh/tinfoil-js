@@ -554,7 +554,7 @@ describe("SecureClient", () => {
       );
     });
 
-    it("explicit empty disables injection despite the environment", async () => {
+    it("treats explicit empty as unset", async () => {
       const { SecureClient } = await import("../src/secure-client");
 
       const client = new SecureClient({ userCacheSecret: "" });
@@ -565,7 +565,7 @@ describe("SecureClient", () => {
         "mock-hpke-public-key",
         undefined,
         "https://test-router.tinfoil.sh",
-        "",
+        "test-secret",
       );
     });
   });

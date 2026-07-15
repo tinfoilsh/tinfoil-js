@@ -5,19 +5,18 @@ import { isRealBrowser } from "./env.js";
  * the secure prompt caching contract. The router derives the request's
  * prefix-cache namespace from it: requests carrying the same secret (under
  * the same API identity) share cached prompt prefixes, requests carrying
- * different secrets cannot observe each other's cache timing. The secret
- * itself is stripped by the router and never reaches the model.
+ * different secrets cannot observe each other's cache timing.
  *
  * Resolution order, mirroring the other Tinfoil clients:
  *
- *  1. an explicit per-request `user_cache_secret` field in the body (never
- *     overwritten here),
+ *  1. a non-empty per-request `user_cache_secret` field in the body,
  *  2. the `userCacheSecret` client option,
  *  3. the TINFOIL_USER_CACHE_SECRET environment variable,
- *  4. a generated secret persisted at ~/.tinfoil/user_cache_secret (0600),
- *     shared with the other Tinfoil SDKs on the same machine. Runtimes
- *     without a filesystem (browsers, edge runtimes) fall back to a
- *     process-lifetime in-memory secret.
+ *  4. an attempted generated secret persisted at
+ *     ~/.tinfoil/user_cache_secret (0600), shared with other Tinfoil SDKs
+ *     using the same home directory. Runtimes without a filesystem (browsers,
+ *     edge runtimes) use a process-lifetime in-memory secret when secure
+ *     random generation succeeds.
  *
  * Injection happens inside the secure transport — before the EHBP transport
  * encrypts the body, or on the way into the TLS connection pinned to the
@@ -26,16 +25,13 @@ import { isRealBrowser } from "./env.js";
 
 /**
  * The router-only request-body field. A non-empty string scopes the prompt
- * cache to that secret; an absent or empty value leaves the request in the
- * tenant-wide namespace.
+ * cache to that secret.
  */
 export const USER_CACHE_SECRET_FIELD = "user_cache_secret";
 
 /**
- * Provisions the secret via the environment. Setting it to an empty string
- * disables generation entirely (tenant-wide caching), which is the right
- * call for pooled multi-user deployments that would otherwise mint a fresh
- * namespace per container.
+ * Provisions the secret via the environment. An empty value is treated as
+ * unset.
  */
 export const USER_CACHE_SECRET_ENV = "TINFOIL_USER_CACHE_SECRET";
 
@@ -53,19 +49,16 @@ const USER_CACHE_SECRET_PATHS = [
 ];
 
 /**
- * Resolves the client-level secret: the explicit option wins (an explicit
- * empty string disables provisioning), then the environment, then the
- * persisted (or generated) secret. An empty result means injection is
- * disabled. Never throws.
+ * Resolves the client-level secret: a non-empty explicit option wins, then a
+ * non-empty environment value, then an attempted persisted (or generated)
+ * secret. Never throws.
  */
 export async function resolveUserCacheSecret(explicit?: string): Promise<string> {
-  if (explicit !== undefined) {
+  if (explicit !== undefined && explicit !== "") {
     return explicit;
   }
-  // A set-but-empty variable counts as set: it disables generation, which is
-  // what pooled multi-user deployments want. Browser bundles have no process.
   const env = typeof process !== "undefined" ? process.env?.[USER_CACHE_SECRET_ENV] : undefined;
-  if (env !== undefined) {
+  if (env !== undefined && env !== "") {
     return env;
   }
   return loadOrGenerateUserCacheSecret();
@@ -78,20 +71,19 @@ function newUserCacheSecret(): string {
     crypto.getRandomValues(bytes);
     return Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
   } catch {
-    // Never fall back to a weak secret: no secret means tenant-wide caching,
-    // which is safe.
     console.warn(
-      "[tinfoil] could not generate a user cache secret; requests stay in the tenant-wide cache namespace",
+      "[tinfoil] could not generate a user cache secret; automatic prompt-cache scoping is unavailable",
     );
     return "";
   }
 }
 
 /**
- * The process-lifetime fallback for when the secret cannot be persisted. An
- * unpersisted secret still isolates this process's cache namespace, but
- * continuity is lost on restart — like a session ID, it silently resets the
- * namespace every deploy — so the fallback warns once per process.
+ * The process-lifetime fallback for when the secret cannot be persisted. When
+ * secure random generation succeeds, an unpersisted secret still isolates
+ * this process's cache namespace, but continuity is lost on restart — like a
+ * session ID, it silently resets the namespace every deploy — so the fallback
+ * warns once per process.
  */
 let ephemeralUserCacheSecret: string | undefined;
 
@@ -112,8 +104,8 @@ function getEphemeralUserCacheSecret(): string {
 /**
  * Returns the secret persisted under the user's home directory, generating
  * and persisting one on first use. Without a usable filesystem (browsers,
- * edge runtimes, an unwritable home directory) it falls back to the
- * process-lifetime in-memory secret.
+ * edge runtimes, an unwritable home directory) it uses a process-lifetime
+ * in-memory secret when secure random generation succeeds.
  */
 async function loadOrGenerateUserCacheSecret(): Promise<string> {
   if (!isRealBrowser()) {
@@ -136,8 +128,8 @@ async function loadOrGenerateUserCacheSecret(): Promise<string> {
 /**
  * Adds the field to a JSON-object body. Returns null — forward the original
  * body untouched — for non-object bodies, trailing data, or a body that
- * already carries the field (an explicit per-request value, including an
- * explicit empty string, always wins).
+ * already carries a non-empty or non-string field. An empty string is
+ * replaced with the resolved client secret.
  */
 export function injectUserCacheSecret(raw: string, secret: string): string | null {
   let parsed: unknown;
@@ -154,7 +146,15 @@ export function injectUserCacheSecret(raw: string, secret: string): string | nul
     return null;
   }
   if (Object.prototype.hasOwnProperty.call(parsed, USER_CACHE_SECRET_FIELD)) {
-    return null;
+    const existing = (parsed as Record<string, unknown>)[USER_CACHE_SECRET_FIELD];
+    if (existing !== "") {
+      return null;
+    }
+    const range = topLevelValueRange(raw, USER_CACHE_SECRET_FIELD);
+    if (range === null) {
+      return null;
+    }
+    return raw.slice(0, range[0]) + JSON.stringify(secret) + raw.slice(range[1]);
   }
   // Splice the field into the original text instead of re-serializing the
   // parsed object: parsing round-trips numbers through float64, which would
@@ -164,6 +164,120 @@ export function injectUserCacheSecret(raw: string, secret: string): string | nul
   const field = `${JSON.stringify(USER_CACHE_SECRET_FIELD)}:${JSON.stringify(secret)}`;
   const separator = Object.keys(parsed).length > 0 ? "," : "";
   return raw.slice(0, end) + separator + field + raw.slice(end);
+}
+
+function topLevelValueRange(raw: string, field: string): [number, number] | null {
+  let index = skipWhitespace(raw, 0);
+  let matchingRange: [number, number] | null = null;
+  if (raw[index] !== "{") {
+    return null;
+  }
+  index += 1;
+
+  while (index < raw.length) {
+    index = skipWhitespace(raw, index);
+    if (raw[index] === "}") {
+      return null;
+    }
+    const keyEnd = stringEnd(raw, index);
+    if (keyEnd === null) {
+      return null;
+    }
+    let key: unknown;
+    try {
+      key = JSON.parse(raw.slice(index, keyEnd));
+    } catch {
+      return null;
+    }
+    index = skipWhitespace(raw, keyEnd);
+    if (raw[index] !== ":") {
+      return null;
+    }
+    const valueStart = skipWhitespace(raw, index + 1);
+    const valueEnd = jsonValueEnd(raw, valueStart);
+    if (valueEnd === null) {
+      return null;
+    }
+    if (key === field) {
+      matchingRange = [valueStart, valueEnd];
+    }
+    index = skipWhitespace(raw, valueEnd);
+    if (raw[index] === ",") {
+      index += 1;
+    } else if (raw[index] === "}") {
+      return matchingRange;
+    } else {
+      return null;
+    }
+  }
+  return null;
+}
+
+function skipWhitespace(raw: string, start: number): number {
+  let index = start;
+  while (index < raw.length && /\s/.test(raw[index])) {
+    index += 1;
+  }
+  return index;
+}
+
+function stringEnd(raw: string, start: number): number | null {
+  if (raw[start] !== "\"") {
+    return null;
+  }
+  let escaped = false;
+  for (let index = start + 1; index < raw.length; index += 1) {
+    if (escaped) {
+      escaped = false;
+    } else if (raw[index] === "\\") {
+      escaped = true;
+    } else if (raw[index] === "\"") {
+      return index + 1;
+    }
+  }
+  return null;
+}
+
+function jsonValueEnd(raw: string, start: number): number | null {
+  if (raw[start] === "\"") {
+    return stringEnd(raw, start);
+  }
+  if (raw[start] === "{" || raw[start] === "[") {
+    let depth = 0;
+    let inString = false;
+    let escaped = false;
+    for (let index = start; index < raw.length; index += 1) {
+      const character = raw[index];
+      if (inString) {
+        if (escaped) {
+          escaped = false;
+        } else if (character === "\\") {
+          escaped = true;
+        } else if (character === "\"") {
+          inString = false;
+        }
+      } else if (character === "\"") {
+        inString = true;
+      } else if (character === "{" || character === "[") {
+        depth += 1;
+      } else if (character === "}" || character === "]") {
+        depth -= 1;
+        if (depth === 0) {
+          return index + 1;
+        }
+      }
+    }
+    return null;
+  }
+
+  let end = start;
+  while (end < raw.length && raw[end] !== "," && raw[end] !== "}") {
+    end += 1;
+  }
+  while (end > start && /\s/.test(raw[end - 1])) {
+    end -= 1;
+  }
+  return end > start ? end : null;
 }
 
 /**
@@ -245,7 +359,7 @@ export async function injectUserCacheSecretIntoRequestInit(
  * Wraps a fetch function so eligible request bodies carry the secret. The
  * wrapper sits directly above the sealing fetch (the TLS connection pinned
  * to the attested key), so the injected field never travels outside the
- * protected channel. An empty secret disables injection entirely.
+ * protected channel.
  */
 export function withUserCacheSecret(
   inner: typeof fetch,
@@ -264,10 +378,33 @@ export function withUserCacheSecret(
       return inner(input, init);
     }
     const normalized = input instanceof Request && init?.body !== undefined
-      ? { method: input.method, headers: input.headers, ...init }
+      ? {
+          ...init,
+          method: init.method ?? input.method,
+          headers: init.headers ?? input.headers,
+        }
       : init;
+    let requestInit = normalized;
+    if (
+      input instanceof Request &&
+      init?.body === undefined &&
+      input.body !== null &&
+      (init?.method ?? input.method).toUpperCase() === "POST" &&
+      USER_CACHE_SECRET_PATHS.some((path) => pathname.endsWith(path))
+    ) {
+      try {
+        requestInit = {
+          ...init,
+          method: init?.method ?? input.method,
+          headers: init?.headers ?? input.headers,
+          body: await input.clone().arrayBuffer(),
+        };
+      } catch {
+        return inner(input, init);
+      }
+    }
     const injected = await injectUserCacheSecretIntoRequestInit(
-      normalized,
+      requestInit,
       pathname,
       secret,
     );

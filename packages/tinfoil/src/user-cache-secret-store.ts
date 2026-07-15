@@ -18,7 +18,7 @@ import { join } from "node:path";
  * Node.js persistence for the user cache secret. The other Tinfoil SDKs use
  * the same file, so one machine gets one cache namespace across tools. The
  * browser build swaps this module for a stub (see package.json's `browser`
- * field) — browsers have no filesystem, so resolution falls back to the
+ * field) — browsers have no filesystem, so resolution attempts a
  * process-lifetime in-memory secret.
  */
 
@@ -94,8 +94,8 @@ function readSecretFile(path: string): string | undefined | null {
 /**
  * Returns the secret persisted under the user's home directory, generating
  * (via `generateSecret`) and persisting one on first use. Returns null when
- * the home directory is unavailable or unwritable — the caller falls back to
- * a process-lifetime in-memory secret. Never throws.
+ * the home directory is unavailable or unwritable — the caller attempts a
+ * process-lifetime in-memory secret. Never throws.
  */
 export function loadOrPersistUserCacheSecret(generateSecret: () => string): string | null {
   let home: string;
@@ -144,8 +144,7 @@ export function loadOrPersistUserCacheSecret(generateSecret: () => string): stri
 
   const secret = generateSecret();
   if (secret === "") {
-    // CSPRNG failure (the generator already warned): tenant-wide caching,
-    // nothing worth persisting.
+    // The generator already reported the CSPRNG failure.
     return "";
   }
 

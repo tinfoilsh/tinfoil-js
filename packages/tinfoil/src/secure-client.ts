@@ -60,17 +60,18 @@ export interface SecureClientOptions {
 
   /**
    * Secret scoping the router's prompt cache for this client's requests.
-   * Requests carrying the same secret share cached prompt prefixes; requests
-   * carrying different secrets cannot observe each other's cache timing. The
-   * router consumes the secret to derive the cache namespace and strips it —
-   * it never reaches the model.
+   * Under the same authenticated API identity, requests carrying the same
+   * secret share cached prompt prefixes; requests carrying different
+   * identities or secrets cannot observe each other's cache timing.
    *
    * Defaults to the TINFOIL_USER_CACHE_SECRET environment variable when set,
-   * otherwise to a generated secret persisted at `~/.tinfoil/user_cache_secret`
-   * (shared with the other Tinfoil SDKs on the same machine). Pass an empty
-   * string to disable prompt-cache scoping entirely (tenant-wide caching).
-   * A `user_cache_secret` field already present in a request body always
-   * wins over this option.
+   * otherwise attempts to generate a secret persisted at
+   * `~/.tinfoil/user_cache_secret` in Node.js (shared with other Tinfoil SDKs
+   * using the same home directory). Browsers cannot persist it and use a
+   * process-lifetime in-memory secret instead. Empty values are treated as
+   * unset. A non-empty
+   * `user_cache_secret` field already present in a request body wins over this
+   * option.
    */
   userCacheSecret?: string;
 }
@@ -331,7 +332,7 @@ export class SecureClient {
     // The prompt-cache scoping secret: the userCacheSecret option wins, then
     // the TINFOIL_USER_CACHE_SECRET environment variable, then the secret
     // persisted at ~/.tinfoil/user_cache_secret (generated on first use).
-    // Empty means disabled; resolution never throws.
+    // Empty values fall through to the attempted persisted or generated default.
     const userCacheSecret = await resolveUserCacheSecret(this.config.userCacheSecret);
 
     if (this.config.transport === 'tls') {

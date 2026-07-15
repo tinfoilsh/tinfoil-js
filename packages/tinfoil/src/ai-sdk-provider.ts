@@ -22,8 +22,9 @@ export interface CreateTinfoilAIOptions {
   /**
    * Secret scoping the router's prompt cache for this provider's requests.
    * Defaults to the TINFOIL_USER_CACHE_SECRET environment variable, otherwise
-   * to a generated secret persisted at `~/.tinfoil/user_cache_secret`. Pass
-   * an empty string to disable prompt-cache scoping (tenant-wide caching).
+   * attempts to generate a secret persisted at `~/.tinfoil/user_cache_secret`
+   * in Node.js. Browsers cannot persist it and use a process-lifetime
+   * in-memory secret instead. Empty values are treated as unset.
    */
   userCacheSecret?: string;
 }
