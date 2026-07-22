@@ -65,7 +65,7 @@
     "@freedomofpress/sigstore-browser": "^0.1.14",
     "@tinfoilsh/verifier": "1.1.10",
     "@types/ws": "^8.18.1",
-    "ehbp": "^0.2.5",
+    "ehbp": "^0.3.0",
     "openai": "^6.46.0",
     "ws": "^8.21.0"
   },
