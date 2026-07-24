@@ -1,0 +1,22 @@
+{
+  "name": "@tinfoilsh/conformance",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Tinfoil cross-SDK conformance binary (JS implementation)",
+  "type": "module",
+  "bin": {
+    "tinfoil-conformance": "dist/cli.js"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json && chmod +x dist/cli.js",
+    "clean": "rm -rf dist"
+  },
+  "dependencies": {
+    "@tinfoilsh/verifier": "1.1.9",
+    "ehbp": "^0.2.5"
+  },
+  "devDependencies": {
+    "@types/node": "^26.1.1",
+    "typescript": "^6.0.3"
+  }
+}

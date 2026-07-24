@@ -86,16 +86,48 @@ export function compareMeasurements(a: AttestationMeasurement, b: AttestationMea
 }
 
 /**
- * Computes the fingerprint of a measurement.
+ * Computes the fingerprint of a measurement (SPEC §7.2).
  * If there is only one register, returns that register directly.
  * Otherwise, returns SHA-256 hash of type + all registers concatenated.
  */
 export async function measurementFingerprint(m: AttestationMeasurement): Promise<string> {
-  if (m.registers.length === 1) {
-    return m.registers[0];
+  return measurementFingerprintForTarget(m, m.type);
+}
+
+/**
+ * Computes the fingerprint of a measurement as if it were the target
+ * platform's type. For cross-platform deployments (SnpTdxMultiPlatformV1
+ * code attestation against a SEV-SNP or TDX enclave attestation) the
+ * source-side fingerprint must select the subset of registers that the
+ * target platform exposes, then run the SPEC §7.2 formula on those.
+ *
+ * Mirrors tinfoil-rs's `Measurement::fingerprint_for_target`:
+ *   - SnpTdxMultiPlatformV1 → SevGuestV2: project to [snp_measurement].
+ *     Single register → fingerprint is the raw register (no hash).
+ *   - SevGuestV2 → anything: project to [snp_measurement]. Single register.
+ *   - TdxGuestV2 → anything: all 5 registers.
+ *   - Same-type or anything else: pass through all registers.
+ */
+export async function measurementFingerprintForTarget(
+  m: AttestationMeasurement,
+  targetType: string,
+): Promise<string> {
+  let registers: string[];
+  if (m.type === PredicateType.SnpTdxMultiplatformV1 && targetType === PredicateType.SevGuestV2) {
+    registers = m.registers.slice(0, 1);
+  } else if (m.type === PredicateType.SevGuestV2) {
+    registers = m.registers.slice(0, 1);
+  } else {
+    registers = m.registers;
   }
 
-  const allData = m.type + m.registers.join('');
+  if (registers.length === 1) {
+    return registers[0];
+  }
+
+  // Per SPEC §7.2 the type prefix is the *source* measurement's type, even
+  // when projecting registers for a different target platform.
+  const allData = m.type + registers.join('');
   const encoder = new TextEncoder();
   const hashBuffer = await crypto.subtle.digest('SHA-256', encoder.encode(allData));
   const hashArray = new Uint8Array(hashBuffer);
