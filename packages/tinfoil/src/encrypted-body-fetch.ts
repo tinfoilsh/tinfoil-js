@@ -52,20 +52,46 @@ export function normalizeEncryptedBodyRequestArgs(
     return { url: input.toString(), init };
   }
 
-  const request = input as Request;
-  const cloned = request.clone();
-
-  const derivedInit: RequestInit = {
-    method: cloned.method,
-    headers: new Headers(cloned.headers),
-    body: cloned.body ?? undefined,
-    signal: cloned.signal,
-  };
+  const request = new Request(input as Request, init);
 
   return {
-    url: cloned.url,
-    init: { ...derivedInit, ...init },
+    url: request.url,
+    init: requestInitFromRequest(request),
   };
+}
+
+function requestInitFromRequest(
+  request: Request,
+  body: BodyInit | null = request.body,
+): RequestInit {
+  const requestWithExtensions = request as Request & {
+    duplex?: "half";
+    priority?: RequestPriority;
+  };
+  const derivedInit: RequestInit & {
+    duplex?: "half";
+    priority?: RequestPriority;
+  } = {
+    method: request.method,
+    headers: new Headers(request.headers),
+    body: body ?? undefined,
+    cache: request.cache,
+    credentials: request.credentials,
+    integrity: request.integrity,
+    keepalive: request.keepalive,
+    mode: request.mode,
+    redirect: request.redirect,
+    referrer: request.referrer,
+    referrerPolicy: request.referrerPolicy,
+    signal: request.signal,
+  };
+  if (requestWithExtensions.duplex !== undefined) {
+    derivedInit.duplex = requestWithExtensions.duplex;
+  }
+  if (requestWithExtensions.priority !== undefined) {
+    derivedInit.priority = requestWithExtensions.priority;
+  }
+  return derivedInit;
 }
 
 export async function encryptedBodyRequest(
@@ -139,7 +165,7 @@ export function createEncryptedBodyFetch(baseURL: string, hpkePublicKey: string,
       );
 
       const transportInstance = await getOrCreateTransport();
-      return encryptedBodyRequest(targetUrl.toString(), hpkePublicKey, initWithHeader, transportInstance);
+      return transportInstance.request(targetUrl.toString(), initWithHeader!);
     },
 
     async getSessionRecoveryToken(): Promise<SessionRecoveryToken> {
