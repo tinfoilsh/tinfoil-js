@@ -82,15 +82,16 @@ function newUserCacheSecret(): string {
  * The process-lifetime fallback for when the secret cannot be persisted. When
  * secure random generation succeeds, an unpersisted secret still isolates
  * this process's cache namespace, but continuity is lost on restart — like a
- * session ID, it silently resets the namespace every deploy — so the fallback
- * warns once per process.
+ * session ID, it silently resets the namespace every deploy. The fallback
+ * warns once per process in server-side runtimes, where persistence is
+ * expected, but remains silent in browsers where in-memory storage is normal.
  */
 let ephemeralUserCacheSecret: string | undefined;
 
 function getEphemeralUserCacheSecret(): string {
   if (ephemeralUserCacheSecret === undefined) {
     ephemeralUserCacheSecret = newUserCacheSecret();
-    if (ephemeralUserCacheSecret !== "") {
+    if (ephemeralUserCacheSecret !== "" && !isRealBrowser()) {
       console.warn(
         "[tinfoil] could not persist the user cache secret; using an in-memory secret, " +
           "so prompt-cache continuity resets when this process exits " +
