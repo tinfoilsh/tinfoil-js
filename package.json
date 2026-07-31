@@ -33,7 +33,7 @@
     "@freedomofpress/crypto-browser": "^0.1.7",
     "@freedomofpress/sigstore-browser": "^0.1.14",
     "@freedomofpress/tuf-browser": "^0.1.11",
-    "ehbp": "^0.3.1"
+    "ehbp": "^0.3.2"
   },
   "syncpack": {
     "versionGroups": [
