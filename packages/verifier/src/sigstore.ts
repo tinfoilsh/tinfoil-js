@@ -144,7 +144,7 @@ export async function verifySigstoreBundle(
     }
 
     const releaseTag = workflowRefPolicy.releaseTag();
-    if (expectedReleaseTag && expectedReleaseTag !== releaseTag) {
+    if (expectedReleaseTag !== undefined && expectedReleaseTag !== releaseTag) {
       throw new AttestationError(
         `Release tag mismatch: selected release "${expectedReleaseTag}" was signed from "${releaseTag}"`
       );

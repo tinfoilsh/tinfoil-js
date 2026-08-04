@@ -5,6 +5,7 @@ import { verifyCertificate } from './cert-verify.js';
 import { compareMeasurements, measurementFingerprint } from './types.js';
 import type { AttestationResponse, VerificationDocument, AttestationBundle, SoftwareIdentity } from './types.js';
 import { ConfigurationError } from './errors.js';
+import { cloneJsonSnapshot } from './json.js';
 import { VERIFICATION_DOCUMENT_SCHEMA_VERSION, VERIFIER_NAME, VERIFIER_VERSION } from './version.js';
 
 function verifierIdentity(): SoftwareIdentity {
@@ -155,6 +156,8 @@ export class Verifier {
   }
 
   getVerificationDocument(): VerificationDocument | undefined {
-    return this.verificationDocument;
+    return this.verificationDocument
+      ? cloneJsonSnapshot(this.verificationDocument)
+      : undefined;
   }
 }

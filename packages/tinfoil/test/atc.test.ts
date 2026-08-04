@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import { X509Certificate } from "@freedomofpress/sigstore-browser";
 
 const RUN_INTEGRATION = process.env.RUN_TINFOIL_INTEGRATION === "true";
@@ -100,6 +100,30 @@ describe("ATC API", () => {
       await expect(fetchAttestationBundle({ atcBaseUrl: "http://atc.example.com" })).rejects.toThrow(
         /must use HTTPS/
       );
+    });
+
+    it("should preserve the selected release tag", async () => {
+      const responseBundle = {
+        domain: "router.example.com",
+        enclaveAttestationReport: { format: "test", body: "report" },
+        digest: "digest",
+        releaseTag: "v1.2.3",
+        sigstoreBundle: {},
+        vcek: "vcek",
+        enclaveCert: "certificate",
+      };
+      const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+        new Response(JSON.stringify(responseBundle)),
+      );
+      const { fetchAttestationBundle } = await import("../src/atc");
+
+      try {
+        const bundle = await fetchAttestationBundle({ atcBaseUrl: "https://atc.example.com" });
+
+        expect(bundle.releaseTag).toBe(responseBundle.releaseTag);
+      } finally {
+        fetchMock.mockRestore();
+      }
     });
   });
 

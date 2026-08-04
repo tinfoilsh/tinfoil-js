@@ -65,17 +65,34 @@ describe('Bundle Verification', () => {
     ).rejects.toThrow('Release tag mismatch');
   });
 
-  it('should not share mutable verifier identity between documents', async () => {
+  it('should reject an empty selected release tag', async () => {
+    const verifier = new Verifier({
+      serverURL: `https://${bundle.domain}`,
+      configRepo: 'tinfoilsh/confidential-model-router',
+    });
+
+    await expect(
+      verifier.verifyBundle({ ...bundle, releaseTag: '' })
+    ).rejects.toThrow('Release tag mismatch');
+  });
+
+  it('should return deeply cloned verification document snapshots', async () => {
     const verifier = new Verifier({
       serverURL: `https://${bundle.domain}`,
       configRepo: 'tinfoilsh/confidential-model-router',
     });
 
     await verifier.verifyBundle(bundle);
-    verifier.getVerificationDocument()!.verifier!.name = 'modified';
-    await verifier.verifyBundle(bundle);
+    const original = verifier.getVerificationDocument()!;
+    const snapshot = verifier.getVerificationDocument()!;
+    snapshot.securityVerified = false;
+    snapshot.releaseTag = 'modified';
+    snapshot.verifier!.name = 'modified';
+    snapshot.steps.verifyCode.status = 'failed';
+    snapshot.codeMeasurement.registers[0] = 'modified';
+    snapshot.enclaveMeasurement.measurement.registers[0] = 'modified';
 
-    expect(verifier.getVerificationDocument()!.verifier!.name).toBe('@tinfoilsh/verifier');
+    expect(verifier.getVerificationDocument()).toEqual(original);
   });
 
   it('should verify certificate containing HPKE key and attestation hash', async () => {
