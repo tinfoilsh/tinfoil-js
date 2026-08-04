@@ -1,6 +1,6 @@
 {
   "name": "tinfoil",
-  "version": "1.2.0",
+  "version": "1.2.1",
   "description": "Tinfoil secure OpenAI client wrapper",
   "type": "module",
   "main": "dist/index.js",
@@ -63,7 +63,7 @@
   "dependencies": {
     "@ai-sdk/openai-compatible": "^3.0.7",
     "@freedomofpress/sigstore-browser": "^0.1.14",
-    "@tinfoilsh/verifier": "1.2.0",
+    "@tinfoilsh/verifier": "1.2.1",
     "@types/ws": "^8.18.1",
     "ehbp": "^0.3.2",
     "openai": "^6.46.0",
