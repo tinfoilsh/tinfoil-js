@@ -34,14 +34,14 @@ describe('Bundle Verification', () => {
     });
 
     const startedAt = Date.now();
-    await verifier.verifyBundle({ ...bundle, releaseTag: 'v1.2.3' });
+    await verifier.verifyBundle(bundle);
     const doc = verifier.getVerificationDocument();
 
     expect(doc).toBeDefined();
     expect(doc!.securityVerified).toBe(true);
     expect(doc!.enclaveHost).toBe(bundle.domain);
     expect(doc!.schemaVersion).toBe(1);
-    expect(doc!.releaseTag).toBeUndefined();
+    expect(doc!.releaseTag).toBeTruthy();
     expect(doc!.releaseDigest).toBe(bundle.digest);
     expect(doc!.verifier?.name).toBe('@tinfoilsh/verifier');
     expect(doc!.verifier?.version).toBeTruthy();

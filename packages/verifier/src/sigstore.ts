@@ -6,6 +6,7 @@ import { AttestationError, wrapOrThrow } from './errors.js';
 
 class GitHubWorkflowRefPattern implements VerificationPolicy {
   private pattern: RegExp;
+  private verifiedWorkflowRef?: string;
 
   constructor(pattern: string | RegExp) {
     this.pattern = typeof pattern === 'string' ? new RegExp(pattern) : pattern;
@@ -21,7 +22,20 @@ class GitHubWorkflowRefPattern implements VerificationPolicy {
         `Sigstore certificate verification failed: Workflow reference "${ext.workflowRef}" does not match expected pattern (must be a tagged release)`
       );
     }
+    this.verifiedWorkflowRef = ext.workflowRef;
   }
+
+  releaseTag(): string {
+    if (!this.verifiedWorkflowRef) {
+      throw new AttestationError('Sigstore certificate verification failed: GitHub workflow reference was not verified');
+    }
+    return this.verifiedWorkflowRef.slice('refs/tags/'.length);
+  }
+}
+
+export interface VerifiedCodeMeasurement {
+  measurement: AttestationMeasurement;
+  releaseTag: string;
 }
 
 /**
@@ -39,7 +53,7 @@ export async function verifySigstoreBundle(
   bundleJson: unknown,
   digest: string,
   repo: string
-): Promise<AttestationMeasurement> {
+): Promise<VerifiedCodeMeasurement> {
 
   try {
     const {
@@ -68,10 +82,11 @@ export async function verifySigstoreBundle(
     }
 
     // Create policy for GitHub Actions certificate identity
+    const workflowRefPolicy = new GitHubWorkflowRefPattern(/^refs\/tags\//);
     const policy = new AllOf([
       new OIDCIssuer(GITHUB_OIDC_ISSUER),
       new GitHubWorkflowRepository(repo),
-      new GitHubWorkflowRefPattern(/^refs\/tags\//),
+      workflowRefPolicy,
     ]);
 
     // Verify the DSSE envelope and get the payload
@@ -128,8 +143,11 @@ export async function verifySigstoreBundle(
     }
 
     return {
-      type: predicateType,
-      registers,
+      measurement: {
+        type: predicateType,
+        registers,
+      },
+      releaseTag: workflowRefPolicy.releaseTag(),
     };
 
   } catch (e) {
