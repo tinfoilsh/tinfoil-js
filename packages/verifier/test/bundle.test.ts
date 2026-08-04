@@ -83,7 +83,7 @@ describe('Bundle Verification', () => {
     });
 
     await verifier.verifyBundle(bundle);
-    const original = verifier.getVerificationDocument()!;
+    const expected = structuredClone(verifier.getVerificationDocument()!);
     const snapshot = verifier.getVerificationDocument()!;
     snapshot.securityVerified = false;
     snapshot.releaseTag = 'modified';
@@ -92,7 +92,7 @@ describe('Bundle Verification', () => {
     snapshot.codeMeasurement.registers[0] = 'modified';
     snapshot.enclaveMeasurement.measurement.registers[0] = 'modified';
 
-    expect(verifier.getVerificationDocument()).toEqual(original);
+    expect(verifier.getVerificationDocument()).toEqual(expected);
   });
 
   it('should verify certificate containing HPKE key and attestation hash', async () => {

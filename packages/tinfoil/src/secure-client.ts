@@ -1,6 +1,6 @@
 import { KeyConfigMismatchError } from "ehbp";
-import { cloneJsonSnapshot, VERIFICATION_DOCUMENT_SCHEMA_VERSION, VERIFIER_NAME, VERIFIER_VERSION } from "@tinfoilsh/verifier";
-import { Verifier, ConfigurationError, FetchError, AttestationError, type VerificationDocument } from "./verifier.js";
+import { VERIFICATION_DOCUMENT_SCHEMA_VERSION, VERIFIER_NAME, VERIFIER_VERSION } from "@tinfoilsh/verifier";
+import { cloneVerificationDocument, Verifier, ConfigurationError, FetchError, AttestationError, type VerificationDocument } from "./verifier.js";
 import type { AttestationBundle } from "./verifier.js";
 import { TINFOIL_CONFIG } from "./config.js";
 import { createSecureFetch } from "./secure-fetch.js";
@@ -308,7 +308,7 @@ export class SecureClient {
    * @see https://docs.tinfoil.sh/verification/attestation-architecture
    */
   public getVerificationDocument(): VerificationDocument {
-    return cloneJsonSnapshot(this.verificationDocument);
+    return cloneVerificationDocument(this.verificationDocument);
   }
 
   /**

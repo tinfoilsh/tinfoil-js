@@ -52,6 +52,7 @@ const createSecureFetchMock = vi.fn<
 }));
 
 vi.mock("../src/verifier.js", () => ({
+  cloneVerificationDocument: (document: typeof mockVerificationDocument) => structuredClone(document),
   Verifier: class {
     verify() {
       return verifyMock();
@@ -215,7 +216,7 @@ describe("SecureClient", () => {
     const client = new SecureClient({ baseURL: "https://test.example.com/" });
 
     await client.ready();
-    const original = client.getVerificationDocument();
+    const expected = structuredClone(mockVerificationDocument);
     const snapshot = client.getVerificationDocument();
     snapshot.securityVerified = false;
     snapshot.releaseTag = "modified";
@@ -224,7 +225,7 @@ describe("SecureClient", () => {
     snapshot.codeMeasurement.registers.push("modified");
     snapshot.enclaveMeasurement.measurement.registers.push("modified");
 
-    expect(client.getVerificationDocument()).toEqual(original);
+    expect(client.getVerificationDocument()).toEqual(expected);
   });
 
   it("should lazily initialize when fetch is first accessed", async () => {
