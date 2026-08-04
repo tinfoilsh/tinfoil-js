@@ -19,6 +19,8 @@ export interface AttestationBundle {
   enclaveAttestationReport: AttestationDocument;
   /** SHA256 digest of the release */
   digest: string;
+  /** Release tag selected for the digest, verified against Sigstore when present */
+  releaseTag?: string;
   /** Sigstore bundle for code provenance verification */
   sigstoreBundle: unknown;
   /** Base64-encoded VCEK certificate (DER format) */

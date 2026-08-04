@@ -76,6 +76,7 @@ export async function assembleAttestationBundle(
     domain: enclaveHost,
     enclaveAttestationReport: attestation,
     digest: release.digest,
+    releaseTag: release.tag,
     sigstoreBundle,
     vcek,
     enclaveCert,

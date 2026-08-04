@@ -52,7 +52,8 @@ export interface VerifiedCodeMeasurement {
 export async function verifySigstoreBundle(
   bundleJson: unknown,
   digest: string,
-  repo: string
+  repo: string,
+  expectedReleaseTag?: string
 ): Promise<VerifiedCodeMeasurement> {
 
   try {
@@ -142,12 +143,19 @@ export async function verifySigstoreBundle(
       throw new AttestationError(`Unsupported in-toto predicate type: "${predicateType}". Only SNP/TDX multiplatform V1 is supported`);
     }
 
+    const releaseTag = workflowRefPolicy.releaseTag();
+    if (expectedReleaseTag && expectedReleaseTag !== releaseTag) {
+      throw new AttestationError(
+        `Release tag mismatch: selected release "${expectedReleaseTag}" was signed from "${releaseTag}"`
+      );
+    }
+
     return {
       measurement: {
         type: predicateType,
         registers,
       },
-      releaseTag: workflowRefPolicy.releaseTag(),
+      releaseTag,
     };
 
   } catch (e) {

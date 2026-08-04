@@ -3,14 +3,13 @@ import { verifySigstoreBundle } from './sigstore.js';
 import { assembleAttestationBundle } from './bundle.js';
 import { verifyCertificate } from './cert-verify.js';
 import { compareMeasurements, measurementFingerprint } from './types.js';
-import type { AttestationResponse, VerificationDocument, AttestationBundle } from './types.js';
+import type { AttestationResponse, VerificationDocument, AttestationBundle, SoftwareIdentity } from './types.js';
 import { ConfigurationError } from './errors.js';
 import { VERIFICATION_DOCUMENT_SCHEMA_VERSION, VERIFIER_NAME, VERIFIER_VERSION } from './version.js';
 
-const VERIFIER_IDENTITY = Object.freeze({
-  name: VERIFIER_NAME,
-  version: VERIFIER_VERSION,
-} as const);
+function verifierIdentity(): SoftwareIdentity {
+  return { name: VERIFIER_NAME, version: VERIFIER_VERSION };
+}
 
 export interface VerifierOptions {
   /** Server URL for fetching attestation. Required when using verify(), optional when using verifyBundle(). */
@@ -41,7 +40,7 @@ export class Verifier {
   }
 
   async verifyBundle(bundle: AttestationBundle): Promise<AttestationResponse> {
-    const { enclaveAttestationReport: attestationDoc, vcek, digest, sigstoreBundle, domain, enclaveCert } = bundle;
+    const { enclaveAttestationReport: attestationDoc, vcek, digest, releaseTag: selectedReleaseTag, sigstoreBundle, domain, enclaveCert } = bundle;
 
     const steps: VerificationDocument['steps'] = {
       fetchDigest: { status: 'success' }, // Already fetched by caller
@@ -67,7 +66,12 @@ export class Verifier {
       let codeMeasurements;
       let releaseTag: string;
       try {
-        const verifiedCode = await verifySigstoreBundle(sigstoreBundle, digest, this.configRepo);
+        const verifiedCode = await verifySigstoreBundle(
+          sigstoreBundle,
+          digest,
+          this.configRepo,
+          selectedReleaseTag
+        );
         codeMeasurements = verifiedCode.measurement;
         releaseTag = verifiedCode.releaseTag;
         steps.verifyCode = { status: 'success' };
@@ -117,7 +121,7 @@ export class Verifier {
         enclaveFingerprint: await measurementFingerprint(amdVerification.measurement),
         selectedRouterEndpoint: domain,
         securityVerified: true,
-        verifier: VERIFIER_IDENTITY,
+        verifier: verifierIdentity(),
         verifiedAt: new Date().toISOString(),
         steps
       };
@@ -145,7 +149,7 @@ export class Verifier {
       enclaveFingerprint: '',
       selectedRouterEndpoint: domain,
       securityVerified: false,
-      verifier: VERIFIER_IDENTITY,
+      verifier: verifierIdentity(),
       steps
     };
   }

@@ -54,6 +54,30 @@ describe('Bundle Verification', () => {
     expect(doc!.steps.verifyCertificate?.status).toBe('success');
   });
 
+  it('should reject a selected release tag that differs from signed provenance', async () => {
+    const verifier = new Verifier({
+      serverURL: `https://${bundle.domain}`,
+      configRepo: 'tinfoilsh/confidential-model-router',
+    });
+
+    await expect(
+      verifier.verifyBundle({ ...bundle, releaseTag: 'forged-release' })
+    ).rejects.toThrow('Release tag mismatch');
+  });
+
+  it('should not share mutable verifier identity between documents', async () => {
+    const verifier = new Verifier({
+      serverURL: `https://${bundle.domain}`,
+      configRepo: 'tinfoilsh/confidential-model-router',
+    });
+
+    await verifier.verifyBundle(bundle);
+    verifier.getVerificationDocument()!.verifier!.name = 'modified';
+    await verifier.verifyBundle(bundle);
+
+    expect(verifier.getVerificationDocument()!.verifier!.name).toBe('@tinfoilsh/verifier');
+  });
+
   it('should verify certificate containing HPKE key and attestation hash', async () => {
     const verifier = new Verifier({
       serverURL: `https://${bundle.domain}`,
