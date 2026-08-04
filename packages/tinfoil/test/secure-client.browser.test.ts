@@ -28,6 +28,7 @@ const mockVerificationDocument = {
 };
 
 vi.mock("../src/verifier.js", () => ({
+  cloneVerificationDocument: (document: typeof mockVerificationDocument) => structuredClone(document),
   Verifier: class {
     verify() {
       return verifyMock();

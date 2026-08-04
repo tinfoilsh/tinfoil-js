@@ -50,6 +50,7 @@ export async function fetchAttestationBundle(options: FetchAttestationBundleOpti
       body: bundle.enclaveAttestationReport.body,
     },
     digest: bundle.digest,
+    releaseTag: bundle.releaseTag,
     sigstoreBundle: bundle.sigstoreBundle,
     vcek: bundle.vcek,
     enclaveCert: bundle.enclaveCert,

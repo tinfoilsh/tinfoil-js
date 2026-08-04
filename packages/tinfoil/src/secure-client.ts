@@ -1,5 +1,6 @@
 import { KeyConfigMismatchError } from "ehbp";
-import { Verifier, ConfigurationError, FetchError, AttestationError, type VerificationDocument } from "./verifier.js";
+import { VERIFICATION_DOCUMENT_SCHEMA_VERSION, VERIFIER_NAME, VERIFIER_VERSION } from "@tinfoilsh/verifier";
+import { cloneVerificationDocument, Verifier, ConfigurationError, FetchError, AttestationError, type VerificationDocument } from "./verifier.js";
 import type { AttestationBundle } from "./verifier.js";
 import { TINFOIL_CONFIG } from "./config.js";
 import { createSecureFetch } from "./secure-fetch.js";
@@ -78,6 +79,7 @@ export interface SecureClientOptions {
 
 function createPendingVerificationDocument(configRepo: string): VerificationDocument {
   return {
+    schemaVersion: VERIFICATION_DOCUMENT_SCHEMA_VERSION,
     configRepo,
     enclaveHost: '',
     releaseDigest: '',
@@ -89,6 +91,10 @@ function createPendingVerificationDocument(configRepo: string): VerificationDocu
     enclaveFingerprint: '',
     selectedRouterEndpoint: '',
     securityVerified: false,
+    verifier: {
+      name: VERIFIER_NAME,
+      version: VERIFIER_VERSION,
+    },
     steps: {
       fetchDigest: { status: 'pending' },
       verifyCode: { status: 'pending' },
@@ -302,7 +308,7 @@ export class SecureClient {
    * @see https://docs.tinfoil.sh/verification/attestation-architecture
    */
   public getVerificationDocument(): VerificationDocument {
-    return this.verificationDocument;
+    return cloneVerificationDocument(this.verificationDocument);
   }
 
   /**

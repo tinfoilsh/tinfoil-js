@@ -3,8 +3,14 @@ import { verifySigstoreBundle } from './sigstore.js';
 import { assembleAttestationBundle } from './bundle.js';
 import { verifyCertificate } from './cert-verify.js';
 import { compareMeasurements, measurementFingerprint } from './types.js';
-import type { AttestationResponse, VerificationDocument, AttestationBundle } from './types.js';
+import type { AttestationResponse, VerificationDocument, AttestationBundle, SoftwareIdentity } from './types.js';
 import { ConfigurationError } from './errors.js';
+import { cloneVerificationDocument } from './json.js';
+import { VERIFICATION_DOCUMENT_SCHEMA_VERSION, VERIFIER_NAME, VERIFIER_VERSION } from './version.js';
+
+function verifierIdentity(): SoftwareIdentity {
+  return { name: VERIFIER_NAME, version: VERIFIER_VERSION };
+}
 
 export interface VerifierOptions {
   /** Server URL for fetching attestation. Required when using verify(), optional when using verifyBundle(). */
@@ -35,7 +41,7 @@ export class Verifier {
   }
 
   async verifyBundle(bundle: AttestationBundle): Promise<AttestationResponse> {
-    const { enclaveAttestationReport: attestationDoc, vcek, digest, sigstoreBundle, domain, enclaveCert } = bundle;
+    const { enclaveAttestationReport: attestationDoc, vcek, digest, releaseTag: selectedReleaseTag, sigstoreBundle, domain, enclaveCert } = bundle;
 
     const steps: VerificationDocument['steps'] = {
       fetchDigest: { status: 'success' }, // Already fetched by caller
@@ -59,8 +65,16 @@ export class Verifier {
 
       // Step 2: Verify code provenance (Sigstore bundle)
       let codeMeasurements;
+      let releaseTag: string;
       try {
-        codeMeasurements = await verifySigstoreBundle(sigstoreBundle, digest, this.configRepo);
+        const verifiedCode = await verifySigstoreBundle(
+          sigstoreBundle,
+          digest,
+          this.configRepo,
+          selectedReleaseTag
+        );
+        codeMeasurements = verifiedCode.measurement;
+        releaseTag = verifiedCode.releaseTag;
         steps.verifyCode = { status: 'success' };
       } catch (error) {
         steps.verifyCode = { status: 'failed', error: (error as Error).message };
@@ -95,8 +109,10 @@ export class Verifier {
 
       // Build successful verification document
       this.verificationDocument = {
+        schemaVersion: VERIFICATION_DOCUMENT_SCHEMA_VERSION,
         configRepo: this.configRepo,
         enclaveHost: domain,
+        releaseTag,
         releaseDigest: digest,
         codeMeasurement: codeMeasurements,
         enclaveMeasurement: amdVerification,
@@ -106,6 +122,8 @@ export class Verifier {
         enclaveFingerprint: await measurementFingerprint(amdVerification.measurement),
         selectedRouterEndpoint: domain,
         securityVerified: true,
+        verifier: verifierIdentity(),
+        verifiedAt: new Date().toISOString(),
         steps
       };
 
@@ -120,6 +138,7 @@ export class Verifier {
 
   private saveFailedVerificationDocument(steps: VerificationDocument['steps'], domain: string): void {
     this.verificationDocument = {
+      schemaVersion: VERIFICATION_DOCUMENT_SCHEMA_VERSION,
       configRepo: this.configRepo,
       enclaveHost: domain,
       releaseDigest: '',
@@ -131,11 +150,14 @@ export class Verifier {
       enclaveFingerprint: '',
       selectedRouterEndpoint: domain,
       securityVerified: false,
+      verifier: verifierIdentity(),
       steps
     };
   }
 
   getVerificationDocument(): VerificationDocument | undefined {
-    return this.verificationDocument;
+    return this.verificationDocument
+      ? cloneVerificationDocument(this.verificationDocument)
+      : undefined;
   }
 }

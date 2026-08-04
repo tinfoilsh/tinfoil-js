@@ -7,6 +7,7 @@ const MOCK_MEASUREMENT_TYPE = "https://tinfoil.sh/predicate/sev-snp-guest/v1";
 const mockVerificationDocument = {
   configRepo: "test-repo",
   enclaveHost: "test-host",
+  releaseTag: "test-release",
   releaseDigest: "test-digest",
   codeMeasurement: { type: MOCK_MEASUREMENT_TYPE, registers: [] },
   enclaveMeasurement: {
@@ -19,6 +20,7 @@ const mockVerificationDocument = {
   enclaveFingerprint: "test-enclave-fingerprint",
   selectedRouterEndpoint: "test.example.com",
   securityVerified: true,
+  verifier: { name: "@tinfoilsh/verifier", version: "1.2.0" },
   steps: {
     fetchDigest: { status: "success" },
     verifyCode: { status: "success" },
@@ -32,6 +34,7 @@ const verifyMock = vi.fn(async () => ({
   hpkePublicKey: "mock-hpke-public-key",
   measurement: { type: MOCK_MEASUREMENT_TYPE, registers: [] },
 }));
+const getVerificationDocumentMock = vi.fn(() => mockVerificationDocument);
 
 const mockFetch = vi.fn(async () => new Response(JSON.stringify({ message: "success" })));
 const mockGetSessionRecoveryToken = vi.fn(async () => ({ exportedSecret: new Uint8Array(), requestEnc: new Uint8Array() }));
@@ -49,6 +52,7 @@ const createSecureFetchMock = vi.fn<
 }));
 
 vi.mock("../src/verifier.js", () => ({
+  cloneVerificationDocument: (document: typeof mockVerificationDocument) => structuredClone(document),
   Verifier: class {
     verify() {
       return verifyMock();
@@ -57,7 +61,7 @@ vi.mock("../src/verifier.js", () => ({
       return verifyMock();
     }
     getVerificationDocument() {
-      return mockVerificationDocument;
+      return getVerificationDocumentMock();
     }
   },
   FetchError: class FetchError extends Error {
@@ -205,6 +209,23 @@ describe("SecureClient", () => {
 
     expect(verifyMock).toHaveBeenCalledTimes(1);
     expect(verificationDocument).toEqual(mockVerificationDocument);
+  });
+
+  it("should return deeply cloned verification document snapshots", async () => {
+    const { SecureClient } = await import("../src/secure-client");
+    const client = new SecureClient({ baseURL: "https://test.example.com/" });
+
+    await client.ready();
+    const expected = structuredClone(mockVerificationDocument);
+    const snapshot = client.getVerificationDocument();
+    snapshot.securityVerified = false;
+    snapshot.releaseTag = "modified";
+    snapshot.verifier!.name = "modified";
+    snapshot.steps.verifyCode.status = "failed";
+    snapshot.codeMeasurement.registers.push("modified");
+    snapshot.enclaveMeasurement.measurement.registers.push("modified");
+
+    expect(client.getVerificationDocument()).toEqual(expected);
   });
 
   it("should lazily initialize when fetch is first accessed", async () => {
@@ -628,6 +649,41 @@ describe("SecureClient", () => {
       expect(verifyMock).toHaveBeenCalledTimes(2);
       expect(createSecureFetchMock).toHaveBeenCalledTimes(2);
       expect(await response.json()).toEqual({ ok: true });
+    });
+
+    it("should replace verification metadata after automatic re-attestation", async () => {
+      const firstDocument = {
+        ...mockVerificationDocument,
+        releaseTag: "v1.0.0",
+        verifiedAt: "2026-01-01T00:00:00.000Z",
+      };
+      const replacementDocument = {
+        ...mockVerificationDocument,
+        releaseTag: "v1.1.0",
+        verifiedAt: "2026-02-01T00:00:00.000Z",
+      };
+      getVerificationDocumentMock
+        .mockReturnValueOnce(firstDocument)
+        .mockReturnValueOnce(replacementDocument);
+      const { KeyConfigMismatchError } = await import("ehbp");
+      mockFetch
+        .mockRejectedValueOnce(new KeyConfigMismatchError("Key config mismatch"))
+        .mockResolvedValueOnce(new Response(JSON.stringify({ ok: true })));
+      const { SecureClient } = await import("../src/secure-client");
+      const client = new SecureClient({ baseURL: "https://test.example.com/" });
+
+      await client.ready();
+      expect(client.getVerificationDocument()).toMatchObject({
+        releaseTag: firstDocument.releaseTag,
+        verifiedAt: firstDocument.verifiedAt,
+      });
+
+      await client.fetch("/test", { method: "GET" });
+
+      expect(client.getVerificationDocument()).toMatchObject({
+        releaseTag: replacementDocument.releaseTag,
+        verifiedAt: replacementDocument.verifiedAt,
+      });
     });
 
     it("should retry eligible requests with the injected cache secret", async () => {

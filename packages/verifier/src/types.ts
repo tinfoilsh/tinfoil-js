@@ -19,6 +19,8 @@ export interface AttestationBundle {
   enclaveAttestationReport: AttestationDocument;
   /** SHA256 digest of the release */
   digest: string;
+  /** Release tag selected for the digest, verified against Sigstore when present */
+  releaseTag?: string;
   /** Sigstore bundle for code provenance verification */
   sigstoreBundle: unknown;
   /** Base64-encoded VCEK certificate (DER format) */
@@ -115,7 +117,7 @@ export async function hashAttestationDocument(doc: AttestationDocument): Promise
 }
 
 export interface VerificationStepState {
-  status: 'pending' | 'success' | 'failed';
+  status: 'pending' | 'success' | 'failed' | 'skipped';
   error?: string;
 }
 
@@ -125,9 +127,16 @@ export interface HardwareMeasurement {
   RTMR0?: string;
 }
 
+export interface SoftwareIdentity {
+  name: string;
+  version: string;
+}
+
 export interface VerificationDocument {
+  schemaVersion?: 1;
   configRepo: string;
   enclaveHost: string;
+  releaseTag?: string;
   releaseDigest: string;
   codeMeasurement: AttestationMeasurement;
   enclaveMeasurement: AttestationResponse;
@@ -138,6 +147,8 @@ export interface VerificationDocument {
   enclaveFingerprint: string;
   selectedRouterEndpoint: string;
   securityVerified: boolean;
+  verifier?: SoftwareIdentity;
+  verifiedAt?: string;
   steps: {
     fetchDigest: VerificationStepState;
     verifyCode: VerificationStepState;
@@ -147,4 +158,3 @@ export interface VerificationDocument {
     otherError?: VerificationStepState;
   };
 }
-

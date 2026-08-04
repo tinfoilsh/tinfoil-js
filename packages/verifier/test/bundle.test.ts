@@ -33,18 +33,66 @@ describe('Bundle Verification', () => {
       configRepo: 'tinfoilsh/confidential-model-router',
     });
 
+    const startedAt = Date.now();
     await verifier.verifyBundle(bundle);
     const doc = verifier.getVerificationDocument();
 
     expect(doc).toBeDefined();
     expect(doc!.securityVerified).toBe(true);
     expect(doc!.enclaveHost).toBe(bundle.domain);
+    expect(doc!.schemaVersion).toBe(1);
+    expect(doc!.releaseTag).toBeTruthy();
     expect(doc!.releaseDigest).toBe(bundle.digest);
+    expect(doc!.verifier?.name).toBe('@tinfoilsh/verifier');
+    expect(doc!.verifier?.version).toBeTruthy();
+    expect(Date.parse(doc!.verifiedAt!)).toBeGreaterThanOrEqual(startedAt);
+    expect(Date.parse(doc!.verifiedAt!)).toBeLessThanOrEqual(Date.now());
     expect(doc!.steps.fetchDigest.status).toBe('success');
     expect(doc!.steps.verifyCode.status).toBe('success');
     expect(doc!.steps.verifyEnclave.status).toBe('success');
     expect(doc!.steps.compareMeasurements.status).toBe('success');
     expect(doc!.steps.verifyCertificate?.status).toBe('success');
+  });
+
+  it('should reject a selected release tag that differs from signed provenance', async () => {
+    const verifier = new Verifier({
+      serverURL: `https://${bundle.domain}`,
+      configRepo: 'tinfoilsh/confidential-model-router',
+    });
+
+    await expect(
+      verifier.verifyBundle({ ...bundle, releaseTag: 'forged-release' })
+    ).rejects.toThrow('Release tag mismatch');
+  });
+
+  it('should reject an empty selected release tag', async () => {
+    const verifier = new Verifier({
+      serverURL: `https://${bundle.domain}`,
+      configRepo: 'tinfoilsh/confidential-model-router',
+    });
+
+    await expect(
+      verifier.verifyBundle({ ...bundle, releaseTag: '' })
+    ).rejects.toThrow('Release tag mismatch');
+  });
+
+  it('should return deeply cloned verification document snapshots', async () => {
+    const verifier = new Verifier({
+      serverURL: `https://${bundle.domain}`,
+      configRepo: 'tinfoilsh/confidential-model-router',
+    });
+
+    await verifier.verifyBundle(bundle);
+    const expected = structuredClone(verifier.getVerificationDocument()!);
+    const snapshot = verifier.getVerificationDocument()!;
+    snapshot.securityVerified = false;
+    snapshot.releaseTag = 'modified';
+    snapshot.verifier!.name = 'modified';
+    snapshot.steps.verifyCode.status = 'failed';
+    snapshot.codeMeasurement.registers[0] = 'modified';
+    snapshot.enclaveMeasurement.measurement.registers[0] = 'modified';
+
+    expect(verifier.getVerificationDocument()).toEqual(expected);
   });
 
   it('should verify certificate containing HPKE key and attestation hash', async () => {
@@ -78,6 +126,7 @@ describe('Bundle Verification', () => {
     });
 
     await expect(verifier.verifyBundle(tamperedBundle)).rejects.toThrow();
+    expect(verifier.getVerificationDocument()?.verifiedAt).toBeUndefined();
   });
 
   it('should return TLS and HPKE public keys from bundle verification', async () => {
