@@ -9,7 +9,7 @@
     "lint": "npm run lint -w tinfoil",
     "test": "npm run test -ws --if-present",
     "test:integration": "npm run test:integration -ws --if-present",
-    "test:browser": "npm run test:browser -ws --if-present",
+    "test:browser": "npm run build -w @tinfoilsh/verifier && npm run test:browser -ws --if-present",
     "test:browser:integration": "npm run test:browser:integration -ws --if-present",
     "test:all": "npm run test && npm run test:integration && npm run test:browser && npm run test:browser:integration",
     "check:es2020": "npm run check:es2020 -ws --if-present",
