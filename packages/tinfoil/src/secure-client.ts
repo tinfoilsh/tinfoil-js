@@ -1,4 +1,5 @@
 import { KeyConfigMismatchError } from "ehbp";
+import { VERIFIER_NAME, VERIFIER_VERSION } from "@tinfoilsh/verifier";
 import { Verifier, ConfigurationError, FetchError, AttestationError, type VerificationDocument } from "./verifier.js";
 import type { AttestationBundle } from "./verifier.js";
 import { TINFOIL_CONFIG } from "./config.js";
@@ -78,6 +79,7 @@ export interface SecureClientOptions {
 
 function createPendingVerificationDocument(configRepo: string): VerificationDocument {
   return {
+    schemaVersion: 1,
     configRepo,
     enclaveHost: '',
     releaseDigest: '',
@@ -89,6 +91,10 @@ function createPendingVerificationDocument(configRepo: string): VerificationDocu
     enclaveFingerprint: '',
     selectedRouterEndpoint: '',
     securityVerified: false,
+    verifier: {
+      name: VERIFIER_NAME,
+      version: VERIFIER_VERSION,
+    },
     steps: {
       fetchDigest: { status: 'pending' },
       verifyCode: { status: 'pending' },

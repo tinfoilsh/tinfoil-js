@@ -33,13 +33,20 @@ describe('Bundle Verification', () => {
       configRepo: 'tinfoilsh/confidential-model-router',
     });
 
-    await verifier.verifyBundle(bundle);
+    const startedAt = Date.now();
+    await verifier.verifyBundle({ ...bundle, releaseTag: 'v1.2.3' });
     const doc = verifier.getVerificationDocument();
 
     expect(doc).toBeDefined();
     expect(doc!.securityVerified).toBe(true);
     expect(doc!.enclaveHost).toBe(bundle.domain);
+    expect(doc!.schemaVersion).toBe(1);
+    expect(doc!.releaseTag).toBeUndefined();
     expect(doc!.releaseDigest).toBe(bundle.digest);
+    expect(doc!.verifier?.name).toBe('@tinfoilsh/verifier');
+    expect(doc!.verifier?.version).toBeTruthy();
+    expect(Date.parse(doc!.verifiedAt!)).toBeGreaterThanOrEqual(startedAt);
+    expect(Date.parse(doc!.verifiedAt!)).toBeLessThanOrEqual(Date.now());
     expect(doc!.steps.fetchDigest.status).toBe('success');
     expect(doc!.steps.verifyCode.status).toBe('success');
     expect(doc!.steps.verifyEnclave.status).toBe('success');
@@ -78,6 +85,7 @@ describe('Bundle Verification', () => {
     });
 
     await expect(verifier.verifyBundle(tamperedBundle)).rejects.toThrow();
+    expect(verifier.getVerificationDocument()?.verifiedAt).toBeUndefined();
   });
 
   it('should return TLS and HPKE public keys from bundle verification', async () => {

@@ -5,6 +5,12 @@ import { verifyCertificate } from './cert-verify.js';
 import { compareMeasurements, measurementFingerprint } from './types.js';
 import type { AttestationResponse, VerificationDocument, AttestationBundle } from './types.js';
 import { ConfigurationError } from './errors.js';
+import { VERIFIER_NAME, VERIFIER_VERSION } from './version.js';
+
+const VERIFIER_IDENTITY = {
+  name: VERIFIER_NAME,
+  version: VERIFIER_VERSION,
+} as const;
 
 export interface VerifierOptions {
   /** Server URL for fetching attestation. Required when using verify(), optional when using verifyBundle(). */
@@ -31,7 +37,14 @@ export class Verifier {
     }
     const domain = new URL(this.serverURL).hostname;
     const bundle = await assembleAttestationBundle(domain, this.configRepo);
-    return this.verifyBundle(bundle);
+    const verification = await this.verifyBundle(bundle);
+    if (this.verificationDocument?.securityVerified) {
+      this.verificationDocument = {
+        ...this.verificationDocument,
+        releaseTag: bundle.releaseTag,
+      };
+    }
+    return verification;
   }
 
   async verifyBundle(bundle: AttestationBundle): Promise<AttestationResponse> {
@@ -95,6 +108,7 @@ export class Verifier {
 
       // Build successful verification document
       this.verificationDocument = {
+        schemaVersion: 1,
         configRepo: this.configRepo,
         enclaveHost: domain,
         releaseDigest: digest,
@@ -106,6 +120,8 @@ export class Verifier {
         enclaveFingerprint: await measurementFingerprint(amdVerification.measurement),
         selectedRouterEndpoint: domain,
         securityVerified: true,
+        verifier: VERIFIER_IDENTITY,
+        verifiedAt: new Date().toISOString(),
         steps
       };
 
@@ -120,6 +136,7 @@ export class Verifier {
 
   private saveFailedVerificationDocument(steps: VerificationDocument['steps'], domain: string): void {
     this.verificationDocument = {
+      schemaVersion: 1,
       configRepo: this.configRepo,
       enclaveHost: domain,
       releaseDigest: '',
@@ -131,6 +148,7 @@ export class Verifier {
       enclaveFingerprint: '',
       selectedRouterEndpoint: domain,
       securityVerified: false,
+      verifier: VERIFIER_IDENTITY,
       steps
     };
   }

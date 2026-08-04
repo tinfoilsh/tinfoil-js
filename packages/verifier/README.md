@@ -82,7 +82,26 @@ console.log(doc.steps.compareMeasurements); // Compared code vs enclave measurem
 // Measurements
 console.log(doc.codeFingerprint);     // Expected measurement from signed release
 console.log(doc.enclaveFingerprint);  // Actual measurement from enclave
+console.log(doc.releaseTag);          // GitHub release selected for verification
+console.log(doc.verifier);            // Verifier package identity and version
+console.log(doc.verifiedAt);           // Local completion time, not evidence freshness
 ```
+
+### Using Your Own Transport
+
+`Verifier` does not require callers to use the main SDK transport. After
+verification, `tlsPublicKeyFingerprint` contains the attested SHA-256 SPKI
+fingerprint and can be passed to a separate HTTP implementation:
+
+```typescript
+const attestation = await verifier.verify();
+const expectedSpkiFingerprint = attestation.tlsPublicKeyFingerprint;
+```
+
+The custom transport must compare that value with the live peer certificate's
+SPKI on every new TLS connection and must still perform normal hostname and
+certificate validation. Merely obtaining the fingerprint does not pin the
+connection.
 
 ## What Gets Verified
 
