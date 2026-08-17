@@ -22,7 +22,7 @@ export function capabilities(): unknown {
         StageAuthenticateQuote,
       ],
       synthetic_roots: { amd: true, intel: true, sigstore: true },
-      freshness_enforced: false,
+      freshness_enforced: true,
     },
   };
 }

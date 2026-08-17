@@ -9,14 +9,24 @@
 // Exit codes are the cross-SDK adapter contract: the suite reads them to
 // decide pass/skip and never depends on stdout for the verdict.
 
+import { X509Certificate } from "node:crypto";
+
 import {
   check,
   CollateralSigstoreCodeV1Format,
   CollateralSigstorePlatformV1Format,
+  CryptoMaterialIDHPKE,
+  CryptoMaterialIDTLS,
   decodeBase64,
   decodeHex,
+  KeySPKIFPSHA256V1Format,
+  KeyX25519HPKEV1Format,
   parseDocument,
+  quoteAuthenticate,
   referenceValuesCollateral,
+  VerificationError,
+  verifyDocumentV3,
+  type CryptoMaterialItem,
   type Document,
 } from "../../verifier/dist/v3/index.js";
 import {
@@ -93,6 +103,9 @@ async function run(stage: string, input: Input): Promise<[Output, number]> {
   if ((amd !== "") !== (ask !== "")) {
     return malformed(stage);
   }
+  // KDS cert_chain is ASK then ARK; empty selects the embedded root.
+  const amdRootPEM = amd !== "" ? `${ask.trim()}\n${amd.trim()}\n` : undefined;
+  const intelRootPEM = (input.intel_sgx_root_pem ?? "") !== "" ? input.intel_sgx_root_pem : undefined;
   const provOpts: ProvenanceOpts = {};
   if ((input.sigstore_trusted_root_json_b64 ?? "") !== "") {
     try {
@@ -103,6 +116,11 @@ async function run(stage: string, input: Input): Promise<[Output, number]> {
       return malformed(stage);
     }
   }
+  // verification_time_unix pins the validity-window and freshness-appraisal
+  // clock so a frozen document replays at its capture time; 0 uses the
+  // current time (Go: Run's Set/ResetVerificationTime).
+  const verificationTime =
+    (input.verification_time_unix ?? 0) !== 0 ? new Date((input.verification_time_unix as number) * 1000) : undefined;
 
   switch (stage) {
     case StageCheckEnvelope:
@@ -164,14 +182,91 @@ async function run(stage: string, input: Input): Promise<[Output, number]> {
         return reject(stage, "PROVENANCE_REJECTED");
       }
     }
-    case StageVerify:
-    case StageAuthenticateQuote:
-      // TODO(integration agent): wire these stages once the quote (sev/tdx)
-      // and policy-assembly layers land; until then they are honestly
-      // unsupported so the suite skips their fixtures.
-      return [{ stage, accepted: false }, ExitUnsupported];
+    case StageAuthenticateQuote: {
+      let parsed: Document;
+      try {
+        parsed = parseDocument(doc);
+      } catch {
+        return malformed(stage);
+      }
+      // Go parses an injected Intel root eagerly (tdx.SetIntelRoot); a PEM
+      // that does not parse is malformed input, not a rejection.
+      if (intelRootPEM !== undefined && !parsesAsCertificate(intelRootPEM)) {
+        return malformed(stage);
+      }
+      try {
+        const auth = await quoteAuthenticate(parsed, { amdRootPEM, intelRootPEM, now: verificationTime });
+        return [
+          {
+            stage,
+            accepted: true,
+            outputs: {
+              enclave_measurement: { type: auth.measurement.type, registers: auth.measurement.registers },
+            },
+          },
+          ExitAccepted,
+        ];
+      } catch {
+        return reject(stage, "QUOTE_REJECTED");
+      }
+    }
+    case StageVerify: {
+      if (intelRootPEM !== undefined && !parsesAsCertificate(intelRootPEM)) {
+        return malformed(stage);
+      }
+      try {
+        const verified = await verifyDocumentV3(doc, nonce, input.repo ?? "", {
+          sigstoreRootJSON: provOpts.trustRootJSON,
+          amdRootPEM,
+          intelRootPEM,
+          verificationTime,
+        });
+        const { tlsFP, hpke } = boundKeys(verified.cryptoMaterial);
+        const outputs: Record<string, unknown> = {
+          code_digest: verified.codeDigest,
+          code_measurement: { type: verified.codeMeasurement.type, registers: verified.codeMeasurement.registers },
+          enclave_measurement: {
+            type: verified.enclaveMeasurement.type,
+            registers: verified.enclaveMeasurement.registers,
+          },
+        };
+        if (tlsFP !== "") outputs.tls_public_key_fp = tlsFP;
+        if (hpke !== "") outputs.hpke_public_key = hpke;
+        return [{ stage, accepted: true, outputs }, ExitAccepted];
+      } catch (err) {
+        // The first failing step names the layer (Go: verifyFull).
+        if (err instanceof VerificationError) {
+          return reject(stage, err.layer);
+        }
+        throw err;
+      }
+    }
     default:
       return [{ stage, accepted: false }, ExitUnsupported];
+  }
+}
+
+// boundKeys returns the endorsed TLS SPKI fingerprint and HPKE public key
+// from the verified crypto material (Go: conformance.boundKeys).
+function boundKeys(items: CryptoMaterialItem[]): { tlsFP: string; hpke: string } {
+  let tlsFP = "";
+  let hpke = "";
+  for (const it of items) {
+    if (it.id === CryptoMaterialIDTLS && it.format === KeySPKIFPSHA256V1Format) {
+      tlsFP = it.data;
+    } else if (it.id === CryptoMaterialIDHPKE && it.format === KeyX25519HPKEV1Format) {
+      hpke = it.data;
+    }
+  }
+  return { tlsFP, hpke };
+}
+
+function parsesAsCertificate(pem: string): boolean {
+  try {
+    new X509Certificate(pem);
+    return true;
+  } catch {
+    return false;
   }
 }
 
