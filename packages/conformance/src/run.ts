@@ -79,6 +79,9 @@ function malformed(stage: string): StageResult {
 // runStage executes one stage and returns the wire Output plus the adapter
 // exit code (Go: conformance.Run).
 export async function runStage(stage: string, input: Input): Promise<StageResult> {
+  if (input.schema_version !== "1") {
+    return malformed(stage);
+  }
   let doc: Uint8Array;
   let nonce: Uint8Array;
   try {

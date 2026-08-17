@@ -577,6 +577,8 @@ export function endorsementCollateral(
 // document without such an entry throws a CollateralNotFoundError. Errors
 // carry PROVENANCE_REJECTED: in the verification flow this lookup is the
 // first step of reference-values authentication.
+// First matching entry wins (ids are unique; two entries of the same format
+// under different ids resolve in collateral order), mirroring Go.
 export function referenceValuesCollateral(doc: Document, format: string): SigstoreCollateral {
   for (const entry of doc.collateral) {
     if (entry.role !== RoleReferenceValues || entry.format !== format) continue;
