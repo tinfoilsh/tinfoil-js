@@ -218,6 +218,12 @@ export async function runStage(stage: string, input: Input): Promise<StageResult
           verificationTime,
         });
         const { tlsFP, hpke } = boundKeys(verified.cryptoMaterial);
+        // A document that verifies but endorses no usable channel keys is
+        // useless to every real client, so the full stage requires both
+        // (Go: verifyFull).
+        if (tlsFP === "" || hpke === "") {
+          return { output: { stage, accepted: false, rejection: { code: "ENVELOPE_REJECTED" } }, exitCode: ExitRejected };
+        }
         const outputs: Record<string, unknown> = {
           code_digest: verified.codeDigest,
           code_measurement: { type: verified.codeMeasurement.type, registers: verified.codeMeasurement.registers },
