@@ -353,18 +353,18 @@ function reraise(err: unknown, layer: "ENVELOPE_REJECTED" | "PROVENANCE_REJECTED
 // https://tinfoil.sh/report-data/v1 algorithm: SHA-256 over the algorithm
 // URI (domain-separation label) followed by the three fixed-length 32-byte
 // inputs in order.
-export function computeReportData(
+export async function computeReportData(
   nonce: Uint8Array,
   cryptoMaterialHash: Uint8Array,
   deviceEvidenceHash: Uint8Array,
-): Uint8Array {
+): Promise<Uint8Array> {
   if (nonce.length !== 32 || cryptoMaterialHash.length !== 32 || deviceEvidenceHash.length !== 32) {
     throw envelopeError(
       `report data inputs must be 32 bytes each (got ${nonce.length}, ${cryptoMaterialHash.length}, ${deviceEvidenceHash.length})`,
     );
   }
   const out = new Uint8Array(64);
-  out.set(sha256(utf8Encode(ReportDataV1Algorithm), nonce, cryptoMaterialHash, deviceEvidenceHash), 0);
+  out.set(await sha256(utf8Encode(ReportDataV1Algorithm), nonce, cryptoMaterialHash, deviceEvidenceHash), 0);
   return out;
 }
 
@@ -515,10 +515,10 @@ export function parseDocument(docBytes: Uint8Array): Document {
 // REPORT_DATA the CPU quote must bind. A check is not authentication:
 // nothing in the document is trusted until the quote proves the hardware
 // bound that REPORT_DATA.
-export function check(
+export async function check(
   docBytes: Uint8Array,
   expectedNonce: Uint8Array,
-): { doc: Document; reportData: Uint8Array } {
+): Promise<{ doc: Document; reportData: Uint8Array }> {
   if (expectedNonce.length !== NonceSize) {
     throw envelopeError(`expected nonce must be ${NonceSize} bytes, got ${expectedNonce.length}`);
   }
@@ -527,8 +527,8 @@ export function check(
     throw envelopeError("challenge nonce does not match the expected nonce");
   }
 
-  const cryptoHash = sha256(doc.cryptoMaterialBytes);
-  const deviceHash = sha256(doc.deviceEvidenceBytes);
+  const cryptoHash = await sha256(doc.cryptoMaterialBytes);
+  const deviceHash = await sha256(doc.deviceEvidenceBytes);
   if (encodeHex(cryptoHash) !== doc.cpuEvidence.endorsed.cryptoMaterialHash) {
     throw envelopeError("crypto_material hash does not match cpu_evidence.endorsed.crypto_material_hash");
   }
@@ -536,7 +536,7 @@ export function check(
     throw envelopeError("device_evidence hash does not match cpu_evidence.endorsed.device_evidence_hash");
   }
 
-  const reportData = computeReportData(expectedNonce, cryptoHash, deviceHash);
+  const reportData = await computeReportData(expectedNonce, cryptoHash, deviceHash);
   if (encodeHex(reportData) !== doc.challenge.reportData) {
     throw envelopeError("challenge report_data does not match the recomputed value");
   }

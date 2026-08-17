@@ -2,6 +2,7 @@
 // from github.com/google/go-sev-guest kds. All errors are plain Errors; the
 // calling module assigns the rejection layer.
 
+import { bytesToLatin1 } from "../bytes.js";
 import {
   composeTCBParts,
   reportSignerString,
@@ -93,7 +94,7 @@ function asn1IA5String(ext: Extension | undefined, field: string): string {
   if (t.end !== ext.value.length) {
     throw new Error(`unexpected leftover bytes for IA5String field ${field}`);
   }
-  return Buffer.from(ext.value.subarray(t.contentStart, t.end)).toString("latin1");
+  return bytesToLatin1(ext.value.subarray(t.contentStart, t.end));
 }
 
 // asn1OctetString accepts the KDS HWID both raw (the KDS omits the type tag)

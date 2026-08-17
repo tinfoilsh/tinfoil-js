@@ -154,7 +154,7 @@ function validateX509Cert(cert: Certificate): void {
 
 // checkSignatureFromCert mirrors x509.Certificate.CheckSignatureFrom's
 // parent-constraint and signature checks.
-function checkSignatureFromCert(cert: Certificate, parent: Certificate, forCRL: boolean, tbs: Uint8Array, signature: Uint8Array): void {
+async function checkSignatureFromCert(cert: Certificate, parent: Certificate, forCRL: boolean, tbs: Uint8Array, signature: Uint8Array): Promise<void> {
   const bc = basicConstraints(parent);
   if ((parent.version === 3 && !bc.present) || (bc.present && !bc.ca)) {
     throw new Error("x509: invalid signature: parent certificate cannot sign this kind of certificate");
@@ -163,13 +163,13 @@ function checkSignatureFromCert(cert: Certificate, parent: Certificate, forCRL: 
   if (ku.present && !(forCRL ? ku.crlSign : ku.certSign)) {
     throw new Error("x509: invalid signature: parent certificate cannot sign this kind of certificate");
   }
-  if (!verifyDERSignature(tbs, signature, parent)) {
+  if (!(await verifyDERSignature(tbs, signature, parent))) {
     throw new Error("crypto/ecdsa: verification error");
   }
   void cert;
 }
 
-function validateCertificate(cert: Certificate, parent: Certificate, phrase: string): void {
+async function validateCertificate(cert: Certificate, parent: Certificate, phrase: string): Promise<void> {
   validateX509Cert(cert);
   if (cert.subjectCN !== phrase) {
     throw new Error(`${JSON.stringify(cert.subjectCN)} is not expected in certificate's subject name. Expected ${JSON.stringify(phrase)}`);
@@ -178,13 +178,13 @@ function validateCertificate(cert: Certificate, parent: Certificate, phrase: str
     throw new Error("certificate's issuer name does not match with parent certificate's subject name");
   }
   try {
-    checkSignatureFromCert(cert, parent, false, cert.tbs, cert.signature);
+    await checkSignatureFromCert(cert, parent, false, cert.tbs, cert.signature);
   } catch (err) {
     throw new Error(`certificate signature verification using parent certificate failed: ${err instanceof Error ? err.message : String(err)}`);
   }
 }
 
-function validateCRL(crl: CRL | undefined, trustedCertificate: Certificate): void {
+async function validateCRL(crl: CRL | undefined, trustedCertificate: Certificate): Promise<void> {
   if (crl === undefined) throw new Error("CRL is empty");
   if (!derBytesEqual(crl.issuerDER, trustedCertificate.subjectDER)) {
     throw new Error("CRL issuer's name does not match with expected name");
@@ -197,7 +197,7 @@ function validateCRL(crl: CRL | undefined, trustedCertificate: Certificate): voi
   if (ku.present && !ku.crlSign) {
     throw new Error("CRL signature verification failed using trusted certificate: constraint violation");
   }
-  if (!verifyDERSignature(crl.tbs, crl.signature, trustedCertificate)) {
+  if (!(await verifyDERSignature(crl.tbs, crl.signature, trustedCertificate))) {
     throw new Error("CRL signature verification failed using trusted certificate");
   }
 }
@@ -211,9 +211,9 @@ function checkValidity(cert: Certificate, now: Date, what: string): void {
 // verifyChainToTrustedRoot mirrors x509.Certificate.Verify for the pools this
 // configuration builds: the quote's intermediate (or none) and the single
 // pinned root. Every candidate chain link matches by raw subject bytes.
-function verifyChainToTrustedRoot(leaf: Certificate, intermediate: Certificate | undefined, trustedRoot: Certificate, now: Date): void {
+async function verifyChainToTrustedRoot(leaf: Certificate, intermediate: Certificate | undefined, trustedRoot: Certificate, now: Date): Promise<void> {
   checkValidity(leaf, now, "leaf certificate");
-  const tryParent = (cert: Certificate, parent: Certificate, what: string): void => {
+  const tryParent = async (cert: Certificate, parent: Certificate, what: string): Promise<void> => {
     if (!derBytesEqual(cert.issuerDER, parent.subjectDER)) {
       throw new Error("x509: certificate signed by unknown authority");
     }
@@ -222,12 +222,12 @@ function verifyChainToTrustedRoot(leaf: Certificate, intermediate: Certificate |
     if (!bc.present || !bc.ca) {
       throw new Error("x509: certificate is not authorized to sign other certificates");
     }
-    checkSignatureFromCert(cert, parent, false, cert.tbs, cert.signature);
+    await checkSignatureFromCert(cert, parent, false, cert.tbs, cert.signature);
   };
   // Chain 1: leaf directly under the trusted root.
   if (derBytesEqual(leaf.issuerDER, trustedRoot.subjectDER)) {
     try {
-      tryParent(leaf, trustedRoot, "root certificate");
+      await tryParent(leaf, trustedRoot, "root certificate");
       return;
     } catch {
       // fall through to the intermediate chain
@@ -236,8 +236,8 @@ function verifyChainToTrustedRoot(leaf: Certificate, intermediate: Certificate |
   if (intermediate === undefined) {
     throw new Error("x509: certificate signed by unknown authority");
   }
-  tryParent(leaf, intermediate, "intermediate certificate");
-  tryParent(intermediate, trustedRoot, "root certificate");
+  await tryParent(leaf, intermediate, "intermediate certificate");
+  await tryParent(intermediate, trustedRoot, "root certificate");
 }
 
 // Collateral acquisition (obtainCollateral and friends).
@@ -434,40 +434,40 @@ function checkCertificateExpiration(chain: PCKCertificateChain, now: Date): void
   }
 }
 
-function verifyPCKCertificationChain(chain: PCKCertificateChain, collateral: Collateral, opts: VerifyOptions): void {
+async function verifyPCKCertificationChain(chain: PCKCertificateChain, collateral: Collateral, opts: VerifyOptions): Promise<void> {
   const { rootCertificate: rootCert, intermediateCertificate: intermediateCert, pckCertificate: pckCert } = chain;
 
   // The root certificate must be self-signed.
   try {
-    validateCertificate(rootCert, rootCert, rootCertPhrase);
+    await validateCertificate(rootCert, rootCert, rootCertPhrase);
   } catch (err) {
     throw new Error(`unable to validate root cert: ${err instanceof Error ? err.message : String(err)}`);
   }
   try {
-    validateCertificate(intermediateCert, rootCert, intermediateCertPhrase);
+    await validateCertificate(intermediateCert, rootCert, intermediateCertPhrase);
   } catch (err) {
     throw new Error(`unable to validate Intermediate CA certificate: ${err instanceof Error ? err.message : String(err)}`);
   }
   try {
-    validateCertificate(pckCert, intermediateCert, pckCertPhrase);
+    await validateCertificate(pckCert, intermediateCert, pckCertPhrase);
   } catch (err) {
     throw new Error(`unable to validate PCK leaf certificate: ${err instanceof Error ? err.message : String(err)}`);
   }
   try {
-    verifyChainToTrustedRoot(pckCert, intermediateCert, opts.trustedRoot, opts.now);
+    await verifyChainToTrustedRoot(pckCert, intermediateCert, opts.trustedRoot, opts.now);
   } catch (err) {
     throw new Error(`error verifying PCK Certificate: ${err instanceof Error ? err.message : String(err)}`);
   }
 
   try {
-    validateCRL(collateral.rootCaCrl, rootCert);
+    await validateCRL(collateral.rootCaCrl, rootCert);
   } catch (err) {
     throw new Error(
       `root CA CRL verification failed using root certificate in PCK Certificate chain: ${err instanceof Error ? err.message : String(err)}`,
     );
   }
   try {
-    validateCRL(collateral.pckCrl, intermediateCert);
+    await validateCRL(collateral.pckCrl, intermediateCert);
   } catch (err) {
     throw new Error(
       `PCK CRL verification failed using intermediate certificate in PCK Certificate chain: ${err instanceof Error ? err.message : String(err)}`,
@@ -493,7 +493,7 @@ function verifyPCKCertificationChain(chain: PCKCertificateChain, collateral: Col
 // Signed PCS response verification (verifyResponse / verifyTCBinfo /
 // verifyQeIdentity).
 
-function verifyResponse(
+async function verifyResponse(
   signingPhrase: string,
   rootCertificate: Certificate,
   signingCertificate: Certificate,
@@ -501,19 +501,19 @@ function verifyResponse(
   rawSignature: string,
   crl: CRL | undefined,
   opts: VerifyOptions,
-): void {
+): Promise<void> {
   try {
-    validateCertificate(rootCertificate, rootCertificate, rootCertPhrase);
+    await validateCertificate(rootCertificate, rootCertificate, rootCertPhrase);
   } catch (err) {
     throw new Error(`unable to validate root certificate in the issuer chain: ${err instanceof Error ? err.message : String(err)}`);
   }
   try {
-    validateCertificate(signingCertificate, rootCertificate, signingPhrase);
+    await validateCertificate(signingCertificate, rootCertificate, signingPhrase);
   } catch (err) {
     throw new Error(`unable to validate signing certificate in the issuer chain: ${err instanceof Error ? err.message : String(err)}`);
   }
   try {
-    verifyChainToTrustedRoot(signingCertificate, undefined, opts.trustedRoot, opts.now);
+    await verifyChainToTrustedRoot(signingCertificate, undefined, opts.trustedRoot, opts.now);
   } catch (err) {
     throw new Error(`unable to verify signing certificate: ${err instanceof Error ? err.message : String(err)}`);
   }
@@ -527,12 +527,12 @@ function verifyResponse(
   if (signature.length !== 0x40) {
     throw new Error(`unable to convert signature to DER format: signature size is ${signature.length} bytes. Expected 64 bytes`);
   }
-  if (!verifyRawSignature(rawBody, signature, signingCertificate.publicKey)) {
+  if (!(await verifyRawSignature(rawBody, signature, signingCertificate.spkiDER))) {
     throw new Error("could not verify response body using the signing certificate");
   }
 
   try {
-    validateCRL(crl, rootCertificate);
+    await validateCRL(crl, rootCertificate);
   } catch (err) {
     throw new Error(
       `root CA CRL verification failed using root certificate in the issuer's chain: ${err instanceof Error ? err.message : String(err)}`,
@@ -545,7 +545,7 @@ function verifyResponse(
   }
 }
 
-function verifyTCBinfo(collateral: Collateral, opts: VerifyOptions): void {
+async function verifyTCBinfo(collateral: Collateral, opts: VerifyOptions): Promise<void> {
   const tcbInfo = collateral.tdxTcbInfo!.tcbInfo;
   if (tcbInfo.id !== tcbInfoID) {
     throw new Error(`tcbInfo ID ${JSON.stringify(tcbInfo.id)} does not match with expected ID ${JSON.stringify(tcbInfoID)}`);
@@ -557,7 +557,7 @@ function verifyTCBinfo(collateral: Collateral, opts: VerifyOptions): void {
     throw new Error("tcbInfo contains empty TcbLevels");
   }
   try {
-    verifyResponse(
+    await verifyResponse(
       tcbSigningPhrase,
       collateral.tcbInfoIssuerRootCertificate!,
       collateral.tcbInfoIssuerIntermediateCertificate!,
@@ -571,7 +571,7 @@ function verifyTCBinfo(collateral: Collateral, opts: VerifyOptions): void {
   }
 }
 
-function verifyQeIdentity(collateral: Collateral, opts: VerifyOptions): void {
+async function verifyQeIdentity(collateral: Collateral, opts: VerifyOptions): Promise<void> {
   const qeIdentity = collateral.qeIdentity!.enclaveIdentity;
   if (qeIdentity.id !== qeIdentityID) {
     throw new Error(`QeIdentity ID ${JSON.stringify(qeIdentity.id)} does not match with expected ID ${JSON.stringify(qeIdentityID)}`);
@@ -583,7 +583,7 @@ function verifyQeIdentity(collateral: Collateral, opts: VerifyOptions): void {
     throw new Error("QeIdentity contains empty TcbLevels");
   }
   try {
-    verifyResponse(
+    await verifyResponse(
       tcbSigningPhrase,
       collateral.qeIdentityIssuerRootCertificate!,
       collateral.qeIdentityIssuerIntermediateCertificate!,
@@ -742,13 +742,13 @@ function verifyQeReport(qeReport: EnclaveReport, qeIdentity: EnclaveIdentity): v
 
 // Quote signature verification (verifyQuote).
 
-function verifyHash256(quote: QuoteV4): void {
+async function verifyHash256(quote: QuoteV4): Promise<void> {
   const qeReportCertificationData = quote.signedData.certificationData.qeReportCertificationData;
   const qeReportData = qeReportCertificationData.qeReport.reportData;
   const qeAuthData = qeReportCertificationData.qeAuthData.data;
   const attestKey = quote.signedData.ecdsaAttestationKey;
 
-  const hashed = sha256(attestKey, qeAuthData);
+  const hashed = await sha256(attestKey, qeAuthData);
   const hashedMessage = new Uint8Array(qeReportData.length);
   hashedMessage.set(hashed, 0);
   if (!bytesEqual(hashedMessage, qeReportData)) {
@@ -758,24 +758,24 @@ function verifyHash256(quote: QuoteV4): void {
   }
 }
 
-function verifyQuote(quote: QuoteV4, chain: PCKCertificateChain, collateral: Collateral, pckCertExtensions: PckExtensions): void {
-  let attestPublicKey;
+async function verifyQuote(quote: QuoteV4, chain: PCKCertificateChain, collateral: Collateral, pckCertExtensions: PckExtensions): Promise<void> {
+  let attestPublicKey: Uint8Array;
   try {
-    attestPublicKey = ecdsaP256PublicKey(quote.signedData.ecdsaAttestationKey);
+    attestPublicKey = await ecdsaP256PublicKey(quote.signedData.ecdsaAttestationKey);
   } catch (err) {
     throw new Error(`attestation key in the quote is invalid: ${err instanceof Error ? err.message : String(err)}`);
   }
-  if (!verifyRawSignature(quote.headerAndBody, quote.signedData.signature, attestPublicKey)) {
+  if (!(await verifyRawSignature(quote.headerAndBody, quote.signedData.signature, attestPublicKey))) {
     throw new Error("unable to verify message digest using quote's signature and ecdsa attestation key");
   }
 
   const qeReportCertificationData = quote.signedData.certificationData.qeReportCertificationData;
-  if (!verifyRawSignature(qeReportCertificationData.qeReportRaw, qeReportCertificationData.qeReportSignature, chain.pckCertificate.publicKey)) {
+  if (!(await verifyRawSignature(qeReportCertificationData.qeReportRaw, qeReportCertificationData.qeReportSignature, chain.pckCertificate.spkiDER))) {
     throw new Error("error verifying QE report signature: QE report's signature verification using PCK Leaf Certificate failed");
   }
 
   try {
-    verifyHash256(quote);
+    await verifyHash256(quote);
   } catch (err) {
     throw new Error(`error verifying QE report data: ${err instanceof Error ? err.message : String(err)}`);
   }
@@ -787,7 +787,7 @@ function verifyQuote(quote: QuoteV4, chain: PCKCertificateChain, collateral: Col
 // tdxVerifyQuoteV4 mirrors tdxverify.TdxQuote for a parsed quote v4 under
 // this configuration: replayed collateral, pinned root, revocations checked,
 // validity at opts.now.
-export function tdxVerifyQuoteV4(quote: QuoteV4, opts: VerifyOptions): void {
+export async function tdxVerifyQuoteV4(quote: QuoteV4, opts: VerifyOptions): Promise<void> {
   const chain = extractChainFromQuoteV4(quote);
   let exts: PckExtensions;
   try {
@@ -798,13 +798,13 @@ export function tdxVerifyQuoteV4(quote: QuoteV4, opts: VerifyOptions): void {
   const ca = extractCaFromPckCert(chain.pckCertificate);
   const collateral = obtainCollateral(exts.fmspc, ca, opts.getter);
 
-  verifyPCKCertificationChain(chain, collateral, opts);
+  await verifyPCKCertificationChain(chain, collateral, opts);
   try {
     verifyCollateral(collateral, opts.now);
   } catch (err) {
     throw new Error(`could not verify collaterals obtained: ${err instanceof Error ? err.message : String(err)}`);
   }
-  verifyTCBinfo(collateral, opts);
-  verifyQeIdentity(collateral, opts);
-  verifyQuote(quote, chain, collateral, exts);
+  await verifyTCBinfo(collateral, opts);
+  await verifyQeIdentity(collateral, opts);
+  await verifyQuote(quote, chain, collateral, exts);
 }

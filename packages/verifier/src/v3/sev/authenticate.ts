@@ -6,6 +6,7 @@
 // VerificationError("QUOTE_REJECTED", ...).
 
 import { decodeBase64, encodeHex } from "../bytes.js";
+import { verifyP384Raw } from "../crypto.js";
 import { VerificationError } from "../errors.js";
 import {
   CollateralAMDCRLV1Format,
@@ -25,7 +26,7 @@ import {
   productLineFromFms,
   ReportSize,
   reportSignerString,
-  reportToSignatureDER,
+  reportToSignatureRaw,
   signedComponent,
   SignEcdsaP384Sha384,
   validateReportFormat,
@@ -51,7 +52,6 @@ import {
   parseCertificate,
   parseCRL,
   pemDecode,
-  verifyECDSASHA384DER,
   verifyPSSSHA384,
   type Certificate,
   type CRL,
@@ -236,7 +236,7 @@ function checkCASignerConstraints(parent: Certificate, usageBit: number, role: s
 // SHA-384 signatures, validity windows, and CA constraints. The ARK
 // self-signature is additionally verified (the trust anchor is repo-pinned,
 // not system-provided).
-function verifyChain(vcek: Certificate, roots: AMDRoots, now: Date): void {
+async function verifyChain(vcek: Certificate, roots: AMDRoots, now: Date): Promise<void> {
   const ica = roots.ask;
   if (ica === undefined) {
     throw new Error("root of trust missing intermediate certificate authority certificate for key VCEK");
@@ -249,7 +249,7 @@ function verifyChain(vcek: Certificate, roots: AMDRoots, now: Date): void {
   }
   checkValidity(ica, now, "ASK");
   checkCASignerConstraints(ica, keyUsageCertSign, "ASK");
-  if (!isPSSSHA384(vcek.signatureAlgorithm) || !verifyPSSSHA384(vcek.tbs, vcek.signature, ica.publicKey)) {
+  if (!isPSSSHA384(vcek.signatureAlgorithm) || !(await verifyPSSSHA384(vcek.tbs, vcek.signature, ica.spkiDER))) {
     throw new Error("error verifying VCEK certificate: not signed by the ASK");
   }
 
@@ -258,14 +258,14 @@ function verifyChain(vcek: Certificate, roots: AMDRoots, now: Date): void {
   }
   checkValidity(ark, now, "ARK");
   checkCASignerConstraints(ark, keyUsageCertSign, "ARK");
-  if (!isPSSSHA384(ica.signatureAlgorithm) || !verifyPSSSHA384(ica.tbs, ica.signature, ark.publicKey)) {
+  if (!isPSSSHA384(ica.signatureAlgorithm) || !(await verifyPSSSHA384(ica.tbs, ica.signature, ark.spkiDER))) {
     throw new Error("error verifying ASK certificate: not signed by the ARK");
   }
 
   if (!derBytesEqual(ark.issuerDER, ark.subjectDER)) {
     throw new Error("error verifying ARK certificate: not self-issued");
   }
-  if (!isPSSSHA384(ark.signatureAlgorithm) || !verifyPSSSHA384(ark.tbs, ark.signature, ark.publicKey)) {
+  if (!isPSSSHA384(ark.signatureAlgorithm) || !(await verifyPSSSHA384(ark.tbs, ark.signature, ark.spkiDER))) {
     throw new Error("error verifying ARK certificate: not properly self-signed");
   }
 }
@@ -275,7 +275,7 @@ function verifyChain(vcek: Certificate, roots: AMDRoots, now: Date): void {
 // points, be signed by the pinned ARK, and revoke neither the ASK nor the
 // VCEK. Fail-closed: any miss rejects (the VCEK-serial check is a
 // fail-closed extension of the library's ASK-only check).
-function checkRevocation(roots: AMDRoots, vcek: Certificate, crl: CRL): void {
+async function checkRevocation(roots: AMDRoots, vcek: Certificate, crl: CRL): Promise<void> {
   const ask = roots.ask;
   if (ask === undefined) {
     throw new Error("missing ASK x509 certificate to check intermediate key validity");
@@ -293,7 +293,7 @@ function checkRevocation(roots: AMDRoots, vcek: Certificate, crl: CRL): void {
   }
   // verifyCRL: signed by the ARK (Go CRL.CheckSignatureFrom).
   checkCASignerConstraints(roots.ark, keyUsageCRLSign, "ARK");
-  if (!isPSSSHA384(crl.signatureAlgorithm) || !verifyPSSSHA384(crl.tbs, crl.signature, roots.ark.publicKey)) {
+  if (!isPSSSHA384(crl.signatureAlgorithm) || !(await verifyPSSSHA384(crl.tbs, crl.signature, roots.ark.spkiDER))) {
     throw new Error("CRL is not signed by ARK");
   }
   for (const bad of crl.revokedSerialsHex) {
@@ -334,13 +334,13 @@ export function rejectMaskedChipID(report: SevReport): void {
 // the provided VCEK, checking revocation against the provided CRL. No
 // policy validation (Go verifySignature + verify.SnpAttestation with the
 // options set in authenticate.go).
-function verifySignature(
+async function verifySignature(
   reportBase64: string,
   vcekDER: Uint8Array,
   crl: CRL,
   rootPEM: string,
   now: Date,
-): { report: SevReport; productLine: string; vcek: Certificate } {
+): Promise<{ report: SevReport; productLine: string; vcek: Certificate }> {
   let reportBytes: Uint8Array;
   try {
     reportBytes = decodeBase64(reportBase64);
@@ -399,20 +399,20 @@ function verifySignature(
   }
   try {
     validateKDSCertIssuer(vcek, ProductGenoa);
-    verifyChain(vcek, roots, now);
+    await verifyChain(vcek, roots, now);
   } catch (err) {
     throw quoteError(errMsg(err));
   }
 
   // CheckRevocations against the document-carried CRL, fail-closed.
   try {
-    checkRevocation(roots, vcek, crl);
+    await checkRevocation(roots, vcek, crl);
   } catch (err) {
     throw quoteError(errMsg(err));
   }
 
   // SnpReportSignature: format check, then ECDSA-P384-SHA384 over the
-  // signed component with little-endian r||s converted to DER.
+  // signed component with little-endian r||s converted to raw big-endian.
   try {
     validateReportFormat(reportBytes);
   } catch (err) {
@@ -421,13 +421,13 @@ function verifySignature(
   if (report.signatureAlgo !== SignEcdsaP384Sha384) {
     throw quoteError(`unknown SignatureAlgo: ${report.signatureAlgo}`);
   }
-  let sigDER: Uint8Array;
+  let sigRaw: Uint8Array | undefined;
   try {
-    sigDER = reportToSignatureDER(reportBytes);
+    sigRaw = reportToSignatureRaw(reportBytes);
   } catch (err) {
     throw quoteError(`could not interpret report signature: ${errMsg(err)}`);
   }
-  if (!verifyECDSASHA384DER(signedComponent(reportBytes), sigDER, vcek.publicKey)) {
+  if (sigRaw === undefined || !(await verifyP384Raw(vcek.spkiDER, sigRaw, signedComponent(reportBytes)))) {
     throw quoteError("report signature verification error");
   }
 
@@ -491,7 +491,7 @@ export async function sevAuthenticate(doc: Document, opts?: QuoteOpts): Promise<
     );
   }
 
-  const { report, productLine, vcek } = verifySignature(doc.cpuEvidence.reportBase64, vcekDER, parsedCRL, rootPEM, now);
+  const { report, productLine, vcek } = await verifySignature(doc.cpuEvidence.reportBase64, vcekDER, parsedCRL, rootPEM, now);
   rejectMaskedChipID(report);
 
   let id: string;

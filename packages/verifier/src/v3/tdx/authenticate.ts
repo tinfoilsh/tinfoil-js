@@ -3,7 +3,7 @@
 // verifier/quote/tdx/authenticate.go. Every rejection throws
 // VerificationError("QUOTE_REJECTED").
 
-import { decodeBase64, encodeHex } from "../bytes.js";
+import { decodeBase64, encodeHex, utf8DecodeLenient } from "../bytes.js";
 import { sgxRootCAPEM } from "../embedded/roots.js";
 import {
   CollateralIntelPCSV1Format,
@@ -105,7 +105,7 @@ export async function tdxAuthenticate(doc: Document, opts?: QuoteOpts): Promise<
   // All options explicit: collateral replayed from the document, chain
   // pinned to the Intel root, revocation checking on, validity at now.
   try {
-    tdxVerifyQuoteV4(quote, { getter: recorder, trustedRoot, now });
+    await tdxVerifyQuoteV4(quote, { getter: recorder, trustedRoot, now });
   } catch (err) {
     throw new VerificationError(
       "QUOTE_REJECTED",
@@ -250,7 +250,7 @@ class TcbEvaluationRecorder implements HTTPSGetter {
       return result;
     }
     try {
-      const parsed = JSON.parse(Buffer.from(result.body).toString("utf-8")) as Record<string, unknown>;
+      const parsed = JSON.parse(utf8DecodeLenient(result.body)) as Record<string, unknown>;
       if (path.endsWith("/tcb")) {
         const n = (parsed?.tcbInfo as Record<string, unknown> | undefined)?.tcbEvaluationDataNumber;
         if (typeof n === "number" && Number.isInteger(n)) this.tcbInfo = n;

@@ -3,7 +3,7 @@
 // encoding/json (case-exact keys as emitted by Intel, unknown members
 // ignored, typed members validated). All errors are plain Errors.
 
-import { decodeHex, encodeHex } from "../bytes.js";
+import { decodeHex, encodeHex, utf8DecodeLenient, utf8Encode } from "../bytes.js";
 import { children, content, decodeOID, decodeUint, readTLV, type Certificate, type TLV } from "./der.js";
 
 const ppidSize = 16;
@@ -366,7 +366,7 @@ function parseTdxModule(v: unknown): TdxModule {
 export function parseTdxTcbInfo(body: Uint8Array): TdxTcbInfo {
   let root: unknown;
   try {
-    root = JSON.parse(Buffer.from(body).toString("utf-8"));
+    root = JSON.parse(utf8DecodeLenient(body));
   } catch (err) {
     throw new Error(`unable to unmarshal tcbInfo response: ${err instanceof Error ? err.message : String(err)}`);
   }
@@ -404,7 +404,7 @@ export function parseTdxTcbInfo(body: Uint8Array): TdxTcbInfo {
 export function parseQeIdentity(body: Uint8Array): QeIdentity {
   let root: unknown;
   try {
-    root = JSON.parse(Buffer.from(body).toString("utf-8"));
+    root = JSON.parse(utf8DecodeLenient(body));
   } catch (err) {
     throw new Error(`unable to unmarshal QeIdentity response: ${err instanceof Error ? err.message : String(err)}`);
   }
@@ -433,7 +433,7 @@ export function parseQeIdentity(body: Uint8Array): QeIdentity {
 // member (Go: bodyToRawMessage via map[string]json.RawMessage — last
 // duplicate wins). Undefined when the member is absent.
 export function rawTopLevelMember(body: Uint8Array, name: string): Uint8Array | undefined {
-  const s = Buffer.from(body).toString("utf-8");
+  const s = utf8DecodeLenient(body);
   let pos = 0;
   const skipWS = () => {
     while (pos < s.length && " \t\r\n".includes(s[pos])) pos++;
@@ -498,7 +498,7 @@ export function rawTopLevelMember(body: Uint8Array, name: string): Uint8Array | 
     const valueStart = pos;
     skipValue();
     if (key === name) {
-      found = new Uint8Array(Buffer.from(s.slice(valueStart, pos), "utf-8"));
+      found = utf8Encode(s.slice(valueStart, pos));
     }
     skipWS();
     if (s[pos] === "}") return found;

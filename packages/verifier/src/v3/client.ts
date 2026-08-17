@@ -100,7 +100,7 @@ export async function verifyDocumentV3(
   repo: string,
   opts?: VerifyOpts,
 ): Promise<VerifiedDocumentV3> {
-  const { doc, reportData } = check(docBytes, nonce);
+  const { doc, reportData } = await check(docBytes, nonce);
 
   const provOpts: ProvenanceOpts = { trustRootJSON: opts?.sigstoreRootJSON };
   const appraisal = opts?.verificationTime ?? new Date();

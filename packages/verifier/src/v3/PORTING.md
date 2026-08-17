@@ -95,6 +95,8 @@ Accept outputs must include code_digest, code_measurement, enclave_measurement,
 tls_public_key_fp, hpke_public_key.
 
 ## Environment
-Node ≥ 22 (node:crypto, X509Certificate, webcrypto), TypeScript, vitest.
-Runtime target for the adapter is Node; keep browser-compatible code where
-free, but never at the cost of 1:1 semantics.
+TypeScript, vitest. `src/v3/**` is engine-neutral: WebCrypto
+(`globalThis.crypto.subtle` via `crypto.ts`) only — no `node:` imports, no
+Buffer (enforced by `test/v3-engine-neutral.test.ts`). Crypto entry points
+are async; `envelope.check` and everything downstream return Promises.
+`packages/conformance/` (the adapter) is Node-only by design.

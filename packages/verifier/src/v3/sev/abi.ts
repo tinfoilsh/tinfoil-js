@@ -3,6 +3,8 @@
 // composition, ported 1:1 from github.com/google/go-sev-guest abi and kds.
 // All errors are plain Errors; callers assign the rejection layer.
 
+import { encodeHex } from "../bytes.js";
+
 // ReportSize is the ABI-specified byte size of an SEV-SNP attestation report.
 export const ReportSize = 0x4a0;
 
@@ -185,7 +187,7 @@ function mbz(data: Uint8Array, lo: number, hi: number): void {
   for (let i = lo; i < hi; i++) {
     if (data[i] !== 0) {
       throw new Error(
-        `mbz range [0x${lo.toString(16)}:0x${hi.toString(16)}] not all zero: ${Buffer.from(data.subarray(lo, hi)).toString("hex")}`,
+        `mbz range [0x${lo.toString(16)}:0x${hi.toString(16)}] not all zero: ${encodeHex(data.subarray(lo, hi))}`,
       );
     }
   }
@@ -332,44 +334,14 @@ export function validateReportFormat(r: Uint8Array): void {
   }
 }
 
-// amdBigInt interprets an AMD little-endian byte string as an unsigned value.
-function amdBigInt(le: Uint8Array): bigint {
-  let v = 0n;
-  for (let i = le.length - 1; i >= 0; i--) v = (v << 8n) | BigInt(le[i]);
-  return v;
-}
-
-function derIntegerFromBigInt(v: bigint): Uint8Array {
-  let hex = v.toString(16);
-  if (hex.length % 2) hex = "0" + hex;
-  let bytes = Buffer.from(hex, "hex");
-  if (bytes.length === 0) bytes = Buffer.from([0]);
-  if (bytes[0] & 0x80) bytes = Buffer.concat([Buffer.from([0]), bytes]);
-  return new Uint8Array(bytes);
-}
-
-function derLength(n: number): Uint8Array {
-  if (n < 0x80) return new Uint8Array([n]);
-  const b: number[] = [];
-  while (n > 0) {
-    b.unshift(n & 0xff);
-    n >>= 8;
-  }
-  return new Uint8Array([0x80 | b.length, ...b]);
-}
-
-function derTLV(tag: number, content: Uint8Array): Uint8Array {
-  const len = derLength(content.length);
-  const out = new Uint8Array(1 + len.length + content.length);
-  out[0] = tag;
-  out.set(len, 1);
-  out.set(content, 1 + len.length);
-  return out;
-}
-
-// reportToSignatureDER returns the report's signature component in DER
-// format for ECDSA verification (Go abi.ReportToSignatureDER).
-export function reportToSignatureDER(report: Uint8Array): Uint8Array {
+// reportToSignatureRaw returns the report's ECDSA signature as big-endian
+// raw r||s (96 bytes) for WebCrypto P-384 verification (Go
+// abi.ReportToSignatureDER's throws, without the DER round trip). The ABI
+// stores r and s as 72-byte little-endian values; a component whose upper 24
+// bytes are non-zero is >= 2^384 and can never verify (the DER path encoded
+// it and verification failed), so undefined is returned and the caller
+// treats it as a signature verification failure.
+export function reportToSignatureRaw(report: Uint8Array): Uint8Array | undefined {
   if (report.length !== ReportSize) {
     throw new Error(`incorrect report size: ${report.length.toString(16)}, want ${ReportSize.toString(16)}`);
   }
@@ -378,12 +350,15 @@ export function reportToSignatureDER(report: Uint8Array): Uint8Array {
     throw new Error(`unknown signature algorithm: ${algo}`);
   }
   const signature = report.subarray(signatureOffset, ReportSize);
-  const r = derTLV(0x02, derIntegerFromBigInt(amdBigInt(signature.subarray(0x00, 0x48))));
-  const s = derTLV(0x02, derIntegerFromBigInt(amdBigInt(signature.subarray(0x48, 0x90))));
-  const seq = new Uint8Array(r.length + s.length);
-  seq.set(r, 0);
-  seq.set(s, r.length);
-  return derTLV(0x30, seq);
+  const out = new Uint8Array(96);
+  for (let comp = 0; comp < 2; comp++) {
+    const le = signature.subarray(comp * ecdsaRSSize, (comp + 1) * ecdsaRSSize);
+    for (let i = 48; i < ecdsaRSSize; i++) {
+      if (le[i] !== 0) return undefined;
+    }
+    for (let i = 0; i < 48; i++) out[comp * 48 + i] = le[47 - i];
+  }
+  return out;
 }
 
 // signedComponent returns the report bytes signed by the AMD-SP.

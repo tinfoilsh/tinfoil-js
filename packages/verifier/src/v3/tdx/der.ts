@@ -1,10 +1,13 @@
 // Minimal strict-DER reader for the X.509 material TDX verification touches:
-// certificates, CRLs, PEM blocks, and name/extension access. node:crypto
-// verifies the signatures but exposes neither CRLs nor arbitrary extensions,
-// so structure parsing is manual. All errors are plain Errors; callers assign
-// the rejection layer.
+// certificates, CRLs, PEM blocks, and name/extension access. WebCrypto (via
+// ../crypto.js) verifies the signatures but exposes neither CRLs nor
+// arbitrary extensions, so structure parsing is manual. All errors are plain
+// Errors; callers assign the rejection layer.
 
-import { createPublicKey, verify as cryptoVerify, type KeyObject } from "node:crypto";
+import { bytesToLatin1, decodeBase64, encodeHex, utf8DecodeLenient } from "../bytes.js";
+import { derEcdsaSignatureToRaw, importEcdsaSpki, verifyP256Raw } from "../crypto.js";
+
+export { bytesToLatin1 };
 
 // ASN.1 tag numbers used below (universal class).
 const tagInteger = 0x02;
@@ -109,11 +112,11 @@ export function decodeUint(b: Uint8Array, what: string): number {
 function serialHexFromInteger(b: Uint8Array): string {
   let start = 0;
   while (start < b.length - 1 && b[start] === 0) start++;
-  return Buffer.from(b.subarray(start)).toString("hex");
+  return encodeHex(b.subarray(start));
 }
 
 function parseTime(b: Uint8Array, t: TLV): Date {
-  const s = Buffer.from(content(b, t)).toString("latin1");
+  const s = bytesToLatin1(content(b, t));
   let iso: string;
   if (t.tag === tagUTCTime) {
     const m = /^(\d{2})(\d{2})(\d{2})(\d{2})(\d{2})(\d{2})Z$/.exec(s);
@@ -143,7 +146,7 @@ function nameCN(b: Uint8Array, name: TLV): string {
       if (decodeOID(content(b, parts[0])) !== "2.5.4.3") continue;
       const vt = parts[1];
       if (vt.tag === tagUTF8String || vt.tag === tagPrintableString || vt.tag === tagIA5String) {
-        return Buffer.from(content(b, vt)).toString("utf-8");
+        return utf8DecodeLenient(content(b, vt));
       }
     }
   }
@@ -193,7 +196,6 @@ export interface Certificate {
   spkiCurveOID: string;
   extensions: Extension[];
   signature: Uint8Array; // DER-encoded ECDSA signature (BIT STRING contents)
-  publicKey: KeyObject;
 }
 
 function algorithmOID(b: Uint8Array, alg: TLV): string {
@@ -264,7 +266,6 @@ export function parseCertificate(der: Uint8Array): Certificate {
     spkiCurveOID,
     extensions,
     signature: bitStringBytes(der, sigT, "certificate signature"),
-    publicKey: createPublicKey({ key: Buffer.from(spkiDER), format: "der", type: "spki" }),
   };
 }
 
@@ -363,7 +364,7 @@ export function crlDistributionPointURIs(cert: Certificate): string[] {
         for (const gn of children(ext.value, fullName)) {
           if (gn.cls === 2 && gn.tag === 6) {
             // [6] uniformResourceIdentifier
-            out.push(Buffer.from(ext.value.subarray(gn.contentStart, gn.end)).toString("latin1"));
+            out.push(bytesToLatin1(ext.value.subarray(gn.contentStart, gn.end)));
           }
         }
       }
@@ -389,47 +390,42 @@ export function pemDecode(text: string): PEMBlock | undefined {
   if (!/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(b64)) return undefined;
   return {
     type: m[1],
-    der: new Uint8Array(Buffer.from(b64, "base64")),
+    der: decodeBase64(b64),
     rest: text.slice((m.index ?? 0) + m[0].length),
   };
 }
 
-export function bytesToLatin1(b: Uint8Array): string {
-  return Buffer.from(b).toString("latin1");
-}
-
 // Signature verification helpers (ECDSA-P256-SHA256 only, matching Intel).
 
-export function verifyDERSignature(message: Uint8Array, signature: Uint8Array, signer: Certificate): boolean {
-  try {
-    return cryptoVerify("sha256", message, { key: signer.publicKey, dsaEncoding: "der" }, signature);
-  } catch {
-    return false;
-  }
+export function verifyDERSignature(message: Uint8Array, signature: Uint8Array, signer: Certificate): Promise<boolean> {
+  const raw = derEcdsaSignatureToRaw(signature, 32);
+  if (raw === undefined) return Promise.resolve(false);
+  return verifyP256Raw(signer.spkiDER, raw, message);
 }
 
 // verifyRawSignature verifies a raw r||s (64-byte) ECDSA-P256 signature.
-export function verifyRawSignature(message: Uint8Array, signature: Uint8Array, key: KeyObject): boolean {
-  if (signature.length !== 64) return false;
-  try {
-    return cryptoVerify("sha256", message, { key, dsaEncoding: "ieee-p1363" }, signature);
-  } catch {
-    return false;
-  }
+export function verifyRawSignature(message: Uint8Array, signature: Uint8Array, spkiDER: Uint8Array): Promise<boolean> {
+  if (signature.length !== 64) return Promise.resolve(false);
+  return verifyP256Raw(spkiDER, signature, message);
 }
 
-// ecdsaP256PublicKey builds a key object from raw X||Y bytes (Go
+// SPKI prefix for id-ecPublicKey on prime256v1 with an uncompressed point.
+const p256SpkiPrefixHex = "3059301306072a8648ce3d020106082a8648ce3d03010703420004";
+
+// ecdsaP256PublicKey builds an SPKI from raw X||Y bytes (Go
 // bytesToEcdsaPubKey; key import fails for malformed points).
-export function ecdsaP256PublicKey(xy: Uint8Array): KeyObject {
+export async function ecdsaP256PublicKey(xy: Uint8Array): Promise<Uint8Array> {
   if (xy.length !== 64) throw new Error("public key is of unexpected size");
-  // SPKI prefix for id-ecPublicKey on prime256v1 with an uncompressed point.
-  const prefix = Buffer.from("3059301306072a8648ce3d020106082a8648ce3d03010703420004", "hex");
-  const spki = Buffer.concat([prefix, Buffer.from(xy)]);
+  const prefix = p256SpkiPrefixHex;
+  const spki = new Uint8Array(prefix.length / 2 + 64);
+  for (let i = 0; i < prefix.length / 2; i++) spki[i] = parseInt(prefix.slice(2 * i, 2 * i + 2), 16);
+  spki.set(xy, prefix.length / 2);
   try {
-    return createPublicKey({ key: spki, format: "der", type: "spki" });
+    await importEcdsaSpki(spki, "P-256"); // point validation
   } catch (err) {
     throw new Error(`attestation key is invalid: ${err instanceof Error ? err.message : String(err)}`);
   }
+  return spki;
 }
 
 export function derBytesEqual(a: Uint8Array, b: Uint8Array): boolean {

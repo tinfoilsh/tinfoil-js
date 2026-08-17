@@ -125,7 +125,7 @@ async function run(stage: string, input: Input): Promise<[Output, number]> {
   switch (stage) {
     case StageCheckEnvelope:
       try {
-        check(doc, nonce);
+        await check(doc, nonce);
       } catch {
         return reject(stage, "ENVELOPE_REJECTED");
       }

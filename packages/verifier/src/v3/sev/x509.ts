@@ -1,10 +1,12 @@
 // Minimal strict-DER reader for the X.509 material SEV-SNP verification
 // touches: AMD certificates (RSA-PSS roots, ECDSA VCEK), CRLs, PEM blocks,
-// names, and extensions. node:crypto verifies the signatures but exposes
-// neither CRLs nor arbitrary extensions, so structure parsing is manual.
-// All errors are plain Errors; callers assign the rejection layer.
+// names, and extensions. WebCrypto (via ../crypto.js) verifies the
+// signatures but exposes neither CRLs nor arbitrary extensions, so structure
+// parsing is manual. All errors are plain Errors; callers assign the
+// rejection layer.
 
-import { constants, createPublicKey, verify as cryptoVerify, type KeyObject } from "node:crypto";
+import { bytesToLatin1, decodeBase64, encodeHex, utf8DecodeLenient } from "../bytes.js";
+import { verifyRsaPssSha384 } from "../crypto.js";
 
 // ASN.1 tag numbers used below (universal class).
 const tagBoolean = 0x01;
@@ -107,11 +109,11 @@ export function decodeUint(b: Uint8Array, what: string): number {
 function serialHexFromInteger(b: Uint8Array): string {
   let start = 0;
   while (start < b.length - 1 && b[start] === 0) start++;
-  return Buffer.from(b.subarray(start)).toString("hex");
+  return encodeHex(b.subarray(start));
 }
 
 function parseTime(b: Uint8Array, t: TLV): Date {
-  const s = Buffer.from(content(b, t)).toString("latin1");
+  const s = bytesToLatin1(content(b, t));
   let iso: string;
   if (t.tag === tagUTCTime) {
     const m = /^(\d{2})(\d{2})(\d{2})(\d{2})(\d{2})(\d{2})Z$/.exec(s);
@@ -143,7 +145,7 @@ export function parseName(b: Uint8Array, name: TLV): Map<string, string[]> {
       const oid = decodeOID(content(b, parts[0]));
       const vt = parts[1];
       if (vt.tag !== tagUTF8String && vt.tag !== tagPrintableString && vt.tag !== tagIA5String) continue;
-      const value = Buffer.from(content(b, vt)).toString("utf-8");
+      const value = utf8DecodeLenient(content(b, vt));
       const list = out.get(oid);
       if (list === undefined) out.set(oid, [value]);
       else list.push(value);
@@ -296,7 +298,7 @@ export interface Certificate {
   keyUsage: number; // 0 when the extension is absent (Go zero value)
   crlDistributionPoints: string[];
   signature: Uint8Array; // BIT STRING contents
-  publicKey: KeyObject;
+  spkiDER: Uint8Array; // full SubjectPublicKeyInfo element
 }
 
 function bitStringBytes(b: Uint8Array, t: TLV, what: string): Uint8Array {
@@ -318,7 +320,7 @@ function crlDistributionPointURIs(value: Uint8Array): string[] {
         for (const gn of children(value, fullName)) {
           if (gn.cls === 2 && gn.tag === 6) {
             // [6] uniformResourceIdentifier
-            out.push(Buffer.from(value.subarray(gn.contentStart, gn.end)).toString("latin1"));
+            out.push(bytesToLatin1(value.subarray(gn.contentStart, gn.end)));
           }
         }
       }
@@ -412,7 +414,7 @@ export function parseCertificate(der: Uint8Array): Certificate {
     keyUsage,
     crlDistributionPoints: crlDPs,
     signature: bitStringBytes(der, sigT, "certificate signature"),
-    publicKey: createPublicKey({ key: Buffer.from(rawOf(der, spkiT)), format: "der", type: "spki" }),
+    spkiDER: rawOf(der, spkiT),
   };
 }
 
@@ -487,7 +489,7 @@ export function pemDecode(text: string): PEMBlock | undefined {
   if (!/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(b64)) return undefined;
   return {
     type: m[1],
-    der: new Uint8Array(Buffer.from(b64, "base64")),
+    der: decodeBase64(b64),
     rest: text.slice((m.index ?? 0) + m[0].length),
   };
 }
@@ -496,26 +498,8 @@ export function pemDecode(text: string): PEMBlock | undefined {
 
 // verifyPSSSHA384 verifies an RSASSA-PSS SHA-384 signature with the salt
 // length Go's x509 requires (equal to the hash size).
-export function verifyPSSSHA384(message: Uint8Array, signature: Uint8Array, signerKey: KeyObject): boolean {
-  try {
-    return cryptoVerify(
-      "sha384",
-      message,
-      { key: signerKey, padding: constants.RSA_PKCS1_PSS_PADDING, saltLength: 48 },
-      signature,
-    );
-  } catch {
-    return false;
-  }
-}
-
-// verifyECDSASHA384DER verifies a DER-encoded ECDSA signature over SHA-384.
-export function verifyECDSASHA384DER(message: Uint8Array, signature: Uint8Array, signerKey: KeyObject): boolean {
-  try {
-    return cryptoVerify("sha384", message, { key: signerKey, dsaEncoding: "der" }, signature);
-  } catch {
-    return false;
-  }
+export function verifyPSSSHA384(message: Uint8Array, signature: Uint8Array, signerSpki: Uint8Array): Promise<boolean> {
+  return verifyRsaPssSha384(signerSpki, signature, message, 48);
 }
 
 export function derBytesEqual(a: Uint8Array, b: Uint8Array): boolean {
