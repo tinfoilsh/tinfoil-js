@@ -8,3 +8,4 @@ packages/*/dist/
 packages/*/.node-tests/
 __screenshots__/
 sigstore-browser/
+packages/verifier/test/fixtures/v3-vectors/

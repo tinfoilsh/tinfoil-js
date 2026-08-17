@@ -94,6 +94,16 @@ clock and the freshness appraisal time. Empty root fields ⇒ embedded roots.
 Accept outputs must include code_digest, code_measurement, enclave_measurement,
 tls_public_key_fp, hpke_public_key.
 
+## Browser conformance run
+The engine-neutral stage runner (`packages/conformance/src/run.ts`, shared with
+the Node CLI) executes the entire suite in real Chromium via
+`test/v3-conformance.browser.test.ts`. Fixtures live outside this repo, so sync
+them first: `node packages/verifier/scripts/sync-v3-fixtures.mjs` copies
+`tinfoil-conformance/vectors/v3` into `packages/verifier/test/fixtures/v3-vectors`
+(gitignored; override source with `TINFOIL_CONFORMANCE_VECTORS=/path/to/vectors/v3`),
+where the test picks them up via `import.meta.glob`. One command does
+build + sync + run: `npm run test:browser:conformance -w packages/verifier`.
+
 ## Environment
 TypeScript, vitest. `src/v3/**` is engine-neutral: WebCrypto
 (`globalThis.crypto.subtle` via `crypto.ts`) only — no `node:` imports, no
