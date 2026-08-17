@@ -25,7 +25,8 @@ import {
   authenticatePlatformEndorsements,
   type ProvenanceOpts,
 } from "../../verifier/dist/v3/provenance/provenance.js";
-import { parseCertificate, pemDecode } from "../../verifier/dist/v3/tdx/der.js";
+import { pemDecode } from "../../verifier/dist/v3/der.js";
+import { parseCertificate } from "../../verifier/dist/v3/tdx/der.js";
 import {
   StageAssemblePolicy,
   StageAuthenticateProvenance,

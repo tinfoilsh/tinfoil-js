@@ -36,8 +36,8 @@ import {
 } from "./abi.js";
 import { identity } from "./identity.js";
 import { vcekCertificateExtensions } from "./kds.js";
+import { derBytesEqual, pemDecode } from "../der.js";
 import {
-  derBytesEqual,
   isPSSSHA384,
   keyUsageCertSign,
   keyUsageCRLSign,
@@ -51,7 +51,6 @@ import {
   oidProvince,
   parseCertificate,
   parseCRL,
-  pemDecode,
   verifyPSSSHA384,
   type Certificate,
   type CRL,

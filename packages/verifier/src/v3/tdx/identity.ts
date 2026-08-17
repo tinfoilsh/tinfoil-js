@@ -4,7 +4,9 @@
 // verification; callers must only invoke this after verification succeeds.
 
 import { decodeHex, encodeHex } from "../bytes.js";
-import { bytesToLatin1, parseCertificate, pemDecode, type Certificate } from "./der.js";
+import { bytesToLatin1 } from "../bytes.js";
+import { pemDecode } from "../der.js";
+import { parseCertificate, type Certificate } from "./der.js";
 import { pckCertificateExtensions } from "./pcs.js";
 import type { QuoteV4 } from "./quote.js";
 

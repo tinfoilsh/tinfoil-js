@@ -4,7 +4,8 @@
 // ignored, typed members validated). All errors are plain Errors.
 
 import { decodeHex, encodeHex, utf8DecodeLenient, utf8Encode } from "../bytes.js";
-import { children, content, decodeOID, decodeUint, readTLV, type Certificate, type TLV } from "./der.js";
+import { children, content, decodeOID, decodeUint, readTLV, type TLV } from "../der.js";
+import type { Certificate } from "./der.js";
 
 const ppidSize = 16;
 const cpuSvnSize = 16;

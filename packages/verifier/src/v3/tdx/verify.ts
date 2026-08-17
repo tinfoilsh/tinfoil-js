@@ -4,17 +4,15 @@
 // CheckRevocations=true, Now pinned. All errors are plain Errors; the
 // authenticate wrapper assigns QUOTE_REJECTED.
 
-import { bytesEqual, decodeHex, encodeHex, sha256 } from "../bytes.js";
+import { bytesEqual, bytesToLatin1, decodeHex, encodeHex, sha256 } from "../bytes.js";
+import { derBytesEqual, pemDecode } from "../der.js";
 import {
   basicConstraints,
-  bytesToLatin1,
   crlDistributionPointURIs,
-  derBytesEqual,
   ecdsaP256PublicKey,
   keyUsage,
   parseCertificate,
   parseCRL,
-  pemDecode,
   verifyDERSignature,
   verifyRawSignature,
   type Certificate,

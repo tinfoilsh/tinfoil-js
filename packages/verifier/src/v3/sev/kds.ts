@@ -10,7 +10,8 @@ import {
   VlekReportSigner,
   NoneReportSigner,
 } from "./abi.js";
-import { decodeUint, oidAuthorityKeyID, readTLV, type Certificate, type Extension } from "./x509.js";
+import { decodeUint, readTLV, type Extension } from "../der.js";
+import { oidAuthorityKeyID, type Certificate } from "./x509.js";
 
 // KDS x509v3 extension OIDs.
 export const OidStructVersion = "1.3.6.1.4.1.3704.1.1";

@@ -15,7 +15,8 @@ import {
 } from "../envelope.js";
 import { VerificationError } from "../errors.js";
 import { TdxGuestV2, type Measurement } from "../measurement.js";
-import { parseCertificate, parseCRL, pemDecode, type Certificate } from "./der.js";
+import { pemDecode } from "../der.js";
+import { parseCertificate, parseCRL, type Certificate } from "./der.js";
 import { identity } from "./identity.js";
 import { quoteToProtoV4, type QuoteV4, type TDQuoteBody } from "./quote.js";
 import { tdxVerifyQuoteV4, type HTTPSGetter } from "./verify.js";
