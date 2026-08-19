@@ -161,6 +161,7 @@ export class SecureClient {
   private attestedTlsPublicKeyFingerprint?: string;
 
   constructor(options: SecureClientOptions = {}) {
+    let baseOrigin: string | undefined;
     // Validate provided URLs, including the empty string: URL resolution
     // keeps "" (via ??) rather than falling back, so an unguarded empty value
     // would surface later as a confusing "Invalid URL" instead of a clear error.
@@ -176,14 +177,41 @@ export class SecureClient {
       if (baseURL.protocol !== "http:" && baseURL.protocol !== "https:") {
         throw new ConfigurationError(`baseURL must be a valid HTTP(S) URL. Got: ${options.baseURL}`);
       }
+      baseOrigin = baseURL.origin;
     }
-    if (options.enclaveURL !== undefined && !options.enclaveURL.startsWith("https://")) {
-      throw new ConfigurationError(`enclaveURL must use HTTPS. Got: ${options.enclaveURL}`);
+
+    let enclaveOrigin: string | undefined;
+    if (options.enclaveURL !== undefined) {
+      let enclaveURL: URL;
+      try {
+        enclaveURL = new URL(options.enclaveURL);
+      } catch {
+        throw new ConfigurationError(`enclaveURL must use HTTPS. Got: ${options.enclaveURL}`);
+      }
+      if (enclaveURL.protocol !== "https:") {
+        throw new ConfigurationError(`enclaveURL must use HTTPS. Got: ${options.enclaveURL}`);
+      }
+      enclaveOrigin = enclaveURL.origin;
     }
     if (options.attestationBundleURL !== undefined && !options.attestationBundleURL.startsWith("https://")) {
       throw new ConfigurationError(`attestationBundleURL must use HTTPS. Got: ${options.attestationBundleURL}`);
     }
-    if (options.configRepo && !options.enclaveURL) {
+
+    let resolvedEnclaveURL = options.enclaveURL;
+    if (baseOrigin === TINFOIL_CONFIG.INFERENCE_ORIGIN) {
+      if (enclaveOrigin && enclaveOrigin !== TINFOIL_CONFIG.INFERENCE_ORIGIN) {
+        throw new ConfigurationError(
+          `baseURL ${options.baseURL} cannot route to enclaveURL ${options.enclaveURL}; ` +
+          "use a proxy that forwards X-Tinfoil-Enclave-Url or connect directly",
+        );
+      }
+      // inference.tinfoil.sh is a stable enclave identity, not a
+      // router-forwarding proxy. Request its matching bundle rather than pairing
+      // this base URL with a randomly selected default-router HPKE key.
+      resolvedEnclaveURL = TINFOIL_CONFIG.INFERENCE_ORIGIN;
+    }
+
+    if (options.configRepo && !resolvedEnclaveURL) {
       throw new ConfigurationError("configRepo requires enclaveURL — without it, ATC always uses the default router repo.");
     } else if (options.enclaveURL && !options.configRepo) {
       console.warn(`[tinfoil] No configRepo specified, verifying against "${TINFOIL_CONFIG.DEFAULT_ROUTER_REPO}".`);
@@ -191,7 +219,7 @@ export class SecureClient {
 
     this.config = {
       baseURL: options.baseURL,
-      enclaveURL: options.enclaveURL,
+      enclaveURL: resolvedEnclaveURL,
       configRepo: options.configRepo ?? TINFOIL_CONFIG.DEFAULT_ROUTER_REPO,
       transport: options.transport || 'ehbp',
       attestationBundleURL: options.attestationBundleURL,

@@ -443,6 +443,39 @@ describe("SecureClient", () => {
   });
 
   describe("constructor validation", () => {
+    it("should bind the official inference baseURL to its matching enclave", async () => {
+      const { SecureClient } = await import("../src/secure-client");
+      const { fetchAttestationBundle } = await import("../src/atc.js");
+
+      const client = new SecureClient({
+        baseURL: "https://inference.tinfoil.sh/v1/",
+      });
+      await client.ready();
+
+      expect(client.getEnclaveURL()).toBe("https://inference.tinfoil.sh");
+      expect(fetchAttestationBundle).toHaveBeenCalledWith({
+        atcBaseUrl: undefined,
+        enclaveURL: "https://inference.tinfoil.sh",
+        configRepo: undefined,
+      });
+      expect(createSecureFetchMock).toHaveBeenCalledWith(
+        "https://inference.tinfoil.sh/v1/",
+        "mock-hpke-public-key",
+        undefined,
+        "https://inference.tinfoil.sh",
+        "test-secret",
+      );
+    });
+
+    it("should reject routing another enclave through the official inference baseURL", async () => {
+      const { SecureClient } = await import("../src/secure-client");
+
+      expect(() => new SecureClient({
+        baseURL: "https://inference.tinfoil.sh/v1/",
+        enclaveURL: "https://router.inf6.tinfoil.sh",
+      })).toThrow("cannot route to enclaveURL");
+    });
+
     it("should throw ConfigurationError when configRepo is set without enclaveURL", async () => {
       const { SecureClient } = await import("../src/secure-client");
 
@@ -627,6 +660,65 @@ describe("SecureClient", () => {
   });
 
   describe("KeyConfigMismatchError recovery", () => {
+    // Automatic clients must rotate the complete endpoint/key pair. Keeping the
+    // first bundle's domain would only fetch another key for the same failed
+    // route and would differ from reset() semantics.
+    it("should allow a fresh default bundle to select another router", async () => {
+      const { SecureClient } = await import("../src/secure-client");
+      const { fetchAttestationBundle } = await import("../src/atc.js");
+      const { KeyConfigMismatchError } = await import("ehbp");
+      vi.mocked(fetchAttestationBundle)
+        .mockResolvedValueOnce({
+          domain: "old-router.tinfoil.sh",
+          enclaveAttestationReport: { format: "test", body: "test" },
+          digest: "old-digest",
+          sigstoreBundle: {},
+          vcek: "test-vcek",
+        } as never)
+        .mockResolvedValueOnce({
+          domain: "new-router.tinfoil.sh",
+          enclaveAttestationReport: { format: "test", body: "test" },
+          digest: "new-digest",
+          sigstoreBundle: {},
+          vcek: "test-vcek",
+        } as never);
+      mockFetch
+        .mockRejectedValueOnce(new KeyConfigMismatchError("Key config mismatch"))
+        .mockResolvedValueOnce(new Response(JSON.stringify({ ok: true })));
+      const client = new SecureClient({ baseURL: "https://proxy.example.com/v1/" });
+
+      await client.ready();
+      await client.fetch("/test", { method: "GET" });
+
+      expect(fetchAttestationBundle).toHaveBeenNthCalledWith(1, {
+        atcBaseUrl: undefined,
+        enclaveURL: undefined,
+        configRepo: undefined,
+      });
+      expect(fetchAttestationBundle).toHaveBeenNthCalledWith(2, {
+        atcBaseUrl: undefined,
+        enclaveURL: undefined,
+        configRepo: undefined,
+      });
+      expect(createSecureFetchMock).toHaveBeenNthCalledWith(
+        1,
+        "https://proxy.example.com/v1/",
+        "mock-hpke-public-key",
+        undefined,
+        "https://old-router.tinfoil.sh",
+        "test-secret",
+      );
+      expect(createSecureFetchMock).toHaveBeenNthCalledWith(
+        2,
+        "https://proxy.example.com/v1/",
+        "mock-hpke-public-key",
+        undefined,
+        "https://new-router.tinfoil.sh",
+        "test-secret",
+      );
+      expect(client.getEnclaveURL()).toBe("https://new-router.tinfoil.sh");
+    });
+
     it("should re-attest and retry on KeyConfigMismatchError", async () => {
       const { SecureClient } = await import("../src/secure-client");
 
