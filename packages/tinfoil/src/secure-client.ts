@@ -104,6 +104,29 @@ function createPendingVerificationDocument(configRepo: string): VerificationDocu
   };
 }
 
+function parseConfiguredURL(
+  value: string,
+  allowedProtocols: readonly string[],
+  errorMessage: string,
+): URL {
+  let parsed: URL;
+  try {
+    parsed = new URL(value.trim());
+  } catch (cause) {
+    throw new ConfigurationError(errorMessage, { cause: cause as Error });
+  }
+  if (!allowedProtocols.includes(parsed.protocol)) {
+    throw new ConfigurationError(errorMessage);
+  }
+  return parsed;
+}
+
+const INFERENCE_HOST = new URL(TINFOIL_CONFIG.INFERENCE_ORIGIN).hostname;
+
+function isInferenceHost(url: URL): boolean {
+  return url.hostname.toLowerCase().replace(/\.$/, "") === INFERENCE_HOST;
+}
+
 /**
  * Low-level secure client providing a verified fetch function for custom HTTP requests.
  * 
@@ -161,43 +184,55 @@ export class SecureClient {
   private attestedTlsPublicKeyFingerprint?: string;
 
   constructor(options: SecureClientOptions = {}) {
+    let configuredBaseURL = options.baseURL?.trim();
     let baseOrigin: string | undefined;
     // Validate provided URLs, including the empty string: URL resolution
     // keeps "" (via ??) rather than falling back, so an unguarded empty value
     // would surface later as a confusing "Invalid URL" instead of a clear error.
     if (options.baseURL !== undefined) {
-      let baseURL: URL;
-      try {
-        baseURL = new URL(options.baseURL);
-      } catch (cause) {
-        throw new ConfigurationError(`baseURL must be a valid HTTP(S) URL. Got: ${options.baseURL}`, {
-          cause: cause as Error,
-        });
-      }
-      if (baseURL.protocol !== "http:" && baseURL.protocol !== "https:") {
-        throw new ConfigurationError(`baseURL must be a valid HTTP(S) URL. Got: ${options.baseURL}`);
+      const baseURL = parseConfiguredURL(
+        options.baseURL,
+        ["http:", "https:"],
+        `baseURL must be a valid HTTP(S) URL. Got: ${options.baseURL}`,
+      );
+      if (isInferenceHost(baseURL)) {
+        if (baseURL.protocol !== "https:" || baseURL.port !== "") {
+          throw new ConfigurationError(
+            `baseURL for ${INFERENCE_HOST} must use its standard HTTPS endpoint. Got: ${options.baseURL}`,
+          );
+        }
+        // Treat the DNS root-dot spelling as the same host, then keep one
+        // canonical routing identity throughout attestation and requests.
+        baseURL.hostname = INFERENCE_HOST;
+        configuredBaseURL = baseURL.toString();
       }
       baseOrigin = baseURL.origin;
     }
 
+    const configuredEnclaveURL = options.enclaveURL?.trim();
     let enclaveOrigin: string | undefined;
     if (options.enclaveURL !== undefined) {
-      let enclaveURL: URL;
-      try {
-        enclaveURL = new URL(options.enclaveURL);
-      } catch {
-        throw new ConfigurationError(`enclaveURL must use HTTPS. Got: ${options.enclaveURL}`);
-      }
-      if (enclaveURL.protocol !== "https:") {
-        throw new ConfigurationError(`enclaveURL must use HTTPS. Got: ${options.enclaveURL}`);
+      const enclaveURL = parseConfiguredURL(
+        options.enclaveURL,
+        ["https:"],
+        `enclaveURL must use HTTPS. Got: ${options.enclaveURL}`,
+      );
+      if (isInferenceHost(enclaveURL) && enclaveURL.port === "") {
+        enclaveURL.hostname = INFERENCE_HOST;
       }
       enclaveOrigin = enclaveURL.origin;
     }
-    if (options.attestationBundleURL !== undefined && !options.attestationBundleURL.startsWith("https://")) {
-      throw new ConfigurationError(`attestationBundleURL must use HTTPS. Got: ${options.attestationBundleURL}`);
+
+    const configuredAttestationBundleURL = options.attestationBundleURL?.trim();
+    if (options.attestationBundleURL !== undefined) {
+      parseConfiguredURL(
+        options.attestationBundleURL,
+        ["https:"],
+        `attestationBundleURL must use HTTPS. Got: ${options.attestationBundleURL}`,
+      );
     }
 
-    let resolvedEnclaveURL = options.enclaveURL;
+    let resolvedEnclaveURL = configuredEnclaveURL;
     if (baseOrigin === TINFOIL_CONFIG.INFERENCE_ORIGIN) {
       if (enclaveOrigin && enclaveOrigin !== TINFOIL_CONFIG.INFERENCE_ORIGIN) {
         throw new ConfigurationError(
@@ -218,11 +253,11 @@ export class SecureClient {
     }
 
     this.config = {
-      baseURL: options.baseURL,
+      baseURL: configuredBaseURL,
       enclaveURL: resolvedEnclaveURL,
       configRepo: options.configRepo ?? TINFOIL_CONFIG.DEFAULT_ROUTER_REPO,
       transport: options.transport || 'ehbp',
-      attestationBundleURL: options.attestationBundleURL,
+      attestationBundleURL: configuredAttestationBundleURL,
       userCacheSecret: options.userCacheSecret,
     };
     this.verificationDocument = createPendingVerificationDocument(this.config.configRepo);

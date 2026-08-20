@@ -476,6 +476,60 @@ describe("SecureClient", () => {
       })).toThrow("cannot route to enclaveURL");
     });
 
+    it("should accept a matching root-dot enclave identity for the official baseURL", async () => {
+      const { SecureClient } = await import("../src/secure-client");
+
+      expect(() => new SecureClient({
+        baseURL: "https://inference.tinfoil.sh/v1/",
+        enclaveURL: "https://inference.tinfoil.sh.",
+      })).not.toThrow();
+    });
+
+    it("should canonicalize the root-dot spelling of the official inference baseURL", async () => {
+      const { SecureClient } = await import("../src/secure-client");
+      const { fetchAttestationBundle } = await import("../src/atc.js");
+
+      const client = new SecureClient({
+        baseURL: "https://inference.tinfoil.sh./v1/",
+      });
+      await client.ready();
+
+      expect(client.getBaseURL()).toBe("https://inference.tinfoil.sh/v1/");
+      expect(client.getEnclaveURL()).toBe("https://inference.tinfoil.sh");
+      expect(fetchAttestationBundle).toHaveBeenCalledWith({
+        atcBaseUrl: undefined,
+        enclaveURL: "https://inference.tinfoil.sh",
+        configRepo: undefined,
+      });
+    });
+
+    it.each([
+      "http://inference.tinfoil.sh/v1/",
+      "https://inference.tinfoil.sh:8443/v1/",
+    ])("should reject a non-standard official inference endpoint %s", async (baseURL) => {
+      const { SecureClient } = await import("../src/secure-client");
+
+      expect(() => new SecureClient({ baseURL })).toThrow("must use its standard HTTPS endpoint");
+    });
+
+    it("should trim an explicitly configured enclave URL before using it", async () => {
+      const { SecureClient } = await import("../src/secure-client");
+      const { fetchAttestationBundle } = await import("../src/atc.js");
+
+      const client = new SecureClient({
+        enclaveURL: "  https://custom.example.com  ",
+        configRepo: "custom/repo",
+      });
+      await client.ready();
+
+      expect(client.getEnclaveURL()).toBe("https://custom.example.com");
+      expect(fetchAttestationBundle).toHaveBeenCalledWith({
+        atcBaseUrl: undefined,
+        enclaveURL: "https://custom.example.com",
+        configRepo: "custom/repo",
+      });
+    });
+
     it("should throw ConfigurationError when configRepo is set without enclaveURL", async () => {
       const { SecureClient } = await import("../src/secure-client");
 
