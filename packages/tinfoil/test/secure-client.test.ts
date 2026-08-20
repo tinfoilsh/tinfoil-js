@@ -485,6 +485,24 @@ describe("SecureClient", () => {
       })).not.toThrow();
     });
 
+    it("should persist the canonical identity for a standalone root-dot enclave URL", async () => {
+      const { SecureClient } = await import("../src/secure-client");
+      const { fetchAttestationBundle } = await import("../src/atc.js");
+
+      const client = new SecureClient({
+        enclaveURL: "https://inference.tinfoil.sh.",
+      });
+      await client.ready();
+
+      expect(client.getEnclaveURL()).toBe("https://inference.tinfoil.sh");
+      expect(client.getEnclaveBaseURL()).toBe("https://inference.tinfoil.sh/v1/");
+      expect(fetchAttestationBundle).toHaveBeenCalledWith({
+        atcBaseUrl: undefined,
+        enclaveURL: "https://inference.tinfoil.sh",
+        configRepo: undefined,
+      });
+    });
+
     it("should canonicalize the root-dot spelling of the official inference baseURL", async () => {
       const { SecureClient } = await import("../src/secure-client");
       const { fetchAttestationBundle } = await import("../src/atc.js");

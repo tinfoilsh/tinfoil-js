@@ -209,7 +209,7 @@ export class SecureClient {
       baseOrigin = baseURL.origin;
     }
 
-    const configuredEnclaveURL = options.enclaveURL?.trim();
+    let configuredEnclaveURL = options.enclaveURL?.trim();
     let enclaveOrigin: string | undefined;
     if (options.enclaveURL !== undefined) {
       const enclaveURL = parseConfiguredURL(
@@ -219,6 +219,7 @@ export class SecureClient {
       );
       if (isInferenceHost(enclaveURL) && enclaveURL.port === "") {
         enclaveURL.hostname = INFERENCE_HOST;
+        configuredEnclaveURL = TINFOIL_CONFIG.INFERENCE_ORIGIN;
       }
       enclaveOrigin = enclaveURL.origin;
     }
