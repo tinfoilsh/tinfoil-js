@@ -24,7 +24,7 @@ export function capabilities(): unknown {
       synthetic_roots: { amd: true, intel: true, sigstore: true },
       freshness_enforced: true,
       live_verify: true,
-      channel_binding: "tls-spki",
+      channel_binding: "hpke",
     },
   };
 }
