@@ -1,71 +1,29 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
-const MOCK_MEASUREMENT_TYPE = "https://tinfoil.sh/predicate/sev-snp-guest/v1";
+const MOCK_MEASUREMENT_TYPE = "https://tinfoil.sh/predicate/sev-snp-guest/v2";
+const MOCK_REGISTER = "ab".repeat(48);
 
+// An enclave that endorses a TLS key but no HPKE key.
 const verifyMock = vi.fn(async () => ({
-  tlsPublicKeyFingerprint: "mock-tls-fingerprint",
-  hpkePublicKey: undefined, // No HPKE key available
-  measurement: { type: MOCK_MEASUREMENT_TYPE, registers: [] },
+  codeDigest: "test-digest",
+  codeTag: "test-release",
+  codeMeasurement: { type: MOCK_MEASUREMENT_TYPE, registers: [MOCK_REGISTER] },
+  enclaveMeasurement: { type: MOCK_MEASUREMENT_TYPE, registers: [MOCK_REGISTER] },
+  cryptoMaterial: [
+    { id: "tls", format: "https://tinfoil.sh/key/spki-fp-sha256/v1", data: "mock-tls-fingerprint" },
+  ],
 }));
 
-const mockVerificationDocument = {
-  configRepo: "test-repo",
-  enclaveHost: "test-host",
-  releaseDigest: "test-digest",
-  codeMeasurement: { type: MOCK_MEASUREMENT_TYPE, registers: [] },
-  enclaveMeasurement: {
-    hpkePublicKey: undefined,
-    tlsPublicKeyFingerprint: "mock-tls-fingerprint",
-    measurement: { type: MOCK_MEASUREMENT_TYPE, registers: [] },
-  },
-  securityVerified: true,
-  steps: {
-    fetchDigest: { status: "success" as const },
-    verifyCode: { status: "success" as const },
-    verifyEnclave: { status: "success" as const },
-    compareMeasurements: { status: "success" as const },
-  },
-};
-
-vi.mock("../src/verifier.js", () => ({
-  cloneVerificationDocument: (document: typeof mockVerificationDocument) => structuredClone(document),
-  Verifier: class {
-    verify() {
-      return verifyMock();
-    }
-    verifyBundle() {
-      return verifyMock();
-    }
-    getVerificationDocument() {
-      return mockVerificationDocument;
-    }
-  },
-  AttestationError: class AttestationError extends Error {
-    constructor(message: string) {
-      super(message);
-      this.name = 'AttestationError';
-    }
-  },
-  ConfigurationError: class ConfigurationError extends Error {
-    constructor(message: string) {
-      super(message);
-      this.name = 'ConfigurationError';
-    }
-  },
-  FetchError: class FetchError extends Error {
-    constructor(message: string) {
-      super(message);
-      this.name = 'FetchError';
-    }
-  },
-  assembleAttestationBundle: vi.fn(async () => ({
-    domain: "custom-enclave.example.com",
-    enclaveAttestationReport: { format: "test", body: "test" },
-    digest: "test-digest",
-    sigstoreBundle: {},
-    vcek: "test-vcek",
-  })),
-}));
+vi.mock("../src/verifier.js", async (importOriginal) => {
+  const original = await importOriginal<typeof import("../src/verifier.js")>();
+  return {
+    ...original,
+    fetchAttestation: vi.fn(async () => new Uint8Array([1, 2, 3])),
+    verifyDocumentV3: () => verifyMock(),
+    // The real tlsPublicKeyFP/hpkePublicKey run against the fixture above:
+    // hpkePublicKey throws because the document endorses no hpke entry.
+  };
+});
 
 // Mock createSecureFetch to simulate browser behavior (throw when no HPKE key)
 vi.mock("../src/secure-fetch.js", () => ({
@@ -94,8 +52,7 @@ vi.mock("../src/atc.js", () => ({
 describe("SecureClient (browser)", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    // Pin the user cache secret so transport creation resolves it from the
-    // (possibly polyfilled) environment instead of a filesystem.
+    // Pin the user cache secret so client init never touches a filesystem.
     vi.stubEnv("TINFOIL_USER_CACHE_SECRET", "test-secret");
   });
 
@@ -103,17 +60,26 @@ describe("SecureClient (browser)", () => {
     vi.unstubAllEnvs();
   });
 
-  it("should reject initialization when HPKE is not available in browser", async () => {
-    const { SecureClient } = await import("../src/secure-client");
+  it("should reject initialization when the document endorses no HPKE key", async () => {
+    vi.useFakeTimers();
+    try {
+      const { SecureClient } = await import("../src/secure-client");
 
-    const client = new SecureClient({
-      baseURL: "https://test.example.com/",
-    });
+      const client = new SecureClient({
+        baseURL: "https://test.example.com/",
+      });
 
-    await expect(client.ready()).rejects.toThrow(
-      /HPKE public key not available and TLS-only verification is not supported in browsers/
-    );
+      // Binding failures re-attest once (AttestationError is transient) and
+      // then propagate; the transport is never created.
+      const assertion = expect(client.ready()).rejects.toThrow(
+        /binding: document endorses no "hpke" crypto material/
+      );
+      await vi.advanceTimersByTimeAsync(1000);
+      await assertion;
 
-    expect(verifyMock).toHaveBeenCalledTimes(1);
+      expect(verifyMock).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

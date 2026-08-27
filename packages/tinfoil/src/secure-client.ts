@@ -1,11 +1,31 @@
 import { KeyConfigMismatchError } from "ehbp";
-import { VERIFICATION_DOCUMENT_SCHEMA_VERSION, VERIFIER_NAME, VERIFIER_VERSION } from "@tinfoilsh/verifier";
-import { cloneVerificationDocument, Verifier, ConfigurationError, FetchError, AttestationError, type VerificationDocument } from "./verifier.js";
-import type { AttestationBundle } from "./verifier.js";
+import {
+  VERIFICATION_DOCUMENT_SCHEMA_VERSION,
+  VERIFIER_NAME,
+  VERIFIER_VERSION,
+  VerificationError,
+  PredicateType,
+  measurementFingerprint,
+} from "@tinfoilsh/verifier";
+import {
+  cloneVerificationDocument,
+  ConfigurationError,
+  FetchError,
+  AttestationError,
+  fetchAttestation,
+  randomNonce,
+  verifyDocumentV3,
+  tlsPublicKeyFP,
+  hpkePublicKey,
+  type VerificationDocument,
+  type VerifiedDocumentV3,
+  type AttestationMeasurement,
+  type HardwareMeasurement,
+} from "./verifier.js";
 import { TINFOIL_CONFIG } from "./config.js";
 import { createSecureFetch } from "./secure-fetch.js";
 import { resolveUserCacheSecret } from "./user-cache-secret.js";
-import { fetchAttestationBundle } from "./atc.js";
+import { fetchRouter } from "./atc.js";
 import type { SecureTransport, SessionRecoveryToken } from "./encrypted-body-fetch.js";
 import type { SecureWebSocketOptions } from "./pinned-ws.js";
 import type * as WS from "ws";
@@ -41,8 +61,8 @@ export interface SecureClientOptions {
   baseURL?: string;
 
   /**
-   * Explicit enclave URL. When set, this takes precedence over the domain
-   * returned by the attestation bundle.
+   * Explicit enclave URL. When set, this takes precedence over router
+   * discovery.
    * Use this when connecting to a custom enclave endpoint rather than the default router.
    */
   enclaveURL?: string;
@@ -56,7 +76,7 @@ export interface SecureClientOptions {
    */
   transport?: TransportMode;
 
-  /** URL to fetch the attestation bundle from. */
+  /** Base URL of the ATC service used for router discovery. */
   attestationBundleURL?: string;
 
   /**
@@ -75,6 +95,61 @@ export interface SecureClientOptions {
    * option.
    */
   userCacheSecret?: string;
+}
+
+// TDX predicate + zeroed RTMR3 (Go: verifier/measurement). The legacy
+// PredicateType enum predates TDX support, so the URL is pinned here.
+const TDX_GUEST_V2 = "https://tinfoil.sh/predicate/tdx-guest/v2";
+const RTMR3_ZERO = "0".repeat(96);
+
+/**
+ * Projects a measurement onto the enclave's platform registers, then applies
+ * the shared fingerprint rule (Go: measurement.Fingerprint).
+ */
+async function fingerprintFor(
+  m: AttestationMeasurement,
+  hw: HardwareMeasurement | undefined,
+  targetType: string,
+): Promise<string> {
+  let registers: string[];
+  switch (m.type) {
+    case PredicateType.SnpTdxMultiplatformV1: // Source
+      if (targetType === PredicateType.SevGuestV2) {
+        registers = [m.registers[0]];
+      } else if (targetType === TDX_GUEST_V2) {
+        if (!hw) {
+          throw new AttestationError("hardware measurement required for TDX guest types");
+        }
+        registers = [hw.MRTD!, hw.RTMR0!, m.registers[1], m.registers[2], RTMR3_ZERO];
+      } else {
+        throw new AttestationError(`unsupported target type ${targetType}`);
+      }
+      break;
+    case TDX_GUEST_V2: // Runtime
+      if (m.registers.length < 5) {
+        throw new AttestationError(`TDX measurement has ${m.registers.length} registers, want 5`);
+      }
+      registers = m.registers.slice(0, 5);
+      break;
+    case PredicateType.SevGuestV2:
+      registers = [m.registers[0]];
+      break;
+    default:
+      throw new AttestationError(`unsupported measurement type ${m.type}`);
+  }
+  return measurementFingerprint({ type: m.type, registers });
+}
+
+/** Maps a v3 rejection layer to the verification-document step it fails. */
+function stepForLayer(layer: VerificationError["layer"]): "verifyCode" | "verifyEnclave" | "compareMeasurements" {
+  switch (layer) {
+    case "PROVENANCE_REJECTED":
+      return "verifyCode";
+    case "POLICY_REJECTED":
+      return "compareMeasurements";
+    default: // ENVELOPE_REJECTED, QUOTE_REJECTED
+      return "verifyEnclave";
+  }
 }
 
 function createPendingVerificationDocument(configRepo: string): VerificationDocument {
@@ -265,16 +340,11 @@ export class SecureClient {
   }
 
   private async initSecureClient(): Promise<void> {
-    const bundle: AttestationBundle = await fetchAttestationBundle({
-      atcBaseUrl: this.config.attestationBundleURL,
-      enclaveURL: this.config.enclaveURL,
-      configRepo: this.config.configRepo !== TINFOIL_CONFIG.DEFAULT_ROUTER_REPO
-        ? this.config.configRepo
-        : undefined,
-    });
-
-    // Resolve enclaveURL: user-provided config takes precedence, otherwise from bundle
-    this.resolvedEnclaveURL = this.config.enclaveURL ?? `https://${bundle.domain}`;
+    // Resolve enclaveURL: user-provided config takes precedence, otherwise
+    // discover a router endpoint. The v3 document travels enclave-to-client,
+    // so discovery needs only the router address — no ATC bundle.
+    this.resolvedEnclaveURL = this.config.enclaveURL
+      ?? `https://${await fetchRouter(this.config.attestationBundleURL)}`;
 
     // Resolve baseURL: user-provided config takes precedence, otherwise use the enclave API
     this.resolvedBaseURL = this.config.baseURL ?? this.getEnclaveBaseURL();
@@ -287,18 +357,140 @@ export class SecureClient {
       throw new ConfigurationError("TLS transport requires baseURL to use the verified enclave origin");
     }
 
-    const verifier = new Verifier({
-      configRepo: this.config.configRepo,
-    });
+    const { tlsFp, hpkeKey } = await this.verifyEnclave(new URL(this.resolvedEnclaveURL).host);
+    this.attestedTlsPublicKeyFingerprint = tlsFp;
+    this._transport = await this.createTransport(hpkeKey, tlsFp);
+  }
+
+  /**
+   * v3 attestation flow against the resolved enclave (Go: SecureClient.verifyV3):
+   * fresh nonce → fetch the document (evidence + collateral in one request) →
+   * verify it offline against the embedded roots → extract the endorsed
+   * channel keys. The verification document is captured on success and on
+   * every failure path.
+   */
+  private async verifyEnclave(host: string): Promise<{ tlsFp: string; hpkeKey: string }> {
+    const steps: VerificationDocument['steps'] = {
+      fetchDigest: { status: 'pending' },
+      verifyCode: { status: 'pending' },
+      verifyEnclave: { status: 'pending' },
+      compareMeasurements: { status: 'pending' },
+    };
 
     try {
-      const attestation = await verifier.verifyBundle(bundle);
-      this.attestedTlsPublicKeyFingerprint = attestation.tlsPublicKeyFingerprint;
-      this._transport = await this.createTransport(attestation.hpkePublicKey, attestation.tlsPublicKeyFingerprint);
-    } finally {
-      // Always capture the verifier's doc (success or partial-failure)
-      this.verificationDocument = verifier.getVerificationDocument() ?? this.verificationDocument;
+      // Fetch phase: the enclave round-trip is the only network request.
+      const nonce = randomNonce();
+      let docBytes: Uint8Array;
+      try {
+        docBytes = await fetchAttestation(host, nonce);
+        steps.fetchDigest = { status: 'success' };
+      } catch (error) {
+        steps.fetchDigest = { status: 'failed', error: (error as Error).message };
+        throw new FetchError(`Failed to fetch attestation document from ${host}: ${(error as Error).message}`, {
+          cause: error as Error,
+        });
+      }
+
+      // Verify phase: offline, embedded roots. A rejection is attributed to
+      // the step matching its layer; unexpected errors propagate untouched.
+      let verified: VerifiedDocumentV3;
+      try {
+        verified = await verifyDocumentV3(docBytes, nonce, this.config.configRepo);
+        steps.verifyCode = { status: 'success' };
+        steps.verifyEnclave = { status: 'success' };
+        steps.compareMeasurements = { status: 'success' };
+      } catch (error) {
+        if (error instanceof VerificationError) {
+          steps[stepForLayer(error.layer)] = { status: 'failed', error: error.message };
+          throw new AttestationError(`Attestation verification failed: ${error.message}`, { cause: error });
+        }
+        steps.otherError = { status: 'failed', error: (error as Error).message };
+        throw error;
+      }
+
+      // Binding phase: both endorsed channel keys are required (Go mirrors
+      // these as "binding:" failures). EHBP binds the channel to the HPKE
+      // key; the TLS fingerprint pins the 'tls' transport and WebSockets.
+      let tlsFp: string;
+      let hpkeKey: string;
+      try {
+        tlsFp = tlsPublicKeyFP(verified);
+        hpkeKey = hpkePublicKey(verified);
+      } catch (error) {
+        steps.otherError = { status: 'failed', error: `binding: ${(error as Error).message}` };
+        throw new AttestationError(`binding: ${(error as Error).message}`, { cause: error as Error });
+      }
+
+      // Fingerprints mirror the legacy flow for consumers that display or
+      // compare them. TDX fingerprints incorporate the platform registers,
+      // which in v3 come from the verified quote itself (already appraised
+      // against the endorsed platform measurements).
+      const hw: HardwareMeasurement | undefined =
+        verified.enclaveMeasurement.type === TDX_GUEST_V2 && verified.enclaveMeasurement.registers.length >= 2
+          ? { MRTD: verified.enclaveMeasurement.registers[0], RTMR0: verified.enclaveMeasurement.registers[1] }
+          : undefined;
+      let codeFingerprint: string;
+      let enclaveFingerprint: string;
+      try {
+        codeFingerprint = await fingerprintFor(verified.codeMeasurement, hw, verified.enclaveMeasurement.type);
+        enclaveFingerprint = await fingerprintFor(verified.enclaveMeasurement, hw, verified.enclaveMeasurement.type);
+      } catch (error) {
+        steps.otherError = { status: 'failed', error: `measurements: ${(error as Error).message}` };
+        throw new AttestationError(`measurements: failed to compute fingerprint: ${(error as Error).message}`, {
+          cause: error as Error,
+        });
+      }
+
+      this.verificationDocument = {
+        schemaVersion: VERIFICATION_DOCUMENT_SCHEMA_VERSION,
+        configRepo: this.config.configRepo,
+        enclaveHost: host,
+        releaseTag: verified.codeTag,
+        releaseDigest: verified.codeDigest,
+        codeMeasurement: verified.codeMeasurement,
+        enclaveMeasurement: {
+          tlsPublicKeyFingerprint: tlsFp,
+          hpkePublicKey: hpkeKey,
+          measurement: verified.enclaveMeasurement,
+        },
+        tlsPublicKey: tlsFp,
+        hpkePublicKey: hpkeKey,
+        ...(hw && { hardwareMeasurement: hw }),
+        codeFingerprint,
+        enclaveFingerprint,
+        selectedRouterEndpoint: host,
+        securityVerified: true,
+        verifier: { name: VERIFIER_NAME, version: VERIFIER_VERSION },
+        verifiedAt: new Date().toISOString(),
+        steps,
+      };
+
+      return { tlsFp, hpkeKey };
+    } catch (error) {
+      // Capture the partial document (the success path never throws after
+      // the document is assembled).
+      this.saveFailedVerificationDocument(steps, host);
+      throw error;
     }
+  }
+
+  private saveFailedVerificationDocument(steps: VerificationDocument['steps'], host: string): void {
+    this.verificationDocument = {
+      schemaVersion: VERIFICATION_DOCUMENT_SCHEMA_VERSION,
+      configRepo: this.config.configRepo,
+      enclaveHost: host,
+      releaseDigest: '',
+      codeMeasurement: { type: '', registers: [] },
+      enclaveMeasurement: { measurement: { type: '', registers: [] } },
+      tlsPublicKey: '',
+      hpkePublicKey: '',
+      codeFingerprint: '',
+      enclaveFingerprint: '',
+      selectedRouterEndpoint: host,
+      securityVerified: false,
+      verifier: { name: VERIFIER_NAME, version: VERIFIER_VERSION },
+      steps,
+    };
   }
 
   /**

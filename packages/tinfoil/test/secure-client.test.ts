@@ -1,26 +1,43 @@
 import type { SecureTransport } from "../src/encrypted-body-fetch";
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { VerificationError, PredicateType, measurementFingerprint, VERIFIER_NAME, VERIFIER_VERSION } from "@tinfoilsh/verifier";
 
-const MOCK_MEASUREMENT_TYPE = "https://tinfoil.sh/predicate/sev-snp-guest/v1";
+const MOCK_MEASUREMENT_TYPE = "https://tinfoil.sh/predicate/sev-snp-guest/v2";
+const MOCK_REGISTER = "ab".repeat(48);
 
-const mockVerificationDocument = {
-  configRepo: "test-repo",
-  enclaveHost: "test-host",
+// VerifiedDocumentV3 fixture returned by the mocked verifyDocumentV3.
+const mockVerified = {
+  codeDigest: "test-digest",
+  codeTag: "test-release",
+  codeMeasurement: { type: MOCK_MEASUREMENT_TYPE, registers: [MOCK_REGISTER] },
+  enclaveMeasurement: { type: MOCK_MEASUREMENT_TYPE, registers: [MOCK_REGISTER] },
+  cryptoMaterial: [
+    { id: "tls", format: "https://tinfoil.sh/key/spki-fp-sha256/v1", data: "mock-tls-public-key-fingerprint" },
+    { id: "hpke", format: "https://tinfoil.sh/key/x25519-hpke/v1", data: "mock-hpke-public-key" },
+  ],
+};
+
+// The document SecureClient assembles from mockVerified (verifiedAt is dynamic).
+const expectedVerificationDocument = {
+  schemaVersion: 1,
+  configRepo: "tinfoilsh/confidential-model-router",
+  enclaveHost: "test-router.tinfoil.sh",
   releaseTag: "test-release",
   releaseDigest: "test-digest",
-  codeMeasurement: { type: MOCK_MEASUREMENT_TYPE, registers: [] },
+  codeMeasurement: { type: MOCK_MEASUREMENT_TYPE, registers: [MOCK_REGISTER] },
   enclaveMeasurement: {
+    tlsPublicKeyFingerprint: "mock-tls-public-key-fingerprint",
     hpkePublicKey: "mock-hpke-public-key",
-    measurement: { type: MOCK_MEASUREMENT_TYPE, registers: [] },
+    measurement: { type: MOCK_MEASUREMENT_TYPE, registers: [MOCK_REGISTER] },
   },
-  tlsPublicKey: "test-tls-public-key",
+  tlsPublicKey: "mock-tls-public-key-fingerprint",
   hpkePublicKey: "mock-hpke-public-key",
-  codeFingerprint: "test-code-fingerprint",
-  enclaveFingerprint: "test-enclave-fingerprint",
-  selectedRouterEndpoint: "test.example.com",
+  codeFingerprint: MOCK_REGISTER,
+  enclaveFingerprint: MOCK_REGISTER,
+  selectedRouterEndpoint: "test-router.tinfoil.sh",
   securityVerified: true,
-  verifier: { name: "@tinfoilsh/verifier", version: "1.2.0" },
+  verifier: { name: VERIFIER_NAME, version: VERIFIER_VERSION },
   steps: {
     fetchDigest: { status: "success" },
     verifyCode: { status: "success" },
@@ -29,12 +46,10 @@ const mockVerificationDocument = {
   },
 };
 
-const verifyMock = vi.fn(async () => ({
-  tlsPublicKeyFingerprint: "mock-tls-public-key-fingerprint",
-  hpkePublicKey: "mock-hpke-public-key",
-  measurement: { type: MOCK_MEASUREMENT_TYPE, registers: [] },
-}));
-const getVerificationDocumentMock = vi.fn(() => mockVerificationDocument);
+const fetchAttestationMock = vi.fn(async (_host: string, _nonce: Uint8Array) => new Uint8Array([1, 2, 3]));
+const verifyMock = vi.fn(async (_doc: Uint8Array, _nonce: Uint8Array, _repo: string) => mockVerified);
+const tlsPublicKeyFPMock = vi.fn((_v: typeof mockVerified) => "mock-tls-public-key-fingerprint");
+const hpkePublicKeyMock = vi.fn((_v: typeof mockVerified) => "mock-hpke-public-key");
 
 const mockFetch = vi.fn(async () => new Response(JSON.stringify({ message: "success" })));
 const mockGetSessionRecoveryToken = vi.fn(async () => ({ exportedSecret: new Uint8Array(), requestEnc: new Uint8Array() }));
@@ -51,45 +66,16 @@ const createSecureFetchMock = vi.fn<
   getSessionRecoveryToken: mockGetSessionRecoveryToken,
 }));
 
-vi.mock("../src/verifier.js", () => ({
-  cloneVerificationDocument: (document: typeof mockVerificationDocument) => structuredClone(document),
-  Verifier: class {
-    verify() {
-      return verifyMock();
-    }
-    verifyBundle() {
-      return verifyMock();
-    }
-    getVerificationDocument() {
-      return getVerificationDocumentMock();
-    }
-  },
-  FetchError: class FetchError extends Error {
-    constructor(message: string) {
-      super(message);
-      this.name = 'FetchError';
-    }
-  },
-  AttestationError: class AttestationError extends Error {
-    constructor(message: string) {
-      super(message);
-      this.name = 'AttestationError';
-    }
-  },
-  ConfigurationError: class ConfigurationError extends Error {
-    constructor(message: string) {
-      super(message);
-      this.name = 'ConfigurationError';
-    }
-  },
-  assembleAttestationBundle: vi.fn(async () => ({
-    domain: "custom-enclave.example.com",
-    enclaveAttestationReport: { format: "test", body: "test" },
-    digest: "test-digest",
-    sigstoreBundle: {},
-    vcek: "test-vcek",
-  })),
-}));
+vi.mock("../src/verifier.js", async (importOriginal) => {
+  const original = await importOriginal<typeof import("../src/verifier.js")>();
+  return {
+    ...original,
+    fetchAttestation: (host: string, nonce: Uint8Array) => fetchAttestationMock(host, nonce),
+    verifyDocumentV3: (doc: Uint8Array, nonce: Uint8Array, repo: string) => verifyMock(doc, nonce, repo),
+    tlsPublicKeyFP: (v: typeof mockVerified) => tlsPublicKeyFPMock(v),
+    hpkePublicKey: (v: typeof mockVerified) => hpkePublicKeyMock(v),
+  };
+});
 
 vi.mock("../src/secure-fetch.js", () => ({
   createSecureFetch: createSecureFetchMock,
@@ -169,7 +155,7 @@ describe("SecureClient", () => {
     });
 
     // Call ready() three times concurrently
-    const [r1, r2, r3] = await Promise.all([
+    await Promise.all([
       client.ready(),
       client.ready(),
       client.ready(),
@@ -208,7 +194,8 @@ describe("SecureClient", () => {
     const verificationDocument = client.getVerificationDocument();
 
     expect(verifyMock).toHaveBeenCalledTimes(1);
-    expect(verificationDocument).toEqual(mockVerificationDocument);
+    expect(verificationDocument).toMatchObject(expectedVerificationDocument);
+    expect(typeof verificationDocument.verifiedAt).toBe("string");
   });
 
   it("should return deeply cloned verification document snapshots", async () => {
@@ -216,7 +203,7 @@ describe("SecureClient", () => {
     const client = new SecureClient({ baseURL: "https://test.example.com/" });
 
     await client.ready();
-    const expected = structuredClone(mockVerificationDocument);
+    const expected = client.getVerificationDocument();
     const snapshot = client.getVerificationDocument();
     snapshot.securityVerified = false;
     snapshot.releaseTag = "modified";
@@ -245,6 +232,161 @@ describe("SecureClient", () => {
     // Verify that initialization happened
     expect(verifyMock).toHaveBeenCalledTimes(1);
     expect(createSecureFetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  describe("v3 verification flow", () => {
+    it("fetches the attestation document with a fresh 32-byte nonce and verifies it against the config repo", async () => {
+      const { SecureClient } = await import("../src/secure-client");
+
+      const client = new SecureClient();
+      await client.ready();
+
+      expect(fetchAttestationMock).toHaveBeenCalledTimes(1);
+      const [host, nonce] = fetchAttestationMock.mock.calls[0];
+      expect(host).toBe("test-router.tinfoil.sh");
+      expect(nonce).toBeInstanceOf(Uint8Array);
+      expect(nonce.length).toBe(32);
+
+      expect(verifyMock).toHaveBeenCalledTimes(1);
+      const [docBytes, verifyNonce, repo] = verifyMock.mock.calls[0];
+      expect(docBytes).toEqual(new Uint8Array([1, 2, 3]));
+      expect(verifyNonce).toBe(nonce);
+      expect(repo).toBe("tinfoilsh/confidential-model-router");
+    });
+
+    it("computes TDX fingerprints from the verified quote registers (Go hardware-measurement rule)", async () => {
+      const TDX_GUEST_V2 = "https://tinfoil.sh/predicate/tdx-guest/v2";
+      const RTMR3_ZERO = "0".repeat(96);
+      const mrtd = "11".repeat(48);
+      const rtmr0 = "22".repeat(48);
+      const rtmr1 = "33".repeat(48);
+      const rtmr2 = "44".repeat(48);
+      verifyMock.mockResolvedValueOnce({
+        ...mockVerified,
+        codeMeasurement: { type: PredicateType.SnpTdxMultiplatformV1, registers: ["55".repeat(48), rtmr1, rtmr2] },
+        enclaveMeasurement: { type: TDX_GUEST_V2, registers: [mrtd, rtmr0, rtmr1, rtmr2, RTMR3_ZERO] },
+      });
+
+      const { SecureClient } = await import("../src/secure-client");
+      const client = new SecureClient();
+      await client.ready();
+
+      const doc = client.getVerificationDocument();
+      expect(doc.hardwareMeasurement).toEqual({ MRTD: mrtd, RTMR0: rtmr0 });
+      expect(doc.codeFingerprint).toBe(
+        await measurementFingerprint({
+          type: PredicateType.SnpTdxMultiplatformV1,
+          registers: [mrtd, rtmr0, rtmr1, rtmr2, RTMR3_ZERO],
+        }),
+      );
+      expect(doc.enclaveFingerprint).toBe(
+        await measurementFingerprint({
+          type: TDX_GUEST_V2,
+          registers: [mrtd, rtmr0, rtmr1, rtmr2, RTMR3_ZERO],
+        }),
+      );
+    });
+
+    it("rejects with an AttestationError carrying the layered rejection as cause", async () => {
+      vi.useFakeTimers();
+      try {
+        // Rejected on both the initial attempt and the automatic retry. The
+        // final reset() restores the pending document (existing behaviour),
+        // so the rejection itself carries the attribution.
+        verifyMock
+          .mockRejectedValueOnce(new VerificationError("POLICY_REJECTED", "measurement mismatch"))
+          .mockRejectedValueOnce(new VerificationError("POLICY_REJECTED", "measurement mismatch"));
+
+        const { SecureClient } = await import("../src/secure-client");
+        const { AttestationError } = await import("../src/verifier.js");
+        const client = new SecureClient();
+
+        const assertion = expect(client.ready()).rejects.toSatisfy((error: Error) => {
+          expect(error).toBeInstanceOf(AttestationError);
+          expect(error.message).toMatch(/measurement mismatch/);
+          expect((error.cause as VerificationError).layer).toBe("POLICY_REJECTED");
+          return true;
+        });
+        await vi.advanceTimersByTimeAsync(1000);
+        await assertion;
+
+        const doc = client.getVerificationDocument();
+        expect(doc.securityVerified).toBe(false);
+        expect(doc.steps.fetchDigest.status).toBe("pending");
+        expect(createSecureFetchMock).not.toHaveBeenCalled();
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("fails binding when the document endorses no HPKE key", async () => {
+      vi.useFakeTimers();
+      try {
+        const bindingFailure = () => {
+          throw new Error('document endorses no "hpke" crypto material');
+        };
+        hpkePublicKeyMock
+          .mockImplementationOnce(bindingFailure)
+          .mockImplementationOnce(bindingFailure);
+
+        const { SecureClient } = await import("../src/secure-client");
+        const client = new SecureClient();
+
+        const assertion = expect(client.ready()).rejects.toThrow(/binding: document endorses no "hpke"/);
+        await vi.advanceTimersByTimeAsync(1000);
+        await assertion;
+
+        expect(createSecureFetchMock).not.toHaveBeenCalled();
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("wraps attestation fetch failures in FetchError", async () => {
+      vi.useFakeTimers();
+      try {
+        fetchAttestationMock
+          .mockRejectedValueOnce(new Error("HTTP 502"))
+          .mockRejectedValueOnce(new Error("HTTP 502"));
+
+        const { SecureClient } = await import("../src/secure-client");
+        const { FetchError } = await import("../src/verifier.js");
+        const client = new SecureClient();
+
+        const assertion = expect(client.ready()).rejects.toSatisfy((error: Error) => {
+          expect(error).toBeInstanceOf(FetchError);
+          expect(error.message).toMatch(/Failed to fetch attestation document from test-router.tinfoil.sh: HTTP 502/);
+          return true;
+        });
+        await vi.advanceTimersByTimeAsync(1000);
+        await assertion;
+
+        expect(verifyMock).not.toHaveBeenCalled();
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("repopulates the document with fresh v3 facts after a rejected first attempt", async () => {
+      verifyMock.mockRejectedValueOnce(new VerificationError("POLICY_REJECTED", "measurement mismatch"));
+
+      vi.useFakeTimers();
+      try {
+        const { SecureClient } = await import("../src/secure-client");
+        const client = new SecureClient();
+
+        const readyPromise = client.ready();
+        await vi.advanceTimersByTimeAsync(1000);
+        await readyPromise;
+
+        const doc = client.getVerificationDocument();
+        expect(doc.securityVerified).toBe(true);
+        expect(doc.steps.compareMeasurements.status).toBe("success");
+        expect(verifyMock).toHaveBeenCalledTimes(2);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
   });
 
   describe("reset()", () => {
@@ -298,14 +440,14 @@ describe("SecureClient", () => {
 
       await client.ready();
       const doc = client.getVerificationDocument();
-      expect(doc).toEqual(mockVerificationDocument);
+      expect(doc).toMatchObject(expectedVerificationDocument);
 
       client.reset();
       await client.ready();
 
       // Should get a fresh verification document
       const newDoc = client.getVerificationDocument();
-      expect(newDoc).toEqual(mockVerificationDocument);
+      expect(newDoc).toMatchObject(expectedVerificationDocument);
       expect(verifyMock).toHaveBeenCalledTimes(2);
     });
 
@@ -347,7 +489,7 @@ describe("SecureClient", () => {
 
       await client.ready();
 
-      // Re-derived from fresh bundle
+      // Re-derived from fresh discovery
       expect(client.getBaseURL()).toBe("https://test-router.tinfoil.sh/v1/");
       expect(client.getEnclaveURL()).toBe("https://test-router.tinfoil.sh");
     });
@@ -364,13 +506,7 @@ describe("SecureClient", () => {
 
     it("should retry once on FetchError then succeed", async () => {
       const { FetchError } = await import("../src/verifier.js");
-      verifyMock
-        .mockRejectedValueOnce(new FetchError("network timeout"))
-        .mockResolvedValueOnce({
-          tlsPublicKeyFingerprint: undefined,
-          hpkePublicKey: "mock-hpke-public-key",
-          measurement: { type: MOCK_MEASUREMENT_TYPE, registers: [] },
-        });
+      verifyMock.mockRejectedValueOnce(new FetchError("network timeout"));
 
       const { SecureClient } = await import("../src/secure-client");
       const client = new SecureClient({ baseURL: "https://test.example.com/" });
@@ -385,13 +521,21 @@ describe("SecureClient", () => {
 
     it("should retry once on AttestationError then succeed", async () => {
       const { AttestationError } = await import("../src/verifier.js");
-      verifyMock
-        .mockRejectedValueOnce(new AttestationError("stale report"))
-        .mockResolvedValueOnce({
-          tlsPublicKeyFingerprint: undefined,
-          hpkePublicKey: "mock-hpke-public-key",
-          measurement: { type: MOCK_MEASUREMENT_TYPE, registers: [] },
-        });
+      verifyMock.mockRejectedValueOnce(new AttestationError("stale report"));
+
+      const { SecureClient } = await import("../src/secure-client");
+      const client = new SecureClient({ baseURL: "https://test.example.com/" });
+
+      const readyPromise = client.ready();
+      await vi.advanceTimersByTimeAsync(1000);
+      await readyPromise;
+
+      expect(verifyMock).toHaveBeenCalledTimes(2);
+      expect(createSecureFetchMock).toHaveBeenCalledTimes(1);
+    });
+
+    it("should retry once on a VerificationError rejection then succeed", async () => {
+      verifyMock.mockRejectedValueOnce(new VerificationError("QUOTE_REJECTED", "stale quote"));
 
       const { SecureClient } = await import("../src/secure-client");
       const client = new SecureClient({ baseURL: "https://test.example.com/" });
@@ -591,25 +735,32 @@ describe("SecureClient", () => {
     });
   });
 
-  describe("attestation bundle paths", () => {
-    it("should use fetchAttestationBundle via GET when no custom options", async () => {
+  describe("enclave discovery", () => {
+    it("should discover a router when no enclaveURL is configured", async () => {
       const { SecureClient } = await import("../src/secure-client");
-      const { fetchAttestationBundle } = await import("../src/atc.js");
+      const { fetchRouter } = await import("../src/atc.js");
 
       const client = new SecureClient();
       await client.ready();
 
-      expect(fetchAttestationBundle).toHaveBeenCalledTimes(1);
-      expect(fetchAttestationBundle).toHaveBeenCalledWith({
-        atcBaseUrl: undefined,
-        enclaveURL: undefined,
-        configRepo: undefined,
-      });
+      expect(fetchRouter).toHaveBeenCalledTimes(1);
+      expect(fetchRouter).toHaveBeenCalledWith(undefined);
+      expect(fetchAttestationMock).toHaveBeenCalledWith("test-router.tinfoil.sh", expect.any(Uint8Array));
     });
 
-    it("should pass enclaveURL and configRepo to fetchAttestationBundle", async () => {
+    it("should pass attestationBundleURL to router discovery", async () => {
       const { SecureClient } = await import("../src/secure-client");
-      const { fetchAttestationBundle } = await import("../src/atc.js");
+      const { fetchRouter } = await import("../src/atc.js");
+
+      const client = new SecureClient({ attestationBundleURL: "https://atc.example.com" });
+      await client.ready();
+
+      expect(fetchRouter).toHaveBeenCalledWith("https://atc.example.com");
+    });
+
+    it("should skip discovery and attest the configured enclave directly", async () => {
+      const { SecureClient } = await import("../src/secure-client");
+      const { fetchRouter } = await import("../src/atc.js");
 
       const client = new SecureClient({
         enclaveURL: "https://my-enclave.example.com",
@@ -617,12 +768,9 @@ describe("SecureClient", () => {
       });
       await client.ready();
 
-      expect(fetchAttestationBundle).toHaveBeenCalledTimes(1);
-      expect(fetchAttestationBundle).toHaveBeenCalledWith({
-        atcBaseUrl: undefined,
-        enclaveURL: "https://my-enclave.example.com",
-        configRepo: "custom/repo",
-      });
+      expect(fetchRouter).not.toHaveBeenCalled();
+      expect(fetchAttestationMock).toHaveBeenCalledWith("my-enclave.example.com", expect.any(Uint8Array));
+      expect(verifyMock).toHaveBeenCalledWith(expect.any(Uint8Array), expect.any(Uint8Array), "custom/repo");
     });
   });
 
@@ -652,19 +800,9 @@ describe("SecureClient", () => {
     });
 
     it("should replace verification metadata after automatic re-attestation", async () => {
-      const firstDocument = {
-        ...mockVerificationDocument,
-        releaseTag: "v1.0.0",
-        verifiedAt: "2026-01-01T00:00:00.000Z",
-      };
-      const replacementDocument = {
-        ...mockVerificationDocument,
-        releaseTag: "v1.1.0",
-        verifiedAt: "2026-02-01T00:00:00.000Z",
-      };
-      getVerificationDocumentMock
-        .mockReturnValueOnce(firstDocument)
-        .mockReturnValueOnce(replacementDocument);
+      verifyMock
+        .mockResolvedValueOnce({ ...mockVerified, codeTag: "v1.0.0" })
+        .mockResolvedValueOnce({ ...mockVerified, codeTag: "v1.1.0" });
       const { KeyConfigMismatchError } = await import("ehbp");
       mockFetch
         .mockRejectedValueOnce(new KeyConfigMismatchError("Key config mismatch"))
@@ -674,15 +812,13 @@ describe("SecureClient", () => {
 
       await client.ready();
       expect(client.getVerificationDocument()).toMatchObject({
-        releaseTag: firstDocument.releaseTag,
-        verifiedAt: firstDocument.verifiedAt,
+        releaseTag: "v1.0.0",
       });
 
       await client.fetch("/test", { method: "GET" });
 
       expect(client.getVerificationDocument()).toMatchObject({
-        releaseTag: replacementDocument.releaseTag,
-        verifiedAt: replacementDocument.verifiedAt,
+        releaseTag: "v1.1.0",
       });
     });
 
@@ -751,7 +887,7 @@ describe("SecureClient", () => {
   });
 
   describe("URL resolution", () => {
-    it("Case 1: no config — derives both URLs from bundle", async () => {
+    it("Case 1: no config — derives both URLs from router discovery", async () => {
       const { SecureClient } = await import("../src/secure-client");
 
       const client = new SecureClient();
@@ -769,7 +905,7 @@ describe("SecureClient", () => {
       );
     });
 
-    it("Case 2: proxy — baseURL is proxy, enclaveURL from bundle", async () => {
+    it("Case 2: proxy — baseURL is proxy, enclaveURL from discovery", async () => {
       const { SecureClient } = await import("../src/secure-client");
 
       const client = new SecureClient({
