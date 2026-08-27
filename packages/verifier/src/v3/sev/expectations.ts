@@ -129,6 +129,11 @@ function options(p: SEVSNPPolicy, productLine: string): Omit<SevValidateOptions,
   if (invalid !== undefined) {
     throw policyError(invalid);
   }
+  // PLATFORM_INFO bit 6 (Turin) is reserved in the supported ABI model;
+  // a policy requiring it cannot be enforced, so fail closed (Go options).
+  if (p.platformInfo.iommuWriteSafe) {
+    throw policyError(`iommu_write_safe is not enforceable for product line ${productLine}`);
+  }
   const api = parseVersionParts("minimum_api_version", p.minimumAPIVersion);
   const abi = parseVersionParts("minimum_abi_version", p.minimumABIVersion);
   if (p.minimumTCB.fmcSpl !== undefined || p.minimumLaunchTCB.fmcSpl !== undefined) {

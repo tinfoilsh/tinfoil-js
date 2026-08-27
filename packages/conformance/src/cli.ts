@@ -5,6 +5,8 @@
 //   node cli.js <stage>        Input JSON on stdin -> Output JSON on stdout,
 //                              exit code = verdict
 //   node cli.js capabilities   self-description JSON on stdout, exit 0
+//   node cli.js live-verify    {"host","repo"} on stdin -> verify a live
+//                              enclave through the public entry point (live.ts)
 //
 // Exit codes are the cross-SDK adapter contract: the suite reads them to
 // decide pass/skip and never depends on stdout for the verdict.
@@ -13,6 +15,7 @@
 // (engine-neutral, shared with the browser conformance test).
 
 import { capabilities } from "./capabilities.js";
+import { runLive } from "./live.js";
 import { ExitAccepted, ExitInternal, ExitMalformed, runStage, type Input } from "./run.js";
 
 export {
@@ -47,6 +50,12 @@ async function main(): Promise<number> {
   if (cmd === "capabilities") {
     writeJSON(capabilities());
     return ExitAccepted;
+  }
+
+  if (cmd === "live-verify") {
+    const { output, exitCode } = await runLive(await readStdin());
+    if (output !== undefined) writeJSON(output);
+    return exitCode;
   }
 
   let input: Input;

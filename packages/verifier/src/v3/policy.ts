@@ -119,6 +119,10 @@ export interface SNPPlatform {
   ciphertextHidingDRAM: boolean;
   aliasCheckComplete: boolean;
   tioEnabled: boolean;
+  // iommuWriteSafe (Turin, PLATFORM_INFO bit 6) parses so artifacts carrying
+  // Turin policies remain readable; a selected policy that requires it is
+  // rejected at assembly (Turin is unsupported).
+  iommuWriteSafe: boolean;
 }
 
 // SEVSNPPolicy is the standard SEV-SNP policy block. Every field is
@@ -254,6 +258,7 @@ const artifactSchema: Schema = structOf({
                 ciphertext_hiding_dram: field("ciphertextHidingDRAM", bool),
                 alias_check_complete: field("aliasCheckComplete", bool),
                 tio_enabled: field("tioEnabled", bool),
+                iommu_write_safe: field("iommuWriteSafe", bool),
               }),
             ),
             permit_provisional_firmware: field("permitProvisionalFirmware", bool),
