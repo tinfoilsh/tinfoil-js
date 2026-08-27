@@ -9,6 +9,9 @@
     "build": "tsc",
     "clean": "rm -rf dist"
   },
+  "dependencies": {
+    "@tinfoilsh/verifier": "1.2.1"
+  },
   "devDependencies": {
     "@types/node": "^26.1.1"
   }

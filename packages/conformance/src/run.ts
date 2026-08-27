@@ -2,22 +2,23 @@
 // browser conformance test. No node:/process/Buffer here — this module must
 // execute unchanged in a browser (Go: verifier/conformance/conformance.go).
 
+// The full-verify stage consumes the SDK's public surface (SDK_SURFACE_SPEC
+// §1); block stages deliberately reach internal layers.
+import {
+  hpkePublicKey,
+  tlsPublicKeyFP,
+  VerificationError,
+  verifyDocumentV3,
+} from "@tinfoilsh/verifier";
 import {
   check,
   CollateralSigstoreCodeV1Format,
   CollateralSigstorePlatformV1Format,
-  CryptoMaterialIDHPKE,
-  CryptoMaterialIDTLS,
   decodeBase64,
   decodeHex,
-  KeySPKIFPSHA256V1Format,
-  KeyX25519HPKEV1Format,
   parseDocument,
   quoteAuthenticate,
   referenceValuesCollateral,
-  VerificationError,
-  verifyDocumentV3,
-  type CryptoMaterialItem,
   type Document,
 } from "../../verifier/dist/v3/index.js";
 import {
@@ -221,12 +222,17 @@ export async function runStage(stage: string, input: Input): Promise<StageResult
           intelRootPEM,
           verificationTime,
         });
-        const { tlsFP, hpke } = boundKeys(verified.cryptoMaterial);
         // A document that verifies but endorses no usable channel keys is
         // useless to every real client, so the full stage requires both
-        // (Go: verifyFull).
-        if (tlsFP === "" || hpke === "") {
-          return { output: { stage, accepted: false, rejection: { code: "ENVELOPE_REJECTED" } }, exitCode: ExitRejected };
+        // (Go: verifyFull); the public accessors throw when a key is absent
+        // or format-mismatched.
+        let tlsFP: string;
+        let hpke: string;
+        try {
+          tlsFP = tlsPublicKeyFP(verified);
+          hpke = hpkePublicKey(verified);
+        } catch {
+          return reject(stage, "ENVELOPE_REJECTED");
         }
         const outputs: Record<string, unknown> = {
           code_digest: verified.codeDigest,
@@ -235,9 +241,9 @@ export async function runStage(stage: string, input: Input): Promise<StageResult
             type: verified.enclaveMeasurement.type,
             registers: verified.enclaveMeasurement.registers,
           },
+          tls_public_key_fp: tlsFP,
+          hpke_public_key: hpke,
         };
-        if (tlsFP !== "") outputs.tls_public_key_fp = tlsFP;
-        if (hpke !== "") outputs.hpke_public_key = hpke;
         return { output: { stage, accepted: true, outputs }, exitCode: ExitAccepted };
       } catch (err) {
         // The first failing step names the layer (Go: verifyFull).
@@ -250,21 +256,6 @@ export async function runStage(stage: string, input: Input): Promise<StageResult
     default:
       return { output: { stage, accepted: false }, exitCode: ExitUnsupported };
   }
-}
-
-// boundKeys returns the endorsed TLS SPKI fingerprint and HPKE public key
-// from the verified crypto material (Go: conformance.boundKeys).
-function boundKeys(items: CryptoMaterialItem[]): { tlsFP: string; hpke: string } {
-  let tlsFP = "";
-  let hpke = "";
-  for (const it of items) {
-    if (it.id === CryptoMaterialIDTLS && it.format === KeySPKIFPSHA256V1Format) {
-      tlsFP = it.data;
-    } else if (it.id === CryptoMaterialIDHPKE && it.format === KeyX25519HPKEV1Format) {
-      hpke = it.data;
-    }
-  }
-  return { tlsFP, hpke };
 }
 
 // parsesAsCertificate uses the same PEM/DER parser the TDX layer uses for an

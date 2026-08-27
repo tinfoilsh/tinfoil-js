@@ -4,16 +4,17 @@
 // then assert the live connection's SPKI fingerprint equals the endorsed one
 // (Go: cmd/tinfoil-conformance/live.go).
 
-import { createHash, randomBytes } from "node:crypto";
+import { createHash } from "node:crypto";
 import * as tls from "node:tls";
 import {
+  fetchAttestation,
   hpkePublicKey,
-  NonceSize,
+  randomNonce,
   tlsPublicKeyFP,
   VerificationError,
   verifyDocumentV3,
   type VerifiedDocumentV3,
-} from "../../verifier/dist/v3/index.js";
+} from "@tinfoilsh/verifier";
 import { ExitAccepted, ExitInternal, ExitMalformed, ExitRejected, type Output } from "./run.js";
 
 const StageLive = "live-verify";
@@ -48,13 +49,10 @@ export async function runLive(reqJSON: string): Promise<LiveResult> {
     };
   }
 
-  const nonce = new Uint8Array(randomBytes(NonceSize));
-  const nonceHex = Buffer.from(nonce).toString("hex");
+  const nonce = randomNonce();
   let doc: Uint8Array;
   try {
-    const resp = await fetch(`https://${req.host}/.well-known/tinfoil-attestation?nonce=${nonceHex}`);
-    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-    doc = new Uint8Array(await resp.arrayBuffer());
+    doc = await fetchAttestation(req.host, nonce); // public path (Go: envelope.Fetch)
   } catch (err) {
     process.stderr.write(`fetching attestation from ${req.host}: ${message(err)}\n`);
     return { exitCode: ExitInternal };
