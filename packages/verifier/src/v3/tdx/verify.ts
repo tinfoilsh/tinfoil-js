@@ -500,6 +500,12 @@ async function verifyResponse(
   crl: CRL | undefined,
   opts: VerifyOptions,
 ): Promise<void> {
+  // The header root must BE the trusted root (go-tdx-guest pins by byte
+  // equality); otherwise the CRL below would be validated against a root the
+  // chain check never saw.
+  if (!derBytesEqual(rootCertificate.raw, opts.trustedRoot.raw)) {
+    throw new Error("root certificate in the issuer chain does not equal the trusted root");
+  }
   try {
     await validateCertificate(rootCertificate, rootCertificate, rootCertPhrase);
   } catch (err) {

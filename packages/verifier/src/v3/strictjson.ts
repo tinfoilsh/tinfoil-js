@@ -336,8 +336,10 @@ class parser {
       if (c === '"') {
         this.pos++;
         const token = this.s.slice(start, this.pos);
-        // JSON.parse validates escapes and control characters in the token.
-        return JSON.parse(token) as string;
+        // JSON.parse validates escapes and control characters; Go additionally
+        // replaces unpaired surrogates with U+FFFD, which collapses distinct
+        // lone-surrogate member names into duplicates — mirror that.
+        return replaceLoneSurrogates(JSON.parse(token) as string);
       }
       this.pos++;
     }
@@ -362,4 +364,24 @@ class parser {
     this.pos += m[0].length;
     return m[0];
   }
+}
+
+// replaceLoneSurrogates mirrors Go's UTF-8 coercion: any unpaired surrogate
+// code unit becomes U+FFFD; valid pairs pass through.
+function replaceLoneSurrogates(s: string): string {
+  if (!/[\uD800-\uDFFF]/.test(s)) return s;
+  let out = "";
+  for (let i = 0; i < s.length; i++) {
+    const c = s.charCodeAt(i);
+    if (c >= 0xd800 && c <= 0xdbff && i + 1 < s.length) {
+      const d = s.charCodeAt(i + 1);
+      if (d >= 0xdc00 && d <= 0xdfff) {
+        out += s[i] + s[i + 1];
+        i++;
+        continue;
+      }
+    }
+    out += c >= 0xd800 && c <= 0xdfff ? "\uFFFD" : s[i];
+  }
+  return out;
 }
