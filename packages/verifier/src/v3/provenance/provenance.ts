@@ -19,17 +19,19 @@
 import {
   SigstoreVerifier,
   X509Certificate,
+  verifyBundleTimestamp,
   type SigstoreBundle,
   type TrustedRoot,
   type VerificationPolicy,
 } from "@freedomofpress/sigstore-browser";
+import { verifySignature } from "@freedomofpress/crypto-browser";
 
 import { decodeBase64, decodeHex, utf8Decode, utf8Encode } from "../bytes.js";
 import { VerificationError } from "../errors.js";
 import { raw, unmarshal } from "../strictjson.js";
 import { SnpTdxMultiPlatformV1, type Measurement } from "../measurement.js";
 import { ArtifactFormat, parseArtifact, type Artifact } from "../policy.js";
-import { trustedRootJSON } from "../embedded/roots.js";
+import { githubTrustedRootJSON, trustedRootJSON } from "../embedded/roots.js";
 import {
   parseBundle,
   rejectLegacyBundleFormat,
@@ -53,9 +55,14 @@ const platformEndorsementsIdentity = githubWorkflowIdentityPattern(
   "build\\.yml",
   "refs/tags/v[0-9][^@]*",
 );
-export const freshnessWitnessIdentity = githubWorkflowIdentityPattern(
+export const publicFreshnessIdentity = githubWorkflowIdentityPattern(
   freshnessWitnessRepo,
   "freshness\\.yml",
+  "refs/heads/main",
+);
+export const privateFreshnessIdentity = githubWorkflowIdentityPattern(
+  freshnessWitnessRepo,
+  "private\\.yml",
   "refs/heads/main",
 );
 
@@ -64,6 +71,7 @@ export const freshnessWitnessIdentity = githubWorkflowIdentityPattern(
 // over the network.
 export interface ProvenanceOpts {
   trustRootJSON?: Uint8Array;
+  githubTrustRootJSON?: Uint8Array;
 }
 
 // AuthenticatedArtifact is release identity recovered from a verified
@@ -155,6 +163,9 @@ export interface VerifiedBundle {
   // tlogTimestamps are the Type=="Tlog" observer timestamps: the integrated
   // time of every verified transparency-log entry.
   tlogTimestamps: Date[];
+  // authenticatedTimestamps contains either verified Rekor integrated times
+  // (public) or verified RFC 3161 signing times (private GitHub).
+  authenticatedTimestamps: Date[];
 }
 
 const inTotoPayloadType = "application/vnd.in-toto+json";
@@ -365,7 +376,15 @@ export async function verifyBundleWithIdentity(
     throw provErr(`decoding hex digest: ${errMsg(err)}`);
   }
 
-  const trustRootBytes = opts?.trustRootJSON ?? utf8Encode(trustedRootJSON);
+  const tlogEntries = wire.verificationMaterial?.tlogEntries ?? [];
+  const rfc3161Timestamps = wire.verificationMaterial?.timestampVerificationData?.rfc3161Timestamps ?? [];
+  const privateGitHub = tlogEntries.length === 0 && rfc3161Timestamps.length > 0;
+  if (tlogEntries.length === 0 && !privateGitHub) {
+    throw provErr("bundle has neither a transparency-log entry nor an RFC 3161 timestamp");
+  }
+  const trustRootBytes = privateGitHub
+    ? (opts?.githubTrustRootJSON ?? utf8Encode(githubTrustedRootJSON))
+    : (opts?.trustRootJSON ?? utf8Encode(trustedRootJSON));
   let trustRoot: TrustedRoot;
   try {
     trustRoot = JSON.parse(utf8Decode(trustRootBytes)) as TrustedRoot;
@@ -377,15 +396,23 @@ export async function verifyBundleWithIdentity(
   // WithSignedCertificateTimestamps(1)/WithTransparencyLog(1); the observer
   // timestamp is the tlog integrated time, which verifyDsse requires to fall
   // inside the certificate validity window.
-  const verifier = new SigstoreVerifier();
+  const verifier = new SigstoreVerifier(
+    privateGitHub
+      ? { tlogThreshold: 0, ctlogThreshold: 0, tsaThreshold: 1 }
+      : { tlogThreshold: 1, ctlogThreshold: 1, tsaThreshold: 0 },
+  );
   const policy: VerificationPolicy = {
     verify(cert: X509Certificate): void {
       checkCertificateIdentity(cert, sanRegex);
     },
   };
   try {
-    await verifier.loadSigstoreRoot(trustRoot);
-    await verifier.verifyDsse(wire as unknown as SigstoreBundle, policy);
+    if (privateGitHub) {
+      await verifyPrivateGitHubDsse(verifier, trustRoot, wire, policy);
+    } else {
+      await verifier.loadSigstoreRoot(trustRoot);
+      await verifier.verifyDsse(wire as unknown as SigstoreBundle, policy);
+    }
   } catch (err) {
     if (err instanceof VerificationError) throw err;
     throw provErr(`verifying: ${errMsg(err)}`);
@@ -413,7 +440,62 @@ export async function verifyBundleWithIdentity(
     }
   }
 
-  return { statement, cert, tlogTimestamps };
+  let authenticatedTimestamps = tlogTimestamps;
+  if (privateGitHub) {
+    const signature = decodeBase64(wire.dsseEnvelope?.signatures?.[0]?.sig ?? "");
+    authenticatedTimestamps = await verifyBundleTimestamp(
+      wire.verificationMaterial?.timestampVerificationData,
+      signature,
+      trustRoot.timestampAuthorities,
+    );
+  }
+
+  return { statement, cert, tlogTimestamps, authenticatedTimestamps };
+}
+
+// sigstore-browser currently assumes at least one Rekor entry inside
+// verifyDsse even when tlogThreshold is zero. This small private-only path uses
+// its exported certificate-chain, TSA and signature primitives while enforcing
+// the same DSSE and certificate policies.
+async function verifyPrivateGitHubDsse(
+  verifier: SigstoreVerifier,
+  trustRoot: TrustedRoot,
+  wire: WireBundle,
+  policy: VerificationPolicy,
+): Promise<void> {
+  const certB64 = wire.verificationMaterial?.certificate?.rawBytes;
+  const envelope = wire.dsseEnvelope;
+  if (certB64 == null || certB64 === "" || envelope == null || envelope.signatures?.length !== 1) {
+    throw new Error("private GitHub bundle is missing its certificate or DSSE signature");
+  }
+  const cert = X509Certificate.parse(decodeBase64(certB64));
+  const authorities = verifier.loadCA(cert.notBefore, trustRoot.certificateAuthorities);
+  await verifier.verifyCertificateChain(cert.notBefore, cert, authorities);
+  policy.verify(cert);
+
+  const signature = decodeBase64(envelope.signatures[0].sig);
+  const timestamps = await verifyBundleTimestamp(
+    wire.verificationMaterial?.timestampVerificationData,
+    signature,
+    trustRoot.timestampAuthorities,
+  );
+  if (timestamps.length < 1) {
+    throw new Error("private GitHub bundle has no verified RFC 3161 timestamp");
+  }
+  for (const timestamp of timestamps) {
+    if (!cert.validForDate(timestamp)) {
+      throw new Error("certificate was not valid at the time of timestamping");
+    }
+  }
+
+  const payload = decodeBase64(envelope.payload ?? "");
+  const paePrefix = utf8Encode(`DSSEv1 ${envelope.payloadType.length} ${envelope.payloadType} ${payload.length} `);
+  const pae = new Uint8Array(paePrefix.length + payload.length);
+  pae.set(paePrefix);
+  pae.set(payload, paePrefix.length);
+  if (!(await verifySignature(await cert.publicKeyObj, pae, signature))) {
+    throw new Error("DSSE signature verification failed");
+  }
 }
 
 async function verifyBundle(
