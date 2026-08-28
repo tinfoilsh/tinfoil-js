@@ -8,7 +8,8 @@ import { VerificationError } from "../errors.js";
 import { arrayOf, field, mapOf, str, structOf, unmarshal, type Schema } from "../strictjson.js";
 import { parseBundle } from "./bundle-format.js";
 import {
-  freshnessWitnessIdentity,
+  privateFreshnessIdentity,
+  publicFreshnessIdentity,
   repoNameRE,
   verifyBundleWithIdentity,
   type AuthenticatedArtifact,
@@ -106,9 +107,13 @@ export async function authenticateFreshness(
   opts?: ProvenanceOpts,
 ): Promise<Date> {
   validateAuthenticatedArtifact(expected);
+  const parsedBundle = parseBundle(bundleJSON);
+  const identity = (parsedBundle.verificationMaterial?.tlogEntries?.length ?? 0) > 0
+    ? publicFreshnessIdentity
+    : privateFreshnessIdentity;
   let result;
   try {
-    result = await verifyBundleWithIdentity(bundleJSON, freshnessWitnessIdentity, expected.digest, opts);
+    result = await verifyBundleWithIdentity(bundleJSON, identity, expected.digest, opts);
   } catch (err) {
     throw provErr(`verifying freshness witness bundle: ${errMsg(err)}`);
   }
@@ -128,7 +133,7 @@ export async function authenticateFreshness(
     throw provErr("freshness statement subject does not match authenticated artifact");
   }
   validateWitness(statement.predicate, expected);
-  return validateFreshnessTime(result.tlogTimestamps, now);
+  return validateFreshnessTime(result.authenticatedTimestamps, now);
 }
 
 function validateAuthenticatedArtifact(expected: AuthenticatedArtifact | null | undefined): void {
@@ -152,7 +157,7 @@ function validateAuthenticatedArtifact(expected: AuthenticatedArtifact | null | 
   }
 }
 
-// validateFreshnessTime appraises the earliest verified transparency-log
+// validateFreshnessTime appraises the earliest verified Rekor or RFC 3161
 // timestamp against the pinned appraisal time.
 function validateFreshnessTime(timestamps: Date[], now: Date): Date {
   let loggedAt: Date | undefined;
@@ -162,7 +167,7 @@ function validateFreshnessTime(timestamps: Date[], now: Date): Date {
     }
   }
   if (loggedAt === undefined) {
-    throw provErr("freshness witness has no verified transparency-log timestamp");
+    throw provErr("freshness witness has no verified authenticated timestamp");
   }
   if (loggedAt.getTime() > now.getTime() + MaxFreshnessFutureSkew) {
     throw provErr("freshness witness timestamp is in the future");
