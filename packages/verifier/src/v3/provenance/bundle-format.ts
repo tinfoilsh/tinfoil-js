@@ -19,13 +19,17 @@ export interface WireTLogEntry {
   canonicalizedBody: string;
 }
 
+export interface WireTimestampVerificationData {
+  rfc3161Timestamps?: { signedTimestamp: string }[];
+}
+
 export interface WireBundle {
   mediaType: string;
   verificationMaterial?: {
     certificate?: WireCertificate;
     x509CertificateChain?: { certificates?: WireCertificate[] };
     tlogEntries?: WireTLogEntry[];
-    timestampVerificationData?: unknown;
+    timestampVerificationData?: WireTimestampVerificationData;
   };
   dsseEnvelope?: {
     payload: string;
