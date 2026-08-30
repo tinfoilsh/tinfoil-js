@@ -4,37 +4,16 @@ const createSecureFetchMock = vi.fn(async () => {
   return { fetch: (async () => new Response(null)) as typeof fetch, getSessionRecoveryToken: vi.fn() };
 });
 
-vi.mock("../src/verifier.js", () => ({
-  Verifier: class {
-    verify() {
+vi.mock("../src/verifier.js", async (importOriginal) => {
+  const original = await importOriginal<typeof import("../src/verifier.js")>();
+  return {
+    ...original,
+    fetchAttestation: vi.fn(async () => new Uint8Array([1, 2, 3])),
+    verifyDocumentV3: vi.fn(async () => {
       throw new Error("verify failed");
-    }
-    verifyBundle() {
-      throw new Error("verify failed");
-    }
-    getVerificationDocument() {
-      return undefined;
-    }
-  },
-  FetchError: class FetchError extends Error {
-    constructor(message: string) {
-      super(message);
-      this.name = 'FetchError';
-    }
-  },
-  AttestationError: class AttestationError extends Error {
-    constructor(message: string) {
-      super(message);
-      this.name = 'AttestationError';
-    }
-  },
-  ConfigurationError: class ConfigurationError extends Error {
-    constructor(message: string) {
-      super(message);
-      this.name = 'ConfigurationError';
-    }
-  },
-}));
+    }),
+  };
+});
 
 vi.mock("../src/secure-fetch.js", () => ({
   createSecureFetch: createSecureFetchMock,

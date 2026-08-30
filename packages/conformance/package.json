@@ -1,0 +1,18 @@
+{
+  "name": "@tinfoil/conformance",
+  "version": "0.0.0",
+  "private": true,
+  "description": "tinfoil-js v3 conformance adapter (cross-SDK suite wire contract)",
+  "type": "module",
+  "main": "dist/cli.js",
+  "scripts": {
+    "build": "tsc",
+    "clean": "rm -rf dist"
+  },
+  "dependencies": {
+    "@tinfoilsh/verifier": "1.2.1"
+  },
+  "devDependencies": {
+    "@types/node": "^26.1.1"
+  }
+}
