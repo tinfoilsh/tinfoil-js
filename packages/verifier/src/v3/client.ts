@@ -32,7 +32,10 @@ import {
 import { assembleAndValidate, quoteAuthenticate } from "./quote.js";
 
 // VerifyOpts selects the trust anchors and pins the verification clock;
-// defaults are the embedded production roots and the current time.
+// defaults are the embedded production roots and the current time. It is the
+// conformance adapter's root/clock injection seam (CONFORMANCE_ADAPTER_SPEC
+// §3), not part of the public surface — it is not re-exported from the package
+// index and is consumed only by _verifyDocumentV3WithOverrides.
 export interface VerifyOpts {
   sigstoreRootJSON?: Uint8Array;
   amdRootPEM?: string;
@@ -94,7 +97,24 @@ function cryptoMaterialData(v: VerifiedDocumentV3, id: string, format: string): 
 // signing identity); the repo named inside the document is not trusted.
 // Channel binding (TLS fingerprint / HPKE key) is the caller's
 // responsibility, using the returned endorsed crypto material.
+//
+// This is the SDK_SURFACE_SPEC §2 three-argument public form: it verifies
+// against the embedded production roots at the current time. The root/clock
+// overrides live on the internal _verifyDocumentV3WithOverrides seam, which
+// the conformance adapter alone consumes.
 export async function verifyDocumentV3(
+  docBytes: Uint8Array,
+  nonce: Uint8Array,
+  repo: string,
+): Promise<VerifiedDocumentV3> {
+  return _verifyDocumentV3WithOverrides(docBytes, nonce, repo);
+}
+
+// _verifyDocumentV3WithOverrides is the full verification flow behind
+// verifyDocumentV3, exposing the conformance adapter's root/clock injection
+// seam (CONFORMANCE_ADAPTER_SPEC §3). It is exported for @tinfoil/conformance
+// only and is deliberately absent from the package's public index.
+export async function _verifyDocumentV3WithOverrides(
   docBytes: Uint8Array,
   nonce: Uint8Array,
   repo: string,

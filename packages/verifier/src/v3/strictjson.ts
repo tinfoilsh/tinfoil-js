@@ -17,7 +17,11 @@
 export type Schema =
   | { kind: "string" }
   | { kind: "bool" }
-  | { kind: "int"; min: bigint; max: bigint; pointer?: boolean }
+  // int decodes to a JS number by default; when big is set the value is
+  // carried as a bigint so 64-bit fields keep full precision (a number loses
+  // integer precision above 2^53). min/max are always bigint for the range
+  // check regardless.
+  | { kind: "int"; min: bigint; max: bigint; pointer?: boolean; big?: boolean }
   | { kind: "raw" }
   | { kind: "array"; elem: Schema }
   | { kind: "map"; value: Schema }
@@ -36,11 +40,21 @@ export const bool: Schema = { kind: "bool" };
 export const raw: Schema = { kind: "raw" };
 
 export function uintSchema(bits: 8 | 32 | 64, pointer = false): Schema {
-  return { kind: "int", min: 0n, max: (1n << BigInt(bits)) - 1n, pointer };
+  // uint64 exceeds the safe-integer range, so it is decoded as a bigint;
+  // uint8/uint32 stay JS numbers.
+  return { kind: "int", min: 0n, max: (1n << BigInt(bits)) - 1n, pointer, big: bits === 64 };
 }
 
 export function intSchema(pointer = false): Schema {
   return { kind: "int", min: -(1n << 63n), max: (1n << 63n) - 1n, pointer };
+}
+
+// int64Schema decodes a signed 64-bit integer as a bigint, preserving full
+// precision (a JS number is exact only up to 2^53). Use it for int64 fields
+// consumed as bigint; intSchema stays a number for fields that never exceed
+// the safe range (VM shape dimensions, VMPL).
+export function int64Schema(pointer = false): Schema {
+  return { kind: "int", min: -(1n << 63n), max: (1n << 63n) - 1n, pointer, big: true };
 }
 
 export function arrayOf(elem: Schema): Schema {
@@ -97,7 +111,7 @@ export function zeroValue(schema: Schema): unknown {
     case "bool":
       return false;
     case "int":
-      return schema.pointer ? undefined : 0;
+      return schema.pointer ? undefined : schema.big ? 0n : 0;
     case "raw":
     case "array":
     case "optstruct":
@@ -197,7 +211,9 @@ class parser {
         if (n < schema.min || n > schema.max) {
           throw new Error(`number ${lit} out of range`);
         }
-        return Number(n);
+        // A big int keeps full precision as a bigint; other ints narrow to a
+        // JS number (exact within their <= 2^53 range).
+        return schema.big ? n : Number(n);
       }
     }
   }

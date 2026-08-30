@@ -23,5 +23,7 @@ export { verifyDocumentV3, tlsPublicKeyFP, hpkePublicKey } from './v3/client.js'
 export { fetchAttestation, randomNonce } from './v3/fetch.js';
 export { NonceSize } from './v3/envelope.js';
 export { VerificationError } from './v3/errors.js';
-export type { VerifiedDocumentV3, VerifyOpts } from './v3/client.js';
+// VerifyOpts (the root/clock injection seam) is intentionally NOT exported:
+// the public verifyDocumentV3 is the three-argument form (SDK_SURFACE_SPEC §2).
+export type { VerifiedDocumentV3 } from './v3/client.js';
 export type { RejectionLayer } from './v3/errors.js';

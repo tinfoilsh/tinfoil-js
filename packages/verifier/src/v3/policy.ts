@@ -18,6 +18,7 @@ import {
   arrayOf,
   bool,
   field,
+  int64Schema,
   intSchema,
   mapOf,
   optStructOf,
@@ -84,7 +85,7 @@ export interface PlatformMeasurement {
 }
 
 // TCB holds AMD security patch levels. fmcSpl applies to family 1Ah (Turin)
-// parts only, which are not yet supported for verification.
+// parts only; it is required for Turin policies and invalid for Genoa.
 export interface TCB {
   fmcSpl?: number;
   blSpl?: number;
@@ -119,9 +120,8 @@ export interface SNPPlatform {
   ciphertextHidingDRAM: boolean;
   aliasCheckComplete: boolean;
   tioEnabled: boolean;
-  // iommuWriteSafe (Turin, PLATFORM_INFO bit 6) parses so artifacts carrying
-  // Turin policies remain readable; a selected policy that requires it is
-  // rejected at assembly (Turin is unsupported).
+  // iommuWriteSafe is PLATFORM_INFO bit 6 (Turin). It is required for Turin
+  // policies and invalid for Genoa, enforced at policy assembly.
   iommuWriteSafe: boolean;
 }
 
@@ -280,7 +280,10 @@ const artifactSchema: Schema = structOf({
             mr_seam: field("mrSeam", str),
             td_attributes: field("tdAttributes", str),
             xfam: field("xfam", str),
-            minimum_tcb_evaluation_data_number: field("minimumTCBEvaluationDataNumber", intSchema(true)),
+            // int64 kept as an exact bigint so a floor above 2^53 stays
+            // bit-exact (C1); the field shares no schema with the number-typed
+            // vmpl / shape dimensions, which must remain plain numbers.
+            minimum_tcb_evaluation_data_number: field("minimumTCBEvaluationDataNumber", int64Schema(true)),
             platform_measurements: field("platformMeasurements", arrayOf(str)),
           }),
         ),

@@ -93,26 +93,29 @@ export interface SnpPlatformInfo {
   raplDisabled: boolean;
   ciphertextHidingDRAMEnabled: boolean;
   aliasCheckComplete: boolean;
+  // iommuWriteSafe is PLATFORM_INFO bit 6 (Turin). It parses to false for
+  // Genoa hardware, which never sets it, so Genoa reports are unaffected.
+  iommuWriteSafe: boolean;
   tioEnabled: boolean;
 }
 
-// parseSnpPlatformInfo errors on unrecognized bits (Go abi.ParseSnpPlatformInfo).
+// parseSnpPlatformInfo errors on unrecognized bits (Go abi.ParseSnpPlatformInfo,
+// bits 0-7).
 export function parseSnpPlatformInfo(platformInfo: bigint): SnpPlatformInfo {
-  if (bit(platformInfo, 6)) {
-    throw new Error(`reserved platform info bit 6 set: 0x${platformInfo.toString(16)}`);
-  }
-  if (platformInfo & ~0xffn) {
-    throw new Error(`unrecognized platform info bit(s): 0x${platformInfo.toString(16)}`);
-  }
-  return {
+  const result: SnpPlatformInfo = {
     smtEnabled: bit(platformInfo, 0),
     tsmeEnabled: bit(platformInfo, 1),
     eccEnabled: bit(platformInfo, 2),
     raplDisabled: bit(platformInfo, 3),
     ciphertextHidingDRAMEnabled: bit(platformInfo, 4),
     aliasCheckComplete: bit(platformInfo, 5),
+    iommuWriteSafe: bit(platformInfo, 6),
     tioEnabled: bit(platformInfo, 7),
   };
+  if (platformInfo & ~0xffn) {
+    throw new Error(`unrecognized platform info bit(s): 0x${platformInfo.toString(16)}`);
+  }
+  return result;
 }
 
 // SignerInfo represents the report signing circumstances (Go abi.SignerInfo).
@@ -366,8 +369,15 @@ export function signedComponent(report: Uint8Array): Uint8Array {
   return report.subarray(0, signatureOffset);
 }
 
-// TCBParts represents all TCB field values of an AMD TCB_VERSION (Go kds.TCBParts).
+// TCB struct versions: 0 for Milan & Genoa, 1 for Turin (Go kds).
+export const TcbStructVersion0 = 0;
+export const TcbStructVersion1 = 1;
+
+// TCBParts represents all TCB field values of an AMD TCB_VERSION, tagged with
+// the layout version they belong to (Go kds.TCBParts). fmcSpl is defined only
+// for struct version 1 (Turin); spl4..spl7 only for struct version 0.
 export interface TCBParts {
+  version: number;
   blSpl: number;
   teeSpl: number;
   spl4: number;
@@ -376,10 +386,48 @@ export interface TCBParts {
   spl7: number;
   snpSpl: number;
   ucodeSpl: number;
+  fmcSpl: number;
 }
 
-// composeTCBParts returns a TCB_VERSION from part values (Go kds.ComposeTCBParts).
-export function composeTCBParts(parts: TCBParts): bigint {
+// productLineToTCBVersion returns the TCB struct version a product line uses in
+// its V[CL]EK x509 extensions (Go kds.productLineToTCBVersion).
+export function productLineToTCBVersion(productLine: string): number {
+  if (productLine === "Milan" || productLine === "Genoa" || productLine === "Siena") {
+    return TcbStructVersion0;
+  }
+  if (productLine === "Turin") {
+    return TcbStructVersion1;
+  }
+  throw new Error(`invalid product line "${productLine}"`);
+}
+
+// newTCBParts validates and tags TCB component values with the layout used by
+// productLine (Go kds.NewTCBParts).
+export function newTCBParts(
+  productLine: string,
+  parts: { fmcSpl?: number; blSpl?: number; teeSpl?: number; snpSpl?: number; ucodeSpl?: number },
+): TCBParts {
+  const version = productLineToTCBVersion(productLine);
+  const result: TCBParts = {
+    version,
+    fmcSpl: parts.fmcSpl ?? 0,
+    blSpl: parts.blSpl ?? 0,
+    teeSpl: parts.teeSpl ?? 0,
+    spl4: 0,
+    spl5: 0,
+    spl6: 0,
+    spl7: 0,
+    snpSpl: parts.snpSpl ?? 0,
+    ucodeSpl: parts.ucodeSpl ?? 0,
+  };
+  tcbPartsToVersion(result); // range/layout validation
+  return result;
+}
+
+// tcbPartsToVersion composes (struct version, 64-bit TCB) from parts (Go
+// kds.TCBParts.ToTCBVersionStruct). Only UcodeSpl may be 0-255; all others
+// must be 0-127.
+export function tcbPartsToVersion(parts: TCBParts): { structVersion: number; tcb: bigint } {
   const check127 = (name: string, value: number): void => {
     if (value > 127) throw new Error(`${name} TCB part is ${value}. Expect 0-127`);
   };
@@ -390,36 +438,84 @@ export function composeTCBParts(parts: TCBParts): bigint {
   check127("Spl4", parts.spl4);
   check127("TeeSpl", parts.teeSpl);
   check127("BlSpl", parts.blSpl);
-  return (
-    (BigInt(parts.ucodeSpl) << 56n) |
-    (BigInt(parts.snpSpl) << 48n) |
-    (BigInt(parts.spl7) << 40n) |
-    (BigInt(parts.spl6) << 32n) |
-    (BigInt(parts.spl5) << 24n) |
-    (BigInt(parts.spl4) << 16n) |
-    (BigInt(parts.teeSpl) << 8n) |
-    BigInt(parts.blSpl)
-  );
+  check127("FmcSpl", parts.fmcSpl);
+
+  if (parts.version === TcbStructVersion0) {
+    if (parts.fmcSpl !== 0) {
+      throw new Error("FmcSpl is not defined for TCB struct version 0");
+    }
+    const tcb =
+      (BigInt(parts.ucodeSpl) << 56n) |
+      (BigInt(parts.snpSpl) << 48n) |
+      (BigInt(parts.spl7) << 40n) |
+      (BigInt(parts.spl6) << 32n) |
+      (BigInt(parts.spl5) << 24n) |
+      (BigInt(parts.spl4) << 16n) |
+      (BigInt(parts.teeSpl) << 8n) |
+      BigInt(parts.blSpl);
+    return { structVersion: TcbStructVersion0, tcb };
+  }
+  if (parts.version === TcbStructVersion1) {
+    if (parts.spl4 !== 0 || parts.spl5 !== 0 || parts.spl6 !== 0 || parts.spl7 !== 0) {
+      throw new Error("reserved Turin TCB components must be zero");
+    }
+    const tcb =
+      (BigInt(parts.ucodeSpl) << 56n) |
+      (BigInt(parts.snpSpl) << 24n) |
+      (BigInt(parts.teeSpl) << 16n) |
+      (BigInt(parts.blSpl) << 8n) |
+      BigInt(parts.fmcSpl);
+    return { structVersion: TcbStructVersion1, tcb };
+  }
+  throw new Error(`unsupported TCB struct version: ${parts.version}`);
 }
 
-// decomposeTCBVersion interprets the TCB_VERSION bytes (Go kds.DecomposeTCBVersion).
-export function decomposeTCBVersion(tcb: bigint): TCBParts {
+// decomposeTCB decodes the security patch levels from a 64-bit TCB under a
+// layout version (Go kds.TCBVersionStruct.ToTCBParts).
+export function decomposeTCB(version: number, tcb: bigint): TCBParts {
   const b = (shift: bigint): number => Number((tcb >> shift) & 0xffn);
-  return {
-    ucodeSpl: b(56n),
-    snpSpl: b(48n),
-    spl7: b(40n),
-    spl6: b(32n),
-    spl5: b(24n),
-    spl4: b(16n),
-    teeSpl: b(8n),
-    blSpl: b(0n),
-  };
+  if (version === TcbStructVersion1) {
+    // Turin reserves bits 55:32; rejecting non-zero values keeps them from
+    // disappearing when the structured representation is composed again.
+    const reserved = tcb & 0x00ffffff00000000n;
+    if (reserved !== 0n) {
+      throw new Error(`non-zero reserved bits in Turin TCB: 0x${reserved.toString(16)}`);
+    }
+    return {
+      version,
+      ucodeSpl: b(56n),
+      snpSpl: b(24n),
+      teeSpl: b(16n),
+      blSpl: b(8n),
+      fmcSpl: b(0n),
+      spl4: 0,
+      spl5: 0,
+      spl6: 0,
+      spl7: 0,
+    };
+  }
+  if (version === TcbStructVersion0) {
+    return {
+      version,
+      ucodeSpl: b(56n),
+      snpSpl: b(48n),
+      spl7: b(40n),
+      spl6: b(32n),
+      spl5: b(24n),
+      spl4: b(16n),
+      teeSpl: b(8n),
+      blSpl: b(0n),
+      fmcSpl: 0,
+    };
+  }
+  throw new Error(`unknown TCB version: ${version}`);
 }
 
-// tcbPartsLE returns true iff all components of tcb0 are <= tcb1's (Go kds.TCBPartsLE).
+// tcbPartsLE returns true iff both use the same layout and all components of
+// tcb0 are <= tcb1's (Go kds.TCBPartsLE).
 export function tcbPartsLE(tcb0: TCBParts, tcb1: TCBParts): boolean {
   return (
+    tcb0.version === tcb1.version &&
     tcb0.ucodeSpl <= tcb1.ucodeSpl &&
     tcb0.snpSpl <= tcb1.snpSpl &&
     tcb0.spl7 <= tcb1.spl7 &&
@@ -427,6 +523,7 @@ export function tcbPartsLE(tcb0: TCBParts, tcb1: TCBParts): boolean {
     tcb0.spl5 <= tcb1.spl5 &&
     tcb0.spl4 <= tcb1.spl4 &&
     tcb0.teeSpl <= tcb1.teeSpl &&
-    tcb0.blSpl <= tcb1.blSpl
+    tcb0.blSpl <= tcb1.blSpl &&
+    tcb0.fmcSpl <= tcb1.fmcSpl
   );
 }

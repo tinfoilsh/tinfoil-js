@@ -12,7 +12,6 @@ import {
   verifyDocumentV3,
   type RejectionLayer,
   type VerifiedDocumentV3,
-  type VerifyOpts,
 } from '../src/index.js';
 
 describe('v3 Tier-1 public surface', () => {
@@ -22,6 +21,12 @@ describe('v3 Tier-1 public surface', () => {
     expect(typeof hpkePublicKey).toBe('function');
     expect(typeof fetchAttestation).toBe('function');
     expect(typeof randomNonce).toBe('function');
+  });
+
+  it('verifyDocumentV3 is the three-argument public form (no opts seam)', () => {
+    // The root/clock override seam is internal (CONFORMANCE_ADAPTER_SPEC §3):
+    // the public entry point takes exactly (doc, nonce, repo).
+    expect(verifyDocumentV3.length).toBe(3);
   });
 
   it('exports NonceSize = 32 and the layer-tagged error type', () => {
@@ -51,8 +56,6 @@ describe('v3 Tier-1 public surface', () => {
       enclaveMeasurement: { type: 'snp-tdx-multi-platform-v1', registers: [] },
       cryptoMaterial: [],
     };
-    const opts: VerifyOpts = {};
-    expect(opts).toEqual({});
     expect(() => tlsPublicKeyFP(v)).toThrow(/crypto material/);
     expect(() => hpkePublicKey(v)).toThrow(/crypto material/);
   });

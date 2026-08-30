@@ -18,9 +18,8 @@ import {
   type Document,
 } from "../envelope.js";
 import { SevGuestV2, type Measurement } from "../measurement.js";
-import { genoaCertChainPEM } from "../embedded/roots.js";
+import { genoaCertChainPEM, turinCertChainPEM } from "../embedded/roots.js";
 import {
-  NoneReportSigner,
   parseReport,
   parseSignerInfo,
   productLineFromFms,
@@ -35,7 +34,7 @@ import {
   type SevReport,
 } from "./abi.js";
 import { identity } from "./identity.js";
-import { vcekCertificateExtensions } from "./kds.js";
+import { validateExtensions, vcekCertificateExtensions } from "./kds.js";
 import { derBytesEqual, pemDecode } from "../der.js";
 import {
   isPSSSHA384,
@@ -56,11 +55,12 @@ import {
   type CRL,
 } from "./x509.js";
 
-// ProductGenoa is the only AMD product line currently supported.
+// Supported AMD product lines with pinned per-product roots.
 export const ProductGenoa = "Genoa";
+export const ProductTurin = "Turin";
 
 export interface QuoteOpts {
-  rootPEM?: string; // ASK+ARK KDS chain; default: embedded Genoa root
+  rootPEM?: string; // ASK+ARK KDS chain; default: the embedded per-product root
   now?: Date; // validity-window clock; default: current time
 }
 
@@ -94,31 +94,47 @@ interface AMDRoots {
   ark: Certificate;
 }
 
-function trustedRoots(rootPEM: string): AMDRoots {
+// trustedRoots builds the pinned AMD trust anchor from the repo-owned
+// per-product chain, or the injected override, selecting Genoa vs Turin by the
+// report's product line (Go trustedRoots + kds.ParseProductCertChain).
+function trustedRoots(productLine: string, rootPEMOverride?: string): AMDRoots {
+  let rootPEM = rootPEMOverride;
+  if (rootPEM === undefined) {
+    if (productLine === ProductGenoa) {
+      rootPEM = genoaCertChainPEM;
+    } else if (productLine === ProductTurin) {
+      rootPEM = turinCertChainPEM;
+    } else {
+      throw new Error(`unsupported SEV product line ${JSON.stringify(productLine)}`);
+    }
+  }
+  const wrap = (msg: string): Error =>
+    new Error(`parsing embedded AMD ${productLine} root certificates: ${msg}`);
+
   // kds.ParseProductCertChain: exactly two CERTIFICATE PEM blocks, ASK then
   // ARK, no trailing bytes.
   const askBlock = pemDecode(rootPEM);
   if (askBlock === undefined || askBlock.type !== "CERTIFICATE") {
-    throw new Error("parsing embedded AMD Genoa root certificates: could not find ASK or ASVK PEM block");
+    throw wrap("could not find ASK or ASVK PEM block");
   }
   const arkBlock = pemDecode(askBlock.rest);
   if (arkBlock === undefined || arkBlock.type !== "CERTIFICATE") {
-    throw new Error("parsing embedded AMD Genoa root certificates: could not find ARK PEM block");
+    throw wrap("could not find ARK PEM block");
   }
   if (arkBlock.rest.length !== 0) {
-    throw new Error(`parsing embedded AMD Genoa root certificates: unexpected trailing bytes: ${arkBlock.rest.length} bytes`);
+    throw wrap(`unexpected trailing bytes: ${arkBlock.rest.length} bytes`);
   }
   let ica: Certificate;
   try {
     ica = parseCertificate(askBlock.der);
   } catch (err) {
-    throw new Error(`parsing embedded AMD Genoa root certificates: could not parse intermediate certificate: ${errMsg(err)}`);
+    throw wrap(`could not parse intermediate certificate: ${errMsg(err)}`);
   }
   let ark: Certificate;
   try {
     ark = parseCertificate(arkBlock.der);
   } catch (err) {
-    throw new Error(`parsing embedded AMD Genoa root certificates: could not parse ARK certificate: ${errMsg(err)}`);
+    throw wrap(`could not parse ARK certificate: ${errMsg(err)}`);
   }
   // trust.ProductCerts.Decode: an SEV-VLEK intermediate is the ASVK.
   const cn = (ica.subject.get(oidCommonName) ?? [""])[0];
@@ -181,7 +197,7 @@ function commonName(name: Map<string, string[]>): string {
 // validateKDSCertificateProductNonspecific checks the documented qualities
 // of a VCEK certificate per the KDS specification (Go
 // verify.validateKDSCertificateProductNonspecific for the VCEK signer).
-function validateKDSCertificateProductNonspecific(cert: Certificate): void {
+function validateKDSCertificateProductNonspecific(cert: Certificate, productLine: string): void {
   if (cert.version !== 3) {
     throw new Error(`VCEK certificate version is ${cert.version}, expected 3`);
   }
@@ -199,7 +215,10 @@ function validateKDSCertificateProductNonspecific(cert: Certificate): void {
   if (commonName(cert.subject) !== want) {
     throw new Error(`VCEK certificate subject common name ${commonName(cert.subject)} not expected. Expected ${want}`);
   }
-  vcekCertificateExtensions(cert); // wellformedness; product name unchecked with a known product line
+  const exts = vcekCertificateExtensions(cert); // wellformedness
+  // With a known product line the product-name claim is disregarded; only the
+  // TCB format must match (report-v3 manufacturing-error workaround).
+  validateExtensions(exts, productLine);
 }
 
 // validateKDSCertIssuer checks the KDS-specified issuer metadata (Go
@@ -312,7 +331,11 @@ function productLineFromReport(report: SevReport): string {
   if (report.cpuid1EaxFms === 0) {
     throw new Error(`report carries no CPUID product identity (report version ${report.version}, want 3+)`);
   }
-  return productLineFromFms(report.cpuid1EaxFms);
+  const product = productLineFromFms(report.cpuid1EaxFms);
+  if (product !== ProductGenoa && product !== ProductTurin) {
+    throw new Error(`unsupported SEV product in report CPUID 0x${report.cpuid1EaxFms.toString(16)}`);
+  }
+  return product;
 }
 
 // rejectMaskedChipID rejects reports whose SIGNER_INFO masks the CHIP_ID:
@@ -337,7 +360,7 @@ async function verifySignature(
   reportBase64: string,
   vcekDER: Uint8Array,
   crl: CRL,
-  rootPEM: string,
+  rootPEMOverride: string | undefined,
   now: Date,
 ): Promise<{ report: SevReport; productLine: string; vcek: Certificate }> {
   let reportBytes: Uint8Array;
@@ -361,7 +384,7 @@ async function verifySignature(
   let roots: AMDRoots;
   try {
     productLine = productLineFromReport(report);
-    roots = trustedRoots(rootPEM);
+    roots = trustedRoots(productLine, rootPEMOverride);
   } catch (err) {
     throw quoteError(errMsg(err));
   }
@@ -381,7 +404,7 @@ async function verifySignature(
   }
 
   // decodeCerts: VCEK wellformedness, then verification against the pinned
-  // Genoa roots (the only product line with a trusted root).
+  // per-product roots.
   let vcek: Certificate;
   try {
     vcek = parseCertificate(vcekDER);
@@ -389,15 +412,8 @@ async function verifySignature(
     throw quoteError(`could not interpret VCEK DER bytes: ${errMsg(err)}`);
   }
   try {
-    validateKDSCertificateProductNonspecific(vcek);
-  } catch (err) {
-    throw quoteError(errMsg(err));
-  }
-  if (productLine !== ProductGenoa) {
-    throw quoteError(`VCEK could not be verified by any trusted roots. Product line ${JSON.stringify(productLine)}`);
-  }
-  try {
-    validateKDSCertIssuer(vcek, ProductGenoa);
+    validateKDSCertificateProductNonspecific(vcek, productLine);
+    validateKDSCertIssuer(vcek, productLine);
     await verifyChain(vcek, roots, now);
   } catch (err) {
     throw quoteError(errMsg(err));
@@ -438,7 +454,7 @@ async function verifySignature(
 // fetches. Callers must assemble a policy and validate before trusting the
 // platform (Go sev.Authenticate).
 export async function sevAuthenticate(doc: Document, opts?: QuoteOpts): Promise<SevQuote> {
-  const rootPEM = opts?.rootPEM ?? genoaCertChainPEM;
+  const rootPEMOverride = opts?.rootPEM;
   const now = opts?.now ?? new Date();
 
   const entry = endorsementCollateral(doc, CollateralAMDVCEKV1Format, SubjectCPU);
@@ -490,7 +506,13 @@ export async function sevAuthenticate(doc: Document, opts?: QuoteOpts): Promise<
     );
   }
 
-  const { report, productLine, vcek } = await verifySignature(doc.cpuEvidence.reportBase64, vcekDER, parsedCRL, rootPEM, now);
+  const { report, productLine, vcek } = await verifySignature(
+    doc.cpuEvidence.reportBase64,
+    vcekDER,
+    parsedCRL,
+    rootPEMOverride,
+    now,
+  );
   rejectMaskedChipID(report);
 
   let id: string;

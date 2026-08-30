@@ -7,18 +7,23 @@ import { bytesEqual, decodeHex, encodeHex } from "../bytes.js";
 import { VerificationError } from "../errors.js";
 import { decodeHexPolicy, validateSEVSNPPolicy, type SEVSNPPolicy, type TCB } from "../policy.js";
 import {
-  decomposeTCBVersion,
+  decomposeTCB,
+  newTCBParts,
   parseSignerInfo,
   parseSnpPlatformInfo,
   parseSnpPolicy,
+  productLineFromFms,
+  productLineToTCBVersion,
+  TcbStructVersion0,
   tcbPartsLE,
+  tcbPartsToVersion,
   VcekReportSigner,
   type SevReport,
   type SnpPlatformInfo,
   type SnpPolicy,
   type TCBParts,
 } from "./abi.js";
-import { ProductGenoa, rejectMaskedChipID, type SevQuote } from "./authenticate.js";
+import { ProductGenoa, ProductTurin, rejectMaskedChipID, type SevQuote } from "./authenticate.js";
 import { certificateExtensions } from "./kds.js";
 
 function policyError(message: string): VerificationError {
@@ -86,6 +91,7 @@ function expectedPlatformInfo(p: SEVSNPPolicy): SnpPlatformInfo {
     raplDisabled: p.platformInfo.raplDisabled,
     ciphertextHidingDRAMEnabled: p.platformInfo.ciphertextHidingDRAM,
     aliasCheckComplete: p.platformInfo.aliasCheckComplete,
+    iommuWriteSafe: p.platformInfo.iommuWriteSafe,
     tioEnabled: p.platformInfo.tioEnabled,
   };
 }
@@ -104,17 +110,20 @@ function parseVersionParts(name: string, v: string): { maj: number; min: number 
   return { maj: parse(v.slice(0, dot), "major"), min: parse(v.slice(dot + 1), "minor") };
 }
 
-function tcbParts(t: TCB): TCBParts {
-  return {
-    blSpl: t.blSpl!,
-    teeSpl: t.teeSpl!,
-    snpSpl: t.snpSpl!,
-    ucodeSpl: t.ucodeSpl!,
-    spl4: 0,
-    spl5: 0,
-    spl6: 0,
-    spl7: 0,
-  };
+// tcbParts translates a policy TCB block into layout-tagged parts for the
+// product line (Go tcbParts + kds.NewTCBParts).
+function tcbParts(field: string, productLine: string, t: TCB): TCBParts {
+  try {
+    return newTCBParts(productLine, {
+      fmcSpl: t.fmcSpl ?? 0,
+      blSpl: t.blSpl ?? 0,
+      teeSpl: t.teeSpl ?? 0,
+      snpSpl: t.snpSpl ?? 0,
+      ucodeSpl: t.ucodeSpl ?? 0,
+    });
+  } catch (err) {
+    throw policyError(`${field}: ${errMsg(err)}`);
+  }
 }
 
 // options translates the policy block into validation options for the given
@@ -122,23 +131,31 @@ function tcbParts(t: TCB): TCBParts {
 // strict equality on both is enforced by the companion checks composed in
 // sevValidate (Go options).
 function options(p: SEVSNPPolicy, productLine: string): Omit<SevValidateOptions, "measurement" | "reportData" | "chipID"> {
-  if (productLine !== ProductGenoa) {
-    throw policyError(`unsupported SEV product line ${JSON.stringify(productLine)} (only ${ProductGenoa} is supported)`);
-  }
   const invalid = validateSEVSNPPolicy(p);
   if (invalid !== undefined) {
     throw policyError(invalid);
   }
-  // PLATFORM_INFO bit 6 (Turin) is reserved in the supported ABI model;
-  // a policy requiring it cannot be enforced, so fail closed (Go options).
-  if (p.platformInfo.iommuWriteSafe) {
-    throw policyError(`iommu_write_safe is not enforceable for product line ${productLine}`);
+  // Per-product rules: Turin adds fmc_spl and requires PLATFORM_INFO bit 6
+  // (iommu_write_safe); Genoa forbids both (Go options).
+  if (productLine === ProductGenoa) {
+    if (p.minimumTCB.fmcSpl !== undefined || p.minimumLaunchTCB.fmcSpl !== undefined) {
+      throw policyError(`fmc_spl is not valid for product line ${productLine}`);
+    }
+    if (p.platformInfo.iommuWriteSafe) {
+      throw policyError(`iommu_write_safe is not valid for product line ${productLine}`);
+    }
+  } else if (productLine === ProductTurin) {
+    if (p.minimumTCB.fmcSpl === undefined || p.minimumLaunchTCB.fmcSpl === undefined) {
+      throw policyError(`fmc_spl is required for product line ${productLine}`);
+    }
+    if (!p.platformInfo.iommuWriteSafe) {
+      throw policyError(`iommu_write_safe is required for product line ${productLine}`);
+    }
+  } else {
+    throw policyError(`unsupported SEV product line ${JSON.stringify(productLine)}`);
   }
   const api = parseVersionParts("minimum_api_version", p.minimumAPIVersion);
   const abi = parseVersionParts("minimum_abi_version", p.minimumABIVersion);
-  if (p.minimumTCB.fmcSpl !== undefined || p.minimumLaunchTCB.fmcSpl !== undefined) {
-    throw policyError(`fmc_spl is not valid for product line ${productLine}`);
-  }
   let hostData: Uint8Array;
   let imageID: Uint8Array;
   let familyID: Uint8Array;
@@ -162,8 +179,8 @@ function options(p: SEVSNPPolicy, productLine: string): Omit<SevValidateOptions,
     minimumVersion: (api.maj << 8) | api.min,
     permitProvisionalFirmware: p.permitProvisionalFirmware,
     platformInfo: expectedPlatformInfo(p),
-    minimumTCB: tcbParts(p.minimumTCB),
-    minimumLaunchTCB: tcbParts(p.minimumLaunchTCB),
+    minimumTCB: tcbParts("minimum_tcb", productLine, p.minimumTCB),
+    minimumLaunchTCB: tcbParts("minimum_launch_tcb", productLine, p.minimumLaunchTCB),
     vmpl: p.vmpl!,
     hostData,
     imageID,
@@ -270,19 +287,18 @@ function validateVerbatimFields(report: SevReport, opts: SevValidateOptions): vo
 }
 
 function tcbNeError(leftDesc: string, left: TCBParts, rightDesc: string, right: TCBParts): void {
-  const compose = (p: TCBParts): bigint =>
-    (BigInt(p.ucodeSpl) << 56n) |
-    (BigInt(p.snpSpl) << 48n) |
-    (BigInt(p.spl7) << 40n) |
-    (BigInt(p.spl6) << 32n) |
-    (BigInt(p.spl5) << 24n) |
-    (BigInt(p.spl4) << 16n) |
-    (BigInt(p.teeSpl) << 8n) |
-    BigInt(p.blSpl);
-  const ltcb = compose(left);
-  const rtcb = compose(right);
-  if (ltcb !== rtcb) {
-    throw policyError(`the ${leftDesc} 0x${ltcb.toString(16)} does not match the ${rightDesc} 0x${rtcb.toString(16)}`);
+  let ltcb: { structVersion: number; tcb: bigint };
+  let rtcb: { structVersion: number; tcb: bigint };
+  try {
+    ltcb = tcbPartsToVersion(left);
+    rtcb = tcbPartsToVersion(right);
+  } catch (err) {
+    throw policyError(`could not compare TCB values: ${errMsg(err)}`);
+  }
+  if (ltcb.structVersion !== rtcb.structVersion || ltcb.tcb !== rtcb.tcb) {
+    throw policyError(
+      `the ${leftDesc} 0x${ltcb.tcb.toString(16)} does not match the ${rightDesc} 0x${rtcb.tcb.toString(16)}`,
+    );
   }
 }
 
@@ -293,15 +309,51 @@ function tcbGtError(lowerDesc: string, wantLower: TCBParts, higherDesc: string, 
   }
 }
 
+// getReportTcbs decomposes the report and certificate TCBs under the product's
+// layout (Go validate.getReportTcbs): [reported, current, committed, launch,
+// cert].
+function getReportTcbs(
+  report: SevReport,
+  certTcbVersion: number,
+  certTcb: bigint,
+): [TCBParts, TCBParts, TCBParts, TCBParts, TCBParts] {
+  let layout: number;
+  if (report.version >= 3) {
+    const productLine = productLineFromFms(report.cpuid1EaxFms);
+    try {
+      layout = productLineToTCBVersion(productLine);
+    } catch (err) {
+      throw policyError(`could not determine report TCB format: ${errMsg(err)}`);
+    }
+    if (layout !== certTcbVersion) {
+      throw policyError(`report product "${productLine}" and V[CL]EK certificate use different TCB formats`);
+    }
+  } else {
+    // Pre-v3 reports predate the Turin TCB layout; do not let a version-1
+    // certificate reinterpret their TCB fields.
+    layout = TcbStructVersion0;
+    if (certTcbVersion !== layout) {
+      throw policyError(`report version ${report.version} cannot be used with a non-legacy TCB format`);
+    }
+  }
+  try {
+    return [
+      decomposeTCB(layout, report.reportedTcb),
+      decomposeTCB(layout, report.currentTcb),
+      decomposeTCB(layout, report.committedTcb),
+      decomposeTCB(layout, report.launchTcb),
+      decomposeTCB(certTcbVersion, certTcb),
+    ];
+  } catch (err) {
+    throw policyError(errMsg(err));
+  }
+}
+
 // validateTcb enforces the report/certificate TCB relationships (Go
 // validate.validateTcb): COMMITTED vs CURRENT, the launch and reported
 // floors, REPORTED == certificate TCB, and certificate TCB <= CURRENT.
-function validateTcb(report: SevReport, certTcb: bigint, opts: SevValidateOptions): void {
-  const reported = decomposeTCBVersion(report.reportedTcb);
-  const current = decomposeTCBVersion(report.currentTcb);
-  const committed = decomposeTCBVersion(report.committedTcb);
-  const launch = decomposeTCBVersion(report.launchTcb);
-  const cert = decomposeTCBVersion(certTcb);
+function validateTcb(report: SevReport, certTcbVersion: number, certTcb: bigint, opts: SevValidateOptions): void {
+  const [reported, current, committed, launch, cert] = getReportTcbs(report, certTcbVersion, certTcb);
 
   if (opts.permitProvisionalFirmware) {
     tcbGtError("report's COMMITTED_TCB", committed, "report's CURRENT_TCB", current);
@@ -380,6 +432,9 @@ function validatePlatformInfo(platformInfo: bigint, required: SnpPlatformInfo): 
   if (!reportInfo.aliasCheckComplete && required.aliasCheckComplete) {
     throw policyError("required memory alias check hasn't been completed");
   }
+  if (!reportInfo.iommuWriteSafe && required.iommuWriteSafe) {
+    throw policyError("required IOMMU write-safe hardware mitigation is not present");
+  }
   if (reportInfo.tioEnabled && !required.tioEnabled) {
     throw policyError("unauthorized feature SEV-TIO enabled");
   }
@@ -429,7 +484,7 @@ function snpAttestationValidate(q: SevQuote, opts: SevValidateOptions): void {
 
   validatePolicy(report.policy, opts.guestPolicy);
   validateVerbatimFields(report, opts);
-  validateTcb(report, exts.tcbVersion, opts);
+  validateTcb(report, exts.tcbStructVersion, exts.tcbVersion, opts);
   validateVersion(report, opts);
   validatePlatformInfo(report.platformInfo, opts.platformInfo);
   validateMitigationVectors(report, opts);
@@ -438,14 +493,36 @@ function snpAttestationValidate(q: SevQuote, opts: SevValidateOptions): void {
     throw policyError(`report VMPL ${report.vmpl} is not ${opts.vmpl}`);
   }
 
-  // MaskChipId might be 1 for the host, so only check a non-zero CHIP_ID.
-  if (
-    info.signingKey === VcekReportSigner &&
-    !allZero(report.chipId) &&
-    (exts.hwid === undefined || !bytesEqual(report.chipId, exts.hwid))
-  ) {
+  // MaskChipId might be 1 for the host, so an all-zero report CHIP_ID is
+  // permitted here; otherwise bind it to the product-specific VCEK HWID.
+  if (info.signingKey === VcekReportSigner) {
+    validateVCEKChipID(report.chipId, exts.hwid);
+  }
+}
+
+// validateVCEKChipID binds a non-zero report CHIP_ID to the product-specific
+// VCEK HWID: 64 bytes for Genoa, an 8-byte PSN-based prefix for Turin (Go
+// validate.validateVCEKChipID).
+function validateVCEKChipID(reportChipID: Uint8Array, certificateHwid: Uint8Array | undefined): void {
+  if (reportChipID.length !== 64) {
+    throw policyError(`report field CHIP_ID has size ${reportChipID.length}, want 64`);
+  }
+  if (allZero(reportChipID)) {
+    return;
+  }
+  const hwid = certificateHwid ?? new Uint8Array(0);
+  let reportHwid: Uint8Array;
+  if (hwid.length === 64) {
+    reportHwid = reportChipID;
+  } else if (hwid.length === 8) {
+    // Turin and later use an 8-byte PSN-based HWID.
+    reportHwid = reportChipID.subarray(0, 8);
+  } else {
+    throw policyError(`VCEK certificate HWID has unsupported size ${hwid.length}`);
+  }
+  if (!bytesEqual(reportHwid, hwid)) {
     throw policyError(
-      `report field CHIP_ID ${encodeHex(report.chipId)} is not the same as the VCEK certificate's HWID`,
+      `report field CHIP_ID ${encodeHex(reportHwid)} is not the same as the VCEK certificate's HWID ${encodeHex(hwid)}`,
     );
   }
 }
@@ -474,6 +551,7 @@ function snpPlatformInfoEqual(a: SnpPlatformInfo, b: SnpPlatformInfo): boolean {
     a.raplDisabled === b.raplDisabled &&
     a.ciphertextHidingDRAMEnabled === b.ciphertextHidingDRAMEnabled &&
     a.aliasCheckComplete === b.aliasCheckComplete &&
+    a.iommuWriteSafe === b.iommuWriteSafe &&
     a.tioEnabled === b.tioEnabled
   );
 }

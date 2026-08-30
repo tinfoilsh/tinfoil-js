@@ -4,6 +4,7 @@
 
 import { utf8Decode } from "../bytes.js";
 import { VerificationError } from "../errors.js";
+import { raw, unmarshal } from "../strictjson.js";
 
 export interface WireCertificate {
   rawBytes: string; // base64 DER
@@ -44,6 +45,11 @@ function provErr(message: string): VerificationError {
 export function parseBundle(bundleJSON: Uint8Array): WireBundle {
   let b: unknown;
   try {
+    // The raw-schema walk enforces protojson's structural rules over the whole
+    // bundle document — valid UTF-8, no duplicate object members anywhere
+    // (including the envelope), no trailing data — which sigstore-go gets from
+    // protojson.Unmarshal (Go/Python: parse_bundle strict pre-walk).
+    unmarshal(bundleJSON, raw);
     b = JSON.parse(utf8Decode(bundleJSON));
   } catch (err) {
     throw provErr(`parsing bundle: ${err instanceof Error ? err.message : String(err)}`);

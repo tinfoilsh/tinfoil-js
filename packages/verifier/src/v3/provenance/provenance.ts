@@ -153,7 +153,8 @@ export interface VerifiedBundle {
   statement: Statement;
   cert: X509Certificate;
   // tlogTimestamps are the Type=="Tlog" observer timestamps: the integrated
-  // time of every verified transparency-log entry.
+  // time of every transparency-log entry whose inclusion promise (SET) is
+  // present, so only cryptographically bound times anchor freshness.
   tlogTimestamps: Date[];
 }
 
@@ -347,6 +348,25 @@ function enforceSubject0Digest(statement: Statement, expectedDigest: string): vo
   }
 }
 
+// checkTrustRoot parse-checks a caller-supplied Sigstore trusted-root document
+// (Go: NewClientFromJSON; Python: check_trust_root via TrustedRoot.from_json).
+// The conformance adapter runs this before any stage so an unparseable trust
+// root is malformed input, not a per-stage rejection. It is deliberately a
+// lenient structural parse — NOT the full loadSigstoreRoot the verify path
+// performs — so a document that parses but does not verify a bundle still
+// surfaces as that stage's rejection, matching Go/Python.
+export function checkTrustRoot(trustRootJSON: Uint8Array): void {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(utf8Decode(trustRootJSON));
+  } catch (err) {
+    throw provErr(`parsing trust root: ${errMsg(err)}`);
+  }
+  if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
+    throw provErr("parsing trust root: not a JSON object");
+  }
+}
+
 // verifyBundleWithIdentity verifies a Sigstore bundle against an explicit
 // signing certificate SAN regex (Go: Client.verifyBundleWithIdentity).
 export async function verifyBundleWithIdentity(
@@ -406,14 +426,26 @@ export async function verifyBundleWithIdentity(
     throw provErr(`parsing signing certificate: ${errMsg(err)}`);
   }
 
-  const tlogTimestamps: Date[] = [];
+  return { statement, cert, tlogTimestamps: tlogObserverTimestamps(wire) };
+}
+
+// tlogObserverTimestamps collects the Type=="Tlog" observer timestamps from a
+// bundle's transparency-log entries (Go: result.VerifiedTimestamps filtered to
+// Tlog). integratedTime is only cryptographically bound when the entry's
+// inclusion promise (SET) is present and verified, so require it before
+// trusting the time as a freshness anchor. Absent the SET (e.g. a TSA-only
+// entry — and the trusted root does carry a TSA), integratedTime is unverified
+// and must not anchor freshness (verifier/provenance/freshness.go keeps only
+// VERIFIED Tlog timestamps).
+export function tlogObserverTimestamps(wire: WireBundle): Date[] {
+  const out: Date[] = [];
   for (const entry of wire.verificationMaterial?.tlogEntries ?? []) {
-    if (entry.integratedTime != null && entry.integratedTime !== "") {
-      tlogTimestamps.push(new Date(Number(entry.integratedTime) * 1000));
+    const set = entry.inclusionPromise?.signedEntryTimestamp;
+    if (set != null && set !== "" && entry.integratedTime != null && entry.integratedTime !== "") {
+      out.push(new Date(Number(entry.integratedTime) * 1000));
     }
   }
-
-  return { statement, cert, tlogTimestamps };
+  return out;
 }
 
 async function verifyBundle(
