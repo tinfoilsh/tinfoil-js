@@ -1,12 +1,19 @@
 import { verifyAttestation as verifyAmdAttestation } from './attestation.js';
 import { verifySigstoreBundle } from './sigstore.js';
-import { assembleAttestationBundle } from './bundle.js';
+import { assembleAttestationBundle, fetchEnclaveAttestationMaterial } from './bundle.js';
 import { verifyCertificate } from './cert-verify.js';
 import { compareMeasurements, measurementFingerprint } from './types.js';
-import type { AttestationResponse, VerificationDocument, AttestationBundle, SoftwareIdentity } from './types.js';
+import type { AttestationResponse, AttestationMeasurement, VerificationDocument, AttestationBundle, SoftwareIdentity } from './types.js';
 import { ConfigurationError } from './errors.js';
 import { cloneVerificationDocument } from './json.js';
 import { VERIFICATION_DOCUMENT_SCHEMA_VERSION, VERIFIER_NAME, VERIFIER_VERSION } from './version.js';
+
+/**
+ * Sentinel values recorded in the verification document when the expected
+ * measurement was pinned by the caller rather than derived from a release.
+ */
+export const PINNED_NO_REPO = 'pinned_no_repo';
+export const PINNED_NO_DIGEST = 'pinned_no_digest';
 
 function verifierIdentity(): SoftwareIdentity {
   return { name: VERIFIER_NAME, version: VERIFIER_VERSION };
@@ -15,20 +22,51 @@ function verifierIdentity(): SoftwareIdentity {
 export interface VerifierOptions {
   /** Server URL for fetching attestation. Required when using verify(), optional when using verifyBundle(). */
   serverURL?: string;
-  configRepo: string;
+  /** GitHub repo whose latest signed release provides the expected measurement. Required unless pinnedMeasurement is set. */
+  configRepo?: string;
+  /**
+   * Expected enclave measurement supplied by the caller. When set, the GitHub
+   * release lookup and Sigstore code verification are skipped and the enclave
+   * measurement is compared directly against this value. The measurement's
+   * provenance must be established out of band.
+   */
+  pinnedMeasurement?: AttestationMeasurement;
 }
+
+/**
+ * Attestation material accepted by verifyBundle(). Release provenance
+ * (digest, releaseTag, sigstoreBundle) is only required without a pinned
+ * measurement.
+ */
+export type VerifiableAttestationBundle = Omit<AttestationBundle, 'digest' | 'releaseTag' | 'sigstoreBundle'> &
+  Partial<Pick<AttestationBundle, 'digest' | 'releaseTag' | 'sigstoreBundle'>>;
 
 export class Verifier {
   private serverURL?: string;
   private configRepo: string;
+  private pinnedMeasurement?: AttestationMeasurement;
   private verificationDocument?: VerificationDocument;
 
   constructor(options: VerifierOptions) {
-    if (!options.configRepo) {
-      throw new ConfigurationError("configRepo is required for Verifier");
+    if (options.pinnedMeasurement) {
+      if (options.configRepo) {
+        throw new ConfigurationError("configRepo and pinnedMeasurement are mutually exclusive");
+      }
+      if (!options.pinnedMeasurement.type || options.pinnedMeasurement.registers.length === 0) {
+        throw new ConfigurationError("pinnedMeasurement must include a type and at least one register");
+      }
+      this.pinnedMeasurement = {
+        type: options.pinnedMeasurement.type,
+        registers: [...options.pinnedMeasurement.registers],
+      };
+      this.configRepo = PINNED_NO_REPO;
+    } else {
+      if (!options.configRepo) {
+        throw new ConfigurationError("configRepo is required for Verifier");
+      }
+      this.configRepo = options.configRepo;
     }
     this.serverURL = options.serverURL;
-    this.configRepo = options.configRepo;
   }
 
   async verify(): Promise<AttestationResponse> {
@@ -36,16 +74,21 @@ export class Verifier {
       throw new ConfigurationError("serverURL is required for verify(). Use verifyBundle() with an attestation bundle instead.");
     }
     const domain = new URL(this.serverURL).hostname;
+    if (this.pinnedMeasurement) {
+      const material = await fetchEnclaveAttestationMaterial(domain);
+      return this.verifyBundle({ domain, ...material });
+    }
     const bundle = await assembleAttestationBundle(domain, this.configRepo);
     return this.verifyBundle(bundle);
   }
 
-  async verifyBundle(bundle: AttestationBundle): Promise<AttestationResponse> {
-    const { enclaveAttestationReport: attestationDoc, vcek, digest, releaseTag: selectedReleaseTag, sigstoreBundle, domain, enclaveCert } = bundle;
+  async verifyBundle(bundle: VerifiableAttestationBundle): Promise<AttestationResponse> {
+    const { enclaveAttestationReport: attestationDoc, vcek, releaseTag: selectedReleaseTag, sigstoreBundle, domain, enclaveCert } = bundle;
+    const pinned = this.pinnedMeasurement;
 
     const steps: VerificationDocument['steps'] = {
-      fetchDigest: { status: 'success' }, // Already fetched by caller
-      verifyCode: { status: 'pending' },
+      fetchDigest: { status: pinned ? 'skipped' : 'success' }, // Already fetched by caller
+      verifyCode: { status: pinned ? 'skipped' : 'pending' },
       verifyEnclave: { status: 'pending' },
       compareMeasurements: { status: 'pending' },
       verifyCertificate: { status: 'pending' },
@@ -63,23 +106,34 @@ export class Verifier {
         throw error;
       }
 
-      // Step 2: Verify code provenance (Sigstore bundle)
-      let codeMeasurements;
-      let releaseTag: string;
-      try {
-        const verifiedCode = await verifySigstoreBundle(
-          sigstoreBundle,
-          digest,
-          this.configRepo,
-          selectedReleaseTag
-        );
-        codeMeasurements = verifiedCode.measurement;
-        releaseTag = verifiedCode.releaseTag;
-        steps.verifyCode = { status: 'success' };
-      } catch (error) {
-        steps.verifyCode = { status: 'failed', error: (error as Error).message };
-        this.saveFailedVerificationDocument(steps, domain);
-        throw error;
+      // Step 2: Establish the expected code measurement, either pinned by the
+      // caller or proven by the release's Sigstore bundle
+      let codeMeasurements: AttestationMeasurement;
+      let releaseTag: string | undefined;
+      let digest: string;
+      if (pinned) {
+        codeMeasurements = pinned;
+        digest = PINNED_NO_DIGEST;
+      } else {
+        try {
+          if (bundle.digest === undefined || sigstoreBundle === undefined) {
+            throw new ConfigurationError("Attestation bundle is missing release provenance (digest, sigstoreBundle)");
+          }
+          digest = bundle.digest;
+          const verifiedCode = await verifySigstoreBundle(
+            sigstoreBundle,
+            digest,
+            this.configRepo,
+            selectedReleaseTag
+          );
+          codeMeasurements = verifiedCode.measurement;
+          releaseTag = verifiedCode.releaseTag;
+          steps.verifyCode = { status: 'success' };
+        } catch (error) {
+          steps.verifyCode = { status: 'failed', error: (error as Error).message };
+          this.saveFailedVerificationDocument(steps, domain);
+          throw error;
+        }
       }
 
       // Step 3: Compare measurements

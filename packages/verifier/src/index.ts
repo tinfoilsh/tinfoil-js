@@ -8,8 +8,8 @@ export {
 
 // Verification
 export { verifyAttestation } from './attestation.js';
-export { assembleAttestationBundle } from './bundle.js';
-export { Verifier } from './client.js';
+export { assembleAttestationBundle, fetchEnclaveAttestationMaterial, type EnclaveAttestationMaterial } from './bundle.js';
+export { Verifier, PINNED_NO_REPO, PINNED_NO_DIGEST, type VerifiableAttestationBundle } from './client.js';
 export { cloneVerificationDocument } from './json.js';
 export { VERIFICATION_DOCUMENT_SCHEMA_VERSION, VERIFIER_NAME, VERIFIER_VERSION } from './version.js';
 export { PredicateType, compareMeasurements, measurementFingerprint, hashAttestationDocument } from './types.js';

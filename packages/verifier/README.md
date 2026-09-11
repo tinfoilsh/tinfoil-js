@@ -55,6 +55,30 @@ const doc = verifier.getVerificationDocument();
 console.log(doc.securityVerified);
 ```
 
+## Verifying Against a Pinned Measurement
+
+To verify an enclave against a measurement you already hold, pass it as
+`pinnedMeasurement` instead of `configRepo`. The GitHub release lookup and
+Sigstore code verification are skipped and reported as `skipped` in the
+verification document, so the measurement's provenance must be established
+out of band.
+
+```typescript
+import { Verifier, PredicateType } from '@tinfoilsh/verifier';
+
+const verifier = new Verifier({
+  serverURL: 'https://enclave.example.com',
+  pinnedMeasurement: {
+    type: PredicateType.SevGuestV2,
+    registers: ['<hex measurement>'],
+  },
+});
+await verifier.verify();
+```
+
+`verifyBundle()` also accepts a bundle without `digest`, `releaseTag`, or
+`sigstoreBundle` in this mode.
+
 ## Error Handling
 
 For callers that want structured error handling, these error classes are part of the public API:
