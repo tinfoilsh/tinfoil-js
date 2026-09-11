@@ -1,7 +1,7 @@
 import { createOpenAICompatible } from "@ai-sdk/openai-compatible";
 import { SecureClient } from "./secure-client.js";
 import { isRealBrowser } from "./env.js";
-import { ConfigurationError } from "./verifier.js";
+import { ConfigurationError, type AttestationMeasurement } from "./verifier.js";
 
 /**
  * Options for creating a Tinfoil AI SDK provider.
@@ -13,11 +13,24 @@ export interface CreateTinfoilAIOptions {
    */
   baseURL?: string;
 
+  /**
+   * Explicit enclave URL.
+   * Use this when connecting to a custom enclave rather than the default routers.
+   */
+  enclaveURL?: string;
+
   /** GitHub repo for code verification. */
   configRepo?: string;
 
   /** URL to fetch the attestation bundle from. */
   attestationBundleURL?: string;
+
+  /**
+   * Verify the enclave against this measurement instead of the latest signed
+   * release of `configRepo`. Requires `enclaveURL`; cannot be combined with
+   * `configRepo` or `attestationBundleURL`.
+   */
+  pinnedMeasurement?: AttestationMeasurement;
 
   /**
    * Secret scoping the router's prompt cache for this provider's requests.
@@ -71,8 +84,10 @@ export async function createTinfoilAI(apiKey?: string, options: CreateTinfoilAIO
 
   const secureClient = new SecureClient({
     baseURL: options.baseURL,
+    enclaveURL: options.enclaveURL,
     configRepo: options.configRepo,
     attestationBundleURL: options.attestationBundleURL,
+    pinnedMeasurement: options.pinnedMeasurement,
     userCacheSecret: options.userCacheSecret,
   });
 

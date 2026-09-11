@@ -9,6 +9,7 @@ export {
   ConfigurationError,
   AttestationError,
   Verifier,
+  PredicateType,
   assembleAttestationBundle,
 } from "./verifier.js";
 

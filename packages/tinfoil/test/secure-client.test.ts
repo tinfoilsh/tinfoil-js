@@ -35,6 +35,12 @@ const verifyMock = vi.fn(async () => ({
   measurement: { type: MOCK_MEASUREMENT_TYPE, registers: [] },
 }));
 const getVerificationDocumentMock = vi.fn(() => mockVerificationDocument);
+const verifierConstructorMock = vi.fn();
+const fetchEnclaveAttestationMaterialMock = vi.fn(async () => ({
+  enclaveAttestationReport: { format: "test", body: "test" },
+  vcek: "test-vcek",
+  enclaveCert: "test-cert",
+}));
 
 const mockFetch = vi.fn(async () => new Response(JSON.stringify({ message: "success" })));
 const mockGetSessionRecoveryToken = vi.fn(async () => ({ exportedSecret: new Uint8Array(), requestEnc: new Uint8Array() }));
@@ -53,7 +59,12 @@ const createSecureFetchMock = vi.fn<
 
 vi.mock("../src/verifier.js", () => ({
   cloneVerificationDocument: (document: typeof mockVerificationDocument) => structuredClone(document),
+  PINNED_NO_REPO: "pinned_no_repo",
+  fetchEnclaveAttestationMaterial: fetchEnclaveAttestationMaterialMock,
   Verifier: class {
+    constructor(options: unknown) {
+      verifierConstructorMock(options);
+    }
     verify() {
       return verifyMock();
     }
@@ -556,6 +567,69 @@ describe("SecureClient", () => {
       expect(() => {
         new SecureClient({ attestationBundleURL: "" });
       }).toThrow("attestationBundleURL must use HTTPS");
+    });
+  });
+
+  describe("pinnedMeasurement option", () => {
+    const pinnedMeasurement = { type: MOCK_MEASUREMENT_TYPE, registers: ["abc"] };
+
+    it("requires enclaveURL", async () => {
+      const { SecureClient } = await import("../src/secure-client");
+
+      expect(() => new SecureClient({ pinnedMeasurement })).toThrow("pinnedMeasurement requires enclaveURL");
+    });
+
+    it("cannot be combined with configRepo or attestationBundleURL", async () => {
+      const { SecureClient } = await import("../src/secure-client");
+
+      expect(() => new SecureClient({
+        enclaveURL: "https://custom.example.com",
+        configRepo: "custom/repo",
+        pinnedMeasurement,
+      })).toThrow("cannot be combined with configRepo");
+      expect(() => new SecureClient({
+        enclaveURL: "https://custom.example.com",
+        attestationBundleURL: "https://atc.example.com",
+        pinnedMeasurement,
+      })).toThrow("cannot be combined with attestationBundleURL");
+    });
+
+    it("does not warn about a missing configRepo", async () => {
+      const consoleSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+      const { SecureClient } = await import("../src/secure-client");
+
+      new SecureClient({ enclaveURL: "https://custom.example.com", pinnedMeasurement });
+
+      expect(consoleSpy).not.toHaveBeenCalled();
+      consoleSpy.mockRestore();
+    });
+
+    it("fetches attestation material from the enclave and verifies with the pinned measurement", async () => {
+      const { fetchAttestationBundle } = await import("../src/atc.js");
+      const { SecureClient } = await import("../src/secure-client");
+
+      const client = new SecureClient({ enclaveURL: "https://custom.example.com", pinnedMeasurement });
+      await client.ready();
+
+      expect(fetchAttestationBundle).not.toHaveBeenCalled();
+      expect(fetchEnclaveAttestationMaterialMock).toHaveBeenCalledWith("custom.example.com");
+      expect(verifierConstructorMock).toHaveBeenCalledWith({ pinnedMeasurement });
+      expect(client.getEnclaveURL()).toBe("https://custom.example.com");
+      expect(createSecureFetchMock).toHaveBeenCalledWith(
+        "https://custom.example.com/v1/",
+        "mock-hpke-public-key",
+        undefined,
+        "https://custom.example.com",
+        "test-secret",
+      );
+    });
+
+    it("reports the pinned sentinel repo in the pending verification document", async () => {
+      const { SecureClient } = await import("../src/secure-client");
+
+      const client = new SecureClient({ enclaveURL: "https://custom.example.com", pinnedMeasurement });
+
+      expect(client.getVerificationDocument().configRepo).toBe("pinned_no_repo");
     });
   });
 
