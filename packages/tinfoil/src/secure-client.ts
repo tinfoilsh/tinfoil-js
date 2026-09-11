@@ -64,9 +64,9 @@ export interface SecureClientOptions {
    * release of `configRepo`. The GitHub release lookup and Sigstore code
    * verification are skipped, so the measurement's provenance must be
    * established out of band. Requires `enclaveURL`; cannot be combined with
-   * `configRepo` or `attestationBundleURL`. The measurement must carry the
-   * register layout of its type (1 for SEV-SNP, 3 for multi-platform) as
-   * 48-byte hex; it is validated and copied when the client is constructed, so
+   * `configRepo` or `attestationBundleURL`. The measurement must be an
+   * SEV-SNP guest measurement (`PredicateType.SevGuestV2`, one 48-byte hex
+   * register); it is validated and copied when the client is constructed, so
    * a null or malformed pin is a `ConfigurationError` rather than a fallback
    * to release-based verification.
    */
@@ -196,8 +196,17 @@ export class SecureClient {
         throw new ConfigurationError(`baseURL must be a valid HTTP(S) URL. Got: ${options.baseURL}`);
       }
     }
-    if (options.enclaveURL !== undefined && !options.enclaveURL.startsWith("https://")) {
-      throw new ConfigurationError(`enclaveURL must use HTTPS. Got: ${options.enclaveURL}`);
+    if (options.enclaveURL !== undefined) {
+      if (!options.enclaveURL.startsWith("https://")) {
+        throw new ConfigurationError(`enclaveURL must use HTTPS. Got: ${options.enclaveURL}`);
+      }
+      try {
+        new URL(options.enclaveURL);
+      } catch (cause) {
+        throw new ConfigurationError(`enclaveURL must be a valid HTTPS URL. Got: ${options.enclaveURL}`, {
+          cause: cause as Error,
+        });
+      }
     }
     if (options.attestationBundleURL !== undefined && !options.attestationBundleURL.startsWith("https://")) {
       throw new ConfigurationError(`attestationBundleURL must use HTTPS. Got: ${options.attestationBundleURL}`);

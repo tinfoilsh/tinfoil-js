@@ -7,13 +7,13 @@ const REGISTER_HEX_LENGTH = 96;
 const HEX_PATTERN = /^[0-9a-f]+$/;
 
 /**
- * Register layout each supported code measurement type must carry. This
- * verifier only verifies SEV-SNP attestation, so TDX runtime measurements are
- * not accepted as pins.
+ * Register layout each supported pin type must carry. This verifier only
+ * verifies SEV-SNP attestation and compares only the SNP register, so a pin
+ * is an SEV-SNP guest measurement; multi-platform and TDX pins are rejected
+ * rather than accepted with registers that would never be compared.
  */
 const REGISTER_COUNTS: Record<string, number> = {
   [PredicateType.SevGuestV2]: 1,
-  [PredicateType.SnpTdxMultiplatformV1]: 3,
 };
 
 /**
@@ -21,8 +21,8 @@ const REGISTER_COUNTS: Record<string, number> = {
  * lowercase-normalized copy so the caller's value cannot change what
  * verification later accepts.
  *
- * @throws ConfigurationError when the measurement is missing, has an
- *   unsupported type, the wrong register count for its type, or a register
+ * @throws ConfigurationError when the measurement is missing, is not an
+ *   SEV-SNP guest measurement, has the wrong register count, or a register
  *   that is not 48-byte hex.
  */
 export function validatePinnedMeasurement(measurement: unknown): AttestationMeasurement {
@@ -46,7 +46,8 @@ export function validatePinnedMeasurement(measurement: unknown): AttestationMeas
     );
   }
 
-  const normalized = registers.map((register, index) => {
+  // Array.from visits holes in sparse arrays so they are rejected as non-strings.
+  const normalized = Array.from(registers, (register, index) => {
     if (typeof register !== 'string') {
       throw new ConfigurationError(`pinnedMeasurement.registers[${index}] must be a string`);
     }

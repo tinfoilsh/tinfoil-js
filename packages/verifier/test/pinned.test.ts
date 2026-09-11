@@ -73,6 +73,11 @@ describe('Pinned Measurement Verification', () => {
 
     const doc = verifier.getVerificationDocument()!;
     expect(doc.securityVerified).toBe(false);
+    expect(doc.configRepo).toBe(PINNED_NO_REPO);
+    expect(doc.releaseDigest).toBe(PINNED_NO_DIGEST);
+    expect(doc.codeMeasurement).toEqual(tampered);
+    expect(doc.steps.fetchDigest.status).toBe('skipped');
+    expect(doc.steps.verifyCode.status).toBe('skipped');
     expect(doc.steps.verifyEnclave.status).toBe('success');
     expect(doc.steps.compareMeasurements.status).toBe('failed');
     expect(doc.steps.compareMeasurements.error).toContain('mismatch');
@@ -123,13 +128,15 @@ describe('Pinned Measurement Verification', () => {
     ['empty object', {}],
     ['missing type', { registers: [VALID_REGISTER] }],
     ['empty type', { type: '', registers: [VALID_REGISTER] }],
-    ['unsupported type', { type: 'https://tinfoil.sh/predicate/tdx-guest/v2', registers: [VALID_REGISTER, VALID_REGISTER, VALID_REGISTER, VALID_REGISTER, VALID_REGISTER] }],
+    ['TDX type', { type: 'https://tinfoil.sh/predicate/tdx-guest/v2', registers: [VALID_REGISTER, VALID_REGISTER, VALID_REGISTER, VALID_REGISTER, VALID_REGISTER] }],
+    // This verifier compares only the SNP register, so a multi-platform pin
+    // would carry registers that are never enforced.
+    ['multiplatform type', { type: PredicateType.SnpTdxMultiplatformV1, registers: [VALID_REGISTER, VALID_REGISTER, VALID_REGISTER] }],
     ['missing registers', { type: PredicateType.SevGuestV2 }],
     ['registers not an array', { type: PredicateType.SevGuestV2, registers: VALID_REGISTER }],
     ['no registers', { type: PredicateType.SevGuestV2, registers: [] }],
     ['too many SEV registers', { type: PredicateType.SevGuestV2, registers: [VALID_REGISTER, VALID_REGISTER] }],
-    ['too few multiplatform registers', { type: PredicateType.SnpTdxMultiplatformV1, registers: [VALID_REGISTER, VALID_REGISTER] }],
-    ['too many multiplatform registers', { type: PredicateType.SnpTdxMultiplatformV1, registers: [VALID_REGISTER, VALID_REGISTER, VALID_REGISTER, VALID_REGISTER] }],
+    ['sparse register array', { type: PredicateType.SevGuestV2, registers: new Array(1) }],
     ['short register', { type: PredicateType.SevGuestV2, registers: ['abc'] }],
     ['non-hex register', { type: PredicateType.SevGuestV2, registers: ['g'.repeat(96)] }],
     ['non-string register', { type: PredicateType.SevGuestV2, registers: [42] }],

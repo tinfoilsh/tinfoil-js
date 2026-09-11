@@ -568,6 +568,14 @@ describe("SecureClient", () => {
       }).toThrow("enclaveURL must use HTTPS");
     });
 
+    it("should throw ConfigurationError for an unparseable enclaveURL", async () => {
+      const { SecureClient } = await import("../src/secure-client");
+
+      expect(() => {
+        new SecureClient({ enclaveURL: "https://" });
+      }).toThrow("enclaveURL must be a valid HTTPS URL");
+    });
+
     it("should throw ConfigurationError for an empty attestationBundleURL", async () => {
       const { SecureClient } = await import("../src/secure-client");
 
