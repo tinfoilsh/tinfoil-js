@@ -6,6 +6,7 @@ import { compareMeasurements, measurementFingerprint } from './types.js';
 import type { AttestationResponse, AttestationMeasurement, VerificationDocument, AttestationBundle, SoftwareIdentity } from './types.js';
 import { ConfigurationError } from './errors.js';
 import { cloneVerificationDocument } from './json.js';
+import { validatePinnedMeasurement } from './pin.js';
 import { VERIFICATION_DOCUMENT_SCHEMA_VERSION, VERIFIER_NAME, VERIFIER_VERSION } from './version.js';
 
 /**
@@ -28,7 +29,9 @@ export interface VerifierOptions {
    * Expected enclave measurement supplied by the caller. When set, the GitHub
    * release lookup and Sigstore code verification are skipped and the enclave
    * measurement is compared directly against this value. The measurement's
-   * provenance must be established out of band.
+   * provenance must be established out of band. It must carry the register
+   * layout of its type (1 for SEV-SNP, 3 for multi-platform) as 48-byte hex,
+   * and is validated and copied at construction.
    */
   pinnedMeasurement?: AttestationMeasurement;
 }
@@ -48,17 +51,13 @@ export class Verifier {
   private verificationDocument?: VerificationDocument;
 
   constructor(options: VerifierOptions) {
-    if (options.pinnedMeasurement) {
+    // Only omission means "not pinned": a supplied null or malformed pin is a
+    // configuration error, not a fallback to release-based verification.
+    if (options.pinnedMeasurement !== undefined) {
       if (options.configRepo) {
         throw new ConfigurationError("configRepo and pinnedMeasurement are mutually exclusive");
       }
-      if (!options.pinnedMeasurement.type || options.pinnedMeasurement.registers.length === 0) {
-        throw new ConfigurationError("pinnedMeasurement must include a type and at least one register");
-      }
-      this.pinnedMeasurement = {
-        type: options.pinnedMeasurement.type,
-        registers: [...options.pinnedMeasurement.registers],
-      };
+      this.pinnedMeasurement = validatePinnedMeasurement(options.pinnedMeasurement);
       this.configRepo = PINNED_NO_REPO;
     } else {
       if (!options.configRepo) {
@@ -73,13 +72,16 @@ export class Verifier {
     if (!this.serverURL) {
       throw new ConfigurationError("serverURL is required for verify(). Use verifyBundle() with an attestation bundle instead.");
     }
-    const domain = new URL(this.serverURL).hostname;
+    // The certificate is checked against the hostname; the fetch keeps any
+    // explicit port so attestation comes from the same origin as requests.
+    const serverURL = new URL(this.serverURL);
+    const domain = serverURL.hostname;
     if (this.pinnedMeasurement) {
-      const material = await fetchEnclaveAttestationMaterial(domain);
+      const material = await fetchEnclaveAttestationMaterial(serverURL.host);
       return this.verifyBundle({ domain, ...material });
     }
-    const bundle = await assembleAttestationBundle(domain, this.configRepo);
-    return this.verifyBundle(bundle);
+    const bundle = await assembleAttestationBundle(serverURL.host, this.configRepo);
+    return this.verifyBundle({ ...bundle, domain });
   }
 
   async verifyBundle(bundle: VerifiableAttestationBundle): Promise<AttestationResponse> {

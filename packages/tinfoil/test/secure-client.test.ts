@@ -57,9 +57,15 @@ const createSecureFetchMock = vi.fn<
   getSessionRecoveryToken: mockGetSessionRecoveryToken,
 }));
 
-vi.mock("../src/verifier.js", () => ({
+vi.mock("../src/verifier.js", async () => {
+  // Pin validation is real so the SecureClient tests exercise the actual
+  // rejection and normalization rules rather than a stand-in.
+  const { validatePinnedMeasurement } = await vi.importActual<typeof import("../src/verifier.js")>("../src/verifier.js");
+  return {
   cloneVerificationDocument: (document: typeof mockVerificationDocument) => structuredClone(document),
   PINNED_NO_REPO: "pinned_no_repo",
+  PINNED_NO_DIGEST: "pinned_no_digest",
+  validatePinnedMeasurement,
   fetchEnclaveAttestationMaterial: fetchEnclaveAttestationMaterialMock,
   Verifier: class {
     constructor(options: unknown) {
@@ -100,7 +106,8 @@ vi.mock("../src/verifier.js", () => ({
     sigstoreBundle: {},
     vcek: "test-vcek",
   })),
-}));
+  };
+});
 
 vi.mock("../src/secure-fetch.js", () => ({
   createSecureFetch: createSecureFetchMock,
@@ -571,7 +578,8 @@ describe("SecureClient", () => {
   });
 
   describe("pinnedMeasurement option", () => {
-    const pinnedMeasurement = { type: MOCK_MEASUREMENT_TYPE, registers: ["abc"] };
+    const PINNED_REGISTER = "a".repeat(96);
+    const pinnedMeasurement = { type: "https://tinfoil.sh/predicate/sev-snp-guest/v2", registers: [PINNED_REGISTER] };
 
     it("requires enclaveURL", async () => {
       const { SecureClient } = await import("../src/secure-client");
@@ -624,12 +632,81 @@ describe("SecureClient", () => {
       );
     });
 
-    it("reports the pinned sentinel repo in the pending verification document", async () => {
+    it("reports the pin in the pending verification document", async () => {
       const { SecureClient } = await import("../src/secure-client");
 
       const client = new SecureClient({ enclaveURL: "https://custom.example.com", pinnedMeasurement });
+      const doc = client.getVerificationDocument();
 
-      expect(client.getVerificationDocument().configRepo).toBe("pinned_no_repo");
+      expect(doc.configRepo).toBe("pinned_no_repo");
+      expect(doc.releaseDigest).toBe("pinned_no_digest");
+      expect(doc.codeMeasurement).toEqual(pinnedMeasurement);
+      expect(doc.steps.fetchDigest.status).toBe("skipped");
+      expect(doc.steps.verifyCode.status).toBe("skipped");
+      expect(doc.steps.verifyEnclave.status).toBe("pending");
+    });
+
+    it("rejects a supplied null pin instead of falling back to release verification", async () => {
+      const { fetchAttestationBundle } = await import("../src/atc.js");
+      const { SecureClient } = await import("../src/secure-client");
+
+      expect(() => new SecureClient({
+        enclaveURL: "https://custom.example.com",
+        pinnedMeasurement: null as unknown as typeof pinnedMeasurement,
+      })).toThrow("pinnedMeasurement must be an object");
+      expect(fetchAttestationBundle).not.toHaveBeenCalled();
+    });
+
+    it.each([
+      ["empty object", {}],
+      ["unsupported type", { type: "https://tinfoil.sh/predicate/tdx-guest/v2", registers: [PINNED_REGISTER] }],
+      ["wrong register count", { type: pinnedMeasurement.type, registers: [PINNED_REGISTER, PINNED_REGISTER] }],
+      ["short register", { type: pinnedMeasurement.type, registers: ["abc"] }],
+    ])("rejects a malformed pin before any network access: %s", async (_name, malformed) => {
+      const { SecureClient } = await import("../src/secure-client");
+
+      expect(() => new SecureClient({
+        enclaveURL: "https://custom.example.com",
+        pinnedMeasurement: malformed as typeof pinnedMeasurement,
+      })).toThrow("pinnedMeasurement");
+      expect(fetchEnclaveAttestationMaterialMock).not.toHaveBeenCalled();
+    });
+
+    it("snapshots the pin so later mutation of the caller's object has no effect", async () => {
+      const { SecureClient } = await import("../src/secure-client");
+
+      const callerPin = { type: pinnedMeasurement.type, registers: [PINNED_REGISTER.toUpperCase()] };
+      const client = new SecureClient({ enclaveURL: "https://custom.example.com", pinnedMeasurement: callerPin });
+      callerPin.registers[0] = "f".repeat(96);
+      callerPin.type = "tampered";
+
+      await client.ready();
+
+      // The verifier receives the normalized snapshot taken at construction.
+      expect(verifierConstructorMock).toHaveBeenCalledWith({ pinnedMeasurement });
+
+      // A reset and re-verification (key rotation path) still uses the snapshot.
+      verifierConstructorMock.mockClear();
+      client.reset();
+      await client.ready();
+      expect(verifierConstructorMock).toHaveBeenCalledWith({ pinnedMeasurement });
+    });
+
+    it("fetches attestation material from the configured enclave origin, including its port", async () => {
+      const { SecureClient } = await import("../src/secure-client");
+
+      const client = new SecureClient({ enclaveURL: "https://custom.example.com:8443", pinnedMeasurement });
+      await client.ready();
+
+      expect(fetchEnclaveAttestationMaterialMock).toHaveBeenCalledWith("custom.example.com:8443");
+      expect(client.getEnclaveURL()).toBe("https://custom.example.com:8443");
+      expect(createSecureFetchMock).toHaveBeenCalledWith(
+        "https://custom.example.com:8443/v1/",
+        "mock-hpke-public-key",
+        undefined,
+        "https://custom.example.com:8443",
+        "test-secret",
+      );
     });
   });
 

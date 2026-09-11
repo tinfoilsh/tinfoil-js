@@ -1,8 +1,16 @@
 import { describe, it, expect } from 'vitest';
 import { Verifier, PINNED_NO_REPO, PINNED_NO_DIGEST } from '../src/client.js';
 import { ConfigurationError, AttestationError } from '../src/errors.js';
+import { PredicateType } from '../src/types.js';
 import type { AttestationBundle, AttestationMeasurement } from '../src/types.js';
 import bundleFixture from './fixtures/attestation-bundle.json';
+
+const VALID_REGISTER = 'a'.repeat(96);
+
+/** Returns a register guaranteed to differ from the input while staying valid hex. */
+function flipHexNibble(register: string): string {
+  return (register[0] === '0' ? '1' : '0') + register.slice(1);
+}
 
 /**
  * Pinned-measurement verification: the caller supplies the expected enclave
@@ -57,7 +65,7 @@ describe('Pinned Measurement Verification', () => {
     const actual = await enclaveMeasurement();
     const tampered: AttestationMeasurement = {
       type: actual.type,
-      registers: ['00' + actual.registers[0].slice(2), ...actual.registers.slice(1)],
+      registers: [flipHexNibble(actual.registers[0]), ...actual.registers.slice(1)],
     };
     const verifier = new Verifier({ pinnedMeasurement: tampered });
 
@@ -73,9 +81,20 @@ describe('Pinned Measurement Verification', () => {
   it('does not let a pinned measurement mutate after construction', async () => {
     const pinnedMeasurement = await enclaveMeasurement();
     const verifier = new Verifier({ pinnedMeasurement });
-    pinnedMeasurement.registers[0] = 'tampered-after-construction';
+    pinnedMeasurement.registers[0] = flipHexNibble(pinnedMeasurement.registers[0]);
+    pinnedMeasurement.type = 'tampered';
 
     await expect(verifier.verifyBundle(pinnedBundle)).resolves.toBeDefined();
+  });
+
+  it('normalizes an uppercase pinned measurement before comparison', async () => {
+    const actual = await enclaveMeasurement();
+    const verifier = new Verifier({
+      pinnedMeasurement: { type: actual.type, registers: actual.registers.map(r => r.toUpperCase()) },
+    });
+
+    await expect(verifier.verifyBundle(pinnedBundle)).resolves.toBeDefined();
+    expect(verifier.getVerificationDocument()!.codeMeasurement.registers).toEqual(actual.registers);
   });
 
   it('rejects a bundle without release provenance when not pinned', async () => {
@@ -88,16 +107,33 @@ describe('Pinned Measurement Verification', () => {
   it('rejects combining configRepo with pinnedMeasurement', () => {
     expect(() => new Verifier({
       configRepo: 'tinfoilsh/confidential-model-router',
-      pinnedMeasurement: { type: 'https://tinfoil.sh/predicate/sev-snp-guest/v2', registers: ['abc'] },
+      pinnedMeasurement: { type: PredicateType.SevGuestV2, registers: [VALID_REGISTER] },
     })).toThrow(ConfigurationError);
   });
 
-  it('rejects an empty pinned measurement', () => {
+  it('rejects a supplied null pin instead of falling back to release verification', () => {
     expect(() => new Verifier({
-      pinnedMeasurement: { type: 'https://tinfoil.sh/predicate/sev-snp-guest/v2', registers: [] },
-    })).toThrow('at least one register');
-    expect(() => new Verifier({
-      pinnedMeasurement: { type: '', registers: ['abc'] },
-    })).toThrow('at least one register');
+      configRepo: 'tinfoilsh/confidential-model-router',
+      pinnedMeasurement: null as unknown as AttestationMeasurement,
+    })).toThrow(ConfigurationError);
+    expect(() => new Verifier({ pinnedMeasurement: null as unknown as AttestationMeasurement })).toThrow(ConfigurationError);
+  });
+
+  it.each<[string, unknown]>([
+    ['empty object', {}],
+    ['missing type', { registers: [VALID_REGISTER] }],
+    ['empty type', { type: '', registers: [VALID_REGISTER] }],
+    ['unsupported type', { type: 'https://tinfoil.sh/predicate/tdx-guest/v2', registers: [VALID_REGISTER, VALID_REGISTER, VALID_REGISTER, VALID_REGISTER, VALID_REGISTER] }],
+    ['missing registers', { type: PredicateType.SevGuestV2 }],
+    ['registers not an array', { type: PredicateType.SevGuestV2, registers: VALID_REGISTER }],
+    ['no registers', { type: PredicateType.SevGuestV2, registers: [] }],
+    ['too many SEV registers', { type: PredicateType.SevGuestV2, registers: [VALID_REGISTER, VALID_REGISTER] }],
+    ['too few multiplatform registers', { type: PredicateType.SnpTdxMultiplatformV1, registers: [VALID_REGISTER, VALID_REGISTER] }],
+    ['too many multiplatform registers', { type: PredicateType.SnpTdxMultiplatformV1, registers: [VALID_REGISTER, VALID_REGISTER, VALID_REGISTER, VALID_REGISTER] }],
+    ['short register', { type: PredicateType.SevGuestV2, registers: ['abc'] }],
+    ['non-hex register', { type: PredicateType.SevGuestV2, registers: ['g'.repeat(96)] }],
+    ['non-string register', { type: PredicateType.SevGuestV2, registers: [42] }],
+  ])('rejects a malformed pin: %s', (_name, pinnedMeasurement) => {
+    expect(() => new Verifier({ pinnedMeasurement: pinnedMeasurement as AttestationMeasurement })).toThrow(ConfigurationError);
   });
 });

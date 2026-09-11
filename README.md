@@ -237,7 +237,7 @@ const client = new TinfoilAI({
 });
 ```
 
-`pinnedMeasurement` requires `enclaveURL` and cannot be combined with `configRepo` or `attestationBundleURL`. The same option is accepted by `SecureClient`, `createTinfoilAI`, and `Verifier`.
+`pinnedMeasurement` requires `enclaveURL` and cannot be combined with `configRepo` or `attestationBundleURL`. The measurement must carry the register layout of its type (1 register for SEV-SNP, 3 for multi-platform) as 48-byte hex; it is validated and copied when the client is constructed, so a `null` or malformed pin throws `ConfigurationError` rather than falling back to release verification. The same option is accepted by `SecureClient`, `createTinfoilAI`, and `Verifier`.
 
 ## Proxy Support
 
