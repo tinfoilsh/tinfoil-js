@@ -1,6 +1,6 @@
 import { KeyConfigMismatchError } from "ehbp";
 import { VERIFICATION_DOCUMENT_SCHEMA_VERSION, VERIFIER_NAME, VERIFIER_VERSION } from "@tinfoilsh/verifier";
-import { cloneVerificationDocument, Verifier, ConfigurationError, FetchError, AttestationError, PINNED_NO_REPO, fetchEnclaveAttestationMaterial, type VerificationDocument } from "./verifier.js";
+import { cloneVerificationDocument, Verifier, ConfigurationError, FetchError, AttestationError, PINNED_NO_REPO, PINNED_NO_DIGEST, fetchEnclaveAttestationMaterial, validatePinnedMeasurement, type VerificationDocument } from "./verifier.js";
 import type { AttestationMeasurement, VerifiableAttestationBundle } from "./verifier.js";
 import { TINFOIL_CONFIG } from "./config.js";
 import { createSecureFetch } from "./secure-fetch.js";
@@ -64,7 +64,11 @@ export interface SecureClientOptions {
    * release of `configRepo`. The GitHub release lookup and Sigstore code
    * verification are skipped, so the measurement's provenance must be
    * established out of band. Requires `enclaveURL`; cannot be combined with
-   * `configRepo` or `attestationBundleURL`.
+   * `configRepo` or `attestationBundleURL`. The measurement must carry the
+   * register layout of its type (1 for SEV-SNP, 3 for multi-platform) as
+   * 48-byte hex; it is validated and copied when the client is constructed, so
+   * a null or malformed pin is a `ConfigurationError` rather than a fallback
+   * to release-based verification.
    */
   pinnedMeasurement?: AttestationMeasurement;
 
@@ -86,13 +90,18 @@ export interface SecureClientOptions {
   userCacheSecret?: string;
 }
 
-function createPendingVerificationDocument(configRepo: string): VerificationDocument {
+function createPendingVerificationDocument(configRepo: string, pinnedMeasurement?: AttestationMeasurement): VerificationDocument {
+  // A pinned client never fetches a release or verifies code provenance, so
+  // those steps are reported as skipped even before verification runs.
+  const provenanceStatus = pinnedMeasurement ? 'skipped' : 'pending';
   return {
     schemaVersion: VERIFICATION_DOCUMENT_SCHEMA_VERSION,
     configRepo,
     enclaveHost: '',
-    releaseDigest: '',
-    codeMeasurement: { type: '', registers: [] },
+    releaseDigest: pinnedMeasurement ? PINNED_NO_DIGEST : '',
+    codeMeasurement: pinnedMeasurement
+      ? { type: pinnedMeasurement.type, registers: [...pinnedMeasurement.registers] }
+      : { type: '', registers: [] },
     enclaveMeasurement: { measurement: { type: '', registers: [] } },
     tlsPublicKey: '',
     hpkePublicKey: '',
@@ -105,8 +114,8 @@ function createPendingVerificationDocument(configRepo: string): VerificationDocu
       version: VERIFIER_VERSION,
     },
     steps: {
-      fetchDigest: { status: 'pending' },
-      verifyCode: { status: 'pending' },
+      fetchDigest: { status: provenanceStatus },
+      verifyCode: { status: provenanceStatus },
       verifyEnclave: { status: 'pending' },
       compareMeasurements: { status: 'pending' },
     },
@@ -193,7 +202,12 @@ export class SecureClient {
     if (options.attestationBundleURL !== undefined && !options.attestationBundleURL.startsWith("https://")) {
       throw new ConfigurationError(`attestationBundleURL must use HTTPS. Got: ${options.attestationBundleURL}`);
     }
-    if (options.pinnedMeasurement) {
+    // Only omission means "not pinned": a supplied null or malformed pin is a
+    // configuration error, not a fallback to release-based verification. The
+    // pin is validated and copied here so later mutation of the caller's
+    // object cannot change what verification accepts.
+    let pinnedMeasurement: AttestationMeasurement | undefined;
+    if (options.pinnedMeasurement !== undefined) {
       if (!options.enclaveURL) {
         throw new ConfigurationError("pinnedMeasurement requires enclaveURL — a pinned measurement cannot be verified against an auto-selected router.");
       }
@@ -203,6 +217,7 @@ export class SecureClient {
       if (options.attestationBundleURL) {
         throw new ConfigurationError("pinnedMeasurement cannot be combined with attestationBundleURL.");
       }
+      pinnedMeasurement = validatePinnedMeasurement(options.pinnedMeasurement);
     } else if (options.configRepo && !options.enclaveURL) {
       throw new ConfigurationError("configRepo requires enclaveURL — without it, ATC always uses the default router repo.");
     } else if (options.enclaveURL && !options.configRepo) {
@@ -212,15 +227,15 @@ export class SecureClient {
     this.config = {
       baseURL: options.baseURL,
       enclaveURL: options.enclaveURL,
-      configRepo: options.pinnedMeasurement
+      configRepo: pinnedMeasurement
         ? PINNED_NO_REPO
         : options.configRepo ?? TINFOIL_CONFIG.DEFAULT_ROUTER_REPO,
       transport: options.transport || 'ehbp',
       attestationBundleURL: options.attestationBundleURL,
-      pinnedMeasurement: options.pinnedMeasurement,
+      pinnedMeasurement,
       userCacheSecret: options.userCacheSecret,
     };
-    this.verificationDocument = createPendingVerificationDocument(this.config.configRepo);
+    this.verificationDocument = createPendingVerificationDocument(this.config.configRepo, this.config.pinnedMeasurement);
   }
 
   /**
@@ -256,7 +271,7 @@ export class SecureClient {
    */
   private clearDerivedState(): void {
     this._transport = null;
-    this.verificationDocument = createPendingVerificationDocument(this.config.configRepo);
+    this.verificationDocument = createPendingVerificationDocument(this.config.configRepo, this.config.pinnedMeasurement);
     this.resolvedEnclaveURL = undefined;
     this.resolvedBaseURL = undefined;
     this.attestedTlsPublicKeyFingerprint = undefined;
@@ -325,9 +340,11 @@ export class SecureClient {
    */
   private async fetchAttestationMaterial(): Promise<VerifiableAttestationBundle> {
     if (this.config.pinnedMeasurement) {
-      const domain = new URL(this.config.enclaveURL!).hostname;
-      const material = await fetchEnclaveAttestationMaterial(domain);
-      return { domain, ...material };
+      // The certificate is checked against the hostname, but the fetch keeps
+      // any explicit port so attestation comes from the origin requests use.
+      const enclaveURL = new URL(this.config.enclaveURL!);
+      const material = await fetchEnclaveAttestationMaterial(enclaveURL.host);
+      return { domain: enclaveURL.hostname, ...material };
     }
     return fetchAttestationBundle({
       atcBaseUrl: this.config.attestationBundleURL,

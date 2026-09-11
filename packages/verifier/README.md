@@ -77,7 +77,10 @@ await verifier.verify();
 ```
 
 `verifyBundle()` also accepts a bundle without `digest`, `releaseTag`, or
-`sigstoreBundle` in this mode.
+`sigstoreBundle` in this mode. The pin must carry the register layout of its
+type (1 register for SEV-SNP, 3 for multi-platform) as 48-byte hex; it is
+validated and copied by the constructor, which throws `ConfigurationError` for
+a `null` or malformed value.
 
 ## Error Handling
 
