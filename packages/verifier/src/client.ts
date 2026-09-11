@@ -29,9 +29,9 @@ export interface VerifierOptions {
    * Expected enclave measurement supplied by the caller. When set, the GitHub
    * release lookup and Sigstore code verification are skipped and the enclave
    * measurement is compared directly against this value. The measurement's
-   * provenance must be established out of band. It must carry the register
-   * layout of its type (1 for SEV-SNP, 3 for multi-platform) as 48-byte hex,
-   * and is validated and copied at construction.
+   * provenance must be established out of band. It must be an SEV-SNP guest
+   * measurement (`PredicateType.SevGuestV2`, one 48-byte hex register), and
+   * is validated and copied at construction.
    */
   pinnedMeasurement?: AttestationMeasurement;
 }
@@ -89,7 +89,7 @@ export class Verifier {
     const pinned = this.pinnedMeasurement;
 
     const steps: VerificationDocument['steps'] = {
-      fetchDigest: { status: pinned ? 'skipped' : 'success' }, // Already fetched by caller
+      fetchDigest: { status: pinned ? 'skipped' : 'success' },
       verifyCode: { status: pinned ? 'skipped' : 'pending' },
       verifyEnclave: { status: 'pending' },
       compareMeasurements: { status: 'pending' },
@@ -193,12 +193,15 @@ export class Verifier {
   }
 
   private saveFailedVerificationDocument(steps: VerificationDocument['steps'], domain: string): void {
+    const pinned = this.pinnedMeasurement;
     this.verificationDocument = {
       schemaVersion: VERIFICATION_DOCUMENT_SCHEMA_VERSION,
       configRepo: this.configRepo,
       enclaveHost: domain,
-      releaseDigest: '',
-      codeMeasurement: { type: '', registers: [] },
+      releaseDigest: pinned ? PINNED_NO_DIGEST : '',
+      codeMeasurement: pinned
+        ? { type: pinned.type, registers: [...pinned.registers] }
+        : { type: '', registers: [] },
       enclaveMeasurement: { measurement: { type: '', registers: [] } },
       tlsPublicKey: '',
       hpkePublicKey: '',
