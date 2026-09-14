@@ -25,6 +25,6 @@ jobs:
       - name: Install dependencies
         run: npm ci
       - name: Scan for vulnerabilities
-        run: npm audit --omit=dev
+        run: npm audit
       - name: Check package provenance signatures
         run: npm audit signatures
