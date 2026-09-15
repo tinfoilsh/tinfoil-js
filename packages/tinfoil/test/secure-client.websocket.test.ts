@@ -5,23 +5,22 @@ const MOCK_MEASUREMENT_TYPE = "https://tinfoil.sh/predicate/sev-snp-guest/v2";
 const MOCK_FINGERPRINT = "ab".repeat(32);
 
 const verifyMock = vi.fn(async () => ({
-  tlsPublicKeyFingerprint: MOCK_FINGERPRINT,
-  hpkePublicKey: "mock-hpke-public-key",
-  measurement: { type: MOCK_MEASUREMENT_TYPE, registers: [] },
+  codeDigest: "test-digest",
+  codeTag: "test-release",
+  codeMeasurement: { type: MOCK_MEASUREMENT_TYPE, registers: ["ab".repeat(48)] },
+  enclaveMeasurement: { type: MOCK_MEASUREMENT_TYPE, registers: ["ab".repeat(48)] },
+  cryptoMaterial: [
+    { id: "tls", format: "https://tinfoil.sh/key/spki-fp-sha256/v1", data: MOCK_FINGERPRINT },
+    { id: "hpke", format: "https://tinfoil.sh/key/x25519-hpke/v1", data: "mock-hpke-public-key" },
+  ],
 }));
 
 vi.mock("../src/verifier.js", async (importOriginal) => {
   const original = await importOriginal<typeof import("../src/verifier.js")>();
   return {
     ...original,
-    Verifier: class {
-      verifyBundle() {
-        return verifyMock();
-      }
-      getVerificationDocument() {
-        return null;
-      }
-    },
+    fetchAttestation: vi.fn(async () => new Uint8Array([1, 2, 3])),
+    verifyDocumentV3: () => verifyMock(),
   };
 });
 
@@ -55,11 +54,11 @@ vi.mock("../src/pinned-ws.js", () => ({
 
 import { SecureClient } from "../src/secure-client.js";
 import { AttestationError } from "../src/verifier.js";
-import { fetchAttestationBundle } from "../src/atc.js";
+import { fetchRouter } from "../src/atc.js";
 
 beforeEach(() => {
   createPinnedWebSocketMock.mockClear();
-  vi.mocked(fetchAttestationBundle).mockClear();
+  vi.mocked(fetchRouter).mockClear();
   // Pin the user cache secret so client init never touches ~/.tinfoil.
   vi.stubEnv("TINFOIL_USER_CACHE_SECRET", "test-secret");
 });
@@ -119,7 +118,7 @@ describe("SecureClient.createWebSocket", () => {
   it("re-attests after a TLS pin failure", async () => {
     const client = new SecureClient();
     const socket = await client.createWebSocket("/v1/realtime?model=test-model");
-    expect(fetchAttestationBundle).toHaveBeenCalledTimes(1);
+    expect(fetchRouter).toHaveBeenCalledTimes(1);
 
     // A stale pin (enclave rotated its TLS key) surfaces as an `error` event;
     // the client should drop its cached attestation so the next call re-attests.
@@ -131,18 +130,18 @@ describe("SecureClient.createWebSocket", () => {
     );
 
     await client.createWebSocket("/v1/realtime?model=test-model");
-    expect(fetchAttestationBundle).toHaveBeenCalledTimes(2);
+    expect(fetchRouter).toHaveBeenCalledTimes(2);
   });
 
   it("keeps the cached attestation on an unrelated socket error", async () => {
     const client = new SecureClient();
     const socket = await client.createWebSocket("/v1/realtime?model=test-model");
-    expect(fetchAttestationBundle).toHaveBeenCalledTimes(1);
+    expect(fetchRouter).toHaveBeenCalledTimes(1);
 
     socket.emit("error", new Error("ECONNRESET"));
 
     await client.createWebSocket("/v1/realtime?model=test-model");
-    expect(fetchAttestationBundle).toHaveBeenCalledTimes(1);
+    expect(fetchRouter).toHaveBeenCalledTimes(1);
   });
 });
 

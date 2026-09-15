@@ -18,6 +18,7 @@
     "test": "vitest run",
     "test:integration": "RUN_TINFOIL_INTEGRATION=true npm test",
     "test:browser": "vitest run --config vite.config.playwright.ts",
+    "test:browser:conformance": "npm run build && node scripts/sync-v3-fixtures.mjs && vitest run --config vite.config.conformance.ts",
     "test:browser:integration": "vitest run --config vite.config.integration.ts",
     "check:es2020": "acorn --ecma2020 --module --silent dist/*.js",
     "clean": "rm -rf dist",
