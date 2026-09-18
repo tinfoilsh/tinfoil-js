@@ -7,14 +7,12 @@ const REGISTER_HEX_LENGTH = 96;
 const HEX_PATTERN = /^[0-9a-f]+$/;
 
 /**
- * Register layout each supported pin type must carry. This verifier only
+ * Register count for the supported SEV-SNP pin type. This verifier only
  * verifies SEV-SNP attestation and compares only the SNP register, so a pin
  * is an SEV-SNP guest measurement; multi-platform and TDX pins are rejected
  * rather than accepted with registers that would never be compared.
  */
-const REGISTER_COUNTS: Record<string, number> = {
-  [PredicateType.SevGuestV2]: 1,
-};
+const REGISTER_COUNT = 1;
 
 /**
  * Validates a caller-supplied code measurement and returns an independent,
@@ -33,16 +31,15 @@ export function validatePinnedMeasurement(measurement: unknown): AttestationMeas
   if (typeof type !== 'string' || type === '') {
     throw new ConfigurationError('pinnedMeasurement must include a type');
   }
-  const expectedCount = REGISTER_COUNTS[type];
-  if (expectedCount === undefined) {
+  if (type !== PredicateType.SevGuestV2) {
     throw new ConfigurationError(`pinnedMeasurement has unsupported type "${type}"`);
   }
   if (!Array.isArray(registers)) {
     throw new ConfigurationError('pinnedMeasurement.registers must be an array');
   }
-  if (registers.length !== expectedCount) {
+  if (registers.length !== REGISTER_COUNT) {
     throw new ConfigurationError(
-      `pinnedMeasurement of type "${type}" must have ${expectedCount} register(s), got ${registers.length}`
+      `pinnedMeasurement of type "${type}" must have ${REGISTER_COUNT} register(s), got ${registers.length}`
     );
   }
 
@@ -59,6 +56,11 @@ export function validatePinnedMeasurement(measurement: unknown): AttestationMeas
     }
     return lowered;
   });
+  if (normalized.length !== REGISTER_COUNT) {
+    throw new ConfigurationError(
+      `pinnedMeasurement of type "${type}" must have ${REGISTER_COUNT} register(s), got ${normalized.length}`
+    );
+  }
 
   return { type, registers: normalized };
 }

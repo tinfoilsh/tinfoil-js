@@ -69,34 +69,45 @@ export class Verifier {
   }
 
   async verify(): Promise<AttestationResponse> {
-    if (!this.serverURL) {
-      throw new ConfigurationError("serverURL is required for verify(). Use verifyBundle() with an attestation bundle instead.");
+    const steps = this.startVerificationAttempt();
+    let domain = '';
+    let bundle: VerifiableAttestationBundle;
+    try {
+      if (!this.serverURL) {
+        throw new ConfigurationError("serverURL is required for verify(). Use verifyBundle() with an attestation bundle instead.");
+      }
+      // The certificate is checked against the hostname; the fetch keeps any
+      // explicit port so attestation comes from the same origin as requests.
+      const serverURL = new URL(this.serverURL);
+      domain = serverURL.hostname;
+      this.saveUnverifiedDocument(steps, domain);
+      if (this.pinnedMeasurement) {
+        const material = await fetchEnclaveAttestationMaterial(serverURL.host);
+        bundle = { domain, ...material };
+      } else {
+        const material = await assembleAttestationBundle(serverURL.host, this.configRepo);
+        bundle = { ...material, domain };
+      }
+    } catch (error) {
+      steps.otherError = { status: 'failed', error: error instanceof Error ? error.message : String(error) };
+      this.saveUnverifiedDocument(steps, domain);
+      throw error;
     }
-    // The certificate is checked against the hostname; the fetch keeps any
-    // explicit port so attestation comes from the same origin as requests.
-    const serverURL = new URL(this.serverURL);
-    const domain = serverURL.hostname;
-    if (this.pinnedMeasurement) {
-      const material = await fetchEnclaveAttestationMaterial(serverURL.host);
-      return this.verifyBundle({ domain, ...material });
-    }
-    const bundle = await assembleAttestationBundle(serverURL.host, this.configRepo);
-    return this.verifyBundle({ ...bundle, domain });
+    return this.verifyBundle(bundle);
   }
 
   async verifyBundle(bundle: VerifiableAttestationBundle): Promise<AttestationResponse> {
-    const { enclaveAttestationReport: attestationDoc, vcek, releaseTag: selectedReleaseTag, sigstoreBundle, domain, enclaveCert } = bundle;
+    const steps = this.startVerificationAttempt();
     const pinned = this.pinnedMeasurement;
-
-    const steps: VerificationDocument['steps'] = {
-      fetchDigest: { status: pinned ? 'skipped' : 'success' },
-      verifyCode: { status: pinned ? 'skipped' : 'pending' },
-      verifyEnclave: { status: 'pending' },
-      compareMeasurements: { status: 'pending' },
-      verifyCertificate: { status: 'pending' },
-    };
+    let domain = '';
 
     try {
+      const { enclaveAttestationReport: attestationDoc, vcek, releaseTag: selectedReleaseTag, sigstoreBundle, enclaveCert } = bundle;
+      domain = bundle.domain;
+      this.saveUnverifiedDocument(steps, domain);
+      if (!pinned && bundle.digest !== undefined) {
+        steps.fetchDigest = { status: 'success' };
+      }
       // Step 1: Verify enclave attestation
       let amdVerification: AttestationResponse;
       try {
@@ -104,7 +115,6 @@ export class Verifier {
         steps.verifyEnclave = { status: 'success' };
       } catch (error) {
         steps.verifyEnclave = { status: 'failed', error: (error as Error).message };
-        this.saveFailedVerificationDocument(steps, domain);
         throw error;
       }
 
@@ -133,7 +143,6 @@ export class Verifier {
           steps.verifyCode = { status: 'success' };
         } catch (error) {
           steps.verifyCode = { status: 'failed', error: (error as Error).message };
-          this.saveFailedVerificationDocument(steps, domain);
           throw error;
         }
       }
@@ -144,7 +153,6 @@ export class Verifier {
         steps.compareMeasurements = { status: 'success' };
       } catch (error) {
         steps.compareMeasurements = { status: 'failed', error: (error as Error).message };
-        this.saveFailedVerificationDocument(steps, domain);
         throw error;
       }
 
@@ -159,7 +167,6 @@ export class Verifier {
         steps.verifyCertificate = { status: 'success' };
       } catch (error) {
         steps.verifyCertificate = { status: 'failed', error: (error as Error).message };
-        this.saveFailedVerificationDocument(steps, domain);
         throw error;
       }
 
@@ -183,16 +190,30 @@ export class Verifier {
         steps
       };
 
-      return amdVerification;
+      return structuredClone(amdVerification);
     } catch (error) {
-      if (!this.verificationDocument) {
-        this.saveFailedVerificationDocument(steps, domain);
+      if (!Object.values(steps).some(step => step?.status === 'failed')) {
+        steps.otherError = { status: 'failed', error: error instanceof Error ? error.message : String(error) };
       }
+      this.saveUnverifiedDocument(steps, domain);
       throw error;
     }
   }
 
-  private saveFailedVerificationDocument(steps: VerificationDocument['steps'], domain: string): void {
+  private startVerificationAttempt(): VerificationDocument['steps'] {
+    const provenanceStatus = this.pinnedMeasurement ? 'skipped' : 'pending';
+    const steps: VerificationDocument['steps'] = {
+      fetchDigest: { status: provenanceStatus },
+      verifyCode: { status: provenanceStatus },
+      verifyEnclave: { status: 'pending' },
+      compareMeasurements: { status: 'pending' },
+      verifyCertificate: { status: 'pending' },
+    };
+    this.saveUnverifiedDocument(steps, '');
+    return steps;
+  }
+
+  private saveUnverifiedDocument(steps: VerificationDocument['steps'], domain: string): void {
     const pinned = this.pinnedMeasurement;
     this.verificationDocument = {
       schemaVersion: VERIFICATION_DOCUMENT_SCHEMA_VERSION,

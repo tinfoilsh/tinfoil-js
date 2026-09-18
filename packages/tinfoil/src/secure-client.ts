@@ -257,18 +257,19 @@ export class SecureClient {
    */
   public async ready(): Promise<void> {
     if (!this.initPromise) {
+      this.clearDerivedState();
       this.initPromise = this.initSecureClient().catch(async err => {
         // Only try recovery if the error is transient (network I/O, attestation errors)
         if (err instanceof FetchError || err instanceof AttestationError) {
           this.clearDerivedState(); // Start with a new enclave
           await new Promise(r => setTimeout(r, INIT_RETRY_DELAY_MS));
           return this.initSecureClient().catch(retryErr => {
-            this.reset();
+            this.recordInitializationFailure(retryErr);
             throw retryErr;
           });
         }
         // Everything else (ConfigurationError, bugs) — propagate immediately
-        this.reset();
+        this.recordInitializationFailure(err);
         throw err;
       });
     }
@@ -279,11 +280,26 @@ export class SecureClient {
    * Clear derived state without touching initPromise (preserves deduplication).
    */
   private clearDerivedState(): void {
-    this._transport = null;
+    this.clearTransportState();
     this.verificationDocument = createPendingVerificationDocument(this.config.configRepo, this.config.pinnedMeasurement);
+  }
+
+  private clearTransportState(): void {
+    this._transport = null;
     this.resolvedEnclaveURL = undefined;
     this.resolvedBaseURL = undefined;
     this.attestedTlsPublicKeyFingerprint = undefined;
+  }
+
+  private recordInitializationFailure(error: unknown): void {
+    this.initPromise = null;
+    this.clearTransportState();
+    const steps = { ...this.verificationDocument.steps };
+    if (!Object.values(steps).some(step => step?.status === 'failed')) {
+      steps.otherError = { status: 'failed', error: error instanceof Error ? error.message : String(error) };
+    }
+    this.verificationDocument = { ...this.verificationDocument, securityVerified: false, steps };
+    delete this.verificationDocument.verifiedAt;
   }
 
   /**
