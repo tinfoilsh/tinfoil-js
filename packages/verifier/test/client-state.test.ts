@@ -16,9 +16,12 @@ const pinnedMeasurement = {
 };
 const CONFIG_REPO = 'tinfoilsh/confidential-model-router';
 
-function mockMaterialFetch(releaseTag?: string) {
+function mockMaterialFetch(releaseTag?: string, { failRelease = false } = {}) {
   const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
     const url = new URL(String(input));
+    if (failRelease && url.pathname.endsWith('/releases/latest')) {
+      throw new Error('release lookup unavailable');
+    }
     if (url.pathname === '/.well-known/tinfoil-attestation') {
       return Response.json(bundle.enclaveAttestationReport);
     }
@@ -113,10 +116,11 @@ describe.each(['release', 'pinned'] as const)('Verifier attempt state (%s)', mod
     expect(failed.enclaveHost).toBe(bundle.domain);
     expect(failed.tlsPublicKey).toBe('');
     expect(failed.hpkePublicKey).toBe('');
-    // Unreachable enclave material is attributed to the enclave step, matching Go.
+    // Unreachable enclave material is attributed to the enclave step, matching
+    // Go. Every fetch fails here, so the release lookup fails too when not pinned.
     expect(failed.steps.verifyEnclave).toMatchObject({ status: 'failed', error: expect.stringContaining('Network error') });
     expect(failed.steps.otherError).toBeUndefined();
-    expect(failed.steps.fetchDigest.status).toBe(mode === 'pinned' ? 'skipped' : 'pending');
+    expect(failed.steps.fetchDigest.status).toBe(mode === 'pinned' ? 'skipped' : 'failed');
     expect(failed.steps.verifyCode.status).toBe(mode === 'pinned' ? 'skipped' : 'pending');
     if (mode === 'pinned') {
       expect(failed.configRepo).toBe(PINNED_NO_REPO);
@@ -128,6 +132,39 @@ describe.each(['release', 'pinned'] as const)('Verifier attempt state (%s)', mod
     await verifier.verifyBundle(bundle);
     expect(verifier.getVerificationDocument()!.securityVerified).toBe(true);
     expect(verifier.getVerificationDocument()!.steps.otherError).toBeUndefined();
+  });
+
+  it('attributes a release-lookup failure to fetchDigest and leaves the enclave step untouched', async () => {
+    if (mode === 'pinned') return; // no release lookup happens when pinned
+    const verifier = createVerifier();
+    // Enclave endpoints answer with real fixture material; only the GitHub
+    // release lookup fails.
+    mockMaterialFetch(bundle.releaseTag, { failRelease: true });
+    vi.useFakeTimers();
+
+    const attempt = verifier.verify();
+    const rejection = expect(attempt).rejects.toThrow(FetchError);
+    await vi.runAllTimersAsync();
+    await rejection;
+
+    const failed = verifier.getVerificationDocument()!;
+    expect(failed.securityVerified).toBe(false);
+    expect(failed.steps.fetchDigest).toMatchObject({ status: 'failed', error: expect.stringContaining('releases/latest') });
+    expect(failed.steps.verifyEnclave.status).toBe('pending');
+    expect(failed.steps.verifyCode.status).toBe('pending');
+    expect(failed.steps.otherError).toBeUndefined();
+    vi.useRealTimers();
+  });
+
+  it('records a malformed server URL without leaving the document pending', async () => {
+    const verifier = new Verifier(mode === 'pinned' ? { pinnedMeasurement, serverURL: 'not a url' } : { configRepo: CONFIG_REPO, serverURL: 'not a url' });
+
+    await expect(verifier.verify()).rejects.toThrow('serverURL must be a valid URL');
+
+    const failed = verifier.getVerificationDocument()!;
+    expect(failed.securityVerified).toBe(false);
+    expect(failed.steps.otherError).toMatchObject({ status: 'failed', error: expect.stringContaining('valid URL') });
+    expect(failed.steps.verifyEnclave.status).toBe('pending');
   });
 
   it('records an early malformed-bundle failure instead of retaining prior success', async () => {
