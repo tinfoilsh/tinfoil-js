@@ -166,8 +166,11 @@ describe('Pinned Measurement Verification', () => {
   it('rejects a bundle without release provenance when not pinned', async () => {
     const verifier = new Verifier({ configRepo: 'tinfoilsh/confidential-model-router' });
 
+    // Same error class as any other bad bundle-service material, so
+    // SecureClient's retry classification is unchanged from before pinning.
+    await expect(verifier.verifyBundle(pinnedBundle)).rejects.toThrow(AttestationError);
     await expect(verifier.verifyBundle(pinnedBundle)).rejects.toThrow('missing release provenance');
-    expect(verifier.getVerificationDocument()!.steps.fetchDigest.status).toBe('pending');
+    expect(verifier.getVerificationDocument()!.steps.fetchDigest.status).toBe('failed');
     expect(verifier.getVerificationDocument()!.steps.verifyCode.status).toBe('failed');
   });
 

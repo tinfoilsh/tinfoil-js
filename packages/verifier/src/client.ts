@@ -4,7 +4,7 @@ import { assembleAttestationBundle, fetchEnclaveAttestationMaterial } from './bu
 import { verifyCertificate } from './cert-verify.js';
 import { compareMeasurements, measurementFingerprint } from './types.js';
 import type { AttestationResponse, AttestationMeasurement, VerificationDocument, AttestationBundle, SoftwareIdentity } from './types.js';
-import { ConfigurationError } from './errors.js';
+import { AttestationError, ConfigurationError } from './errors.js';
 import { cloneVerificationDocument } from './json.js';
 import { validatePinnedMeasurement } from './pin.js';
 import { VERIFICATION_DOCUMENT_SCHEMA_VERSION, VERIFIER_NAME, VERIFIER_VERSION } from './version.js';
@@ -129,7 +129,11 @@ export class Verifier {
       } else {
         try {
           if (bundle.digest === undefined || sigstoreBundle === undefined) {
-            throw new ConfigurationError("Attestation bundle is missing release provenance (digest, sigstoreBundle)");
+            // Malformed bundle material is an attestation failure like any other
+            // bad input from the bundle service, so it keeps the same retry
+            // classification rather than being treated as caller misconfiguration.
+            steps.fetchDigest = { status: 'failed', error: 'Attestation bundle is missing release digest or Sigstore bundle' };
+            throw new AttestationError("Attestation bundle is missing release provenance (digest, sigstoreBundle)");
           }
           digest = bundle.digest;
           const verifiedCode = await verifySigstoreBundle(
