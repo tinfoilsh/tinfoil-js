@@ -70,17 +70,20 @@ export class Verifier {
 
   async verify(): Promise<AttestationResponse> {
     const steps = this.startVerificationAttempt();
-    let domain = '';
+    if (!this.serverURL) {
+      const error = new ConfigurationError("serverURL is required for verify(). Use verifyBundle() with an attestation bundle instead.");
+      steps.otherError = { status: 'failed', error: error.message };
+      this.saveUnverifiedDocument(steps, '');
+      throw error;
+    }
+    // The certificate is checked against the hostname; the fetch keeps any
+    // explicit port so attestation comes from the same origin as requests.
+    const serverURL = new URL(this.serverURL);
+    const domain = serverURL.hostname;
+    this.saveUnverifiedDocument(steps, domain);
+
     let bundle: VerifiableAttestationBundle;
     try {
-      if (!this.serverURL) {
-        throw new ConfigurationError("serverURL is required for verify(). Use verifyBundle() with an attestation bundle instead.");
-      }
-      // The certificate is checked against the hostname; the fetch keeps any
-      // explicit port so attestation comes from the same origin as requests.
-      const serverURL = new URL(this.serverURL);
-      domain = serverURL.hostname;
-      this.saveUnverifiedDocument(steps, domain);
       if (this.pinnedMeasurement) {
         const material = await fetchEnclaveAttestationMaterial(serverURL.host);
         bundle = { domain, ...material };
@@ -89,7 +92,10 @@ export class Verifier {
         bundle = { ...material, domain };
       }
     } catch (error) {
-      steps.otherError = { status: 'failed', error: error instanceof Error ? error.message : String(error) };
+      // Fetching the enclave's evidence is part of verifying the enclave, so an
+      // unreachable or misbehaving enclave is reported on that step (as the Go
+      // verifier does) rather than as an unattributed failure.
+      steps.verifyEnclave = { status: 'failed', error: error instanceof Error ? error.message : String(error) };
       this.saveUnverifiedDocument(steps, domain);
       throw error;
     }

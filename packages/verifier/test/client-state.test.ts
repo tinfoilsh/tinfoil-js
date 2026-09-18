@@ -113,8 +113,9 @@ describe.each(['release', 'pinned'] as const)('Verifier attempt state (%s)', mod
     expect(failed.enclaveHost).toBe(bundle.domain);
     expect(failed.tlsPublicKey).toBe('');
     expect(failed.hpkePublicKey).toBe('');
-    expect(failed.steps.otherError).toMatchObject({ status: 'failed', error: expect.stringContaining('Network error') });
-    expect(failed.steps.verifyEnclave.status).toBe('pending');
+    // Unreachable enclave material is attributed to the enclave step, matching Go.
+    expect(failed.steps.verifyEnclave).toMatchObject({ status: 'failed', error: expect.stringContaining('Network error') });
+    expect(failed.steps.otherError).toBeUndefined();
     expect(failed.steps.fetchDigest.status).toBe(mode === 'pinned' ? 'skipped' : 'pending');
     expect(failed.steps.verifyCode.status).toBe(mode === 'pinned' ? 'skipped' : 'pending');
     if (mode === 'pinned') {
