@@ -1,6 +1,10 @@
 import { describe, it, expect } from 'vitest';
+import { gunzipSync, gzipSync } from 'node:zlib';
 import { Verifier, PINNED_NO_REPO, PINNED_NO_DIGEST } from '../src/client.js';
 import { ConfigurationError, AttestationError } from '../src/errors.js';
+import { SIGNATURE_OFFSET } from '../src/sev/constants.js';
+import { Report } from '../src/sev/report.js';
+import { defaultValidationOptions } from '../src/sev/validation.js';
 import { PredicateType } from '../src/types.js';
 import type { AttestationBundle, AttestationMeasurement } from '../src/types.js';
 import bundleFixture from './fixtures/attestation-bundle.json';
@@ -92,6 +96,63 @@ describe('Pinned Measurement Verification', () => {
     await expect(verifier.verifyBundle(pinnedBundle)).resolves.toBeDefined();
   });
 
+  it('rejects an invalid report signature even when the measurement is pinned', async () => {
+    const pinnedMeasurement = await enclaveMeasurement();
+    const verifier = new Verifier({ pinnedMeasurement });
+    const reportBytes = gunzipSync(Buffer.from(bundle.enclaveAttestationReport.body, 'base64'));
+    reportBytes[SIGNATURE_OFFSET] ^= 1;
+
+    await expect(verifier.verifyBundle({
+      ...pinnedBundle,
+      enclaveAttestationReport: {
+        ...bundle.enclaveAttestationReport,
+        body: gzipSync(reportBytes).toString('base64'),
+      },
+    })).rejects.toThrow('Attestation report signature is invalid');
+
+    const doc = verifier.getVerificationDocument()!;
+    expect(doc.securityVerified).toBe(false);
+    expect(doc.steps.verifyEnclave.status).toBe('failed');
+    expect(doc.steps.compareMeasurements.status).toBe('pending');
+    expect(doc.steps.verifyCode.status).toBe('skipped');
+  });
+
+  it('enforces report policy even when the measurement is pinned', async () => {
+    const pinnedMeasurement = await enclaveMeasurement();
+    const verifier = new Verifier({ pinnedMeasurement });
+    const report = new Report(gunzipSync(Buffer.from(bundle.enclaveAttestationReport.body, 'base64')));
+    const minimumGuestSvn = defaultValidationOptions.minimumGuestSvn;
+    // A stricter policy exercises policy rejection with an authentic signed report.
+    defaultValidationOptions.minimumGuestSvn = report.guestSvn + 1;
+    try {
+      await expect(verifier.verifyBundle(pinnedBundle)).rejects.toThrow('Guest SVN');
+      const doc = verifier.getVerificationDocument()!;
+      expect(doc.securityVerified).toBe(false);
+      expect(doc.steps.verifyEnclave.status).toBe('failed');
+      expect(doc.steps.compareMeasurements.status).toBe('pending');
+      expect(doc.steps.verifyCode.status).toBe('skipped');
+    } finally {
+      defaultValidationOptions.minimumGuestSvn = minimumGuestSvn;
+    }
+  });
+
+  it.each([
+    ['invalid certificate', { enclaveCert: '' }, 'Failed to parse enclave TLS certificate'],
+    ['wrong certificate domain', { domain: 'wrong.example.com' }, 'Certificate domain mismatch'],
+  ] as const)('rejects %s even when the measurement is pinned', async (_name, override, message) => {
+    const pinnedMeasurement = await enclaveMeasurement();
+    const verifier = new Verifier({ pinnedMeasurement });
+
+    await expect(verifier.verifyBundle({ ...pinnedBundle, ...override })).rejects.toThrow(message);
+
+    const doc = verifier.getVerificationDocument()!;
+    expect(doc.securityVerified).toBe(false);
+    expect(doc.steps.verifyEnclave.status).toBe('success');
+    expect(doc.steps.compareMeasurements.status).toBe('success');
+    expect(doc.steps.verifyCertificate?.status).toBe('failed');
+    expect(doc.steps.verifyCode.status).toBe('skipped');
+  });
+
   it('normalizes an uppercase pinned measurement before comparison', async () => {
     const actual = await enclaveMeasurement();
     const verifier = new Verifier({
@@ -106,6 +167,7 @@ describe('Pinned Measurement Verification', () => {
     const verifier = new Verifier({ configRepo: 'tinfoilsh/confidential-model-router' });
 
     await expect(verifier.verifyBundle(pinnedBundle)).rejects.toThrow('missing release provenance');
+    expect(verifier.getVerificationDocument()!.steps.fetchDigest.status).toBe('pending');
     expect(verifier.getVerificationDocument()!.steps.verifyCode.status).toBe('failed');
   });
 
@@ -128,6 +190,7 @@ describe('Pinned Measurement Verification', () => {
     ['empty object', {}],
     ['missing type', { registers: [VALID_REGISTER] }],
     ['empty type', { type: '', registers: [VALID_REGISTER] }],
+    ['inherited property name', { type: 'constructor', registers: [VALID_REGISTER] }],
     ['TDX type', { type: 'https://tinfoil.sh/predicate/tdx-guest/v2', registers: [VALID_REGISTER, VALID_REGISTER, VALID_REGISTER, VALID_REGISTER, VALID_REGISTER] }],
     // This verifier compares only the SNP register, so a multi-platform pin
     // would carry registers that are never enforced.
