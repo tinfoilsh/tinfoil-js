@@ -88,7 +88,16 @@ export async function fetchEnclaveAttestationMaterial(enclaveHost: string): Prom
   return { enclaveAttestationReport: attestation, vcek, enclaveCert };
 }
 
-async function fetchReleaseProvenance(configRepo: string): Promise<Pick<AttestationBundle, 'digest' | 'releaseTag' | 'sigstoreBundle'>> {
+/** Release provenance for the latest signed release of a config repo. */
+export type ReleaseProvenance = Pick<AttestationBundle, 'digest' | 'releaseTag' | 'sigstoreBundle'>;
+
+/**
+ * Resolve the latest release of the config repo, its artifact digest, and the
+ * Sigstore bundle attesting to it.
+ *
+ * @throws FetchError on I/O failure (after retries) or when no bundle exists
+ */
+export async function fetchReleaseProvenance(configRepo: string): Promise<ReleaseProvenance> {
   // 1. Resolve the latest release and its digest
   const release = await withRetry(async () => {
     const { tag_name } = await fetchJson(`${GITHUB_PROXY}/repos/${configRepo}/releases/latest`);

@@ -168,8 +168,9 @@ describe('Pinned Measurement Verification', () => {
 
     // Same error class as any other bad bundle-service material, so
     // SecureClient's retry classification is unchanged from before pinning.
-    await expect(verifier.verifyBundle(pinnedBundle)).rejects.toThrow(AttestationError);
-    await expect(verifier.verifyBundle(pinnedBundle)).rejects.toThrow('missing release provenance');
+    const rejection = verifier.verifyBundle(pinnedBundle);
+    await expect(rejection).rejects.toThrow(AttestationError);
+    await expect(rejection).rejects.toThrow('missing release provenance');
     expect(verifier.getVerificationDocument()!.steps.fetchDigest.status).toBe('failed');
     expect(verifier.getVerificationDocument()!.steps.verifyCode.status).toBe('failed');
   });

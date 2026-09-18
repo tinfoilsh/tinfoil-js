@@ -1,6 +1,6 @@
 import { verifyAttestation as verifyAmdAttestation } from './attestation.js';
 import { verifySigstoreBundle } from './sigstore.js';
-import { assembleAttestationBundle, fetchEnclaveAttestationMaterial } from './bundle.js';
+import { fetchEnclaveAttestationMaterial, fetchReleaseProvenance } from './bundle.js';
 import { verifyCertificate } from './cert-verify.js';
 import { compareMeasurements, measurementFingerprint } from './types.js';
 import type { AttestationResponse, AttestationMeasurement, VerificationDocument, AttestationBundle, SoftwareIdentity } from './types.js';
@@ -15,6 +15,10 @@ import { VERIFICATION_DOCUMENT_SCHEMA_VERSION, VERIFIER_NAME, VERIFIER_VERSION }
  */
 export const PINNED_NO_REPO = 'pinned_no_repo';
 export const PINNED_NO_DIGEST = 'pinned_no_digest';
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
 
 function verifierIdentity(): SoftwareIdentity {
   return { name: VERIFIER_NAME, version: VERIFIER_VERSION };
@@ -76,30 +80,39 @@ export class Verifier {
       this.saveUnverifiedDocument(steps, '');
       throw error;
     }
+    let serverURL: URL;
+    try {
+      serverURL = new URL(this.serverURL);
+    } catch (cause) {
+      const error = new ConfigurationError(`serverURL must be a valid URL. Got: ${this.serverURL}`, { cause: cause as Error });
+      steps.otherError = { status: 'failed', error: error.message };
+      this.saveUnverifiedDocument(steps, '');
+      throw error;
+    }
     // The certificate is checked against the hostname; the fetch keeps any
     // explicit port so attestation comes from the same origin as requests.
-    const serverURL = new URL(this.serverURL);
     const domain = serverURL.hostname;
     this.saveUnverifiedDocument(steps, domain);
 
-    let bundle: VerifiableAttestationBundle;
-    try {
-      if (this.pinnedMeasurement) {
-        const material = await fetchEnclaveAttestationMaterial(serverURL.host);
-        bundle = { domain, ...material };
-      } else {
-        const material = await assembleAttestationBundle(serverURL.host, this.configRepo);
-        bundle = { ...material, domain };
-      }
-    } catch (error) {
-      // Fetching the enclave's evidence is part of verifying the enclave, so an
-      // unreachable or misbehaving enclave is reported on that step (as the Go
-      // verifier does) rather than as an unattributed failure.
-      steps.verifyEnclave = { status: 'failed', error: error instanceof Error ? error.message : String(error) };
-      this.saveUnverifiedDocument(steps, domain);
-      throw error;
+    // The two halves are fetched separately so a failure lands on the step it
+    // belongs to: enclave material on verifyEnclave (as the Go verifier does),
+    // release provenance on fetchDigest.
+    const materialPromise = fetchEnclaveAttestationMaterial(serverURL.host);
+    const provenancePromise = this.pinnedMeasurement ? undefined : fetchReleaseProvenance(this.configRepo);
+    const [materialResult, provenanceResult] = await Promise.allSettled([materialPromise, provenancePromise]);
+
+    if (materialResult.status === 'rejected') {
+      steps.verifyEnclave = { status: 'failed', error: errorMessage(materialResult.reason) };
     }
-    return this.verifyBundle(bundle);
+    if (provenanceResult.status === 'rejected') {
+      steps.fetchDigest = { status: 'failed', error: errorMessage(provenanceResult.reason) };
+    }
+    if (materialResult.status === 'rejected' || provenanceResult.status === 'rejected') {
+      this.saveUnverifiedDocument(steps, domain);
+      throw materialResult.status === 'rejected' ? materialResult.reason : (provenanceResult as PromiseRejectedResult).reason;
+    }
+
+    return this.verifyBundle({ domain, ...materialResult.value, ...provenanceResult.value });
   }
 
   async verifyBundle(bundle: VerifiableAttestationBundle): Promise<AttestationResponse> {
@@ -138,8 +151,9 @@ export class Verifier {
             // Malformed bundle material is an attestation failure like any other
             // bad input from the bundle service, so it keeps the same retry
             // classification rather than being treated as caller misconfiguration.
-            steps.fetchDigest = { status: 'failed', error: 'Attestation bundle is missing release digest or Sigstore bundle' };
-            throw new AttestationError("Attestation bundle is missing release provenance (digest, sigstoreBundle)");
+            const message = 'Attestation bundle is missing release provenance (digest, sigstoreBundle)';
+            steps.fetchDigest = { status: 'failed', error: message };
+            throw new AttestationError(message);
           }
           digest = bundle.digest;
           const verifiedCode = await verifySigstoreBundle(
@@ -203,7 +217,7 @@ export class Verifier {
       return structuredClone(amdVerification);
     } catch (error) {
       if (!Object.values(steps).some(step => step?.status === 'failed')) {
-        steps.otherError = { status: 'failed', error: error instanceof Error ? error.message : String(error) };
+        steps.otherError = { status: 'failed', error: errorMessage(error) };
       }
       this.saveUnverifiedDocument(steps, domain);
       throw error;
