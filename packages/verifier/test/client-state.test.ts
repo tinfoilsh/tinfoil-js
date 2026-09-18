@@ -134,8 +134,8 @@ describe.each(['release', 'pinned'] as const)('Verifier attempt state (%s)', mod
     expect(verifier.getVerificationDocument()!.steps.otherError).toBeUndefined();
   });
 
-  it('attributes a release-lookup failure to fetchDigest and leaves the enclave step untouched', async () => {
-    if (mode === 'pinned') return; // no release lookup happens when pinned
+  // No release lookup happens when pinned, so the case only exists for release mode.
+  it.skipIf(mode === 'pinned')('attributes a release-lookup failure to fetchDigest and leaves the enclave step untouched', async () => {
     const verifier = createVerifier();
     // Enclave endpoints answer with real fixture material; only the GitHub
     // release lookup fails.
