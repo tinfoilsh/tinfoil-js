@@ -56,6 +56,8 @@ export function validatePinnedMeasurement(measurement: unknown): AttestationMeas
     }
     return lowered;
   });
+  // Array.from consults the iterator, which a Proxy can make disagree with
+  // .length, so the count is checked on the materialized copy.
   if (normalized.length !== REGISTER_COUNT) {
     throw new ConfigurationError(
       `pinnedMeasurement of type "${type}" must have ${REGISTER_COUNT} register(s), got ${normalized.length}`
