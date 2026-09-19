@@ -479,6 +479,7 @@ describe("SecureClient", () => {
       await vi.runAllTimersAsync();
       await rejection;
 
+      expect(verifyMock).toHaveBeenCalledTimes(2);
       expect(client.getVerificationDocument()).toEqual(failedDocument);
       expect(client.getBaseURL()).toBeUndefined();
       expect(client.getEnclaveURL()).toBeUndefined();
@@ -515,6 +516,7 @@ describe("SecureClient", () => {
       await vi.runAllTimersAsync();
       await rejection;
 
+      expect(createSecureFetchMock).toHaveBeenCalledTimes(retryable ? 2 : 1);
       const failed = client.getVerificationDocument();
       expect(failed.securityVerified).toBe(false);
       expect(failed.verifiedAt).toBeUndefined();

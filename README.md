@@ -237,7 +237,7 @@ const client = new TinfoilAI({
 });
 ```
 
-`pinnedMeasurement` requires `enclaveURL` and cannot be combined with `configRepo` or `attestationBundleURL`. The measurement must be an SEV-SNP guest measurement (`PredicateType.SevGuestV2` with one 48-byte hex register); it is validated and copied when the client is constructed, so a `null` or malformed pin throws `ConfigurationError` rather than falling back to release verification. The same option is accepted by `SecureClient`, `createTinfoilAI`, and `Verifier`.
+In `TinfoilAI`, `SecureClient`, and `createTinfoilAI`, `pinnedMeasurement` requires `enclaveURL` and cannot be combined with `configRepo` or `attestationBundleURL`. `Verifier` also accepts the pin: it uses `serverURL` for `verify()`, or no URL when calling `verifyBundle()` with pre-fetched material. The measurement must be an SEV-SNP guest measurement (`PredicateType.SevGuestV2` with one 48-byte hex register); it is validated and copied at construction, so a `null` or malformed pin throws `ConfigurationError` rather than falling back to release verification.
 
 After successful verification, `codeFingerprint` and `enclaveFingerprint` match.
 For SEV-SNP, both are the single measurement register. This SDK does not support
