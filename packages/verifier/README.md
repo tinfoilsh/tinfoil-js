@@ -82,6 +82,11 @@ await verifier.verify();
 validated and copied by the constructor, which throws `ConfigurationError` for
 a `null` or malformed value.
 
+On success, `codeFingerprint` and `enclaveFingerprint` are equal: both represent
+the expected and authenticated SEV-SNP measurement as one register. The same
+contract applies to release-backed verification. This package does not verify
+TDX attestation; pinning still retains SEV-SNP attestation and certificate checks.
+
 ## Error Handling
 
 For callers that want structured error handling, these error classes are part of the public API:

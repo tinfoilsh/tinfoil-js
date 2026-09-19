@@ -239,6 +239,11 @@ const client = new TinfoilAI({
 
 `pinnedMeasurement` requires `enclaveURL` and cannot be combined with `configRepo` or `attestationBundleURL`. The measurement must be an SEV-SNP guest measurement (`PredicateType.SevGuestV2` with one 48-byte hex register); it is validated and copied when the client is constructed, so a `null` or malformed pin throws `ConfigurationError` rather than falling back to release verification. The same option is accepted by `SecureClient`, `createTinfoilAI`, and `Verifier`.
 
+After successful verification, `codeFingerprint` and `enclaveFingerprint` match.
+For SEV-SNP, both are the single measurement register. This SDK does not support
+TDX pinning. Fingerprint equality does not replace attestation-signature,
+platform-policy, or certificate-binding checks.
+
 ## Proxy Support
 
 Route requests through your own backend while keeping request bodies encrypted end-to-end. This lets you:
