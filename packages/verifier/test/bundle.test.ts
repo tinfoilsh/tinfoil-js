@@ -158,6 +158,8 @@ describe('Bundle Verification', () => {
 
     expect(doc!.codeFingerprint).toBeTruthy();
     expect(doc!.enclaveFingerprint).toBeTruthy();
+    expect(doc!.codeFingerprint).toBe(doc!.enclaveFingerprint);
+    expect(doc!.enclaveFingerprint).toBe(doc!.enclaveMeasurement.measurement.registers[0]);
     expect(doc!.releaseDigest).toBe(bundle.digest);
   });
 

@@ -35,6 +35,12 @@ const verifyMock = vi.fn(async () => ({
   measurement: { type: MOCK_MEASUREMENT_TYPE, registers: [] },
 }));
 const getVerificationDocumentMock = vi.fn(() => mockVerificationDocument);
+const verifierConstructorMock = vi.fn();
+const fetchEnclaveAttestationMaterialMock = vi.fn(async () => ({
+  enclaveAttestationReport: { format: "test", body: "test" },
+  vcek: "test-vcek",
+  enclaveCert: "test-cert",
+}));
 
 const mockFetch = vi.fn(async () => new Response(JSON.stringify({ message: "success" })));
 const mockGetSessionRecoveryToken = vi.fn(async () => ({ exportedSecret: new Uint8Array(), requestEnc: new Uint8Array() }));
@@ -51,9 +57,20 @@ const createSecureFetchMock = vi.fn<
   getSessionRecoveryToken: mockGetSessionRecoveryToken,
 }));
 
-vi.mock("../src/verifier.js", () => ({
+vi.mock("../src/verifier.js", async () => {
+  // Pin validation is real so the SecureClient tests exercise the actual
+  // rejection and normalization rules rather than a stand-in.
+  const { validatePinnedMeasurement } = await vi.importActual<typeof import("../src/verifier.js")>("../src/verifier.js");
+  return {
   cloneVerificationDocument: (document: typeof mockVerificationDocument) => structuredClone(document),
+  PINNED_NO_REPO: "pinned_no_repo",
+  PINNED_NO_DIGEST: "pinned_no_digest",
+  validatePinnedMeasurement,
+  fetchEnclaveAttestationMaterial: fetchEnclaveAttestationMaterialMock,
   Verifier: class {
+    constructor(options: unknown) {
+      verifierConstructorMock(options);
+    }
     verify() {
       return verifyMock();
     }
@@ -89,7 +106,8 @@ vi.mock("../src/verifier.js", () => ({
     sigstoreBundle: {},
     vcek: "test-vcek",
   })),
-}));
+  };
+});
 
 vi.mock("../src/secure-fetch.js", () => ({
   createSecureFetch: createSecureFetchMock,
@@ -440,6 +458,111 @@ describe("SecureClient", () => {
       await expect(client.ready()).rejects.toThrow("unexpected bug");
       expect(verifyMock).toHaveBeenCalledTimes(1);
     });
+
+    it.each(["compareMeasurements", "verifyCertificate"])("preserves a terminal %s failure document", async failedStep => {
+      const { AttestationError } = await import("../src/verifier.js");
+      const { SecureClient } = await import("../src/secure-client");
+      const error = new AttestationError(`${failedStep} failed`);
+      const failedDocument = {
+        ...structuredClone(mockVerificationDocument),
+        securityVerified: false,
+        steps: {
+          ...mockVerificationDocument.steps,
+          [failedStep]: { status: "failed", error: error.message },
+        },
+      };
+      verifyMock.mockRejectedValueOnce(error).mockRejectedValueOnce(error);
+      getVerificationDocumentMock.mockReturnValueOnce(failedDocument).mockReturnValueOnce(failedDocument);
+      const client = new SecureClient();
+
+      const rejection = expect(client.ready()).rejects.toBe(error);
+      await vi.runAllTimersAsync();
+      await rejection;
+
+      expect(client.getVerificationDocument()).toEqual(failedDocument);
+      expect(client.getBaseURL()).toBeUndefined();
+      expect(client.getEnclaveURL()).toBeUndefined();
+      expect(Reflect.get(client, "attestedTlsPublicKeyFingerprint")).toBeUndefined();
+      await expect(client.getSessionRecoveryToken()).rejects.toThrow("No session recovery token available");
+      expect(createSecureFetchMock).not.toHaveBeenCalled();
+      expect(mockFetch).not.toHaveBeenCalled();
+
+      client.reset();
+      const pending = client.getVerificationDocument();
+      expect(pending.securityVerified).toBe(false);
+      expect(pending.steps.compareMeasurements.status).toBe("pending");
+      expect(pending.steps.otherError).toBeUndefined();
+      expect(Object.values(pending.steps).some(step => step?.status === "failed")).toBe(false);
+    });
+
+    it.each([false, true])("records terminal transport creation failure (retryable: %s)", async retryable => {
+      const { AttestationError } = await import("../src/verifier.js");
+      const { SecureClient } = await import("../src/secure-client");
+      const error = retryable ? new AttestationError("transport unavailable") : new Error("transport unavailable");
+      const successfulDocument = {
+        ...structuredClone(mockVerificationDocument),
+        verifiedAt: "2026-01-01T00:00:00.000Z",
+      };
+      createSecureFetchMock.mockRejectedValueOnce(error);
+      getVerificationDocumentMock.mockReturnValueOnce(successfulDocument);
+      if (retryable) {
+        createSecureFetchMock.mockRejectedValueOnce(error);
+        getVerificationDocumentMock.mockReturnValueOnce(successfulDocument);
+      }
+      const client = new SecureClient();
+
+      const rejection = expect(client.ready()).rejects.toBe(error);
+      await vi.runAllTimersAsync();
+      await rejection;
+
+      const failed = client.getVerificationDocument();
+      expect(failed.securityVerified).toBe(false);
+      expect(failed.verifiedAt).toBeUndefined();
+      expect(failed.steps.verifyEnclave.status).toBe("success");
+      expect(failed.steps.otherError).toEqual({ status: "failed", error: error.message });
+      expect(client.getBaseURL()).toBeUndefined();
+      expect(client.getEnclaveURL()).toBeUndefined();
+      expect(Reflect.get(client, "attestedTlsPublicKeyFingerprint")).toBeUndefined();
+      await expect(client.getSessionRecoveryToken()).rejects.toThrow("No session recovery token available");
+      expect(mockFetch).not.toHaveBeenCalled();
+      expect(successfulDocument.securityVerified).toBe(true);
+
+      const nextAttempt = client.ready();
+      expect(client.getVerificationDocument().steps.otherError).toBeUndefined();
+      await nextAttempt;
+      expect(client.getVerificationDocument().securityVerified).toBe(true);
+    });
+
+    it("retains pin details and records terminal material-fetch failure", async () => {
+      const { FetchError } = await import("../src/verifier.js");
+      const { SecureClient } = await import("../src/secure-client");
+      const pinnedMeasurement = {
+        type: "https://tinfoil.sh/predicate/sev-snp-guest/v2",
+        registers: ["a".repeat(96)],
+      };
+      const error = new FetchError("material unavailable");
+      fetchEnclaveAttestationMaterialMock.mockRejectedValueOnce(error).mockRejectedValueOnce(error);
+      const client = new SecureClient({ enclaveURL: "https://custom.example.com", pinnedMeasurement });
+
+      const rejection = expect(client.ready()).rejects.toBe(error);
+      await vi.runAllTimersAsync();
+      await rejection;
+
+      const failed = client.getVerificationDocument();
+      expect(failed.securityVerified).toBe(false);
+      expect(failed.configRepo).toBe("pinned_no_repo");
+      expect(failed.releaseDigest).toBe("pinned_no_digest");
+      expect(failed.codeMeasurement).toEqual(pinnedMeasurement);
+      expect(failed.steps.fetchDigest.status).toBe("skipped");
+      expect(failed.steps.verifyCode.status).toBe("skipped");
+      expect(failed.steps.otherError).toEqual({ status: "failed", error: error.message });
+      expect(verifyMock).not.toHaveBeenCalled();
+      expect(createSecureFetchMock).not.toHaveBeenCalled();
+
+      client.reset();
+      expect(client.getVerificationDocument().codeMeasurement).toEqual(pinnedMeasurement);
+      expect(client.getVerificationDocument().steps.otherError).toBeUndefined();
+    });
   });
 
   describe("constructor validation", () => {
@@ -550,12 +673,153 @@ describe("SecureClient", () => {
       }).toThrow("enclaveURL must use HTTPS");
     });
 
+    it("should throw ConfigurationError for an unparseable enclaveURL", async () => {
+      const { SecureClient } = await import("../src/secure-client");
+
+      expect(() => {
+        new SecureClient({ enclaveURL: "https://" });
+      }).toThrow("enclaveURL must be a valid HTTPS URL");
+    });
+
     it("should throw ConfigurationError for an empty attestationBundleURL", async () => {
       const { SecureClient } = await import("../src/secure-client");
 
       expect(() => {
         new SecureClient({ attestationBundleURL: "" });
       }).toThrow("attestationBundleURL must use HTTPS");
+    });
+  });
+
+  describe("pinnedMeasurement option", () => {
+    const PINNED_REGISTER = "a".repeat(96);
+    const pinnedMeasurement = { type: "https://tinfoil.sh/predicate/sev-snp-guest/v2", registers: [PINNED_REGISTER] };
+
+    it("requires enclaveURL", async () => {
+      const { SecureClient } = await import("../src/secure-client");
+
+      expect(() => new SecureClient({ pinnedMeasurement })).toThrow("pinnedMeasurement requires enclaveURL");
+    });
+
+    it("cannot be combined with configRepo or attestationBundleURL", async () => {
+      const { SecureClient } = await import("../src/secure-client");
+
+      expect(() => new SecureClient({
+        enclaveURL: "https://custom.example.com",
+        configRepo: "custom/repo",
+        pinnedMeasurement,
+      })).toThrow("cannot be combined with configRepo");
+      expect(() => new SecureClient({
+        enclaveURL: "https://custom.example.com",
+        attestationBundleURL: "https://atc.example.com",
+        pinnedMeasurement,
+      })).toThrow("cannot be combined with attestationBundleURL");
+    });
+
+    it("does not warn about a missing configRepo", async () => {
+      const consoleSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+      const { SecureClient } = await import("../src/secure-client");
+
+      new SecureClient({ enclaveURL: "https://custom.example.com", pinnedMeasurement });
+
+      expect(consoleSpy).not.toHaveBeenCalled();
+      consoleSpy.mockRestore();
+    });
+
+    it("fetches attestation material from the enclave and verifies with the pinned measurement", async () => {
+      const { fetchAttestationBundle } = await import("../src/atc.js");
+      const { SecureClient } = await import("../src/secure-client");
+
+      const client = new SecureClient({ enclaveURL: "https://custom.example.com", pinnedMeasurement });
+      await client.ready();
+
+      expect(fetchAttestationBundle).not.toHaveBeenCalled();
+      expect(fetchEnclaveAttestationMaterialMock).toHaveBeenCalledWith("custom.example.com");
+      expect(verifierConstructorMock).toHaveBeenCalledWith({ pinnedMeasurement });
+      expect(client.getEnclaveURL()).toBe("https://custom.example.com");
+      expect(createSecureFetchMock).toHaveBeenCalledWith(
+        "https://custom.example.com/v1/",
+        "mock-hpke-public-key",
+        undefined,
+        "https://custom.example.com",
+        "test-secret",
+      );
+    });
+
+    it("reports the pin in the pending verification document", async () => {
+      const { SecureClient } = await import("../src/secure-client");
+
+      const client = new SecureClient({ enclaveURL: "https://custom.example.com", pinnedMeasurement });
+      const doc = client.getVerificationDocument();
+
+      expect(doc.configRepo).toBe("pinned_no_repo");
+      expect(doc.releaseDigest).toBe("pinned_no_digest");
+      expect(doc.codeMeasurement).toEqual(pinnedMeasurement);
+      expect(doc.steps.fetchDigest.status).toBe("skipped");
+      expect(doc.steps.verifyCode.status).toBe("skipped");
+      expect(doc.steps.verifyEnclave.status).toBe("pending");
+    });
+
+    it("rejects a supplied null pin instead of falling back to release verification", async () => {
+      const { fetchAttestationBundle } = await import("../src/atc.js");
+      const { SecureClient } = await import("../src/secure-client");
+
+      expect(() => new SecureClient({
+        enclaveURL: "https://custom.example.com",
+        pinnedMeasurement: null as unknown as typeof pinnedMeasurement,
+      })).toThrow("pinnedMeasurement must be an object");
+      expect(fetchAttestationBundle).not.toHaveBeenCalled();
+    });
+
+    it.each([
+      ["empty object", {}],
+      ["unsupported type", { type: "https://tinfoil.sh/predicate/tdx-guest/v2", registers: [PINNED_REGISTER] }],
+      ["wrong register count", { type: pinnedMeasurement.type, registers: [PINNED_REGISTER, PINNED_REGISTER] }],
+      ["short register", { type: pinnedMeasurement.type, registers: ["abc"] }],
+    ])("rejects a malformed pin before any network access: %s", async (_name, malformed) => {
+      const { SecureClient } = await import("../src/secure-client");
+
+      expect(() => new SecureClient({
+        enclaveURL: "https://custom.example.com",
+        pinnedMeasurement: malformed as typeof pinnedMeasurement,
+      })).toThrow("pinnedMeasurement");
+      expect(fetchEnclaveAttestationMaterialMock).not.toHaveBeenCalled();
+    });
+
+    it("snapshots the pin so later mutation of the caller's object has no effect", async () => {
+      const { SecureClient } = await import("../src/secure-client");
+
+      const callerPin = { type: pinnedMeasurement.type, registers: [PINNED_REGISTER.toUpperCase()] };
+      const client = new SecureClient({ enclaveURL: "https://custom.example.com", pinnedMeasurement: callerPin });
+      callerPin.registers[0] = "f".repeat(96);
+      callerPin.type = "tampered";
+
+      await client.ready();
+
+      // The verifier receives the normalized snapshot taken at construction.
+      expect(verifierConstructorMock).toHaveBeenCalledWith({ pinnedMeasurement });
+
+      // A reset and re-verification (key rotation path) still uses the snapshot.
+      verifierConstructorMock.mockClear();
+      client.reset();
+      await client.ready();
+      expect(verifierConstructorMock).toHaveBeenCalledWith({ pinnedMeasurement });
+    });
+
+    it("fetches attestation material from the configured enclave origin, including its port", async () => {
+      const { SecureClient } = await import("../src/secure-client");
+
+      const client = new SecureClient({ enclaveURL: "https://custom.example.com:8443", pinnedMeasurement });
+      await client.ready();
+
+      expect(fetchEnclaveAttestationMaterialMock).toHaveBeenCalledWith("custom.example.com:8443");
+      expect(client.getEnclaveURL()).toBe("https://custom.example.com:8443");
+      expect(createSecureFetchMock).toHaveBeenCalledWith(
+        "https://custom.example.com:8443/v1/",
+        "mock-hpke-public-key",
+        undefined,
+        "https://custom.example.com:8443",
+        "test-secret",
+      );
     });
   });
 
