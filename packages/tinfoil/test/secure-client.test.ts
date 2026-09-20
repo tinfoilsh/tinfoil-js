@@ -3,6 +3,7 @@ import type { SecureTransport } from "../src/encrypted-body-fetch";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 const MOCK_MEASUREMENT_TYPE = "https://tinfoil.sh/predicate/sev-snp-guest/v1";
+const PINNED_MEASUREMENT_TYPE = "https://tinfoil.sh/predicate/sev-snp-guest/v2";
 
 const mockVerificationDocument = {
   configRepo: "test-repo",
@@ -541,7 +542,7 @@ describe("SecureClient", () => {
       const pinnedMeasurement = {
         snp_measurement: "a".repeat(96),
       };
-      const expectedMeasurement = { type: "https://tinfoil.sh/predicate/sev-snp-guest/v2", registers: [pinnedMeasurement.snp_measurement] };
+      const expectedMeasurement = { type: PINNED_MEASUREMENT_TYPE, registers: [pinnedMeasurement.snp_measurement] };
       const error = new FetchError("material unavailable");
       fetchEnclaveAttestationMaterialMock.mockRejectedValueOnce(error).mockRejectedValueOnce(error);
       const client = new SecureClient({ enclaveURL: "https://custom.example.com", pinnedMeasurement });
@@ -755,7 +756,7 @@ describe("SecureClient", () => {
 
       expect(doc.configRepo).toBe("pinned_no_repo");
       expect(doc.releaseDigest).toBe("pinned_no_digest");
-      expect(doc.codeMeasurement).toEqual({ type: "https://tinfoil.sh/predicate/sev-snp-guest/v2", registers: [PINNED_REGISTER] });
+      expect(doc.codeMeasurement).toEqual({ type: PINNED_MEASUREMENT_TYPE, registers: [PINNED_REGISTER] });
       expect(doc.steps.fetchDigest.status).toBe("skipped");
       expect(doc.steps.verifyCode.status).toBe("skipped");
       expect(doc.steps.verifyEnclave.status).toBe("pending");
