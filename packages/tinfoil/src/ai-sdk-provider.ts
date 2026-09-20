@@ -1,7 +1,7 @@
 import { createOpenAICompatible } from "@ai-sdk/openai-compatible";
 import { SecureClient } from "./secure-client.js";
 import { isRealBrowser } from "./env.js";
-import { ConfigurationError, type AttestationMeasurement } from "./verifier.js";
+import { ConfigurationError, type CodeMeasurement } from "./verifier.js";
 
 /**
  * Options for creating a Tinfoil AI SDK provider.
@@ -30,7 +30,7 @@ export interface CreateTinfoilAIOptions {
    * release of `configRepo`. Requires `enclaveURL`; cannot be combined with
    * `configRepo` or `attestationBundleURL`.
    */
-  pinnedMeasurement?: AttestationMeasurement;
+  pinnedMeasurement?: CodeMeasurement;
 
   /**
    * Secret scoping the router's prompt cache for this provider's requests.

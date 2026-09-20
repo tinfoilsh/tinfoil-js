@@ -10,7 +10,7 @@ export {
 export { verifyAttestation } from './attestation.js';
 export { assembleAttestationBundle, fetchEnclaveAttestationMaterial, fetchReleaseProvenance, type EnclaveAttestationMaterial, type ReleaseProvenance } from './bundle.js';
 export { Verifier, PINNED_NO_REPO, PINNED_NO_DIGEST, type VerifiableAttestationBundle } from './client.js';
-export { validatePinnedMeasurement } from './pin.js';
+export { validatePinnedMeasurement, type CodeMeasurement } from './pin.js';
 export { cloneVerificationDocument } from './json.js';
 export { VERIFICATION_DOCUMENT_SCHEMA_VERSION, VERIFIER_NAME, VERIFIER_VERSION } from './version.js';
 export { PredicateType, compareMeasurements, measurementFingerprint, hashAttestationDocument } from './types.js';

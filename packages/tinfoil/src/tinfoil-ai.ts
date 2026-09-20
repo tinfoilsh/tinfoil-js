@@ -12,7 +12,7 @@ import type {
   Responses,
 } from "openai/resources";
 import { SecureClient, type TransportMode } from "./secure-client.js";
-import { type AttestationMeasurement, type VerificationDocument } from "./verifier.js";
+import { type CodeMeasurement, type VerificationDocument } from "./verifier.js";
 import { isRealBrowser } from "./env.js";
 import type * as WS from "ws";
 import type { OpenAIRealtimeWS } from "openai/realtime/ws";
@@ -104,7 +104,7 @@ export interface TinfoilAIOptions {
    * band. Requires `enclaveURL`; cannot be combined with `configRepo` or
    * `attestationBundleURL`.
    */
-  pinnedMeasurement?: AttestationMeasurement;
+  pinnedMeasurement?: CodeMeasurement;
 
   /**
    * Secret scoping the router's prompt cache for this client's requests

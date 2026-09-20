@@ -64,23 +64,23 @@ verification document, so the measurement's provenance must be established
 out of band.
 
 ```typescript
-import { Verifier, PredicateType } from '@tinfoilsh/verifier';
+import { Verifier } from '@tinfoilsh/verifier';
 
 const verifier = new Verifier({
   serverURL: 'https://enclave.example.com',
   pinnedMeasurement: {
-    type: PredicateType.SevGuestV2,
-    registers: ['<hex measurement>'],
+    snp_measurement: '<release SNP measurement>',
   },
 });
 await verifier.verify();
 ```
 
 `verifyBundle()` also accepts a bundle without `digest`, `releaseTag`, or
-`sigstoreBundle` in this mode. The pin must be an SEV-SNP guest measurement
-(`PredicateType.SevGuestV2` with one 48-byte hex register); it is
+`sigstoreBundle` in this mode. Supply the release's `snp_measurement` as 96 hex
+characters, not an artifact digest or a new fingerprint. The input is
 validated and copied by the constructor, which throws `ConfigurationError` for
-a `null` or malformed value.
+a `null` or malformed value. `tdx_measurement` is rejected because this
+verifier does not authenticate TDX evidence.
 
 On success, `codeFingerprint` and `enclaveFingerprint` are equal: both represent
 the expected and authenticated SEV-SNP measurement as one register. The same

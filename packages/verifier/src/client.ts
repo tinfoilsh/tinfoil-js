@@ -6,7 +6,7 @@ import { compareMeasurements, measurementFingerprint } from './types.js';
 import type { AttestationResponse, AttestationMeasurement, VerificationDocument, AttestationBundle, SoftwareIdentity } from './types.js';
 import { AttestationError, ConfigurationError } from './errors.js';
 import { cloneVerificationDocument } from './json.js';
-import { validatePinnedMeasurement } from './pin.js';
+import { validatePinnedMeasurement, type CodeMeasurement } from './pin.js';
 import { VERIFICATION_DOCUMENT_SCHEMA_VERSION, VERIFIER_NAME, VERIFIER_VERSION } from './version.js';
 
 /**
@@ -33,11 +33,11 @@ export interface VerifierOptions {
    * Expected enclave measurement supplied by the caller. When set, the GitHub
    * release lookup and Sigstore code verification are skipped and the enclave
    * measurement is compared directly against this value. The measurement's
-   * provenance must be established out of band. It must be an SEV-SNP guest
-   * measurement (`PredicateType.SevGuestV2`, one 48-byte hex register), and
-   * is validated and copied at construction.
+   * provenance must be established out of band. Supply the release's
+   * `snp_measurement` (one 48-byte hex register); the input is
+   * validated and copied at construction.
    */
-  pinnedMeasurement?: AttestationMeasurement;
+  pinnedMeasurement?: CodeMeasurement;
 }
 
 /**

@@ -1,7 +1,7 @@
 import { KeyConfigMismatchError } from "ehbp";
 import { VERIFICATION_DOCUMENT_SCHEMA_VERSION, VERIFIER_NAME, VERIFIER_VERSION } from "@tinfoilsh/verifier";
 import { cloneVerificationDocument, Verifier, ConfigurationError, FetchError, AttestationError, PINNED_NO_REPO, PINNED_NO_DIGEST, fetchEnclaveAttestationMaterial, validatePinnedMeasurement, type VerificationDocument } from "./verifier.js";
-import type { AttestationMeasurement, VerifiableAttestationBundle } from "./verifier.js";
+import type { AttestationMeasurement, CodeMeasurement, VerifiableAttestationBundle } from "./verifier.js";
 import { TINFOIL_CONFIG } from "./config.js";
 import { createSecureFetch } from "./secure-fetch.js";
 import { resolveUserCacheSecret } from "./user-cache-secret.js";
@@ -64,13 +64,13 @@ export interface SecureClientOptions {
    * release of `configRepo`. The GitHub release lookup and Sigstore code
    * verification are skipped, so the measurement's provenance must be
    * established out of band. Requires `enclaveURL`; cannot be combined with
-   * `configRepo` or `attestationBundleURL`. The measurement must be an
-   * SEV-SNP guest measurement (`PredicateType.SevGuestV2`, one 48-byte hex
-   * register); it is validated and copied when the client is constructed, so
+   * `configRepo` or `attestationBundleURL`. Supply `snp_measurement` from a
+   * trusted release (one 48-byte hex register). TDX is not supported by this
+   * verifier. The pin is validated and copied when the client is constructed, so
    * a null or malformed pin is a `ConfigurationError` rather than a fallback
    * to release-based verification.
    */
-  pinnedMeasurement?: AttestationMeasurement;
+  pinnedMeasurement?: CodeMeasurement;
 
   /**
    * Secret scoping the router's prompt cache for this client's requests.
@@ -345,7 +345,7 @@ export class SecureClient {
     }
 
     const verifier = this.config.pinnedMeasurement
-      ? new Verifier({ pinnedMeasurement: this.config.pinnedMeasurement })
+      ? new Verifier({ pinnedMeasurement: { snp_measurement: this.config.pinnedMeasurement.registers[0] } })
       : new Verifier({ configRepo: this.config.configRepo });
 
     try {

@@ -539,9 +539,9 @@ describe("SecureClient", () => {
       const { FetchError } = await import("../src/verifier.js");
       const { SecureClient } = await import("../src/secure-client");
       const pinnedMeasurement = {
-        type: "https://tinfoil.sh/predicate/sev-snp-guest/v2",
-        registers: ["a".repeat(96)],
+        snp_measurement: "a".repeat(96),
       };
+      const expectedMeasurement = { type: "https://tinfoil.sh/predicate/sev-snp-guest/v2", registers: [pinnedMeasurement.snp_measurement] };
       const error = new FetchError("material unavailable");
       fetchEnclaveAttestationMaterialMock.mockRejectedValueOnce(error).mockRejectedValueOnce(error);
       const client = new SecureClient({ enclaveURL: "https://custom.example.com", pinnedMeasurement });
@@ -554,7 +554,7 @@ describe("SecureClient", () => {
       expect(failed.securityVerified).toBe(false);
       expect(failed.configRepo).toBe("pinned_no_repo");
       expect(failed.releaseDigest).toBe("pinned_no_digest");
-      expect(failed.codeMeasurement).toEqual(pinnedMeasurement);
+      expect(failed.codeMeasurement).toEqual(expectedMeasurement);
       expect(failed.steps.fetchDigest.status).toBe("skipped");
       expect(failed.steps.verifyCode.status).toBe("skipped");
       expect(failed.steps.otherError).toEqual({ status: "failed", error: error.message });
@@ -562,7 +562,7 @@ describe("SecureClient", () => {
       expect(createSecureFetchMock).not.toHaveBeenCalled();
 
       client.reset();
-      expect(client.getVerificationDocument().codeMeasurement).toEqual(pinnedMeasurement);
+      expect(client.getVerificationDocument().codeMeasurement).toEqual(expectedMeasurement);
       expect(client.getVerificationDocument().steps.otherError).toBeUndefined();
     });
   });
@@ -694,7 +694,7 @@ describe("SecureClient", () => {
 
   describe("pinnedMeasurement option", () => {
     const PINNED_REGISTER = "a".repeat(96);
-    const pinnedMeasurement = { type: "https://tinfoil.sh/predicate/sev-snp-guest/v2", registers: [PINNED_REGISTER] };
+    const pinnedMeasurement = { snp_measurement: PINNED_REGISTER };
 
     it("requires enclaveURL", async () => {
       const { SecureClient } = await import("../src/secure-client");
@@ -755,7 +755,7 @@ describe("SecureClient", () => {
 
       expect(doc.configRepo).toBe("pinned_no_repo");
       expect(doc.releaseDigest).toBe("pinned_no_digest");
-      expect(doc.codeMeasurement).toEqual(pinnedMeasurement);
+      expect(doc.codeMeasurement).toEqual({ type: "https://tinfoil.sh/predicate/sev-snp-guest/v2", registers: [PINNED_REGISTER] });
       expect(doc.steps.fetchDigest.status).toBe("skipped");
       expect(doc.steps.verifyCode.status).toBe("skipped");
       expect(doc.steps.verifyEnclave.status).toBe("pending");
@@ -774,9 +774,9 @@ describe("SecureClient", () => {
 
     it.each([
       ["empty object", {}],
-      ["unsupported type", { type: "https://tinfoil.sh/predicate/tdx-guest/v2", registers: [PINNED_REGISTER] }],
-      ["wrong register count", { type: pinnedMeasurement.type, registers: [PINNED_REGISTER, PINNED_REGISTER] }],
-      ["short register", { type: pinnedMeasurement.type, registers: ["abc"] }],
+      ["unsupported TDX", { tdx_measurement: { rtmr1: PINNED_REGISTER, rtmr2: PINNED_REGISTER } }],
+      ["non-string register", { snp_measurement: [PINNED_REGISTER] }],
+      ["short register", { snp_measurement: "abc" }],
     ])("rejects a malformed pin before any network access: %s", async (_name, malformed) => {
       const { SecureClient } = await import("../src/secure-client");
 
@@ -790,10 +790,9 @@ describe("SecureClient", () => {
     it("snapshots the pin so later mutation of the caller's object has no effect", async () => {
       const { SecureClient } = await import("../src/secure-client");
 
-      const callerPin = { type: pinnedMeasurement.type, registers: [PINNED_REGISTER.toUpperCase()] };
+      const callerPin = { snp_measurement: PINNED_REGISTER.toUpperCase() };
       const client = new SecureClient({ enclaveURL: "https://custom.example.com", pinnedMeasurement: callerPin });
-      callerPin.registers[0] = "f".repeat(96);
-      callerPin.type = "tampered";
+      callerPin.snp_measurement = "f".repeat(96);
 
       await client.ready();
 

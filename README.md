@@ -226,18 +226,17 @@ console.log(doc.steps); // fetchDigest, verifyCode, verifyEnclave, compareMeasur
 By default the client fetches the expected code measurement from the latest signed release of `configRepo`. To verify against a measurement you obtained out of band instead, pin it explicitly. This skips the GitHub release lookup and Sigstore code verification, so the measurement's provenance is your responsibility; the verification document reports those steps as `skipped`.
 
 ```typescript
-import { TinfoilAI, PredicateType } from "tinfoil";
+import { TinfoilAI } from "tinfoil";
 
 const client = new TinfoilAI({
   enclaveURL: "https://enclave.host.com",
   pinnedMeasurement: {
-    type: PredicateType.SevGuestV2,
-    registers: ["<hex measurement>"],
+    snp_measurement: "<release SNP measurement>",
   },
 });
 ```
 
-In `TinfoilAI`, `SecureClient`, and `createTinfoilAI`, `pinnedMeasurement` requires `enclaveURL` and cannot be combined with `configRepo` or `attestationBundleURL`. `Verifier` also accepts the pin: it uses `serverURL` for `verify()`, or no URL when calling `verifyBundle()` with pre-fetched material. The measurement must be an SEV-SNP guest measurement (`PredicateType.SevGuestV2` with one 48-byte hex register); it is validated and copied at construction, so a `null` or malformed pin throws `ConfigurationError` rather than falling back to release verification.
+In `TinfoilAI`, `SecureClient`, and `createTinfoilAI`, `pinnedMeasurement` requires `enclaveURL` and cannot be combined with `configRepo` or `attestationBundleURL`. `Verifier` also accepts the pin: it uses `serverURL` for `verify()`, or no URL when calling `verifyBundle()` with pre-fetched material. Supply the trusted release's `snp_measurement` as 96 hex characters, not an artifact digest or a new fingerprint. It is normalized and copied at construction, so a `null` or malformed pin throws `ConfigurationError` rather than falling back to release verification. `tdx_measurement` is rejected because this verifier supports SEV-SNP only.
 
 After successful verification, `codeFingerprint` and `enclaveFingerprint` match.
 For SEV-SNP, both are the single measurement register. This SDK does not support

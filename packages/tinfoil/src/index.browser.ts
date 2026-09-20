@@ -16,6 +16,7 @@ export {
 export type {
   AttestationDocument,
   AttestationMeasurement,
+  CodeMeasurement,
   AttestationResponse,
   AttestationBundle,
   VerificationDocument,

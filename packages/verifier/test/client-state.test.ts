@@ -11,8 +11,7 @@ import bundleFixture from './fixtures/attestation-bundle.json';
 const bundle = bundleFixture as AttestationBundle;
 const report = new Report(gunzipSync(Buffer.from(bundle.enclaveAttestationReport.body, 'base64')));
 const pinnedMeasurement = {
-  type: PredicateType.SevGuestV2,
-  registers: [Buffer.from(report.measurement).toString('hex')],
+  snp_measurement: Buffer.from(report.measurement).toString('hex'),
 };
 const CONFIG_REPO = 'tinfoilsh/confidential-model-router';
 
@@ -125,7 +124,7 @@ describe.each(['release', 'pinned'] as const)('Verifier attempt state (%s)', mod
     if (mode === 'pinned') {
       expect(failed.configRepo).toBe(PINNED_NO_REPO);
       expect(failed.releaseDigest).toBe(PINNED_NO_DIGEST);
-      expect(failed.codeMeasurement).toEqual(pinnedMeasurement);
+      expect(failed.codeMeasurement).toEqual({ type: PredicateType.SevGuestV2, registers: [pinnedMeasurement.snp_measurement] });
     }
 
     vi.useRealTimers();
