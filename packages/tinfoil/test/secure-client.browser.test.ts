@@ -29,10 +29,6 @@ const mockVerificationDocument = {
 
 vi.mock("../src/verifier.js", () => ({
   cloneVerificationDocument: (document: typeof mockVerificationDocument) => structuredClone(document),
-  PINNED_NO_REPO: "pinned_no_repo",
-  PINNED_NO_DIGEST: "pinned_no_digest",
-  validatePinnedMeasurement: (measurement: unknown) => measurement,
-  fetchEnclaveAttestationMaterial: vi.fn(),
   Verifier: class {
     verify() {
       return verifyMock();

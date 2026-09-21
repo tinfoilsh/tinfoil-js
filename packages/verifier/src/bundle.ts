@@ -25,39 +25,17 @@ export async function assembleAttestationBundle(
   enclaveHost: string,
   configRepo: string,
 ): Promise<AttestationBundle> {
-  const [enclaveMaterial, release] = await Promise.all([
-    fetchEnclaveAttestationMaterial(enclaveHost),
-    fetchReleaseProvenance(configRepo),
-  ]);
 
-  return {
-    domain: enclaveHost,
-    ...enclaveMaterial,
-    ...release,
-  };
-}
-
-/**
- * Attestation material served by the enclave itself plus the VCEK needed to
- * verify it. This is everything required to verify an enclave against a
- * measurement the caller already holds; code provenance from GitHub and
- * Sigstore is fetched separately.
- */
-export type EnclaveAttestationMaterial = Pick<AttestationBundle, 'enclaveAttestationReport' | 'vcek' | 'enclaveCert'>;
-
-/**
- * Fetch the enclave's attestation report and TLS certificate, then the VCEK
- * for the report from AMD KDS.
- *
- * @throws FetchError on I/O failure (after retries)
- * @throws AttestationError if the attestation report cannot be parsed
- */
-export async function fetchEnclaveAttestationMaterial(enclaveHost: string): Promise<EnclaveAttestationMaterial> {
   // 1. Fetch independent resources in parallel
-  const [attestation, enclaveCert] = await Promise.all([
+  const [attestation, release, enclaveCert] = await Promise.all([
     withRetry(async (): Promise<AttestationDocument> => {
       const doc = await fetchJson(`https://${enclaveHost}/.well-known/tinfoil-attestation`);
       return { format: doc.format as PredicateType, body: doc.body };
+    }),
+    withRetry(async () => {
+      const { tag_name } = await fetchJson(`${GITHUB_PROXY}/repos/${configRepo}/releases/latest`);
+      const digest = (await fetchText(`${GITHUB_PROXY}/${configRepo}/releases/download/${tag_name}/tinfoil.hash`)).trim();
+      return { tag: tag_name as string, digest };
     }),
     withRetry(async () => {
       const data = await fetchJson(`https://${enclaveHost}/.well-known/tinfoil-certificate`);
@@ -65,7 +43,16 @@ export async function fetchEnclaveAttestationMaterial(enclaveHost: string): Prom
     }),
   ]);
 
-  // 2. Parse attestation report
+  // 2. Fetch Sigstore bundle (needs digest)
+  const sigstoreBundle = await withRetry(async () => {
+    const data = await fetchJson(`${GITHUB_PROXY}/repos/${configRepo}/attestations/sha256:${release.digest}`);
+    if (!data.attestations?.[0]?.bundle) {
+      throw new FetchError(`No Sigstore bundle for ${configRepo} at digest ${release.digest}`);
+    }
+    return data.attestations[0].bundle;
+  });
+
+  // 3. Parse attestation report
   let report: Report;
   try {
     report = new Report(await decompressGzip(base64ToBytes(attestation.body)));
@@ -73,7 +60,7 @@ export async function fetchEnclaveAttestationMaterial(enclaveHost: string): Prom
     wrapOrThrow(e, AttestationError, 'Failed to parse attestation report');
   }
 
-  // 3. Fetch VCEK certificate from AMD KDS (needs parsed report)
+  // 4. Fetch VCEK certificate from AMD KDS (needs parsed report)
   const vcek = await withRetry(async () => {
     const tcb = tcbFromInt(report.reportedTcb);
     const chip = bytesToHex(report.chipId);
@@ -85,36 +72,15 @@ export async function fetchEnclaveAttestationMaterial(enclaveHost: string): Prom
     return btoa(bin);
   });
 
-  return { enclaveAttestationReport: attestation, vcek, enclaveCert };
-}
-
-/** Release provenance for the latest signed release of a config repo. */
-export type ReleaseProvenance = Pick<AttestationBundle, 'digest' | 'releaseTag' | 'sigstoreBundle'>;
-
-/**
- * Resolve the latest release of the config repo, its artifact digest, and the
- * Sigstore bundle attesting to it.
- *
- * @throws FetchError on I/O failure (after retries) or when no bundle exists
- */
-export async function fetchReleaseProvenance(configRepo: string): Promise<ReleaseProvenance> {
-  // 1. Resolve the latest release and its digest
-  const release = await withRetry(async () => {
-    const { tag_name } = await fetchJson(`${GITHUB_PROXY}/repos/${configRepo}/releases/latest`);
-    const digest = (await fetchText(`${GITHUB_PROXY}/${configRepo}/releases/download/${tag_name}/tinfoil.hash`)).trim();
-    return { tag: tag_name as string, digest };
-  });
-
-  // 2. Fetch Sigstore bundle (needs digest)
-  const sigstoreBundle = await withRetry(async () => {
-    const data = await fetchJson(`${GITHUB_PROXY}/repos/${configRepo}/attestations/sha256:${release.digest}`);
-    if (!data.attestations?.[0]?.bundle) {
-      throw new FetchError(`No Sigstore bundle for ${configRepo} at digest ${release.digest}`);
-    }
-    return data.attestations[0].bundle;
-  });
-
-  return { digest: release.digest, releaseTag: release.tag, sigstoreBundle };
+  return {
+    domain: enclaveHost,
+    enclaveAttestationReport: attestation,
+    digest: release.digest,
+    releaseTag: release.tag,
+    sigstoreBundle,
+    vcek,
+    enclaveCert,
+  };
 }
 
 // ---------------------------------------------------------------------------
