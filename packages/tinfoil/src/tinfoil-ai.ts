@@ -12,7 +12,7 @@ import type {
   Responses,
 } from "openai/resources";
 import { SecureClient, type TransportMode } from "./secure-client.js";
-import { type VerificationDocument } from "./verifier.js";
+import { type CodeMeasurement, type VerificationDocument } from "./verifier.js";
 import { isRealBrowser } from "./env.js";
 import type * as WS from "ws";
 import type { OpenAIRealtimeWS } from "openai/realtime/ws";
@@ -98,6 +98,15 @@ export interface TinfoilAIOptions {
   attestationBundleURL?: string;
 
   /**
+   * Verify the enclave against this measurement instead of the latest signed
+   * release of `configRepo`. Skips the GitHub release lookup and Sigstore code
+   * verification, so the measurement's provenance must be established out of
+   * band. Requires `enclaveURL`; cannot be combined with `configRepo` or
+   * `attestationBundleURL`.
+   */
+  pinnedMeasurement?: CodeMeasurement;
+
+  /**
    * Secret scoping the router's prompt cache for this client's requests
    * (e.g. one stable value per end user). Defaults to the
    * TINFOIL_USER_CACHE_SECRET environment variable, otherwise attempts to
@@ -167,6 +176,7 @@ export class TinfoilAI {
       configRepo: options.configRepo,
       transport: options.transport,
       attestationBundleURL: options.attestationBundleURL,
+      pinnedMeasurement: options.pinnedMeasurement,
       userCacheSecret: options.userCacheSecret,
     });
   }

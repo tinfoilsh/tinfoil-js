@@ -9,12 +9,14 @@ export {
   ConfigurationError,
   AttestationError,
   Verifier,
+  PredicateType,
   assembleAttestationBundle,
 } from "./verifier.js";
 
 export type {
   AttestationDocument,
   AttestationMeasurement,
+  CodeMeasurement,
   AttestationResponse,
   AttestationBundle,
   VerificationDocument,
