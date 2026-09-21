@@ -55,38 +55,6 @@ const doc = verifier.getVerificationDocument();
 console.log(doc.securityVerified);
 ```
 
-## Verifying Against a Pinned Measurement
-
-To verify an enclave against a measurement you already hold, pass it as
-`pinnedMeasurement` instead of `configRepo`. The GitHub release lookup and
-Sigstore code verification are skipped and reported as `skipped` in the
-verification document, so the measurement's provenance must be established
-out of band.
-
-```typescript
-import { Verifier } from '@tinfoilsh/verifier';
-
-const verifier = new Verifier({
-  serverURL: 'https://enclave.example.com',
-  pinnedMeasurement: {
-    snp_measurement: '<release SNP measurement>',
-  },
-});
-await verifier.verify();
-```
-
-`verifyBundle()` also accepts a bundle without `digest`, `releaseTag`, or
-`sigstoreBundle` in this mode. Supply the release's `snp_measurement` as 96 hex
-characters, not an artifact digest or a new fingerprint. The input is
-validated and copied by the constructor, which throws `ConfigurationError` for
-a `null` or malformed value. `tdx_measurement` is rejected because this
-verifier does not authenticate TDX evidence.
-
-On success, `codeFingerprint` and `enclaveFingerprint` are equal: both represent
-the expected and authenticated SEV-SNP measurement as one register. The same
-contract applies to release-backed verification. This package does not verify
-TDX attestation; pinning still retains SEV-SNP attestation and certificate checks.
-
 ## Error Handling
 
 For callers that want structured error handling, these error classes are part of the public API:
