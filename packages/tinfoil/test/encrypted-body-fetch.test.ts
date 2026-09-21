@@ -169,7 +169,7 @@ describe("encrypted-body-fetch", () => {
       let apiRequestMade = false;
       globalThis.fetch = vi.fn(async (input: RequestInfo | URL) => {
         const url = input instanceof Request ? input.url : input.toString();
-        if (url.includes("api.example.com")) {
+        if (url === "https://api.example.com/test") {
           apiRequestMade = true;
         }
         return new Response("ok");
@@ -273,11 +273,25 @@ describe("encrypted-body-fetch", () => {
       expect(() => createEncryptedBodyFetch("http://api.example.com", "mockkey123")).not.toThrow();
     });
 
-    it("refuses requests to an origin outside the enclave/proxy", async () => {
+    it.each([
+      "https://evil.example.com/steal",
+      "https://api.example.com.evil.test/steal",
+      "https://evil.test/api.example.com",
+      "https://evil.test/?host=api.example.com",
+      "https://api.example.com@evil.test/steal",
+      "http://api.example.com/test",
+      "https://api.example.com:8443/test",
+    ])("refuses requests to an origin outside the enclave/proxy: %s", async (url) => {
       const transport = createEncryptedBodyFetch("https://api.example.com", "mockkey123");
-      await expect(transport.fetch("https://evil.example.com/steal")).rejects.toThrow(
-        /refusing to send request/
-      );
+      const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response("ok"));
+      try {
+        await expect(transport.fetch(url)).rejects.toThrow(
+          /refusing to send request/
+        );
+        expect(fetchMock).not.toHaveBeenCalled();
+      } finally {
+        fetchMock.mockRestore();
+      }
     });
 
     it("allows requests to the baseURL origin", async () => {
@@ -288,7 +302,7 @@ describe("encrypted-body-fetch", () => {
       const originalFetch = globalThis.fetch;
       globalThis.fetch = vi.fn(async (input: RequestInfo | URL) => {
         const url = input instanceof Request ? input.url : input.toString();
-        if (url.includes("api.example.com")) apiRequestMade = true;
+        if (url === "https://api.example.com/test") apiRequestMade = true;
         return new Response("ok");
       }) as typeof fetch;
 
@@ -403,14 +417,14 @@ describe("encrypted-body-fetch", () => {
 
       globalThis.fetch = vi.fn(async (input: RequestInfo | URL) => {
         const url = input instanceof Request ? input.url : input.toString();
-        if (url.includes("/.well-known/hpke-keys")) {
+        if (url === "http://api.example.com/.well-known/hpke-keys") {
           keyFetched = true;
           return new Response(publicConfig as unknown as BodyInit, {
             status: 200,
             headers: { "content-type": PROTOCOL.KEYS_MEDIA_TYPE },
           });
         }
-        if (url.includes("api.example.com")) {
+        if (url === "http://api.example.com/test") {
           apiRequestMade = true;
         }
         return new Response("ok");
@@ -431,7 +445,7 @@ describe("encrypted-body-fetch", () => {
 
       globalThis.fetch = vi.fn(async (input: RequestInfo | URL) => {
         const url = input instanceof Request ? input.url : input.toString();
-        if (url.includes("enclave.example.com") && url.includes("/.well-known/hpke-keys")) {
+        if (url === "https://enclave.example.com/.well-known/hpke-keys") {
           keyFetchedFromEnclave = true;
           return new Response(publicConfig as unknown as BodyInit, {
             status: 200,
