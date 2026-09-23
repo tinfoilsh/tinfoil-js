@@ -15,7 +15,7 @@ assert that the production freshness API rejects it. Production qualification
 still requires App dispatch of `private.yml@refs/heads/main`; these fixtures do
 not establish a measured CVM deployment or production freshness authorization.
 
-`public-log-entry.json` is copied from the existing public attestation fixture
-in tinfoil-js (`packages/verifier/test/fixtures/attestation-bundle.json`). Adding
+`public-log-entry.json` is the `verificationMaterial.tlogEntries[0]` entry
+extracted from `packages/verifier/test/fixtures/attestation-bundle.json`. Adding
 it to the private bundle tests rejection without falling back between trust
 profiles. The private fixtures and this entry are byte-identical in Go and JS.

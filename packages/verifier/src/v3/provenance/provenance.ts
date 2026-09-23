@@ -426,9 +426,10 @@ export async function verifyBundleWithIdentity(
       checkCertificateIdentity(cert, sanRegex);
     },
   };
+  let privateTimestamps: Date[] | undefined;
   try {
     if (privateGitHub) {
-      await verifyPrivateGitHubDsse(verifier, trustRoot, wire, policy);
+      privateTimestamps = await verifyPrivateGitHubDsse(verifier, trustRoot, wire, policy);
     } else {
       await verifier.loadSigstoreRoot(trustRoot);
       await verifier.verifyDsse(wire as unknown as SigstoreBundle, policy);
@@ -454,15 +455,7 @@ export async function verifyBundleWithIdentity(
   }
 
   const tlogTimestamps = tlogObserverTimestamps(wire);
-  let authenticatedTimestamps = tlogTimestamps;
-  if (privateGitHub) {
-    const signature = decodeBase64(wire.dsseEnvelope?.signatures?.[0]?.sig ?? "");
-    authenticatedTimestamps = await verifyBundleTimestamp(
-      wire.verificationMaterial?.timestampVerificationData,
-      signature,
-      trustRoot.timestampAuthorities,
-    );
-  }
+  const authenticatedTimestamps = privateTimestamps ?? tlogTimestamps;
   return { statement, cert, tlogTimestamps, authenticatedTimestamps };
 }
 
@@ -494,7 +487,7 @@ async function verifyPrivateGitHubDsse(
   trustRoot: TrustedRoot,
   wire: WireBundle,
   policy: VerificationPolicy,
-): Promise<void> {
+): Promise<Date[]> {
   const certB64 = wire.verificationMaterial?.certificate?.rawBytes;
   const envelope = wire.dsseEnvelope;
   if (certB64 == null || certB64 === "" || envelope == null || envelope.signatures?.length !== 1) {
@@ -528,6 +521,7 @@ async function verifyPrivateGitHubDsse(
   if (!(await verifySignature(await cert.publicKeyObj, pae, signature))) {
     throw new Error("DSSE signature verification failed");
   }
+  return timestamps;
 }
 
 async function verifyBundle(
