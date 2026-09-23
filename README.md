@@ -1,14 +1,12 @@
-# Tinfoil TypeScript SDK
+# Tinfoil TypeScript Client
 
 [![Build Status](https://github.com/tinfoilsh/tinfoil-js/actions/workflows/test.yml/badge.svg)](https://github.com/tinfoilsh/tinfoil-js/actions)
 [![NPM version](https://img.shields.io/npm/v/tinfoil.svg)](https://npmjs.org/package/tinfoil)
 [![Documentation](https://img.shields.io/badge/docs-tinfoil.sh-blue)](https://docs.tinfoil.sh/sdk/javascript-sdk)
 
-A TypeScript client for verifiably private AI inference with the [Tinfoil API](https://docs.tinfoil.sh/introduction). Supports the [OpenAI API format](https://platform.openai.com/docs/api-reference) and the [Vercel AI SDK](https://sdk.vercel.ai/).
+A TypeScript client for verifiably private AI inference with Tinfoil. It wraps the [OpenAI Node client](https://github.com/openai/openai-node) with the same API, and before sending any request it verifies the enclave's attestation and encrypts the request body to the attested key using [EHBP](https://docs.tinfoil.sh/resources/ehbp), so only the verified enclave can read it. Works in Node 20+, browsers, Electron, and Bun, and supports the [Vercel AI SDK](https://sdk.vercel.ai/).
 
-Tinfoil runs LLMs inside [secure enclaves](https://docs.tinfoil.sh/cc/how-it-works)—isolated environments on hardware where even Tinfoil cannot access your data. This SDK encrypts your requests using [HPKE (RFC 9180)](https://www.rfc-editor.org/rfc/rfc9180.html) via the [EHBP](https://github.com/tinfoilsh/encrypted-http-body-protocol) protocol, so that only the verified enclave can decrypt them.
-
-It also supports TLS certificate pinning as an alternative transport mode, where all connections are encrypted and terminated to a verified secure enclave.
+For complete documentation, see the [JavaScript SDK documentation](https://docs.tinfoil.sh/sdk/javascript-sdk).
 
 ## Installation
 
@@ -16,162 +14,81 @@ It also supports TLS certificate pinning as an alternative transport mode, where
 npm install tinfoil
 ```
 
-Requires Node 20+. Works in browsers with ES2020 support, Electron, and Bun (see [Bun Support](#bun-support)).
-
 ## Quick Start
 
-You'll need an [API key](https://docs.tinfoil.sh/get-api-key) to get started.
-
 ```typescript
 import { TinfoilAI } from "tinfoil";
 
 const client = new TinfoilAI({
-  apiKey: "<YOUR_API_KEY>", // or use TINFOIL_API_KEY env var
+  apiKey: "<YOUR_API_KEY>", // or set TINFOIL_API_KEY
 });
 
+// Enclave verification and encryption happen automatically.
 const completion = await client.chat.completions.create({
   messages: [{ role: "user", content: "Hello!" }],
-  model: "llama3-3-70b", // See all models: https://docs.tinfoil.sh/models/catalog
+  model: "llama3-3-70b", // see https://docs.tinfoil.sh/models/catalog
 });
 ```
 
-## Browser Usage
+### Browser usage
 
-Use `bearerToken` for browser authentication (e.g., JWT from your auth system):
+Never put `apiKey` in browser code. Route requests through a [proxy server](https://docs.tinfoil.sh/guides/proxy-server) that adds the key, and authenticate the browser with `bearerToken`. Request bodies stay encrypted to the enclave, so the proxy cannot read them.
 
 ```typescript
-import { TinfoilAI } from "tinfoil";
-
 const client = new TinfoilAI({
-  bearerToken: "your-jwt-token", // From your auth system
+  bearerToken: "your-jwt-token",
+  baseURL: "https://your-proxy.com/",
 });
-
-await client.ready(); // Wait for verification to complete
-
-const completion = await client.chat.completions.create({
-  model: "llama3-3-70b",
-  messages: [{ role: "user", content: "Hello!" }],
-});
+await client.ready();
 ```
 
-> **Warning:** Never use `apiKey` in browser code—it exposes your key in page source. Use `bearerToken` with your backend authentication. If you must use `apiKey` instead of `bearerToken` in the browser, set `dangerouslyAllowBrowser: true`.
+### Realtime (WebSockets)
 
-## Using with OpenAI SDK
-
-If you prefer the OpenAI SDK directly, use `SecureClient` to get a verified fetch function:
+`client.realtime()` opens a WebSocket session pinned to the attested enclave key and returns an `OpenAIRealtimeWS` client from the OpenAI SDK. Node.js only: browsers cannot pin TLS connections. Realtime always connects directly to the enclave, even when a proxy `baseURL` is configured.
 
 ```typescript
-import OpenAI from "openai";
+const rt = await client.realtime({ model: "voxtral-mini-4b-realtime" });
+rt.on("session.created", (event) => console.log(event));
+rt.send({ type: "input_audio_buffer.append", audio: base64AudioChunk });
+```
+
+### Vercel AI SDK
+
+```typescript
+import { createTinfoilAI } from "tinfoil";
+import { generateText } from "ai";
+
+const tinfoil = await createTinfoilAI("<YOUR_API_KEY>");
+const { text } = await generateText({ model: tinfoil("llama3-3-70b"), prompt: "Hello!" });
+```
+
+For browser apps, pass `secureClient.fetch` to `DefaultChatTransport`; see the [React example](packages/tinfoil/examples/ai-sdk-react/).
+
+## Verification document
+
+```typescript
 import { SecureClient } from "tinfoil";
 
 const secureClient = new SecureClient();
 await secureClient.ready();
 
-const openai = new OpenAI({
-  apiKey: "<YOUR_API_KEY>",
-  baseURL: secureClient.getBaseURL(),
-  fetch: secureClient.fetch,
-});
-
-const completion = await openai.chat.completions.create({
-  model: "llama3-3-70b",
-  messages: [{ role: "user", content: "Hello!" }],
-});
+const doc = secureClient.getVerificationDocument();
+console.log(doc.securityVerified);
+console.log(doc.steps); // fetchDigest, verifyCode, verifyEnclave, compareMeasurements, verifyCertificate
 ```
 
-## Realtime API (WebSockets)
-
-Open a realtime WebSocket session (e.g. streaming speech-to-text) with the connection pinned to the attested enclave key. Returns an [`OpenAIRealtimeWS`](https://github.com/openai/openai-node) client from the OpenAI SDK:
-
-```typescript
-import { TinfoilAI } from "tinfoil";
-
-const client = new TinfoilAI({ apiKey: "<YOUR_API_KEY>" });
-
-const rt = await client.realtime({ model: "voxtral-mini-4b-realtime" });
-
-rt.on("session.created", (event) => console.log(event));
-rt.send({ type: "input_audio_buffer.append", audio: base64AudioChunk });
-```
-
-For lower-level control, `SecureClient.createWebSocket()` opens a pinned `ws` socket to any enclave path, and `SecureClient.getPinnedWebSocketOptions()` returns pinning options for wiring into other WebSocket-based libraries.
-
-WebSocket frames are not covered by EHBP (which seals HTTP bodies), so realtime connections go directly to the enclave over TLS pinned to the attested key — the same guarantee as the `tls` transport mode. Node.js only: browsers cannot pin TLS connections, and a proxy `baseURL` cannot present the enclave's certificate (both are rejected with a `ConfigurationError`).
-
-## Using with Vercel AI SDK
-
-Full support for the [Vercel AI SDK](https://sdk.vercel.ai/) in both server and browser environments.
-
-### AI Server SDK (Node.js / Next.js)
-
-Use `createTinfoilAI` for server-side AI SDK functions:
-
-```typescript
-import { createTinfoilAI } from "tinfoil";
-import { generateText, streamText } from "ai";
-
-const tinfoil = await createTinfoilAI("<YOUR_API_KEY>");
-
-const { text } = await generateText({
-  model: tinfoil("llama3-3-70b"),
-  prompt: "Hello!",
-});
-```
-
-For Next.js API routes, initialize once at module level to avoid repeated verification:
-
-```typescript
-// app/api/chat/route.ts
-const tinfoilPromise = createTinfoilAI(process.env.TINFOIL_API_KEY!);
-
-export async function POST(req: Request) {
-  const tinfoil = await tinfoilPromise;
-  // ...
-}
-```
-
-See the [Vercel AI Server SDK Example](packages/tinfoil/examples/ai-sdk/) for more details.
-
-### AI Browser SDK (React / Vue / etc.)
-
-For browser apps, use `SecureClient` with `DefaultChatTransport`. A [proxy server](https://docs.tinfoil.sh/guides/proxy-server) is required to keep your API key secret.
-
-```typescript
-import { SecureClient } from "tinfoil";
-import { DefaultChatTransport } from "ai";
-
-const secureClient = new SecureClient({
-  baseURL: "https://your-proxy.com/",
-});
-await secureClient.ready(); // Wait for attestation
-
-const transport = new DefaultChatTransport({
-  api: "/v1/chat/completions",
-  fetch: secureClient.fetch,
-});
-```
-
-See the [Vercel AI Browser SDK Example](packages/tinfoil/examples/ai-sdk-react/) for complete React patterns with `useChat`, context providers, and error handling.
+`SecureClient` also exposes a verified `fetch` and `getBaseURL()` for use with the OpenAI SDK or any HTTP library. The lower-level `Verifier` class verifies an enclave without creating a client.
 
 ## Prompt Cache Scoping
 
-The inference router partitions prompt-prefix caches using both the authenticated API identity and `user_cache_secret`. Cache reuse requires the same identity, secret, model, and matching prompt prefix. Changing the identity or secret selects a different cache namespace, so those requests do not share cache entries or cache-hit timing.
-
-`user_cache_secret` is sensitive application data used only for cache partitioning. It is not an API credential or encryption key. Do not log or expose it unnecessarily: a caller who can send requests with the same API identity and secret joins that cache namespace and can observe its cache-hit timing. The SDK adds it to eligible request bodies before they are protected for transport to the verified enclave.
-
-By default, Node.js attempts to generate a random secret and persists it at `~/.tinfoil/user_cache_secret`, requesting mode `0600` where supported. Tinfoil SDKs using the same home directory reuse this value. Browsers attempt to use a runtime-lifetime value instead. This default is suitable for a single-user application, but it does not separate end users who share one application process, runtime, or home directory. You can control the scope explicitly:
+The router partitions prompt caches by API identity and a `user_cache_secret` that the SDK adds to eligible requests. By default, Node.js generates one and persists it at `~/.tinfoil/user_cache_secret`, and browsers use a runtime-lifetime value; either is suitable for single-user applications. Multi-user services should scope each request to its end user:
 
 ```typescript
-// Pin a stable, non-empty, opaque secret for this client.
+// Pin a stable, opaque secret for this client (or set TINFOIL_USER_CACHE_SECRET in Node.js).
 // SecureClient and createTinfoilAI accept the same option.
 const client = new TinfoilAI({ userCacheSecret: secret });
 
-// Or provision it via the environment (Node.js)
-//   TINFOIL_USER_CACHE_SECRET=<secret>   use this value
-
-// Multi-user services should scope every request to its end user;
-// a non-empty string `user_cache_secret` field set in the request body wins
-// over the client-level secret:
+// A per-request value wins over the client-level secret.
 const completion = await client.chat.completions.create({
   model: "llama3-3-70b",
   messages: [{ role: "user", content: "Hello!" }],
@@ -179,146 +96,32 @@ const completion = await client.chat.completions.create({
 } as TinfoilAI.Chat.ChatCompletionCreateParams);
 ```
 
-Resolution order is a non-empty per-request string, a non-empty client value, a non-empty `TINFOIL_USER_CACHE_SECRET`, then an attempted generated default. Empty client or environment values are treated as unset, and an empty per-request string is replaced with the resolved client value. The SDK leaves non-string values unchanged, and applications should not use them for cache scoping.
-
-Multi-user services must provide a stable, non-empty, opaque value for each user (or group whose members may share cache-hit timing) on every eligible request. Do not use a raw user identifier, API key, or encryption key. A single client, environment, or generated value groups all requests using it under the same API identity. If persistence is unavailable and secure random generation succeeds, the SDK uses an in-memory value and cache continuity ends when that process or runtime exits. If secure random generation also fails, automatic prompt-cache scoping is unavailable.
-
-## How Verification Works
-
-When you create a client, the SDK **automatically**:
-
-1. **Verifies the enclave** — Fetches attestation and checks AMD SEV-SNP hardware signatures to prove it's a genuine secure enclave
-2. **Verifies the code** — Confirms the running code matches the signed GitHub release (via Sigstore)
-3. **Establishes encryption** — Creates an encrypted connection that only the verified enclave can decrypt
-
-Your requests are encrypted before leaving your machine. Even Tinfoil cannot read them—only the verified enclave can decrypt and process your data.
-
-#### Transport Modes:
-
-- **HPKE (default)**: End-to-end encrypted via RFC 9180, works through proxies
-- **TLS Pinning**: Direct TLS certificate pinning to the enclave (requires direct connection, no proxy support)
-
-For a deeper understanding, see [How It Works](https://docs.tinfoil.sh/cc/how-it-works), [Confidentiality](https://docs.tinfoil.sh/cc/confidentiality), [Verifiability](https://docs.tinfoil.sh/cc/verifiability) and [Attestation Architecture](https://docs.tinfoil.sh/verification/attestation-architecture).
-
-### Verification API
-
-The `Verifier` class is for advanced use cases where you want to verify an enclave **before** creating a client, or verify arbitrary enclaves independently.
-
-```typescript
-import { Verifier } from "tinfoil";
-
-const verifier = new Verifier({
-  serverURL: "https://enclave.host.com",
-  configRepo: "tinfoilsh/confidential-model-router",
-});
-
-const attestation = await verifier.verify();
-console.log(attestation.tlsPublicKeyFingerprint);
-console.log(attestation.hpkePublicKey);
-
-const doc = verifier.getVerificationDocument();
-console.log(doc.securityVerified);
-console.log(doc.steps); // fetchDigest, verifyCode, verifyEnclave, compareMeasurements
-```
-
-## Proxy Support
-
-Route requests through your own backend while keeping request bodies encrypted end-to-end. This lets you:
-
-- Keep API keys on your server
-- Add authentication, rate limiting, logging
-- The proxy sees headers/URLs but **cannot decrypt request or response bodies**
-
-```typescript
-import { SecureClient } from "tinfoil";
-
-const client = new SecureClient({
-  baseURL: "https://your-proxy-server.com/",
-});
-
-await client.ready();
-// Requests go to your proxy, bodies remain encrypted to the enclave
-```
-
-For full proxy server implementation (Go example, CORS config, header handling), see the [Encrypted Request Proxying guide](https://docs.tinfoil.sh/guides/proxy-server).
+See [Prompt caching](https://docs.tinfoil.sh/sdk/prompt-caching) for resolution order and guidance on choosing a scope.
 
 ## Examples
 
-Working examples are in [`packages/tinfoil/examples/`](packages/tinfoil/examples/):
+Working examples are in [`packages/tinfoil/examples/`](packages/tinfoil/examples/): basic chat, streaming, Vercel AI SDK (server and React), direct `SecureClient` usage, and an unverified client for development.
 
-| Example                                                              | Description                                                |
-| -------------------------------------------------------------------- | ---------------------------------------------------------- |
-| [`chat/`](packages/tinfoil/examples/chat/)                           | Basic chat completion with TinfoilAI                       |
-| [`streaming/`](packages/tinfoil/examples/streaming/)                 | Server-sent events streaming                               |
-| [`ai-sdk/`](packages/tinfoil/examples/ai-sdk/)                       | Vercel AI SDK server-side integration                      |
-| [`ai-sdk-react/`](packages/tinfoil/examples/ai-sdk-react/)           | Vercel AI SDK React/browser integration                    |
-| [`secure_client/`](packages/tinfoil/examples/secure_client/)         | Direct SecureClient usage for custom HTTP                  |
-| [`unverified_client/`](packages/tinfoil/examples/unverified_client/) | Development/testing without attestation (`tinfoil/unsafe`) |
+## API Documentation
 
-Run any example:
-
-```bash
-cd packages/tinfoil/examples/chat
-npx ts-node main.ts
-```
-
-## Documentation
-
-### Guides
-
-- [Encrypted Request Proxying](https://docs.tinfoil.sh/guides/proxy-server) — Set up a proxy server
-- [Tool Calling](https://docs.tinfoil.sh/guides/tool-calling) — Function calling with AI models
-- [Structured Outputs](https://docs.tinfoil.sh/guides/structured-outputs) — JSON schema validation
-- [Image Processing](https://docs.tinfoil.sh/guides/image-processing) — Multi-modal AI
-- [Document Processing](https://docs.tinfoil.sh/guides/document-processing) — PDF/document handling
-
-### Understanding the Security
-
-- [How It Works](https://docs.tinfoil.sh/cc/how-it-works) — Confidential computing overview
-- [Confidentiality](https://docs.tinfoil.sh/cc/confidentiality) — Data privacy guarantees
-- [Verifiability](https://docs.tinfoil.sh/cc/verifiability) — Attestation explanation
-- [Attestation Architecture](https://docs.tinfoil.sh/verification/attestation-architecture) — Technical deep-dive
-- [EHBP Protocol](https://docs.tinfoil.sh/resources/ehbp) — Encryption protocol specification
-
-### Tutorials
-
-- [Cline with Tinfoil](https://docs.tinfoil.sh/tutorials/cline) — Private AI-assisted coding in VS Code
-- [Private RAG with Verba](https://docs.tinfoil.sh/tutorials/verba) — Build private RAG applications
-
-### Resources
-
-- [Model Catalog](https://docs.tinfoil.sh/models/catalog) — Available models
-- [Getting an API Key](https://docs.tinfoil.sh/get-api-key) — Sign up
-- [SDK Overview](https://docs.tinfoil.sh/sdk/overview) — All Tinfoil SDKs
-- [Status](https://docs.tinfoil.sh/resources/status) — Service status
-- [Changelog](https://docs.tinfoil.sh/resources/changelog) — What's new
-
-## Project Structure
-
-This is a monorepo with two packages:
-
-| Package             | Description                                               |
-| ------------------- | --------------------------------------------------------- |
-| `packages/tinfoil`  | Main SDK (published as `tinfoil`)                         |
-| `packages/verifier` | Attestation verifier (published as `@tinfoilsh/verifier`) |
+This library is a drop-in replacement for the [official OpenAI Node client](https://github.com/openai/openai-node). All methods and types are identical; see the [OpenAI Node client documentation](https://github.com/openai/openai-node) for API usage.
 
 ## Development
 
+This is a monorepo: `packages/tinfoil` is the SDK (published as `tinfoil`) and `packages/verifier` is the attestation verifier (published as `@tinfoilsh/verifier`).
+
 ```bash
-# Install dependencies
 npm install
-
-# Build all packages
 npm run build
-
-# Run tests
-npm test                    # Unit tests
-npm run test:all            # All tests (unit + integration + browser)
-npm run test:integration    # Integration tests (real network requests)
-npm run test:browser        # Browser tests
-npm run test:bun -w tinfoil # Bun tests
+npm test                    # unit tests
+npm run test:all            # unit, integration, and browser tests
 ```
 
 ## Reporting Vulnerabilities
 
-Email [security@tinfoil.sh](mailto:security@tinfoil.sh) or open a GitHub issue.
+Please report security vulnerabilities by either:
+
+- Emailing [security@tinfoil.sh](mailto:security@tinfoil.sh)
+- Opening an issue on GitHub on this repository
+
+We aim to respond to (legitimate) security reports within 24 hours.
