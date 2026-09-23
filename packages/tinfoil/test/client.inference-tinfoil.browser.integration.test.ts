@@ -74,6 +74,41 @@ describe("SecureClient - enclaveURL integration", () => {
     expect(verificationDoc.enclaveHost).toBeTruthy();
   }, 60000);
 
+  it("should carry the v3 facts in the verification document and bind the transport to them", async () => {
+    const client = new SecureClient({
+      enclaveURL: INFERENCE_URL,
+    });
+
+    await client.ready();
+
+    const doc = client.getVerificationDocument();
+    expect(doc.securityVerified).toBe(true);
+    expect(doc.schemaVersion).toBe(1);
+    expect(doc.releaseDigest).toMatch(/^[0-9a-f]{64}$/);
+    expect(doc.releaseTag).toBeTruthy();
+    expect(doc.codeFingerprint).toBeTruthy();
+    expect(doc.enclaveFingerprint).toBeTruthy();
+    expect(doc.tlsPublicKey).toMatch(/^[0-9a-f]{64}$/);
+    expect(doc.hpkePublicKey).toBeTruthy();
+    expect(doc.enclaveMeasurement.tlsPublicKeyFingerprint).toBe(doc.tlsPublicKey);
+    expect(doc.enclaveMeasurement.hpkePublicKey).toBe(doc.hpkePublicKey);
+    expect(doc.codeMeasurement.registers.length).toBeGreaterThan(0);
+    expect(doc.enclaveMeasurement.measurement.registers.length).toBeGreaterThan(0);
+    expect(doc.verifiedAt).toBeTruthy();
+    expect(doc.steps).toMatchObject({
+      fetchDigest: { status: "success" },
+      verifyCode: { status: "success" },
+      verifyEnclave: { status: "success" },
+      compareMeasurements: { status: "success" },
+    });
+
+    // The EHBP transport is built from the same endorsed HPKE key the
+    // document carries: a request round-trips only if the attested enclave
+    // can decrypt it.
+    const response = await client.fetch("/v1/models", { method: "GET" });
+    expect(response.status).toBe(200);
+  }, 60000);
+
   it("should make successful fetch request when enclaveURL is set to inference.tinfoil.sh", async () => {
     const client = new SecureClient({
       enclaveURL: INFERENCE_URL,

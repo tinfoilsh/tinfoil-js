@@ -1,72 +1,31 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
-const MOCK_MEASUREMENT_TYPE = "https://tinfoil.sh/predicate/sev-snp-guest/v1";
-
-const mockVerificationDocument = {
-  configRepo: "test-repo",
-  enclaveHost: "test-host",
-  releaseDigest: "test-digest",
-  codeMeasurement: { type: MOCK_MEASUREMENT_TYPE, registers: [] },
-  enclaveMeasurement: {
-    tlsPublicKeyFingerprint: "fingerprint",
-    hpkePublicKey: "mock-hpke-public-key",
-    measurement: { type: MOCK_MEASUREMENT_TYPE, registers: [] },
-  },
-  tlsPublicKey: "test-tls-public-key",
-  hpkePublicKey: "mock-hpke-public-key",
-  codeFingerprint: "test-code-fingerprint",
-  enclaveFingerprint: "test-enclave-fingerprint",
-  selectedRouterEndpoint: "test-router.tinfoil.sh",
-  securityVerified: true,
-  steps: {
-    fetchDigest: { status: "success" },
-    verifyCode: { status: "success" },
-    verifyEnclave: { status: "success" },
-    compareMeasurements: { status: "success" },
-  },
-};
+const MOCK_MEASUREMENT_TYPE = "https://tinfoil.sh/predicate/sev-snp-guest/v2";
+const MOCK_REGISTER = "ab".repeat(48);
 
 const verifyMock = vi.fn(async () => ({
-  tlsPublicKeyFingerprint: "fingerprint",
-  hpkePublicKey: "mock-hpke-public-key",
-  measurement: { type: MOCK_MEASUREMENT_TYPE, registers: [] },
+  codeDigest: "test-digest",
+  codeTag: "test-release",
+  codeMeasurement: { type: MOCK_MEASUREMENT_TYPE, registers: [MOCK_REGISTER] },
+  enclaveMeasurement: { type: MOCK_MEASUREMENT_TYPE, registers: [MOCK_REGISTER] },
+  cryptoMaterial: [
+    { id: "tls", format: "https://tinfoil.sh/key/spki-fp-sha256/v1", data: "fingerprint" },
+    { id: "hpke", format: "https://tinfoil.sh/key/x25519-hpke/v1", data: "mock-hpke-public-key" },
+  ],
 }));
 
 const mockFetch = vi.fn(async () => new Response(null));
 const createSecureFetchMock = vi.fn(async () => ({ fetch: mockFetch, getSessionRecoveryToken: vi.fn() }));
 const createPinnedRealtimeWSMock = vi.fn(async () => ({}));
 
-vi.mock("../src/verifier.js", () => ({
-  Verifier: class {
-    verify() {
-      return verifyMock();
-    }
-    verifyBundle() {
-      return verifyMock();
-    }
-    getVerificationDocument() {
-      return mockVerificationDocument;
-    }
-  },
-  FetchError: class FetchError extends Error {
-    constructor(message: string) {
-      super(message);
-      this.name = 'FetchError';
-    }
-  },
-  AttestationError: class AttestationError extends Error {
-    constructor(message: string) {
-      super(message);
-      this.name = 'AttestationError';
-    }
-  },
-  ConfigurationError: class ConfigurationError extends Error {
-    constructor(message: string) {
-      super(message);
-      this.name = 'ConfigurationError';
-    }
-  },
-}));
+vi.mock("../src/verifier.js", async (importOriginal) => {
+  const original = await importOriginal<typeof import("../src/verifier.js")>();
+  return {
+    ...original,
+    fetchAttestation: vi.fn(async () => new Uint8Array([1, 2, 3])),
+    verifyDocumentV3: () => verifyMock(),
+  };
+});
 
 vi.mock("../src/secure-fetch.js", () => ({
   createSecureFetch: createSecureFetchMock,
