@@ -1,6 +1,6 @@
 import { isRealBrowser } from "./env.js";
 import { ConfigurationError } from "./verifier.js";
-import { createEncryptedBodyFetch, type SecureTransport } from "./encrypted-body-fetch.js";
+import { createEncryptedBodyFetch, type ResealFn, type SecureTransport } from "./encrypted-body-fetch.js";
 import { withUserCacheSecret } from "./user-cache-secret.js";
 
 /**
@@ -21,10 +21,11 @@ export async function createSecureFetch(
   hpkePublicKey?: string,
   tlsPublicKeyFingerprint?: string,
   enclaveURL?: string,
-  userCacheSecret: string = ""
+  userCacheSecret: string = "",
+  reseal?: ResealFn
 ): Promise<SecureTransport> {
   if (hpkePublicKey) {
-    return createEncryptedBodyFetch(baseURL, hpkePublicKey, enclaveURL, userCacheSecret);
+    return createEncryptedBodyFetch(baseURL, hpkePublicKey, enclaveURL, userCacheSecret, reseal);
   }
 
   if (isRealBrowser()) {

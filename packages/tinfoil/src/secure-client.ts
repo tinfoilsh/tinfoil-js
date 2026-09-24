@@ -72,7 +72,7 @@ export interface SecureClientOptions {
    * process-lifetime in-memory secret instead. Empty values are treated as
    * unset. A non-empty
    * `user_cache_secret` field already present in a request body wins over this
-   * option.
+   * option. It also keys the cache-affinity hash the gateway routes on.
    */
   userCacheSecret?: string;
 }
@@ -264,19 +264,34 @@ export class SecureClient {
     this.clearDerivedState();
   }
 
-  private async initSecureClient(): Promise<void> {
-    const bundle: AttestationBundle = await fetchAttestationBundle({
+  private fetchBundle(enclaveURL: string | undefined): Promise<AttestationBundle> {
+    return fetchAttestationBundle({
       atcBaseUrl: this.config.attestationBundleURL,
-      enclaveURL: this.config.enclaveURL,
+      enclaveURL,
       configRepo: this.config.configRepo !== TINFOIL_CONFIG.DEFAULT_ROUTER_REPO
         ? this.config.configRepo
         : undefined,
     });
+  }
 
-    // Resolve enclaveURL: user-provided config takes precedence, otherwise from bundle
+  private async verifyBundle(bundle: AttestationBundle) {
+    const verifier = new Verifier({
+      configRepo: this.config.configRepo,
+    });
+
+    try {
+      return await verifier.verifyBundle(bundle);
+    } finally {
+      // Always capture the verifier's doc (success or partial-failure)
+      this.verificationDocument = verifier.getVerificationDocument() ?? this.verificationDocument;
+    }
+  }
+
+  private async initSecureClient(): Promise<void> {
+    const bundle = await this.fetchBundle(this.config.enclaveURL);
+
     this.resolvedEnclaveURL = this.config.enclaveURL ?? `https://${bundle.domain}`;
 
-    // Resolve baseURL: user-provided config takes precedence, otherwise use the enclave API
     this.resolvedBaseURL = this.config.baseURL ?? this.getEnclaveBaseURL();
 
     if (
@@ -287,19 +302,24 @@ export class SecureClient {
       throw new ConfigurationError("TLS transport requires baseURL to use the verified enclave origin");
     }
 
-    const verifier = new Verifier({
-      configRepo: this.config.configRepo,
-    });
-
-    try {
-      const attestation = await verifier.verifyBundle(bundle);
-      this.attestedTlsPublicKeyFingerprint = attestation.tlsPublicKeyFingerprint;
-      this._transport = await this.createTransport(attestation.hpkePublicKey, attestation.tlsPublicKeyFingerprint);
-    } finally {
-      // Always capture the verifier's doc (success or partial-failure)
-      this.verificationDocument = verifier.getVerificationDocument() ?? this.verificationDocument;
-    }
+    const attestation = await this.verifyBundle(bundle);
+    this.attestedTlsPublicKeyFingerprint = attestation.tlsPublicKeyFingerprint;
+    this._transport = await this.createTransport(attestation.hpkePublicKey, attestation.tlsPublicKeyFingerprint);
   }
+
+  private reseal = async (enclaveURL: string): Promise<string> => {
+    const verifier = new Verifier({ configRepo: this.config.configRepo });
+    const { hpkePublicKey, tlsPublicKeyFingerprint } = await verifier.verifyBundle(
+      await this.fetchBundle(enclaveURL),
+    );
+    if (!hpkePublicKey) {
+      throw new AttestationError(`enclave ${enclaveURL} attested without an HPKE public key`);
+    }
+    this.verificationDocument = verifier.getVerificationDocument() ?? this.verificationDocument;
+    this.resolvedEnclaveURL = enclaveURL;
+    this.attestedTlsPublicKeyFingerprint = tlsPublicKeyFingerprint;
+    return hpkePublicKey;
+  };
 
   /**
    * Get the verification document containing attestation details.
@@ -335,17 +355,13 @@ export class SecureClient {
   }
 
   private async createTransport(hpkePublicKey?: string, tlsPublicKeyFingerprint?: string): Promise<SecureTransport> {
-    // The prompt-cache scoping secret: the userCacheSecret option wins, then
-    // the TINFOIL_USER_CACHE_SECRET environment variable, then the secret
-    // persisted at ~/.tinfoil/user_cache_secret (generated on first use).
-    // Empty values fall through to the attempted persisted or generated default.
     const userCacheSecret = await resolveUserCacheSecret(this.config.userCacheSecret);
 
     if (this.config.transport === 'tls') {
       return await createSecureFetch(this.resolvedBaseURL!, undefined, tlsPublicKeyFingerprint, this.resolvedEnclaveURL, userCacheSecret);
     }
 
-    return await createSecureFetch(this.resolvedBaseURL!, hpkePublicKey, undefined, this.resolvedEnclaveURL, userCacheSecret);
+    return await createSecureFetch(this.resolvedBaseURL!, hpkePublicKey, undefined, this.resolvedEnclaveURL, userCacheSecret, this.reseal);
   }
 
   /**
