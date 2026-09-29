@@ -1,6 +1,12 @@
 import { TINFOIL_CONFIG } from "./config.js";
 import type { AttestationBundle } from "./verifier.js";
 import { ConfigurationError, FetchError } from "./verifier.js";
+import { SDK_NAME, SDK_VERSION } from "./version.js";
+
+const ATTESTATION_HEADERS = {
+  "Tinfoil-SDK": SDK_NAME,
+  "Tinfoil-SDK-Version": SDK_VERSION,
+};
 
 export interface FetchAttestationBundleOptions {
   atcBaseUrl?: string;
@@ -29,13 +35,13 @@ export async function fetchAttestationBundle(options: FetchAttestationBundleOpti
   const response = usePost
     ? await fetch(url, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { ...ATTESTATION_HEADERS, 'Content-Type': 'application/json' },
         body: JSON.stringify({
           enclaveUrl: options.enclaveURL,
           repo: options.configRepo,
         }),
       })
-    : await fetch(url);
+    : await fetch(url, { headers: ATTESTATION_HEADERS });
 
   if (!response.ok) {
     throw new FetchError(`Failed to fetch attestation bundle from ${baseUrl}: HTTP ${response.status} ${response.statusText}`);
