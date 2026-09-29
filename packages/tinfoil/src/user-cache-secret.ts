@@ -21,6 +21,9 @@ import { isRealBrowser } from "./env.js";
  * Injection happens inside the secure transport — before the EHBP transport
  * encrypts the body, or on the way into the TLS connection pinned to the
  * attested key — so the secret is only ever visible to the verified enclave.
+ *
+ * The gateway cannot read that body, so `withRoutingHeaders` derives the
+ * plaintext headers it routes on from the same secret.
  */
 
 /**
@@ -64,12 +67,16 @@ export async function resolveUserCacheSecret(explicit?: string): Promise<string>
   return loadOrGenerateUserCacheSecret();
 }
 
+function toHex(bytes: Uint8Array): string {
+  return Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
+}
+
 /** Returns a fresh 256-bit random secret, hex-encoded. */
 function newUserCacheSecret(): string {
   try {
     const bytes = new Uint8Array(32);
     crypto.getRandomValues(bytes);
-    return Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
+    return toHex(bytes);
   } catch {
     console.warn(
       "[tinfoil] could not generate a user cache secret; automatic prompt-cache scoping is unavailable",
@@ -422,4 +429,79 @@ function requestPathname(input: RequestInfo | URL, baseURL: string): string {
     return input.pathname;
   }
   return new URL((input as Request).url, baseURL).pathname;
+}
+
+/** The model pool to route to, which the gateway cannot read out of the sealed body. */
+export const MODEL_HEADER = "X-Tinfoil-Model";
+
+/** Hash(secret || prompt head), which the gateway hashes to a replica with a warm KV cache. */
+export const CACHE_PREFIX_HEADER = "X-Tinfoil-Cache-Prefix";
+
+/** Keying on the secret is what makes this safe in the clear: no one else can compute it. */
+async function cachePrefix(secret: string, head: string): Promise<string> {
+  // `head` is JSON-encoded, which escapes NUL, so the separator is unambiguous.
+  const digest = await crypto.subtle.digest(
+    "SHA-256",
+    new TextEncoder().encode(`${secret}\u0000${head}`),
+  );
+  return toHex(new Uint8Array(digest));
+}
+
+/** The prompt prefix that stays byte-identical as a conversation grows, so every turn hashes alike. */
+function promptHead(body: Record<string, unknown>): unknown {
+  // `instructions` precedes `input` on the wire, so it is the longer shared head.
+  if (typeof body.instructions === "string" && body.instructions !== "") {
+    return body.instructions;
+  }
+  for (const field of ["messages", "input", "prompt"]) {
+    const value = body[field];
+    if (Array.isArray(value)) {
+      return value[0];
+    }
+    if (value !== undefined && value !== null) {
+      return value;
+    }
+  }
+  return undefined;
+}
+
+/** Adds the gateway's plaintext routing headers, preferring any the caller set. Never throws. */
+export async function withRoutingHeaders(
+  init: RequestInit | undefined,
+  pathname: string,
+  secret: string,
+): Promise<RequestInit | undefined> {
+  if (init === undefined || (init.method ?? "GET").toUpperCase() !== "POST") {
+    return init;
+  }
+  const raw = bodyText(init.body);
+  if (raw === null) {
+    return init;
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return init;
+  }
+  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+    return init;
+  }
+  const body = parsed as Record<string, unknown>;
+
+  const headers = new Headers(init.headers);
+  if (!headers.has(MODEL_HEADER) && typeof body.model === "string" && body.model !== "") {
+    headers.set(MODEL_HEADER, body.model);
+  }
+  if (
+    secret !== "" &&
+    !headers.has(CACHE_PREFIX_HEADER) &&
+    USER_CACHE_SECRET_PATHS.some((path) => pathname.endsWith(path))
+  ) {
+    const head = promptHead(body);
+    if (head !== undefined) {
+      headers.set(CACHE_PREFIX_HEADER, await cachePrefix(secret, JSON.stringify(head)));
+    }
+  }
+  return { ...init, headers };
 }

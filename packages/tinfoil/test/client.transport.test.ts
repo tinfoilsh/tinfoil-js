@@ -117,7 +117,8 @@ describe("Secure transport integration", () => {
       "mock-hpke-public-key",
       undefined,
       "https://test-router.tinfoil.sh",
-      "test-secret"
+      "test-secret",
+      expect.any(Function),
     );
   });
 
