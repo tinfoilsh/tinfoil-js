@@ -9,9 +9,14 @@ import { tcbFromInt, bytesToHex } from './sev/utils.js';
 import { AttestationError, FetchError, wrapOrThrow } from './errors.js';
 import { PredicateType } from './types.js';
 import type { AttestationBundle, AttestationDocument } from './types.js';
+import { VERIFIER_NAME, VERIFIER_VERSION } from './version.js';
 
 const GITHUB_PROXY = 'https://github-proxy.tinfoil.sh';
 const KDS = 'https://kds-proxy.tinfoil.sh';
+const ATTESTATION_HEADERS = {
+  'Tinfoil-SDK': VERIFIER_NAME,
+  'Tinfoil-SDK-Version': VERIFIER_VERSION,
+};
 
 /**
  * Assemble a complete attestation bundle by fetching all components
@@ -29,7 +34,7 @@ export async function assembleAttestationBundle(
   // 1. Fetch independent resources in parallel
   const [attestation, release, enclaveCert] = await Promise.all([
     withRetry(async (): Promise<AttestationDocument> => {
-      const doc = await fetchJson(`https://${enclaveHost}/.well-known/tinfoil-attestation`);
+      const doc = await fetchJson(`https://${enclaveHost}/.well-known/tinfoil-attestation`, { headers: ATTESTATION_HEADERS });
       return { format: doc.format as PredicateType, body: doc.body };
     }),
     withRetry(async () => {
@@ -100,10 +105,10 @@ async function withRetry<T>(fn: () => Promise<T>): Promise<T> {
 }
 
 /** Fetch a URL, throwing FetchError on non-OK or network failure. */
-async function fetchOk(url: string): Promise<Response> {
+async function fetchOk(url: string, init?: RequestInit): Promise<Response> {
   let response: Response;
   try {
-    response = await fetch(url);
+    response = await fetch(url, init);
   } catch (e) {
     throw new FetchError(`Network error: ${url}`, { cause: e as Error });
   }
@@ -113,8 +118,8 @@ async function fetchOk(url: string): Promise<Response> {
   return response;
 }
 
-async function fetchJson<T = any>(url: string): Promise<T> {
-  try { return await (await fetchOk(url)).json(); }
+async function fetchJson<T = any>(url: string, init?: RequestInit): Promise<T> {
+  try { return await (await fetchOk(url, init)).json(); }
   catch (e) { wrapOrThrow(e, FetchError, `Invalid response from ${url}`); }
 }
 
