@@ -164,8 +164,12 @@ export function createEncryptedBodyFetch(baseURL: string, hpkePublicKey: string,
         userCacheSecret,
       );
 
+      // The transport is bound to the proxy origin and rejects any other
+      // (ehbp >= 0.4 no longer rewrites hosts); send the enclave path through
+      // the proxy, which routes on the enclave header set above.
+      const sendUrl = new URL(targetUrl.pathname + targetUrl.search + targetUrl.hash, baseOrigin);
       const transportInstance = await getOrCreateTransport();
-      return transportInstance.request(targetUrl.toString(), initWithHeader!);
+      return transportInstance.request(sendUrl.toString(), initWithHeader!);
     },
 
     async getSessionRecoveryToken(): Promise<SessionRecoveryToken> {
@@ -224,7 +228,8 @@ export function createUnverifiedEncryptedBodyFetch(baseURL: string, keyOrigin?: 
       const initWithEnclaveHeader = { ...normalized.init, headers };
 
       const transportInstance = await getOrCreateTransport();
-      return transportInstance.request(targetUrl.toString(), initWithEnclaveHeader);
+      const sendUrl = new URL(targetUrl.pathname + targetUrl.search + targetUrl.hash, baseOrigin);
+      return transportInstance.request(sendUrl.toString(), initWithEnclaveHeader);
     },
 
     async getSessionRecoveryToken(): Promise<SessionRecoveryToken> {
