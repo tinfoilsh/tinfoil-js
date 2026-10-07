@@ -83,5 +83,6 @@ export async function createTinfoilAI(apiKey?: string, options: CreateTinfoilAIO
     baseURL: secureClient.getBaseURL()!,
     apiKey: resolvedApiKey,
     fetch: secureClient.fetch,
+    supportsStructuredOutputs: true,
   });
 }
