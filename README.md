@@ -34,7 +34,7 @@ Never put `apiKey` in browser code: route browser requests through a [proxy serv
 
 - [JavaScript SDK documentation](https://docs.tinfoil.sh/sdk/javascript-sdk), including `SecureClient` and verification documents. Realtime transcription over WebSockets is covered in [Processing audio](https://docs.tinfoil.sh/guides/processing-audio).
 - [Examples](packages/tinfoil/examples/), including the Vercel AI SDK on the server and in React.
-- All OpenAI methods and types are unchanged; see the [OpenAI Node client documentation](https://github.com/openai/openai-node).
+- The resources `TinfoilAI` exposes, such as `chat`, `responses`, `embeddings`, and `audio`, keep the OpenAI methods and types; see the [OpenAI Node client documentation](https://github.com/openai/openai-node).
 
 ## Development
 
