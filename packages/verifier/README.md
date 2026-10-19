@@ -30,7 +30,7 @@ const doc = verifier.getVerificationDocument();
 console.log(doc?.securityVerified);
 ```
 
-`verifyBundle(bundle)` verifies an attestation bundle you already hold. Failures throw `ConfigurationError`, `FetchError`, or `AttestationError`.
+`verifyBundle(bundle)` verifies an attestation bundle you already hold. Failed verification throws `AttestationError`, a failed fetch in `verify()` throws `FetchError`, and missing options throw `ConfigurationError`.
 
 Obtaining `tlsPublicKeyFingerprint` does not pin anything: a custom transport must compare it with the live peer certificate's SPKI on every new TLS connection, in addition to normal hostname and certificate validation.
 
