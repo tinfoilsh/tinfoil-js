@@ -39,6 +39,8 @@
     "lint": "eslint src/**/*.ts",
     "check:es2020": "acorn --ecma2020 --module --silent dist/*.js",
     "clean": "rm -rf dist",
+    "prepack": "cp ../../README.md README.md",
+    "postpack": "rm README.md",
     "prepublishOnly": "npm run build"
   },
   "files": [

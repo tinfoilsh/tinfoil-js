@@ -9,3 +9,4 @@ packages/*/.node-tests/
 __screenshots__/
 sigstore-browser/
 packages/tinfoil/src/version.ts
+packages/tinfoil/README.md
