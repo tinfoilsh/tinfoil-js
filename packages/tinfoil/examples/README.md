@@ -1,8 +1,9 @@
 # Tinfoil SDK Examples
 
 Set `TINFOIL_API_KEY` ([get one](https://docs.tinfoil.sh/get-api-key)) and run
-`npm install && npm run build` from the monorepo root. Then run an example with
-`cd <example> && npx ts-node main.ts`, or all of them with `./run-all.sh`.
+`npm install && npm run build` from the monorepo root. Then, from
+`packages/tinfoil/examples`, run an example with `cd <example> && npx ts-node main.ts`,
+or all of them with `./run-all.sh`.
 
 | Example | Shows |
 | --- | --- |
