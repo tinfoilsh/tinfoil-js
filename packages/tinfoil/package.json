@@ -68,7 +68,7 @@
     "@tinfoilsh/verifier": "1.2.3",
     "@types/ws": "^8.18.1",
     "ehbp": "^0.3.3",
-    "openai": "^6.46.0",
+    "openai": "^7.35.0",
     "ws": "^8.21.0"
   },
   "peerDependencies": {
