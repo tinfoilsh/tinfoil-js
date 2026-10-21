@@ -1,3 +1,3 @@
 export const VERIFIER_NAME = '@tinfoilsh/verifier';
-export const VERIFIER_VERSION = '1.2.3';
+export const VERIFIER_VERSION = '1.3.0';
 export const VERIFICATION_DOCUMENT_SCHEMA_VERSION = 1 as const;
