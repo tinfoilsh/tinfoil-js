@@ -121,6 +121,26 @@ describe("Secure transport integration", () => {
     );
   });
 
+  it("sends decisions requests through the encrypted body transport", async () => {
+    const { TinfoilAI } = await import("../src/tinfoil-ai");
+    const client = new TinfoilAI({
+      apiKey: "test",
+      baseURL: "https://test-router.tinfoil.sh/v1/",
+    });
+    mockFetch.mockResolvedValueOnce(
+      new Response(JSON.stringify({ id: "dec_1", object: "decision" }), {
+        headers: { "content-type": "application/json" },
+      }),
+    );
+
+    await client.decisions.create({} as any);
+
+    expect(mockFetch).toHaveBeenCalledTimes(1);
+    const [url, init] = mockFetch.mock.calls[0] as unknown as [string, RequestInit];
+    expect(url).toBe("https://test-router.tinfoil.sh/v1/decisions");
+    expect(init.method).toBe("POST");
+  });
+
   it("provides the encrypted body transport to the AI SDK provider", async () => {
     const { createTinfoilAI } = await import("../src/ai-sdk-provider");
     const provider = await createTinfoilAI("api-key");

@@ -3,6 +3,7 @@ import type {
   Audio,
   Beta,
   Chat,
+  Decisions,
   Embeddings,
   Files,
   FineTuning,
@@ -276,6 +277,12 @@ export class TinfoilAI {
     );
   }
 
+  get decisions(): Decisions {
+    return createAsyncProxy(
+      this.ensureReady().then((client) => client.decisions),
+    );
+  }
+
   get embeddings(): Embeddings {
     return createAsyncProxy(
       this.ensureReady().then((client) => client.embeddings),
@@ -305,6 +312,7 @@ export namespace TinfoilAI {
   export import Beta = OpenAI.Beta;
   export import Batches = OpenAI.Batches;
   export import Completions = OpenAI.Completions;
+  export import Decisions = OpenAI.Decisions;
   export import Embeddings = OpenAI.Embeddings;
   export import Files = OpenAI.Files;
   export import FineTuning = OpenAI.FineTuning;
