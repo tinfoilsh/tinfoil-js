@@ -135,6 +135,7 @@ describe("SecureClient", () => {
       undefined,
       "https://test-router.tinfoil.sh",
       "test-secret",
+      expect.any(Function),
     );
   });
 
@@ -572,6 +573,7 @@ describe("SecureClient", () => {
         undefined,
         "https://test-router.tinfoil.sh",
         "option-secret",
+        expect.any(Function),
       );
     });
 
@@ -587,6 +589,7 @@ describe("SecureClient", () => {
         undefined,
         "https://test-router.tinfoil.sh",
         "test-secret",
+        expect.any(Function),
       );
     });
   });
@@ -766,6 +769,7 @@ describe("SecureClient", () => {
         undefined,
         "https://test-router.tinfoil.sh",
         "test-secret",
+        expect.any(Function),
       );
     });
 
@@ -786,6 +790,7 @@ describe("SecureClient", () => {
         undefined,
         "https://test-router.tinfoil.sh",
         "test-secret",
+        expect.any(Function),
       );
     });
 
@@ -806,6 +811,7 @@ describe("SecureClient", () => {
         undefined,
         "https://my-enclave.example.com",
         "test-secret",
+        expect.any(Function),
       );
     });
 
@@ -827,6 +833,7 @@ describe("SecureClient", () => {
         undefined,
         "https://my-enclave.example.com",
         "test-secret",
+        expect.any(Function),
       );
     });
 
