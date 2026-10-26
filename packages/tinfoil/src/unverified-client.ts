@@ -9,8 +9,8 @@
  * server that doesn't have attestation set up. For production, use SecureClient
  * or TinfoilAI which verify the key through attestation.
  */
-import { fetchRouter } from "./atc.js";
-import { ConfigurationError } from "./verifier.js";
+import { fetchRouters } from "./acquisition.js";
+import { ConfigurationError } from "./errors.js";
 import { createUnverifiedEncryptedBodyFetch, type SecureTransport } from "./encrypted-body-fetch.js";
 
 interface UnverifiedClientOptions {
@@ -47,9 +47,9 @@ export class UnverifiedClient {
   private async initUnverifiedClient(): Promise<void> {
     // Only fetch router if neither baseURL nor keyOrigin is provided
     if (!this.baseURL && !this.keyOrigin) {
-      const routerAddress = await fetchRouter();
-      this.keyOrigin = `https://${routerAddress}`;
-      this.baseURL = `https://${routerAddress}/v1/`;
+      const routerAddress = (await fetchRouters())[0];
+      this.keyOrigin = routerAddress;
+      this.baseURL = `${routerAddress}/v1/`;
     }
 
     // Ensure both baseURL and keyOrigin are initialized
@@ -74,9 +74,7 @@ export class UnverifiedClient {
     this._transport = createUnverifiedEncryptedBodyFetch(this.baseURL, this.keyOrigin);
   }
 
-  public async getVerificationDocument(): Promise<never> {
-    throw new ConfigurationError("Verification document unavailable: this version of the client is unverified");
-  }
+  public inspect(): undefined { return undefined; }
 
   get fetch(): typeof fetch {
     return async (input: RequestInfo | URL, init?: RequestInit) => {
