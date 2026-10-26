@@ -20,12 +20,7 @@ export default defineConfig({
       instances: [
         {
           browser: "chromium",
-          launch: {
-            args: [
-              '--disable-web-security',
-              '--disable-features=IsolateOrigins,site-per-process',
-            ],
-          },
+
         },
       ],
     },

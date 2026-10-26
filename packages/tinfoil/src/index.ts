@@ -1,45 +1,12 @@
-// Re-export the TinfoilAI class
-export { TinfoilAI } from "./tinfoil-ai.js";
-export { TinfoilAI as default } from "./tinfoil-ai.js";
-export type { TinfoilAIOptions } from "./tinfoil-ai.js";
-
-export {
-  TinfoilError,
-  ConfigurationError,
-  AttestationError,
-  Verifier,
-  assembleAttestationBundle,
-} from "./verifier.js";
-
-export type {
-  AttestationDocument,
-  AttestationMeasurement,
-  AttestationResponse,
-  AttestationBundle,
-  VerificationDocument,
-  VerificationStepState,
-  HardwareMeasurement,
-  VerifierOptions,
-  CertVerificationResult,
-} from "./verifier.js";
-export { createTinfoilAI } from "./ai-sdk-provider.js";
-export type { CreateTinfoilAIOptions } from "./ai-sdk-provider.js";
-export {
-  SecureClient,
-  type TransportMode,
-  type SecureWebSocketOptions,
-} from "./secure-client.js";
+export { TinfoilAI, TinfoilAI as default, type TinfoilAIOptions } from "./tinfoil-ai.js";
+export { TinfoilError, ConfigurationError, AttestationError, NetworkError } from "./errors.js";
+export { SecureClient, type SecureClientOptions, type VerificationSnapshot, type TransportMode, type SecureWebSocketOptions } from "./secure-client.js";
+export { Client, type ClientOptions } from "./client.js";
+export { Gateway, type GatewayOptions, type Catalog, type CatalogEntry, type ModelPin } from "./gateway.js";
+export { createTinfoilAI, type CreateTinfoilAIOptions } from "./ai-sdk-provider.js";
+export { fetchAttestationDocument, fetchRouters, type AcquisitionOptions } from "./acquisition.js";
 export type { SessionRecoveryToken } from "ehbp";
-export {
-  serializeSessionRecoveryToken,
-  deserializeSessionRecoveryToken,
-  decryptResponseWithToken,
-} from "ehbp";
-export {
-  fetchRouter,
-  fetchAttestationBundle,
-  type FetchAttestationBundleOptions,
-} from "./atc.js";
+export { serializeSessionRecoveryToken, deserializeSessionRecoveryToken, decryptResponseWithToken } from "ehbp";
 
 // Re-export OpenAI utility types and classes that users might need
 // Using public exports from the main OpenAI package instead of deep imports

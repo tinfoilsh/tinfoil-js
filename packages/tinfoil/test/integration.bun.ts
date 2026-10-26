@@ -26,8 +26,8 @@ describe("Bun Integration", () => {
     });
     await client.ready();
 
-    const doc = await client.getVerificationDocument();
-    expect(doc.securityVerified).toBe(true);
+    const doc = client.inspect()?.verification;
+    expect(doc?.freshnessExpiresAt?.getTime()).toBeGreaterThan(Date.now());
   });
 
   it("should make chat completion via EHBP transport (default)", async () => {
@@ -56,8 +56,8 @@ describe("Bun Integration", () => {
     });
     await client.ready();
 
-    const doc = await client.getVerificationDocument();
-    expect(doc.securityVerified).toBe(true);
+    const doc = client.inspect()?.verification;
+    expect(doc?.freshnessExpiresAt?.getTime()).toBeGreaterThan(Date.now());
   });
 
   it("should make chat completion via TLS transport", async () => {
@@ -77,15 +77,15 @@ describe("Bun Integration", () => {
     expect(completion.choices[0].message.content).toBeDefined();
   });
 
-  it("should create SecureClient with TLS transport", async () => {
+  it("should create Client with TLS transport", async () => {
     if (!isBun || !RUN_INTEGRATION) return;
 
-    const { SecureClient } = await import("../src/index.js");
-    const client = new SecureClient({ transport: 'tls' });
+    const { Client } = await import("../src/index.js");
+    const client = new Client({ transport: 'tls' });
     await client.ready();
 
-    const doc = await client.getVerificationDocument();
-    expect(doc.securityVerified).toBe(true);
+    const doc = client.inspect()?.verification;
+    expect(doc?.freshnessExpiresAt?.getTime()).toBeGreaterThan(Date.now());
     expect(client.getBaseURL()).toBeDefined();
   });
 });

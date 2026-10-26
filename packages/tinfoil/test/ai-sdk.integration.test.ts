@@ -7,7 +7,7 @@ const RUN_INTEGRATION = process.env.RUN_TINFOIL_INTEGRATION === "true";
  *
  * Tests the integration between Tinfoil SDK and Vercel AI SDK using:
  * 1. createTinfoilAI - convenience function for AI SDK provider
- * 2. SecureClient.fetch - direct usage with createOpenAI from @ai-sdk/openai
+ * 2. Client.fetch - direct usage with createOpenAI from @ai-sdk/openai
  *
  * These tests verify that Tinfoil's secure fetch works correctly with
  * all AI SDK features: text generation, streaming, abort, and system messages.
@@ -107,16 +107,16 @@ describe("Vercel AI SDK Integration Tests", () => {
     }, 60000);
   });
 
-  describe("SecureClient with @ai-sdk/openai-compatible", () => {
-    // Share a single attested SecureClient + provider across both tests
+  describe("Client with @ai-sdk/openai-compatible", () => {
+    // Share a single attested Client + provider across both tests
     let provider: any;
 
     beforeAll(async () => {
       if (!RUN_INTEGRATION) return;
-      const { SecureClient } = await import("../src/secure-client");
+      const { Client } = await import("../src/client");
       const { createOpenAICompatible } = await import("@ai-sdk/openai-compatible");
 
-      const secureClient = new SecureClient();
+      const secureClient = new Client();
       await secureClient.ready();
 
       provider = createOpenAICompatible({

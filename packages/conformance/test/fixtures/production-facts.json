@@ -1,0 +1,64 @@
+{
+  "reference": "0ad2c4addae02b7aac7ba9d11d98e2726b82d177 plus audited vendor-binding and mitigation-version corrections",
+  "facts": {
+    "snp": {
+      "code_digest": "5233a27f1468f474d27c103e06c1a7a607e6a722ff4f9299ddf4e32fa87f201e",
+      "code_measurement": {
+        "type": "https://tinfoil.sh/predicate/sev-snp-guest/v2",
+        "registers": [
+          "9134838da8aa4e1792566b2988820340356517c4db0c94261eb8154843e0357554ba72fcf185f950d9301fbede574c90"
+        ]
+      },
+      "enclave_measurement": {
+        "type": "https://tinfoil.sh/predicate/sev-snp-guest/v2",
+        "registers": [
+          "9134838da8aa4e1792566b2988820340356517c4db0c94261eb8154843e0357554ba72fcf185f950d9301fbede574c90"
+        ]
+      },
+      "tls_public_key_fp": "c9e1acc1f54b49852032c4f13d2459df08c7676cbd2fb631451e7cdf12b35bf9",
+      "hpke_public_key": "07ba19655a005e8914a8a6ff8797e9c0c317c71d50b067045b4c23d9da99e723"
+    },
+    "tdx": {
+      "code_digest": "83494c29a2f8d67b0a7c71f85c442363afd6b96f40b60be268c6b531d70c8210",
+      "code_measurement": {
+        "type": "https://tinfoil.sh/predicate/tdx-guest/v2",
+        "registers": [
+          "",
+          "",
+          "7e57f9877b4533e7dcb8dd7419dfaf422f3c7cef6fd337a4eaf27ae90a751ff04945ef0d4fb6c3753285cb1f09ce048e",
+          "d2874f914be55a3b4f9cce518223a5c752190d2177313a2911e2979fc6881951ca0642e72a02127a7619bada9ed21f14",
+          ""
+        ]
+      },
+      "enclave_measurement": {
+        "type": "https://tinfoil.sh/predicate/tdx-guest/v2",
+        "registers": [
+          "7357a10d2e2724dffe68813e3cc4cfcde6814d749f2fb62e3953e54f6e0b50a219786afe2cd478f684b52c61837e1114",
+          "97390df542bb467ee4acbebe726f1199a5aece2062690a282985cc604c2f0f70ec2e2fd7918dd5c39c625e9d0410422f",
+          "7e57f9877b4533e7dcb8dd7419dfaf422f3c7cef6fd337a4eaf27ae90a751ff04945ef0d4fb6c3753285cb1f09ce048e",
+          "d2874f914be55a3b4f9cce518223a5c752190d2177313a2911e2979fc6881951ca0642e72a02127a7619bada9ed21f14",
+          "000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"
+        ]
+      },
+      "tls_public_key_fp": "d56f45c63c90d388e81832e124de063fb1700d0558ab9f85b62eb183f6a01900",
+      "hpke_public_key": "451e8b48d0c6af5bc4ee72b8c800395fd1a80de9d32c123b7ae60a4df9b1467c"
+    },
+    "turin": {
+      "code_digest": "7f08c86aa38a93530255ba65c73834fab19bc0683fb7c1decf5e34f307342fbb",
+      "code_measurement": {
+        "type": "https://tinfoil.sh/predicate/sev-snp-guest/v2",
+        "registers": [
+          "b64eb23f1441a8f25e29d901782fbb82f894f434db70cb1658dd37c398715bfff070f3b732f2e623bf151e56d2699188"
+        ]
+      },
+      "enclave_measurement": {
+        "type": "https://tinfoil.sh/predicate/sev-snp-guest/v2",
+        "registers": [
+          "b64eb23f1441a8f25e29d901782fbb82f894f434db70cb1658dd37c398715bfff070f3b732f2e623bf151e56d2699188"
+        ]
+      },
+      "tls_public_key_fp": "1cdbe7a1e62c55dfc17794ede55bc3d0d96e655e5f68ea3824881a6ac1f636b7",
+      "hpke_public_key": "b3b63ea039e2a888126aefa0ed50d4026115dedb380a470770373467fdac3042"
+    }
+  }
+}

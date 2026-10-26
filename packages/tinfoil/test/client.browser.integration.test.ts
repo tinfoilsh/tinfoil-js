@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { TinfoilAI } from '../src/tinfoil-ai';
-import { SecureClient } from '../src/secure-client';
+import { Client } from '../src/client';
 import { UnverifiedClient } from '../src/unverified-client';
 
 describe('Browser Client Integration Tests', () => {
@@ -36,17 +36,11 @@ describe('Browser Client Integration Tests', () => {
 
       await client.ready();
 
-      const verificationDoc = await client.getVerificationDocument();
+      const verificationDoc = client.inspect()?.verification;
 
       expect(verificationDoc).toBeDefined();
-      expect(verificationDoc.securityVerified).toBe(true);
-      expect(verificationDoc.configRepo).toBeTruthy();
-      expect(verificationDoc.enclaveHost).toBeTruthy();
-      expect(verificationDoc.releaseDigest).toBeTruthy();
-      expect(verificationDoc.codeFingerprint).toBeTruthy();
-      expect(verificationDoc.enclaveFingerprint).toBeTruthy();
-      expect(verificationDoc.tlsPublicKey).toBeTruthy();
-      expect(verificationDoc.enclaveMeasurement.hpkePublicKey).toBeTruthy();
+      expect(verificationDoc?.freshnessExpiresAt?.getTime()).toBeGreaterThan(Date.now());
+      expect(verificationDoc?.hpkePublicKey()).toBeTruthy();
     }, 60000);
 
     it('should handle streaming chat completion', async () => {
@@ -76,9 +70,9 @@ describe('Browser Client Integration Tests', () => {
     }, 60000);
   });
 
-  describe('SecureClient', () => {
-    it('should create a SecureClient and make a direct fetch request', async () => {
-      const client = new SecureClient();
+  describe('Client', () => {
+    it('should create a Client and make a direct fetch request', async () => {
+      const client = new Client();
 
       expect(client).toBeDefined();
 
@@ -111,18 +105,14 @@ describe('Browser Client Integration Tests', () => {
       expect(firstChoice.message).toBeDefined();
     }, 60000);
 
-    it('should get verification document from SecureClient', async () => {
-      const client = new SecureClient();
+    it('should get verification document from Client', async () => {
+      const client = new Client();
       await client.ready();
 
-      const verificationDoc = await client.getVerificationDocument();
+      const verificationDoc = client.inspect()?.verification;
 
       expect(verificationDoc).toBeDefined();
-      expect(verificationDoc.securityVerified).toBe(true);
-      expect(verificationDoc.steps.fetchDigest.status).toBe('success');
-      expect(verificationDoc.steps.verifyCode.status).toBe('success');
-      expect(verificationDoc.steps.verifyEnclave.status).toBe('success');
-      expect(verificationDoc.steps.compareMeasurements.status).toBe('success');
+      expect(verificationDoc?.freshnessExpiresAt?.getTime()).toBeGreaterThan(Date.now());
     }, 60000);
   });
 
@@ -156,13 +146,11 @@ describe('Browser Client Integration Tests', () => {
       expect(responseBody.choices.length).toBeGreaterThan(0);
     }, 60000);
 
-    it('should throw when trying to get verification document from UnverifiedClient', async () => {
+    it('should return undefined when inspecting an UnverifiedClient', async () => {
       const client = new UnverifiedClient();
       await client.ready();
 
-      await expect(client.getVerificationDocument()).rejects.toThrow(
-        'Verification document unavailable: this version of the client is unverified'
-      );
+      expect(client.inspect()).toBeUndefined();
     }, 30000);
   });
 
@@ -189,8 +177,8 @@ describe('Browser Client Integration Tests', () => {
       expect(client.fetch).toBeDefined();
     }, 30000);
 
-    it('SecureClient should initialize correctly when enclaveURL is provided but baseURL is not', async () => {
-      const client = new SecureClient({
+    it('Client should initialize correctly when enclaveURL is provided but baseURL is not', async () => {
+      const client = new Client({
         enclaveURL: 'https://inference.tinfoil.sh'
       });
 
@@ -199,12 +187,12 @@ describe('Browser Client Integration Tests', () => {
       expect(client).toBeDefined();
       expect(client.fetch).toBeDefined();
 
-      const doc = await client.getVerificationDocument();
-      expect(doc.securityVerified).toBe(true);
+      const doc = client.inspect()?.verification;
+      expect(doc?.freshnessExpiresAt?.getTime()).toBeGreaterThan(Date.now());
     }, 60000);
 
-    it('SecureClient should initialize correctly when baseURL is provided but enclaveURL is not', async () => {
-      const client = new SecureClient({
+    it('Client should initialize correctly when baseURL is provided but enclaveURL is not', async () => {
+      const client = new Client({
         baseURL: 'https://inference.tinfoil.sh/v1/'
       });
 
@@ -213,8 +201,8 @@ describe('Browser Client Integration Tests', () => {
       expect(client).toBeDefined();
       expect(client.fetch).toBeDefined();
 
-      const doc = await client.getVerificationDocument();
-      expect(doc.securityVerified).toBe(true);
+      const doc = client.inspect()?.verification;
+      expect(doc?.freshnessExpiresAt?.getTime()).toBeGreaterThan(Date.now());
     }, 60000);
   });
 });

@@ -10,17 +10,7 @@ export default defineConfig({
       enabled: true,
       provider: playwright(),
       headless: true,
-      instances: [
-        {
-          browser: "chromium",
-          launch: {
-            args: [
-              '--disable-web-security',
-              '--disable-features=IsolateOrigins,site-per-process',
-            ],
-          },
-        },
-      ],
+      instances: [{ browser: "chromium" }],
     },
   },
 });

@@ -1,26 +1,27 @@
-import { describe, it, expect } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { describe, expect, it } from 'vitest';
 import { Report } from '../src/sev/report.js';
 
-describe('Report Parsing', () => {
-  it('parses version 2 report correctly', () => {
-    const base64Data = 'AgAAAAAAAAAAAAMAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAQAAAAEAAAAHAAAAAAAOSAEAAAAAAAAAAAAAAAAAAAA2NTA4M2U1OTA0YzAyNzNiNjQ0YWQ5MGU1MWUxMmE4ZDc2ZmUwN2YyYWI4YWIxNGQ3NjAxMWIzZTljN2RjYWE3';
-    const binaryString = atob(base64Data);
-    const testData = new Uint8Array(binaryString.length);
-    for (let i = 0; i < binaryString.length; i++) {
-      testData[i] = binaryString.charCodeAt(i);
-    }
+const fixture = JSON.parse(readFileSync(new URL('fixtures/hardware-v3/sev.json', import.meta.url), 'utf8'));
+const reportBytes = () => Uint8Array.from(Buffer.from(fixture.report, 'base64'));
 
-    const reportBytes = new Uint8Array(0x4a0);
-    reportBytes.set(testData, 0);
-
-    const report = new Report(reportBytes);
-
-    expect(report.version).toBe(2);
-    expect(report.productName).toBe('Genoa');
+describe('SNP report parsing', () => {
+  it.each([3, 4, 5])('parses supported report version %s with explicit product identity', version => {
+    const bytes = reportBytes();
+    new DataView(bytes.buffer).setUint32(0, version, true);
+    const report = new Report(bytes);
+    expect(report.version).toBe(version);
+    expect(report.product).toBe('Genoa');
+    expect(report.launch).toBe(fixture.refs.snp.launch);
   });
 
-  it('rejects invalid report size', () => {
-    const tooSmall = new Uint8Array(100);
-    expect(() => new Report(tooSmall)).toThrow('smaller than expected SEV-SNP report size');
+  it('rejects legacy reports without authenticated CPUID identity', () => {
+    const bytes = reportBytes();
+    new DataView(bytes.buffer).setUint32(0, 2, true);
+    expect(() => new Report(bytes)).toThrow('CPUID report identity required');
+  });
+
+  it.each([100, 1183, 1185])('requires exact report size: %s', size => {
+    expect(() => new Report(new Uint8Array(size))).toThrow('exactly 1184 bytes');
   });
 });

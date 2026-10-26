@@ -1,12 +1,12 @@
 /**
  * Tinfoil Transport Singleton
  *
- * This module provides a singleton pattern for initializing the Tinfoil SecureClient
+ * This module provides a singleton pattern for initializing the Tinfoil Client
  * and creating a transport for the Vercel AI SDK. The transport is initialized once
  * and reused across your application.
  */
 
-import { SecureClient } from "tinfoil";
+import { Client } from "tinfoil";
 import { DefaultChatTransport, UIMessage } from "ai";
 
 // Singleton promise - initialized once, reused everywhere
@@ -16,7 +16,7 @@ let transportPromise: Promise<DefaultChatTransport<UIMessage>> | null = null;
  * Get or create the Tinfoil transport singleton.
  *
  * This function:
- * 1. Creates a SecureClient (optionally routing through your proxy)
+ * 1. Creates a Client (optionally routing through your proxy)
  * 2. Waits for attestation verification to complete
  * 3. Returns a DefaultChatTransport configured with the secure fetch
  *
@@ -51,8 +51,8 @@ async function initializeTransport(): Promise<DefaultChatTransport<UIMessage>> {
     );
   }
 
-  // Create SecureClient, optionally routing traffic through your proxy
-  const secureClient = new SecureClient({
+  // Create Client, optionally routing traffic through your proxy
+  const secureClient = new Client({
     baseURL: proxyUrl,
   });
 
@@ -83,7 +83,7 @@ export async function createTinfoilTransport(options: {
   proxyUrl: string;
   enclaveUrl?: string;
 }): Promise<DefaultChatTransport<UIMessage>> {
-  const secureClient = new SecureClient({
+  const secureClient = new Client({
     baseURL: options.proxyUrl,
     enclaveURL: options.enclaveUrl,
   });

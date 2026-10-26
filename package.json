@@ -6,6 +6,10 @@
   ],
   "scripts": {
     "build": "npm run build -w @tinfoilsh/verifier && npm run build -w tinfoil",
+    "build:conformance": "npm run build -w @tinfoilsh/conformance",
+    "test:conformance": "npm run build:conformance && node packages/conformance/scripts/run.mjs",
+    "test:conformance:browser": "npm run test:browser -w @tinfoilsh/conformance",
+    "test:packages": "node scripts/check-packages.mjs",
     "lint": "npm run lint -w tinfoil",
     "test": "npm run test -ws --if-present",
     "test:integration": "npm run test:integration -ws --if-present",
@@ -23,22 +27,17 @@
   },
   "devDependencies": {
     "acorn": "^8.16.0",
+    "esbuild": "^0.28.2",
     "syncpack": "^14.3.0",
     "typescript": "^6.0.3"
   },
   "engines": {
     "npm": ">=11.10.0"
   },
-  "dependencies": {
-    "@freedomofpress/crypto-browser": "^0.1.7",
-    "@freedomofpress/sigstore-browser": "^0.1.14",
-    "@freedomofpress/tuf-browser": "^0.1.11",
-    "ehbp": "^0.3.3"
-  },
   "syncpack": {
     "versionGroups": [
       {
-        "label": "ai peer range stays wide so v6 consumers keep working",
+        "label": "AI SDK peer range is independent of the development pin",
         "dependencies": [
           "ai"
         ],
