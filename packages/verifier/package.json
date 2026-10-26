@@ -51,7 +51,7 @@
   ],
   "dependencies": {
     "@freedomofpress/crypto-browser": "^0.1.7",
-    "@freedomofpress/sigstore-browser": "^0.1.14",
+    "@freedomofpress/sigstore-browser": "^0.1.15",
     "@noble/curves": "^2.0.1",
     "@noble/hashes": "^2.0.1",
     "yaml": "^2.9.1"

@@ -7,6 +7,7 @@ import {
   SigstoreVerifier,
   X509Certificate,
   verifyBundleTimestamp,
+  type TrustedRoot,
 } from "@freedomofpress/sigstore-browser";
 import {
   array,
@@ -28,7 +29,7 @@ import {
 } from "./encoding.js";
 import productionRoot from "./sigstore-trusted-root.js";
 import { der as strictDER } from "./quote/crypto.js";
-export type SigstoreRoot = typeof productionRoot;
+export type SigstoreRoot = TrustedRoot;
 export const PAYLOAD_TYPE = "application/vnd.in-toto+json";
 export const STATEMENT_TYPE = "https://in-toto.io/Statement/v1";
 export function pae(
@@ -399,7 +400,10 @@ export async function verifyStatement(
     b.signature,
     root.timestampAuthorities,
   );
-  const observerTimes = [...tlogTimes, ...timestamps];
+  const observerTimes = [
+    ...tlogTimes,
+    ...timestamps.map(({ signingTime }) => signingTime),
+  ];
   if (!observerTimes.length)
     throw new Error("No authenticated observer timestamp");
   const verifier = new SigstoreVerifier();
@@ -421,6 +425,7 @@ export async function verifyStatement(
     root.ctlogs.map(async (l) => ({
       logID: unbase64(l.logId.keyId),
       publicKey: await logKey(l),
+      operator: l.operator ?? "",
       validFor: {
         start: new Date(l.publicKey.validFor.start),
         end: new Date(
@@ -431,7 +436,7 @@ export async function verifyStatement(
       },
     })),
   );
-  if ((await verifier.verifySCT(cert, path[1] ?? path[0], ctlogs)).length < 1)
+  if ((await verifier.verifySCT(cert, path[1] ?? path[0], ctlogs)).size < 1)
     throw new Error("Missing authenticated SCT");
   if (
     !(await verifySignature(
@@ -522,5 +527,5 @@ export async function verifyInnerTimestamp(
     root.timestampAuthorities,
   );
   if (times.length !== 1) throw new Error("No trusted timestamp authority");
-  return times[0];
+  return times[0].signingTime;
 }

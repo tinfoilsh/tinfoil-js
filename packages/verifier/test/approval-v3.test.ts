@@ -42,7 +42,12 @@ describe.each(["config", "runtime", "platform"] as const)(
           );
 
     it("accepts the authentic pinned-key approval", async () => {
-      await expect(verify(original)).resolves.toBeDefined();
+      const approved = await verify(original);
+      const approvalTime =
+        approved instanceof Date ? approved : approved.approvalTime;
+      expect(approvalTime).toEqual(
+        new Date(fixture.expected[kind].approval_time_unix * 1000),
+      );
     });
     it("rejects zero signatures", async () => {
       const bundle = structuredClone(original);

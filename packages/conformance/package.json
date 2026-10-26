@@ -9,7 +9,7 @@
     "test:browser": "vitest run --config vite.config.browser.ts"
   },
   "dependencies": {
-    "@freedomofpress/sigstore-browser": "^0.1.14",
+    "@freedomofpress/sigstore-browser": "^0.1.15",
     "@tinfoilsh/verifier": "2.0.0"
   },
   "devDependencies": {
