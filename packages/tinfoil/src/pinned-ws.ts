@@ -1,6 +1,6 @@
 import type * as WS from "ws";
 import { createCheckServerIdentity } from "./pinned-tls-fetch.js";
-import { ConfigurationError } from "./verifier.js";
+import { ConfigurationError } from "./errors.js";
 import { isBun } from "./env.js";
 
 /**

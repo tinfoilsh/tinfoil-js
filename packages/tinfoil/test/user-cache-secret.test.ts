@@ -1,3 +1,4 @@
+import { BoundEHBPTransport } from "../src/bound-ehbp.js";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import {
   chmodSync,
@@ -660,7 +661,7 @@ describe("createEncryptedBodyFetch user cache secret", () => {
     // Capture the plaintext handed to the sealing transport: the field must
     // be present there, so it is encrypted with the rest of the body.
     const requestSpy = vi
-      .spyOn(Transport.prototype, "request")
+      .spyOn(BoundEHBPTransport.prototype, "request")
       .mockImplementation(async () => new Response("ok", { status: 200 }));
 
     const identity = await Identity.generate();
@@ -673,14 +674,14 @@ describe("createEncryptedBodyFetch user cache secret", () => {
 
     await transport.fetch("/v1/chat/completions", postJSON('{"model":"m"}'));
 
-    const [url, init] = requestSpy.mock.calls[0];
-    expect(url).toBe("https://enclave.example.com/v1/chat/completions");
-    expect(JSON.parse(init!.body as string)[USER_CACHE_SECRET_FIELD]).toBe("s1");
+    const [url] = requestSpy.mock.calls[0];
+    expect((url as Request).url).toBe("https://enclave.example.com/v1/chat/completions");
+    expect((await (url as Request).json())[USER_CACHE_SECRET_FIELD]).toBe("s1");
   });
 
   it("leaves a caller-set field untouched inside the sealing boundary", async () => {
     const requestSpy = vi
-      .spyOn(Transport.prototype, "request")
+      .spyOn(BoundEHBPTransport.prototype, "request")
       .mockImplementation(async () => new Response("ok", { status: 200 }));
 
     const identity = await Identity.generate();
@@ -694,7 +695,7 @@ describe("createEncryptedBodyFetch user cache secret", () => {
     const raw = '{"model":"m","user_cache_secret":"end-user-7"}';
     await transport.fetch("/v1/chat/completions", postJSON(raw));
 
-    expect(requestSpy.mock.calls[0][1]!.body).toBe(raw);
+    expect(await (requestSpy.mock.calls[0][0] as Request).text()).toBe(raw);
   });
 });
 
