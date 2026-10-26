@@ -1,0 +1,31 @@
+package endorsement
+
+import (
+ "encoding/json"
+ "os"
+ "path/filepath"
+ "testing"
+ "time"
+)
+
+func TestAuditJSSigstoreBoundaries(t *testing.T) {
+ directory:=os.Getenv("TINFOIL_JS_SIGSTORE_FIXTURES")
+ raw,e:=os.ReadFile(filepath.Join(directory,"provenance-boundaries.json"));if e!=nil {t.Fatal(e)}
+ var provenance struct{ Repo string; Digest string; Cases []struct{Name string; Bundle json.RawMessage; Root json.RawMessage; Accepted bool} }
+ if e=json.Unmarshal(raw,&provenance);e!=nil {t.Fatal(e)}
+ for _,c:=range provenance.Cases {t.Run(c.Name,func(t *testing.T){
+  client,e:=NewClientFromJSON(c.Root);if e!=nil {t.Fatal(e)}
+  _,e=client.AuthenticateCode(c.Bundle,Reference{Repo:provenance.Repo,Tag:"v1.0.0"},"v1.0.0",provenance.Digest)
+  if (e==nil)!=c.Accepted {t.Fatalf("expected acceptance %v, got %v",c.Accepted,e)}
+ })}
+ raw,e=os.ReadFile(filepath.Join(directory,"two-observers.json"));if e!=nil {t.Fatal(e)}
+ var observers struct{Bundle map[string]any; Root map[string]any; Digest string; Repo string; First int64}
+ if e=json.Unmarshal(raw,&observers);e!=nil {t.Fatal(e)}
+ check:=func(want bool){t.Helper();rootBytes,_:=json.Marshal(observers.Root);client,e:=NewClientFromJSON(rootBytes);if e!=nil {t.Fatal(e)};bundle,_:=json.Marshal(observers.Bundle);_,e=client.verifyBundle(bundle,observers.Repo,observers.Digest);if (e==nil)!=want {t.Fatalf("expected acceptance %v, got %v",want,e)}}
+ check(true)
+ observers.Root["certificateAuthorities"].([]any)[0].(map[string]any)["validFor"].(map[string]any)["end"]=time.Unix(observers.First,0).UTC().Format(time.RFC3339)
+ check(false)
+ material:=observers.Bundle["verificationMaterial"].(map[string]any)
+ material["tlogEntries"]=material["tlogEntries"].([]any)[:1]
+ check(true)
+}
