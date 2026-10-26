@@ -1,289 +1,49 @@
-import type { SignerInfo, TCBParts, SnpPlatformInfo, SnpPolicy } from './types.js';
-import {
-  POLICY_RESERVED_1_BIT,
-  REPORT_SIZE,
-  SIGNATURE_OFFSET,
-  ECDSA_P384_SHA384_SIGNATURE_SIZE,
-  ZEN3ZEN4_FAMILY,
-  ZEN5_FAMILY,
-  MILAN_MODEL,
-  GENOA_MODEL,
-  TURIN_MODEL,
-  ReportSigner
-} from './constants.js';
-import { policyFromInt, platformInfoFromInt } from './utils.js';
-import { AttestationError } from '../errors.js';
+import { hex, requireThat, zero } from '../quote/crypto.js';
 
-/**
- * SEV-SNP attestation report
- */
+export type Product = 'Genoa' | 'Turin';
+export type TCB = { bl_spl: number; tee_spl: number; snp_spl: number; ucode_spl: number; fmc_spl?: number };
+export function decodeTCB(value: bigint, product: Product): TCB {
+  const byte = (shift: number) => Number((value >> BigInt(shift)) & 255n);
+  if (product === 'Turin') {
+    requireThat((value & 0x00ffffff00000000n) === 0n, 'nonzero reserved Turin TCB bits');
+    return { fmc_spl: byte(0), bl_spl: byte(8), tee_spl: byte(16), snp_spl: byte(24), ucode_spl: byte(56) };
+  }
+  requireThat((value & 0x0000ffffffff0000n) === 0n, 'nonzero reserved Genoa TCB bits');
+  return { bl_spl: byte(0), tee_spl: byte(8), snp_spl: byte(48), ucode_spl: byte(56) };
+}
+export const tcbAtLeast = (got: TCB, min: TCB): boolean => Object.entries(min).every(([k, v]) => (got[k as keyof TCB] ?? -1) >= v);
+
 export class Report {
-  version: number;  // Should be 2 for revision 1.55, 3 for revision 1.56, 5 for revision 1.58
-  guestSvn: number;
-  policy: bigint;
-  policyParsed: SnpPolicy;
-  familyId: Uint8Array;  // Should be 16 bytes long
-  imageId: Uint8Array;   // Should be 16 bytes long
-  vmpl: number;
-  signatureAlgo: number;
-  currentTcb: bigint;
-  platformInfo: bigint;
-  platformInfoParsed: SnpPlatformInfo;
-  signerInfo: number;  // AuthorKeyEn, MaskChipKey, SigningKey
-  signerInfoParsed: SignerInfo;
-  reportData: Uint8Array;  // Should be 64 bytes long
-  measurement: Uint8Array;  // Should be 48 bytes long
-  hostData: Uint8Array;   // Should be 32 bytes long
-  idKeyDigest: Uint8Array;  // Should be 48 bytes long
-  authorKeyDigest: Uint8Array;  // Should be 48 bytes long
-  reportId: Uint8Array;   // Should be 32 bytes long
-  reportIdMa: Uint8Array;  // Should be 32 bytes long
-  reportedTcb: bigint;
-  chipId: Uint8Array;  // Should be 64 bytes long
-  committedTcb: bigint;
-  currentBuild: number;
-  currentMinor: number;
-  currentMajor: number;
-  committedBuild: number;
-  committedMinor: number;
-  committedMajor: number;
-  launchTcb: bigint;
-  signedData: Uint8Array;
-  signature: Uint8Array;  // Should be 512 bytes long
-  family: number;
-  model: number;
-  stepping: number;
-  productName: string;
-
-  /**
-   * Parse an attestation report from raw bytes in SEV SNP ABI format.
-   *
-   * @param data - Raw bytes of the attestation report
-   * @returns Report object containing parsed data
-   * @throws Error if data is malformed or validation fails
-   */
-  constructor(data: Uint8Array) {
-    if (data.length < REPORT_SIZE) {
-      throw new AttestationError(`Invalid attestation report: Data size (${data.length} bytes) is smaller than expected SEV-SNP report size (${REPORT_SIZE} bytes)`);
+  readonly bytes: Uint8Array;
+  readonly view: DataView;
+  readonly product: Product;
+  constructor(input: Uint8Array) {
+    requireThat(input.length === 0x4a0, 'SEV-SNP report must be exactly 1184 bytes');
+    this.bytes = Uint8Array.from(input); this.view = new DataView(this.bytes.buffer);
+    requireThat(this.version >= 3 && this.version <= 5, 'unsupported SEV report version; CPUID report identity required');
+    const family = this.bytes[0x188], model = this.bytes[0x189];
+    if (family === 0x19 && model >> 4 === 1) this.product = 'Genoa';
+    else if (family === 0x1a && model >> 4 <= 1) this.product = 'Turin';
+    else throw new Error('unsupported AMD product identity');
+    requireThat(this.u32(0x34) === 1, 'SEV report requires ECDSA P-384 SHA-384 signature');
+    requireThat((this.policy & (1n << 17n)) !== 0n && (this.policy >> 26n) === 0n, 'invalid SEV guest policy reserved bits');
+    requireThat((this.signerInfo & ~31) === 0 && (this.signerInfo >> 2) === 0, 'SEV report requires VCEK signing key');
+    requireThat((this.signerInfo & 2) === 0 && !zero(this.chipID), 'masked or zero SEV platform identity');
+    requireThat(this.platformInfo <= 255n, 'nonzero SEV PLATFORM_INFO reserved bits');
+    for (const [lo, hi] of [[0x4c, 0x50], [0x18b, 0x1a0], [0x1eb, 0x1ec], [0x1ef, 0x1f0], [this.version < 5 ? 0x1f8 : 0x208, 0x2a0], [0x2d0, 0x2e8], [0x318, 0x4a0]]) {
+      requireThat(zero(this.bytes.slice(lo, hi)), `nonzero reserved SEV report bytes at ${lo.toString(16)}`);
     }
-
-    // Parse all fields using little-endian byte order
-    const view = new DataView(data.buffer, data.byteOffset, data.byteLength);
-
-    this.version = view.getUint32(0x00, true);
-    this.guestSvn = view.getUint32(0x04, true);
-    this.policy = view.getBigUint64(0x08, true);
-
-    // Check reserved bit must be 1
-    if (!(this.policy & (1n << BigInt(POLICY_RESERVED_1_BIT)))) {
-      throw new AttestationError('Invalid attestation report: Policy field has invalid reserved bit (must be 1)');
-    }
-
-    // Check bits 63-26 must be zero
-    if (this.policy >> 26n) {
-      throw new AttestationError('Invalid attestation report: Policy field has non-zero reserved bits');
-    }
-
-    this.familyId = data.slice(0x10, 0x20);  // 16 bytes
-    this.imageId = data.slice(0x20, 0x30);   // 16 bytes
-    this.vmpl = view.getUint32(0x30, true);
-    this.signatureAlgo = view.getUint32(0x34, true);
-    this.currentTcb = view.getBigUint64(0x38, true);
-
-    try {
-      mbz64(this.currentTcb, 'current_tcb', 47, 16);
-    } catch (e) {
-      throw new AttestationError('Invalid attestation report: TCB (Trusted Computing Base) version field is malformed', { cause: e as Error });
-    }
-
-    this.platformInfo = view.getBigUint64(0x40, true);
-    // Decode additional helper structures for easier consumption later.
-    this.policyParsed = policyFromInt(this.policy);
-    this.platformInfoParsed = platformInfoFromInt(this.platformInfo);
-    this.signerInfo = view.getUint32(0x48, true);
-
-    try {
-      mbz64(BigInt(this.signerInfo), 'signer_info', 31, 5);
-    } catch (e) {
-      throw new AttestationError('Invalid attestation report: Signer info field is malformed', { cause: e as Error });
-    }
-
-    const signingKey = (this.signerInfo >> 2) & 7;
-    if (signingKey !== ReportSigner.VcekReportSigner) {
-      throw new AttestationError(`Unsupported signing key type: This verifier only supports VCEK-signed attestation reports (got signing key type ${signingKey})`);
-    }
-
-    this.signerInfoParsed = {
-      signingKey: signingKey,
-      maskChipKey: !!(this.signerInfo & 2),
-      authorKeyEn: !!(this.signerInfo & 1),
-    };
-
-    try {
-      mbz(data, 0x4c, 0x50);
-    } catch (e) {
-      throw new AttestationError('Invalid attestation report: Reserved bytes at offset 0x4C are not zeroed', { cause: e as Error });
-    }
-
-    // 0x4C-0x50 is MBZ (Must Be Zero)
-    this.reportData = data.slice(0x50, 0x90);      // 64 bytes
-    this.measurement = data.slice(0x90, 0xc0);      // 48 bytes
-    this.hostData = data.slice(0xc0, 0xe0);        // 32 bytes
-    this.idKeyDigest = data.slice(0xe0, 0x110);    // 48 bytes
-    this.authorKeyDigest = data.slice(0x110, 0x140);  // 48 bytes
-    this.reportId = data.slice(0x140, 0x160);       // 32 bytes
-    this.reportIdMa = data.slice(0x160, 0x180);    // 32 bytes
-    this.reportedTcb = view.getBigUint64(0x180, true);
-
-    try {
-      mbz64(this.reportedTcb, 'reported_tcb', 47, 16);
-    } catch (e) {
-      throw new AttestationError('Invalid attestation report: Reported TCB field is malformed', { cause: e as Error });
-    }
-
-    let mbzLo = 0x188;
-    // Version specific parsing
-    if (this.version >= 3) {  // Report Version 3
-      this.family = view.getUint8(0x188);
-      this.model = view.getUint8(0x189);
-      this.stepping = view.getUint8(0x18a);
-      this.productName = this.initProductName();
-      mbzLo = 0x18b;
-    } else if (this.version === 2) {  // Report Version 2
-      this.family = ZEN3ZEN4_FAMILY;
-      this.model = GENOA_MODEL;
-      this.stepping = 0x01;
-      this.productName = 'Genoa';
-    } else {
-      throw new AttestationError(`Unsupported attestation report version: ${this.version}. Only version 2 (revision 1.55) and version 3+ are supported`);
-    }
-
-    try {
-      mbz(data, mbzLo, 0x1a0);
-    } catch (e) {
-      throw new AttestationError('Invalid attestation report: Reserved bytes in version section are not zeroed', { cause: e as Error });
-    }
-
-    this.chipId = data.slice(0x1a0, 0x1e0);        // 64 bytes
-    this.committedTcb = view.getBigUint64(0x1e0, true);
-
-    try {
-      mbz64(this.committedTcb, 'committed_tcb', 47, 16);
-    } catch (e) {
-      throw new AttestationError('Invalid attestation report: Committed TCB field is malformed', { cause: e as Error });
-    }
-
-    // Version fields
-    this.currentBuild = view.getUint8(0x1e8);
-    this.currentMinor = view.getUint8(0x1e9);
-    this.currentMajor = view.getUint8(0x1ea);
-
-    try {
-      mbz(data, 0x1eb, 0x1ec);
-    } catch (e) {
-      throw new AttestationError('Invalid attestation report: Reserved bytes after current version are not zeroed', { cause: e as Error });
-    }
-
-    this.committedBuild = view.getUint8(0x1ec);
-    this.committedMinor = view.getUint8(0x1ed);
-    this.committedMajor = view.getUint8(0x1ee);
-
-    try {
-      mbz(data, 0x1ef, 0x1f0);
-    } catch (e) {
-      throw new AttestationError('Invalid attestation report: Reserved bytes after committed version are not zeroed', { cause: e as Error });
-    }
-
-    this.launchTcb = view.getBigUint64(0x1f0, true);
-
-    try {
-      mbz64(this.launchTcb, 'launch_tcb', 47, 16);
-    } catch (e) {
-      throw new AttestationError('Invalid attestation report: Launch TCB field is malformed', { cause: e as Error });
-    }
-
-    // 0x1F8-0x200: launch_mit_vector (valid field in v5+)
-    // 0x200-0x208: current_mit_vector (valid field in v5+)
-    // For v2/v3 these bytes are reserved MBZ; for v5+ they are valid fields.
-    // 0x208-0x2A0: Reserved before signature (must be zero for all versions)
-    const mbzBeforeSig = this.version < 5 ? 0x1f8 : 0x208;
-    try {
-      mbz(data, mbzBeforeSig, SIGNATURE_OFFSET);
-    } catch (e) {
-      throw new AttestationError('Invalid attestation report: Reserved bytes before signature are not zeroed', { cause: e as Error });
-    }
-
-    if (this.signatureAlgo === 1) {  // ECDSA P-384 SHA-384
-      try {
-        mbz(data, SIGNATURE_OFFSET + ECDSA_P384_SHA384_SIGNATURE_SIZE, REPORT_SIZE);
-      } catch (e) {
-        throw new AttestationError('Invalid attestation report: Reserved bytes after signature are not zeroed', { cause: e as Error });
-      }
-    }
-
-    this.signedData = data.slice(0, SIGNATURE_OFFSET);
-    this.signature = data.slice(SIGNATURE_OFFSET, REPORT_SIZE);
+    for (const offset of [0x38, 0x180, 0x1e0, 0x1f0]) decodeTCB(this.u64(offset), this.product);
   }
-
-  private initProductName(): string {
-    if (this.family === ZEN3ZEN4_FAMILY) {
-      if (this.model === MILAN_MODEL) return 'Milan';
-      if (this.model === GENOA_MODEL) return 'Genoa';
-    } else if (this.family === ZEN5_FAMILY) {
-      if (this.model === TURIN_MODEL) return 'Turin';
-    }
-    return 'Unknown';
-  }
-}
-
-/**
- * Returns the first index which is not zero, otherwise returns hi.
- *
- * @param data - Bytes to search through
- * @param lo - Starting index (inclusive)
- * @param hi - Ending index (exclusive)
- * @returns Index of first non-zero byte, or hi if all bytes are zero
- */
-function findNonZero(data: Uint8Array, lo: number, hi: number): number {
-  for (let i = lo; i < hi; i++) {
-    if (data[i] !== 0) return i;
-  }
-  return hi;
-}
-
-/**
- * Checks if a range of bytes is all zeros.
- *
- * @param data - Bytes to check
- * @param lo - Starting index (inclusive)
- * @param hi - Ending index (exclusive)
- * @throws Error if any byte in the range is non-zero
- */
-function mbz(data: Uint8Array, lo: number, hi: number): void {
-  const firstNonZero = findNonZero(data, lo, hi);
-  if (firstNonZero !== hi) {
-    const hexStr = Array.from(data.slice(lo, hi))
-      .map(b => b.toString(16).padStart(2, '0'))
-      .join('');
-    throw new AttestationError(`reserved bytes at offset 0x${lo.toString(16)}-0x${hi.toString(16)} contain non-zero data: ${hexStr}`);
-  }
-}
-
-/**
- * Checks if a range of bits in an integer is all zeros.
- *
- * @param data - Integer to check
- * @param base - String identifier for error message
- * @param hi - Highest bit position (inclusive)
- * @param lo - Lowest bit position (inclusive)
- * @throws Error if any bit in the range is non-zero
- */
-function mbz64(data: bigint, base: string, hi: number, lo: number): void {
-  // Create mask for the bit range
-  const mask = (1n << BigInt(hi - lo + 1)) - 1n;
-  // Extract and check the bits
-  const bits = (data >> BigInt(lo)) & mask;
-  if (bits !== 0n) {
-    throw new AttestationError(`Reserved bits in ${base} field contain non-zero data: 0x${data.toString(16)}`);
-  }
+  u32(offset: number): number { return this.view.getUint32(offset, true); }
+  u64(offset: number): bigint { return this.view.getBigUint64(offset, true); }
+  field(offset: number, size: number): Uint8Array { return this.bytes.slice(offset, offset + size); }
+  get version(): number { return this.u32(0); }
+  get policy(): bigint { return this.u64(8); }
+  get platformInfo(): bigint { return this.u64(0x40); }
+  get signerInfo(): number { return this.u32(0x48); }
+  get chipID(): Uint8Array { return this.field(0x1a0, 64); }
+  get identity(): string { return hex(this.chipID); }
+  get launch(): string { return hex(this.field(0x90, 48)); }
+  get reportedTCB(): TCB { return decodeTCB(this.u64(0x180), this.product); }
 }
