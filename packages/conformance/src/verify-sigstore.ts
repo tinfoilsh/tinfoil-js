@@ -217,7 +217,7 @@ function classifyError(raw: string): { code: string; spec_ref: string } {
   // Order matters: most specific first. Use word boundaries / contextual
   // phrases to avoid false positives — e.g. "CA" must not match "verifiCAtion".
   if (
-    /outside (of )?the certificate validity|outside certificate validity window|certificate has expired|certificate is expired/i.test(
+    /outside (of )?the certificate validity|outside certificate validity window|certificate has expired|certificate is expired|not valid at the time of timestamping/i.test(
       raw,
     )
   )
@@ -234,11 +234,11 @@ function classifyError(raw: string): { code: string; spec_ref: string } {
   // guard message ("Rekor v2 bundles require a timestamp for verification.")
   // contains "Rekor", but the failure is a missing observer timestamp, not an
   // inclusion-proof problem. Match the timestamp phrasing first (SPEC §5.2 #5).
-  if (/require[sd]? (a |an )?timestamp|observer timestamp|no verifiable timestamp/i.test(raw))
+  if (/require[sd]? (a |an )?timestamp|observer timestamp|no verifiable timestamp|Timestamp could not be verified/i.test(raw))
     return { code: 'OBSERVER_TIMESTAMP_INSUFFICIENT', spec_ref: '5.2' };
   if (/No.*Rekor key|Trusted log IDs|Unknown.*log/i.test(raw))
     return { code: 'REKOR_KEY_NOT_TRUSTED', spec_ref: '5.1' };
-  if (/Rekor|tlog|inclusion proof|checkpoint/i.test(raw))
+  if (/Rekor|tlog|inclusion proof|inclusion promise|checkpoint/i.test(raw))
     return { code: 'REKOR_INCLUSION_INVALID', spec_ref: '5.2' };
   if (/\b(Fulcio|CAs?)\b|certificate chain|chain validation|No valid CAs/i.test(raw))
     return { code: 'FULCIO_CHAIN_INVALID', spec_ref: '5.2' };
