@@ -88,10 +88,10 @@ export async function verifyHardwareMeasurements(
   const hwList: unknown[] = Array.isArray(inp.hardware_measurements) ? inp.hardware_measurements : [];
 
   // SPEC §6.3 step 3: return the FIRST matching hardware measurement.
-  // Entries without string mrtd/rtmr0 cannot match and are skipped.
+  // Entries without string id/mrtd/rtmr0 cannot be reported as a match and are skipped.
   for (const entry of hwList) {
     const hw = entry as { id?: unknown; mrtd?: unknown; rtmr0?: unknown } | null;
-    if (!hw || typeof hw.mrtd !== 'string' || typeof hw.rtmr0 !== 'string') continue;
+    if (!hw || typeof hw.id !== 'string' || typeof hw.mrtd !== 'string' || typeof hw.rtmr0 !== 'string') continue;
     const hwMrtd = hw.mrtd.toLowerCase();
     const hwRtmr0 = hw.rtmr0.toLowerCase();
     if (hwMrtd === enclaveMrtd && hwRtmr0 === enclaveRtmr0) {

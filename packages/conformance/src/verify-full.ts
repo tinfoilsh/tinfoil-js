@@ -105,7 +105,13 @@ async function verifySevAgainst(
   expected: AttestationMeasurement,
   attestationSev: unknown,
 ): Promise<{ ok: true; sev: SevStage } | { ok: false; result: VerifyFullResult }> {
-  const sevResult = await runVerifyAttestationSevInner(attestationSev as any);
+  let sevResult: Awaited<ReturnType<typeof runVerifyAttestationSevInner>>;
+  try {
+    sevResult = await runVerifyAttestationSevInner(attestationSev as any);
+  } catch (e) {
+    return { ok: false, result: emitFullRejection('REPORT_FORMAT_UNSUPPORTED', 'verify-attestation-sev', '3.1',
+      `malformed attestation_sev input: ${(e as Error).message ?? String(e)}`) };
+  }
   if (!sevResult.ok) {
     return { ok: false, result: emitFullRejection(sevResult.rej.code, 'verify-attestation-sev', sevResult.rej.specRef, sevResult.rej.message) };
   }
