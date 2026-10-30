@@ -72,6 +72,31 @@ function unsupportedTdx(): number {
   return EXIT.unsupported;
 }
 
+/** Read stdin, parse JSON, run the stage, print its body. Malformed JSON is a
+ *  structured rejection on stdout with the stage's bad-input code. */
+async function runStage(
+  stage: string,
+  badInputCode: string,
+  specRef: string,
+  handler: (parsed: unknown) => Promise<{ exitCode: number; body: unknown }>,
+): Promise<number> {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(await readStdin());
+  } catch (e) {
+    const body = {
+      stage,
+      accepted: false,
+      rejection: { code: badInputCode, spec_ref: specRef, message: `input is not valid JSON: ${(e as Error).message}` },
+    };
+    process.stdout.write(JSON.stringify(body, null, 2) + '\n');
+    return EXIT.badInput;
+  }
+  const { exitCode, body } = await handler(parsed);
+  process.stdout.write(JSON.stringify(body, null, 2) + '\n');
+  return exitCode;
+}
+
 async function main(): Promise<number> {
   const sub = process.argv[2] ?? '';
   switch (sub) {
@@ -80,100 +105,20 @@ async function main(): Promise<number> {
       process.stdout.write(JSON.stringify(caps, null, 2) + '\n');
       return EXIT.accept;
     }
-    case 'verify-sigstore': {
-      const raw = await readStdin();
-      let parsed: unknown;
-      try {
-        parsed = JSON.parse(raw);
-      } catch (e) {
-        process.stdout.write(
-          JSON.stringify(
-            {
-              stage: 'verify-sigstore',
-              accepted: false,
-              rejection: {
-                code: 'BUNDLE_MALFORMED',
-                spec_ref: '5.2',
-                message: `input is not valid JSON: ${(e as Error).message}`,
-              },
-            },
-            null,
-            2,
-          ) + '\n',
-        );
-        return EXIT.badInput;
-      }
-      const { exitCode, body } = await verifySigstore(parsed);
-      process.stdout.write(JSON.stringify(body, null, 2) + '\n');
-      return exitCode;
-    }
-    case 'verify-measurement': {
-      const raw = await readStdin();
-      let parsed: unknown;
-      try {
-        parsed = JSON.parse(raw);
-      } catch (e) {
-        process.stderr.write(`input is not valid JSON: ${(e as Error).message}\n`);
-        return EXIT.badInput;
-      }
-      const { exitCode, body } = await verifyMeasurement(parsed);
-      process.stdout.write(JSON.stringify(body, null, 2) + '\n');
-      return exitCode;
-    }
-    case 'verify-hardware-measurements': {
-      const raw = await readStdin();
-      let parsed: unknown;
-      try {
-        parsed = JSON.parse(raw);
-      } catch (e) {
-        process.stderr.write(`input is not valid JSON: ${(e as Error).message}\n`);
-        return EXIT.badInput;
-      }
-      const { exitCode, body } = await verifyHardwareMeasurements(parsed);
-      process.stdout.write(JSON.stringify(body, null, 2) + '\n');
-      return exitCode;
-    }
-    case 'verify-attestation-sev': {
-      const raw = await readStdin();
-      let parsed: unknown;
-      try {
-        parsed = JSON.parse(raw);
-      } catch (e) {
-        process.stderr.write(`input is not valid JSON: ${(e as Error).message}\n`);
-        return EXIT.badInput;
-      }
-      const { exitCode, body } = await verifyAttestationSev(parsed);
-      process.stdout.write(JSON.stringify(body, null, 2) + '\n');
-      return exitCode;
-    }
+    case 'verify-sigstore':
+      return runStage('verify-sigstore', 'BUNDLE_MALFORMED', '5.2', verifySigstore);
+    case 'verify-measurement':
+      return runStage('verify-measurement', 'MEASUREMENT_TYPE_UNKNOWN', '2.3', verifyMeasurement);
+    case 'verify-hardware-measurements':
+      return runStage('verify-hardware-measurements', 'ENCLAVE_MEASUREMENT_TYPE_INVALID', '6.3', verifyHardwareMeasurements);
+    case 'verify-attestation-sev':
+      return runStage('verify-attestation-sev', 'REPORT_FORMAT_UNSUPPORTED', '3.1', verifyAttestationSev);
     case VERIFY_ATTESTATION_TDX:
       return unsupportedTdx();
-    case 'verify-full': {
-      const raw = await readStdin();
-      let parsed: unknown;
-      try {
-        parsed = JSON.parse(raw);
-      } catch (e) {
-        process.stderr.write(`input is not valid JSON: ${(e as Error).message}\n`);
-        return EXIT.badInput;
-      }
-      const { exitCode, body } = await verifyFull(parsed);
-      process.stdout.write(JSON.stringify(body, null, 2) + '\n');
-      return exitCode;
-    }
-    case 'verify-ehbp-key-binding': {
-      const raw = await readStdin();
-      let parsed: unknown;
-      try {
-        parsed = JSON.parse(raw);
-      } catch (e) {
-        process.stderr.write(`input is not valid JSON: ${(e as Error).message}\n`);
-        return EXIT.badInput;
-      }
-      const { exitCode, body } = await verifyEhbpKeyBinding(parsed);
-      process.stdout.write(JSON.stringify(body, null, 2) + '\n');
-      return exitCode;
-    }
+    case 'verify-full':
+      return runStage('verify-full', 'BUNDLE_MALFORMED', '11', verifyFull);
+    case 'verify-ehbp-key-binding':
+      return runStage('verify-ehbp-key-binding', 'INPUT_MALFORMED', '14.2', verifyEhbpKeyBinding);
     case 'help':
     case '--help':
     case '-h':

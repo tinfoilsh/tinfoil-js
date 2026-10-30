@@ -75,8 +75,6 @@ async function verifySevAttestationV2(
  * per Tinfoil SPEC §14.2: [0:32] = TLS SPKI fingerprint, [32:64] = HPKE X25519
  * public key. This is the same slice the SEV/TDX verifiers apply to a verified
  * report, exposed so the EHBP key-binding check exercises the real offset.
- *
- * @throws Error if reportData is not exactly 64 bytes.
  */
 export function extractReportDataKeys(reportData: Uint8Array): {
   tlsPublicKeyFingerprint: string;

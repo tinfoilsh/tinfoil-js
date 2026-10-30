@@ -19,7 +19,7 @@ import { runVerifyAttestationSevInner } from './verify-attestation-sev.js';
 
 interface PinnedMeasurement {
   type: string;
-  registers: string[];
+  registers: unknown;
 }
 
 interface VerifyFullInput {
@@ -86,15 +86,41 @@ function classifyCompareError(err: unknown): { code: string; specRef: string } {
   return { code: 'MEASUREMENT_MISMATCH', specRef: '7.3' };
 }
 
-function asAttestationMeasurement(m: { type: string; registers: string[] }): AttestationMeasurement | null {
+function asAttestationMeasurement(m: { type: string; registers: unknown }): AttestationMeasurement | null {
   const pt = predicateFromUri(m.type);
-  if (pt === null) {
+  if (pt === null || !Array.isArray(m.registers) || !m.registers.every((r) => typeof r === 'string')) {
     return null;
   }
   return {
     type: pt,
-    registers: m.registers.map((r) => r.toLowerCase()),
+    registers: (m.registers as string[]).map((r) => r.toLowerCase()),
   };
+}
+
+type SevStage = Awaited<ReturnType<typeof runVerifyAttestationSevInner>> & { ok: true };
+
+/** Verify the SEV attestation and compare its measurement with `expected`
+ *  (the Sigstore or pinned measurement). Shared by every verify-full mode. */
+async function verifySevAgainst(
+  expected: AttestationMeasurement,
+  attestationSev: unknown,
+): Promise<{ ok: true; sev: SevStage } | { ok: false; result: VerifyFullResult }> {
+  const sevResult = await runVerifyAttestationSevInner(attestationSev as any);
+  if (!sevResult.ok) {
+    return { ok: false, result: emitFullRejection(sevResult.rej.code, 'verify-attestation-sev', sevResult.rej.specRef, sevResult.rej.message) };
+  }
+  const attM = asAttestationMeasurement(sevResult.measurement);
+  if (attM === null) {
+    return { ok: false, result: emitFullRejection('MEASUREMENT_TYPE_UNKNOWN', 'verify-measurement', '2.3',
+      `unrecognized attestation measurement type: ${sevResult.measurement.type}`) };
+  }
+  try {
+    compareMeasurements(expected, attM);
+  } catch (e) {
+    const { code, specRef } = classifyCompareError(e);
+    return { ok: false, result: emitFullRejection(code, 'verify-measurement', specRef, (e as Error).message ?? String(e)) };
+  }
+  return { ok: true, sev: sevResult };
 }
 
 export async function verifyFull(raw: unknown): Promise<VerifyFullResult> {
@@ -113,32 +139,28 @@ export async function verifyFull(raw: unknown): Promise<VerifyFullResult> {
       return emitFullRejection('BUNDLE_MALFORMED', 'verify-full', '11.1',
         'mode="standard"/"bundle" requires "sigstore" input block');
     }
-    const sigResult = await runVerifySigstoreInner(input.sigstore);
+    let sigResult: Awaited<ReturnType<typeof runVerifySigstoreInner>>;
+    try {
+      sigResult = await runVerifySigstoreInner(input.sigstore);
+    } catch (e) {
+      return emitFullRejection('BUNDLE_MALFORMED', 'verify-sigstore', '5.2',
+        `malformed sigstore input: ${(e as Error).message ?? String(e)}`);
+    }
     if (!sigResult.ok) {
       return emitFullRejection(sigResult.rej.code, 'verify-sigstore', sigResult.rej.spec_ref, sigResult.rej.message);
     }
-    const sigMeasurement = sigResult.v.measurement;
+    // SPEC §7.3 lowercase normalization before comparison.
+    const sigMeasurement: AttestationMeasurement = {
+      type: sigResult.v.measurement.type,
+      registers: sigResult.v.measurement.registers.map((r) => r.toLowerCase()),
+    };
 
     if (typeof input.attestation_sev !== 'object' || input.attestation_sev === null) {
       return emitFullRejection('BUNDLE_MALFORMED', 'verify-full', '11.1',
         'mode="standard"/"bundle" requires attestation_sev (TDX path not wired on JS)');
     }
-    const sevResult = await runVerifyAttestationSevInner(input.attestation_sev);
-    if (!sevResult.ok) {
-      return emitFullRejection(sevResult.rej.code, 'verify-attestation-sev', sevResult.rej.specRef, sevResult.rej.message);
-    }
-    const attM = asAttestationMeasurement(sevResult.measurement);
-    if (attM === null) {
-      return emitFullRejection('MEASUREMENT_TYPE_UNKNOWN', 'verify-measurement', '2.3',
-        `unrecognized attestation measurement type: ${sevResult.measurement.type}`);
-    }
-
-    try {
-      compareMeasurements(sigMeasurement, attM);
-    } catch (e) {
-      const { code, specRef } = classifyCompareError(e);
-      return emitFullRejection(code, 'verify-measurement', specRef, (e as Error).message ?? String(e));
-    }
+    const r = await verifySevAgainst(sigMeasurement, input.attestation_sev);
+    if (!r.ok) return r.result;
 
     return {
       exitCode: EXIT_ACCEPT,
@@ -149,8 +171,8 @@ export async function verifyFull(raw: unknown): Promise<VerifyFullResult> {
           mode: input.mode,
           platform: 'sev-snp',
           sigstore_measurement: sigMeasurement,
-          attestation_measurement: sevResult.measurement,
-          final_measurement_fingerprint_hex: sevResult.measurement.registers[0],
+          attestation_measurement: r.sev.measurement,
+          final_measurement_fingerprint_hex: r.sev.measurement.registers[0],
         },
       },
     };
@@ -164,27 +186,14 @@ export async function verifyFull(raw: unknown): Promise<VerifyFullResult> {
     const pinM = asAttestationMeasurement(input.pinned_measurement);
     if (pinM === null) {
       return emitFullRejection('MEASUREMENT_TYPE_UNKNOWN', 'verify-full', '2.3',
-        `unrecognized pinned measurement type: ${input.pinned_measurement.type}`);
+        `unrecognized or malformed pinned measurement: ${input.pinned_measurement.type}`);
     }
     if (typeof input.attestation_sev !== 'object' || input.attestation_sev === null) {
       return emitFullRejection('BUNDLE_MALFORMED', 'verify-full', '11.3',
         'mode="pinned" requires attestation_sev');
     }
-    const sevResult = await runVerifyAttestationSevInner(input.attestation_sev);
-    if (!sevResult.ok) {
-      return emitFullRejection(sevResult.rej.code, 'verify-attestation-sev', sevResult.rej.specRef, sevResult.rej.message);
-    }
-    const attM = asAttestationMeasurement(sevResult.measurement);
-    if (attM === null) {
-      return emitFullRejection('MEASUREMENT_TYPE_UNKNOWN', 'verify-measurement', '2.3',
-        `unrecognized attestation measurement type: ${sevResult.measurement.type}`);
-    }
-    try {
-      compareMeasurements(pinM, attM);
-    } catch (e) {
-      const { code, specRef } = classifyCompareError(e);
-      return emitFullRejection(code, 'verify-measurement', specRef, (e as Error).message ?? String(e));
-    }
+    const r = await verifySevAgainst(pinM, input.attestation_sev);
+    if (!r.ok) return r.result;
     return {
       exitCode: EXIT_ACCEPT,
       body: {
@@ -193,8 +202,8 @@ export async function verifyFull(raw: unknown): Promise<VerifyFullResult> {
         outputs: {
           mode: 'pinned',
           platform: 'sev-snp',
-          attestation_measurement: sevResult.measurement,
-          final_measurement_fingerprint_hex: sevResult.measurement.registers[0],
+          attestation_measurement: r.sev.measurement,
+          final_measurement_fingerprint_hex: r.sev.measurement.registers[0],
         },
       },
     };

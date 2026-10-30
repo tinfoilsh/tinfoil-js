@@ -29,9 +29,13 @@ export async function verifyEhbpKeyBinding(
 ): Promise<{ exitCode: number; body: unknown }> {
   const input = (raw ?? {}) as VerifyEhbpKeyBindingInput;
 
+  const malformed = (message: string) => ({
+    exitCode: 30,
+    body: { stage: STAGE, accepted: false, rejection: { code: 'INPUT_MALFORMED', spec_ref: '14.2', message } },
+  });
+
   if (input.schema_version !== '1') {
-    process.stderr.write('input.schema_version != "1"\n');
-    return { exitCode: 30, body: { stage: STAGE, accepted: false } };
+    return malformed('input.schema_version != "1"');
   }
 
   // Decode + extract the attested keys via the verifier's real slice.
@@ -43,8 +47,7 @@ export async function verifyEhbpKeyBinding(
     attested = keys.hpkePublicKey;
     tlsFingerprint = keys.tlsPublicKeyFingerprint;
   } catch (e) {
-    process.stderr.write(`malformed report_data: ${(e as Error).message}\n`);
-    return { exitCode: 30, body: { stage: STAGE, accepted: false } };
+    return malformed(`malformed report_data: ${(e as Error).message}`);
   }
 
   // Validate the offered key through the same EHBP parser the transport uses.
@@ -52,10 +55,7 @@ export async function verifyEhbpKeyBinding(
   try {
     await Identity.fromPublicKeyHex(offeredHex);
   } catch (e) {
-    process.stderr.write(
-      `offered hpke key not a valid X25519 public key: ${(e as Error).message}\n`,
-    );
-    return { exitCode: 30, body: { stage: STAGE, accepted: false } };
+    return malformed(`offered hpke key not a valid X25519 public key: ${(e as Error).message}`);
   }
 
   // SPEC §14.2 fail-closed: offered key MUST equal the attested key.

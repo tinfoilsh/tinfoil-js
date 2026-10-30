@@ -70,6 +70,14 @@ export interface SigstoreRejection {
  *  rejection triple on failure. Shared between cmd_verify_sigstore and
  *  verify-full's chaining. The verify-full envelope's nested sigstore block
  *  omits schema_version (the envelope carries it); treat missing as "1". */
+/** Buffer.from(..., 'base64') silently drops invalid characters; reject them. */
+function decodeBase64Strict(s: unknown): Buffer {
+  if (typeof s !== 'string' || s.length % 4 !== 0 || !/^[A-Za-z0-9+/]*={0,2}$/.test(s)) {
+    throw new Error('not valid base64');
+  }
+  return Buffer.from(s, 'base64');
+}
+
 export async function runVerifySigstoreInner(
   input: Input,
 ): Promise<{ ok: true; v: Awaited<ReturnType<typeof verifySigstoreBundleWithPolicy>> } | { ok: false; rej: SigstoreRejection }> {
@@ -80,7 +88,7 @@ export async function runVerifySigstoreInner(
   let bundle: unknown;
   try {
     bundle = JSON.parse(
-      Buffer.from(input.bundle_b64, 'base64').toString('utf-8'),
+      decodeBase64Strict(input.bundle_b64).toString('utf-8'),
     );
   } catch (e) {
     return { ok: false, rej: { code: 'BUNDLE_MALFORMED', spec_ref: '5.2', message: `bundle_b64 not valid base64+JSON: ${(e as Error).message}`, exitCode: EXIT_BAD_INPUT } };
@@ -88,7 +96,7 @@ export async function runVerifySigstoreInner(
   let trustRoot: any;
   try {
     trustRoot = JSON.parse(
-      Buffer.from(input.trust_root_b64, 'base64').toString('utf-8'),
+      decodeBase64Strict(input.trust_root_b64).toString('utf-8'),
     );
   } catch (e) {
     // Trust root that decodes but doesn't parse is a *substantive*

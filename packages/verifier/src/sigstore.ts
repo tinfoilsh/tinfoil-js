@@ -202,8 +202,8 @@ export async function verifySigstoreBundleWithPolicy(
 
     const statementType: string | undefined = payload._type;
     if (
-      policy.inTotoStatementTypesAllowed !== null &&
-      (statementType === undefined ||
+      typeof statementType !== 'string' ||
+      (policy.inTotoStatementTypesAllowed !== null &&
         !policy.inTotoStatementTypesAllowed.includes(statementType))
     ) {
       throw new AttestationError(
@@ -305,19 +305,19 @@ function extractMeasurement(
 ): AttestationMeasurement {
   if (predicateType === PredicateType.SnpTdxMultiplatformV1) {
     const snp = predicate.snp_measurement;
-    if (typeof snp !== 'string') {
+    if (typeof snp !== 'string' || snp === '') {
       throw new AttestationError(
         'PREDICATE_MEASUREMENT_INVALID: SnpTdxMultiplatformV1 missing snp_measurement'
       );
     }
     const rtmr1 = predicate.tdx_measurement?.rtmr1;
     const rtmr2 = predicate.tdx_measurement?.rtmr2;
-    if (typeof rtmr1 !== 'string') {
+    if (typeof rtmr1 !== 'string' || rtmr1 === '') {
       throw new AttestationError(
         'PREDICATE_MEASUREMENT_INVALID: SnpTdxMultiplatformV1 missing tdx_measurement.rtmr1'
       );
     }
-    if (typeof rtmr2 !== 'string') {
+    if (typeof rtmr2 !== 'string' || rtmr2 === '') {
       throw new AttestationError(
         'PREDICATE_MEASUREMENT_INVALID: SnpTdxMultiplatformV1 missing tdx_measurement.rtmr2'
       );

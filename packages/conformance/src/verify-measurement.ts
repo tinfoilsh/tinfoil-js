@@ -130,7 +130,7 @@ export async function verifyMeasurement(
   const source = srcResult.measurement;
 
   let target: AttestationMeasurement | null = null;
-  if (inp.target) {
+  if (inp.target !== undefined && inp.target !== null) {
     const t = normalize(inp.target);
     if (!t.ok) {
       return {

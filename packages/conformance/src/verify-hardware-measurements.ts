@@ -79,13 +79,19 @@ export async function verifyHardwareMeasurements(
     );
   }
 
+  if (!enclave.registers.every((r: unknown) => typeof r === 'string')) {
+    return rejection('ENCLAVE_MEASUREMENT_TYPE_INVALID', '6.3', 'enclave registers must be hex strings');
+  }
   // SPEC §7.3 lowercase normalization.
   const enclaveMrtd = enclave.registers[0].toLowerCase();
   const enclaveRtmr0 = enclave.registers[1].toLowerCase();
-  const hwList = inp.hardware_measurements ?? [];
+  const hwList: unknown[] = Array.isArray(inp.hardware_measurements) ? inp.hardware_measurements : [];
 
   // SPEC §6.3 step 3: return the FIRST matching hardware measurement.
-  for (const hw of hwList) {
+  // Entries without string mrtd/rtmr0 cannot match and are skipped.
+  for (const entry of hwList) {
+    const hw = entry as { id?: unknown; mrtd?: unknown; rtmr0?: unknown } | null;
+    if (!hw || typeof hw.mrtd !== 'string' || typeof hw.rtmr0 !== 'string') continue;
     const hwMrtd = hw.mrtd.toLowerCase();
     const hwRtmr0 = hw.rtmr0.toLowerCase();
     if (hwMrtd === enclaveMrtd && hwRtmr0 === enclaveRtmr0) {

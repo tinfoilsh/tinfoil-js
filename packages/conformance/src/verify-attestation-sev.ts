@@ -157,14 +157,15 @@ function decodeBodyFields(report: Uint8Array): Record<string, unknown> {
     report_id_ma_hex: toHex(report.slice(0x160, 0x160 + 32)),
     reported_tcb_hex: toHex(report.slice(0x180, 0x180 + 8)),
     chip_id_hex: toHex(report.slice(0x1a0, 0x1a0 + 64)),
-    committed_tcb_hex: toHex(report.slice(0x1e8, 0x1e8 + 8)),
-    current_build: report[0x1f0],
-    current_minor: report[0x1f1],
-    current_major: report[0x1f2],
-    committed_build: report[0x1f4],
-    committed_minor: report[0x1f5],
-    committed_major: report[0x1f6],
-    launch_tcb_hex: toHex(report.slice(0x1f8, 0x1f8 + 8)),
+    // SEV-SNP ABI: CHIP_ID 0x1A0..0x1E0, COMMITTED_TCB 0x1E0, versions 0x1E8.., LAUNCH_TCB 0x1F0.
+    committed_tcb_hex: toHex(report.slice(0x1e0, 0x1e0 + 8)),
+    current_build: report[0x1e8],
+    current_minor: report[0x1e9],
+    current_major: report[0x1ea],
+    committed_build: report[0x1ec],
+    committed_minor: report[0x1ed],
+    committed_major: report[0x1ee],
+    launch_tcb_hex: toHex(report.slice(0x1f0, 0x1f0 + 8)),
   };
 }
 
@@ -267,12 +268,12 @@ function enforcePolicy(
         message: `guest_policy reserved-MBO bit (17) is clear (policy=${u64Hex(guestPolicy)})`,
       };
     }
-    const reservedMBZ = 0xfffffffffe000000n;
+    const reservedMBZ = 0xfffffffffc000000n; // bits 0-25 are defined (25 = PAGE_SWAP_DISABLE)
     if ((guestPolicy & reservedMBZ) !== 0n) {
       return {
         code: 'GUEST_POLICY_RESERVED_BIT_SET',
         specRef: '3.7',
-        message: `guest_policy reserved-MBZ bit (≥25) set (policy=${u64Hex(guestPolicy)})`,
+        message: `guest_policy reserved-MBZ bit (≥26) set (policy=${u64Hex(guestPolicy)})`,
       };
     }
   }
@@ -386,7 +387,7 @@ export async function runVerifyAttestationSevInner(
   let report: Uint8Array;
   try {
     const gzBytes = Buffer.from(input.attestation_doc_b64, 'base64');
-    report = new Uint8Array(gunzipSync(gzBytes));
+    report = new Uint8Array(gunzipSync(gzBytes, { maxOutputLength: 4096 })); // report is 1184 bytes
   } catch (e) {
     return { ok: false, rej: { code: 'REPORT_FORMAT_UNSUPPORTED', specRef: '3.1', message: `gzip decompress failed: ${(e as Error).message}` } };
   }
