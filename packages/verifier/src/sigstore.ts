@@ -64,8 +64,11 @@ export async function verifySigstoreBundle(
       OIDCIssuer,
       GitHubWorkflowRepository,
     } = await import('@freedomofpress/sigstore-browser');
+    // Rekor v2 checkpoints are Ed25519; browsers without native Ed25519 need the fallback.
+    const { installEd25519Fallback, verifySignatureOverDigest } = await import('@freedomofpress/crypto-browser/noble');
+    await installEd25519Fallback();
 
-    const verifier = new SigstoreVerifier();
+    const verifier = new SigstoreVerifier({ verifyDigest: verifySignatureOverDigest });
     // Use bundled Sigstore trusted root instead of fetching via TUF
     // This avoids CORS issues in browsers since tuf-repo-cdn.sigstore.dev doesn't support CORS
     await verifier.loadSigstoreRoot(sigstoreTrustedRoot);
