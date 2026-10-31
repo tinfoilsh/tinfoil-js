@@ -30,9 +30,9 @@
     "npm": ">=11.10.0"
   },
   "dependencies": {
-    "@freedomofpress/crypto-browser": "^0.1.7",
-    "@freedomofpress/sigstore-browser": "^0.1.14",
-    "@freedomofpress/tuf-browser": "^0.1.11",
+    "@freedomofpress/crypto-browser": "^0.3.0",
+    "@freedomofpress/sigstore-browser": "^0.2.0",
+    "@freedomofpress/tuf-browser": "^0.3.0",
     "ehbp": "^0.3.3"
   },
   "syncpack": {
