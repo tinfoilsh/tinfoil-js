@@ -8,14 +8,13 @@
  * replaces `ws` with a native implementation that drops it, so WebSocket
  * pinning fails closed on Bun.
  *
- * This file records, as executable assertions, exactly which Bun primitives
- * honor `checkServerIdentity` as of the tested Bun version — so a future Bun
- * release that closes the gap will flip a test and tell us a cleaner path
- * opened up. Findings on Bun 1.3.14:
- *   - Native `WebSocket` `tls` bag: IGNORES checkServerIdentity (pin skipped).
- *   - `node:tls` `tls.connect`: HONORS it and exposes `cert.raw` — the only
- *     viable primitive for a Bun WebSocket pinning path (hand-rolled framing
- *     over a manually pinned socket).
+ * This file records, as executable assertions, which Bun primitives honor
+ * `checkServerIdentity`, so a Bun release that changes either flips a test.
+ * Findings on Bun 1.4.4:
+ *   - Native `WebSocket` `tls` bag: HONORS checkServerIdentity (since 1.4; on
+ *     1.3.14 it was ignored and the pin silently skipped).
+ *   - `node:tls` `tls.connect`: HONORS it and exposes `cert.raw`, which the
+ *     production WebSocket pinning path still uses.
  */
 import { describe, it, expect } from "bun:test";
 import * as tls from "tls";
@@ -121,17 +120,17 @@ function spkiFingerprint(certRaw: Buffer): string {
 }
 
 describe("Bun WebSocket TLS pinning capability", () => {
-  it("native WebSocket IGNORES tls.checkServerIdentity (pin silently skipped)", async () => {
+  it("native WebSocket HONORS tls.checkServerIdentity", async () => {
     if (!isBun) return;
-
-    // A rejecting check must NOT prevent the connection on current Bun: the
-    // callback is never invoked. If this ever starts rejecting, Bun has wired
-    // checkServerIdentity into its WebSocket and we can pin via it directly.
-    const result = await wsProbe(() => new Error("intentional pin failure"));
-
-    expect(result.invoked).toBe(false);
-    expect(result.outcome).toBe("open");
-  }, 15_000);
+    // If invoked ever turns false again, Bun has gone back to skipping the
+    // callback and native WebSocket pinning would silently do nothing.
+    const accepted = await wsProbe(() => undefined);
+    expect(accepted.invoked).toBe(true);
+    expect(accepted.outcome).toBe("open");
+    const rejected = await wsProbe(() => new Error("intentional pin failure"));
+    expect(rejected.invoked).toBe(true);
+    expect(rejected.outcome).toBe("error");
+  }, 25_000);
 
   it("node:tls tls.connect HONORS checkServerIdentity and exposes cert.raw", async () => {
     if (!isBun) return;
