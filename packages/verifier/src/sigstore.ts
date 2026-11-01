@@ -68,7 +68,8 @@ export async function verifySigstoreBundle(
     const { installEd25519Fallback, verifySignatureOverDigest } = await import('@freedomofpress/crypto-browser/noble');
     await installEd25519Fallback();
 
-    const verifier = new SigstoreVerifier({ verifyDigest: verifySignatureOverDigest });
+    // SPEC §5.2 accepts only v0.3 bundles; sigstore-browser 0.3.0 enforces that at the media type.
+    const verifier = new SigstoreVerifier({ verifyDigest: verifySignatureOverDigest, bundleVersions: ["0.3"] });
     // Use bundled Sigstore trusted root instead of fetching via TUF
     // This avoids CORS issues in browsers since tuf-repo-cdn.sigstore.dev doesn't support CORS
     await verifier.loadSigstoreRoot(sigstoreTrustedRoot);
