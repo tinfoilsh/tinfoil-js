@@ -48,3 +48,40 @@ export function registerHex(r: Register): string {
   for (const b of r) s += b.toString(16).padStart(2, "0");
   return s;
 }
+
+const copy = (r: Register): Register => r.slice();
+const copyOpt = (r: Register | undefined): Register | undefined => r?.slice();
+
+/** A deep copy sharing no register buffers with the original. */
+export function cloneMeasurement<M extends Measurement>(m: M): M {
+  switch (m.platform) {
+    case "sev-snp":
+      return { platform: "sev-snp", launch: copy(m.launch) } as M;
+    case "tdx":
+      return {
+        platform: "tdx",
+        mrtd: copy(m.mrtd),
+        rtmr0: copy(m.rtmr0),
+        rtmr1: copy(m.rtmr1),
+        rtmr2: copy(m.rtmr2),
+        rtmr3: copy(m.rtmr3),
+      } as M;
+  }
+}
+
+/** A deep copy sharing no register buffers with the original; unset registers stay unset. */
+export function cloneExpected<E extends Expected>(e: E): E {
+  switch (e.platform) {
+    case "sev-snp":
+      return { platform: "sev-snp", launch: copyOpt(e.launch) } as E;
+    case "tdx":
+      return {
+        platform: "tdx",
+        mrtd: copyOpt(e.mrtd),
+        rtmr0: copyOpt(e.rtmr0),
+        rtmr1: copyOpt(e.rtmr1),
+        rtmr2: copyOpt(e.rtmr2),
+        rtmr3: copyOpt(e.rtmr3),
+      } as E;
+  }
+}

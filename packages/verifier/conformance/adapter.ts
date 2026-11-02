@@ -232,7 +232,7 @@ async function verifyFull(
     return reject(stage, "ENVELOPE_REJECTED");
   }
   return accept(stage, {
-    code_digest: verified.codeDigest,
+    code_digest: verified.codeDigest(),
     code_measurement: expectedOf(verified.codeMeasurement()),
     enclave_measurement: measurementOf(verified.enclaveMeasurement()),
     tls_public_key_fp: tlsFP,

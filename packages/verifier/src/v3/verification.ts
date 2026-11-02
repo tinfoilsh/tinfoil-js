@@ -1,4 +1,4 @@
-import type { Expected, Measurement } from "./measurement.js";
+import { cloneExpected, cloneMeasurement, type Expected, type Measurement } from "./measurement.js";
 
 /** @internal The facts the verifier proved; only the verifier builds one. */
 export interface VerificationFields {
@@ -12,36 +12,47 @@ export interface VerificationFields {
 }
 
 /**
- * The facts proven by verifying an attestation document. Immutable; only the
- * verifier creates one.
+ * The facts proven by verifying an attestation document. Only the verifier
+ * creates one, and it can't be changed: the state is runtime-private and
+ * accessors return copies.
  * TODO(v3): crypto material, freshness expiry, config/runtime/platform
  * artifacts and metadata (tinfoil-go verify.Verification).
  */
 export class Verification {
-  /** Digest of the verified code or runtime artifact. */
-  readonly codeDigest: string;
-  /** Release tag of the verified code or runtime artifact. */
-  readonly codeTag: string;
-  /** The selected code or runtime repository, without version pins. */
-  readonly configRepo: string;
   readonly #fields: VerificationFields;
 
   /** @internal */
   constructor(fields: VerificationFields) {
-    this.#fields = fields;
-    this.codeDigest = fields.codeDigest;
-    this.codeTag = fields.codeTag;
-    this.configRepo = fields.configRepo;
+    this.#fields = {
+      ...fields,
+      codeMeasurement: cloneExpected(fields.codeMeasurement),
+      enclaveMeasurement: cloneMeasurement(fields.enclaveMeasurement),
+    };
+  }
+
+  /** Digest of the verified code or runtime artifact. */
+  codeDigest(): string {
+    return this.#fields.codeDigest;
+  }
+
+  /** Release tag of the verified code or runtime artifact. */
+  codeTag(): string {
+    return this.#fields.codeTag;
+  }
+
+  /** The selected code or runtime repository, without version pins. */
+  configRepo(): string {
+    return this.#fields.configRepo;
   }
 
   /** Registers the release fixes on the enclave's platform; unset registers are left to the platform. */
   codeMeasurement(): Expected {
-    return this.#fields.codeMeasurement;
+    return cloneExpected(this.#fields.codeMeasurement);
   }
 
   /** The quote's authenticated registers. */
   enclaveMeasurement(): Measurement {
-    return this.#fields.enclaveMeasurement;
+    return cloneMeasurement(this.#fields.enclaveMeasurement);
   }
 
   /** The endorsed TLS SPKI fingerprint, or undefined if the document endorses none in that format. */
