@@ -5,6 +5,7 @@ node_modules/
 .env
 dist/
 packages/*/dist/
+packages/*/dist-conformance/
 packages/*/.node-tests/
 __screenshots__/
 sigstore-browser/

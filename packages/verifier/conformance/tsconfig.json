@@ -1,0 +1,10 @@
+{
+  "extends": "../../../tsconfig.base.json",
+  "compilerOptions": {
+    "outDir": "../dist-conformance",
+    "rootDir": "..",
+    "declaration": false,
+    "declarationMap": false
+  },
+  "include": ["./**/*", "../src/v3/**/*"]
+}
