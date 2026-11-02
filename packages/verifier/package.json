@@ -15,12 +15,14 @@
   },
   "scripts": {
     "build": "tsc",
+    "build:conformance": "tsc -p conformance/tsconfig.json",
     "test": "vitest run",
+    "test:conformance": "npm run build:conformance && TINFOIL_CONFORMANCE_FIXTURES=${TINFOIL_CONFORMANCE_FIXTURES:-../../../tinfoil-conformance/vectors/v3} vitest run test/conformance.test.ts",
     "test:integration": "RUN_TINFOIL_INTEGRATION=true npm test",
     "test:browser": "vitest run --config vite.config.playwright.ts",
     "test:browser:integration": "vitest run --config vite.config.integration.ts",
     "check:es2020": "acorn --ecma2020 --module --silent dist/*.js",
-    "clean": "rm -rf dist",
+    "clean": "rm -rf dist dist-conformance",
     "prepublishOnly": "npm run build"
   },
   "keywords": [
