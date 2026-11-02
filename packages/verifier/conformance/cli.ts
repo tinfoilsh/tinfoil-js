@@ -1,5 +1,8 @@
+#!/usr/bin/env node
 /**
- * tinfoil-conformance CLI for tinfoil-js.
+ * tinfoil-conformance CLI for tinfoil-js. Test tooling, not published: build
+ * with `npm run build:conformance -w @tinfoilsh/verifier`, then point the
+ * suite at `node packages/verifier/dist-conformance/conformance/cli.js`.
  *
  *   tinfoil-conformance <stage>        Input JSON on stdin → Output JSON on stdout
  *   tinfoil-conformance capabilities   capabilities JSON on stdout

@@ -1,19 +1,56 @@
 import type { Expected, Measurement } from "./measurement.js";
 
-/**
- * The verified facts of an accepted document.
- * TODO(v3): config/runtime/platform artifacts, crypto material, freshness
- * expiry and metadata, per tinfoil-go verify.Verification.
- */
-export interface Verification {
-  /** Digest of the authenticated code release. */
+/** @internal The facts the verifier proved; only the verifier builds one. */
+export interface VerificationFields {
   readonly codeDigest: string;
-  /** Registers the release fixes, in the layout of the enclave's platform. */
+  readonly codeTag: string;
+  readonly configRepo: string;
   readonly codeMeasurement: Expected;
-  /** The registers the quote measured. */
   readonly enclaveMeasurement: Measurement;
-  /** The endorsed TLS SPKI fingerprint, if the document endorses one. */
   readonly tlsPublicKeyFP?: string;
-  /** The endorsed HPKE (x25519) public key, if the document endorses one. */
   readonly hpkePublicKey?: string;
+}
+
+/**
+ * The facts proven by verifying an attestation document. Immutable; only the
+ * verifier creates one.
+ * TODO(v3): crypto material, freshness expiry, config/runtime/platform
+ * artifacts and metadata (tinfoil-go verify.Verification).
+ */
+export class Verification {
+  /** Digest of the verified code or runtime artifact. */
+  readonly codeDigest: string;
+  /** Release tag of the verified code or runtime artifact. */
+  readonly codeTag: string;
+  /** The selected code or runtime repository, without version pins. */
+  readonly configRepo: string;
+  readonly #fields: VerificationFields;
+
+  /** @internal */
+  constructor(fields: VerificationFields) {
+    this.#fields = fields;
+    this.codeDigest = fields.codeDigest;
+    this.codeTag = fields.codeTag;
+    this.configRepo = fields.configRepo;
+  }
+
+  /** Registers the release fixes on the enclave's platform; unset registers are left to the platform. */
+  codeMeasurement(): Expected {
+    return this.#fields.codeMeasurement;
+  }
+
+  /** The quote's authenticated registers. */
+  enclaveMeasurement(): Measurement {
+    return this.#fields.enclaveMeasurement;
+  }
+
+  /** The endorsed TLS SPKI fingerprint, or undefined if the document endorses none in that format. */
+  tlsPublicKeyFP(): string | undefined {
+    return this.#fields.tlsPublicKeyFP;
+  }
+
+  /** The endorsed HPKE (x25519) public key, or undefined if the document endorses none in that format. */
+  hpkePublicKey(): string | undefined {
+    return this.#fields.hpkePublicKey;
+  }
 }

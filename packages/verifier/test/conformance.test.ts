@@ -2,10 +2,10 @@
  * Runs the shared tinfoil-conformance v3 fixtures through the adapter.
  *
  * Point TINFOIL_CONFORMANCE_FIXTURES at the suite's vectors/v3 directory (it
- * is searched recursively); the test is skipped when unset. Fixtures whose
+ * is searched recursively); the test is skipped when unset or missing. Fixtures whose
  * stage still hits a v3 placeholder report "unsupported" and are skipped.
  */
-import { readdirSync, readFileSync, statSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { join, relative } from "node:path";
 import { describe, expect, it } from "vitest";
 import { ExitCode, run, type Measurement } from "../conformance/adapter.js";
@@ -34,7 +34,7 @@ function findFixtures(dir: string): string[] {
 }
 
 const dir = process.env.TINFOIL_CONFORMANCE_FIXTURES;
-const files = dir ? findFixtures(dir).sort() : [];
+const files = dir && existsSync(dir) ? findFixtures(dir).sort() : [];
 
 describe.skipIf(files.length === 0)("v3 conformance fixtures", () => {
   it.for(files.map((f) => [relative(dir!, f), f] as const))("%s", async ([, file], ctx) => {

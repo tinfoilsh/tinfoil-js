@@ -54,7 +54,7 @@ export class Document {
  * (nonce equality, endorsed-section hashes, report_data ladder).
  * Throws on any envelope failure.
  */
-export function parse(docBytes: Uint8Array, expectedNonce: Uint8Array): Document {
+export async function parse(docBytes: Uint8Array, expectedNonce: Uint8Array): Promise<Document> {
   void docBytes;
   void expectedNonce;
   throw new NotImplementedError("document.parse");
@@ -64,7 +64,7 @@ export function parse(docBytes: Uint8Array, expectedNonce: Uint8Array): Document
  * Decodes a document without checking its nonce or report_data binding, so
  * the conformance adapter can drive a single layer. Not for production use.
  */
-export function dangerousTestOnlyDecode(docBytes: Uint8Array): Document {
+export async function dangerousTestOnlyDecode(docBytes: Uint8Array): Promise<Document> {
   void docBytes;
   throw new NotImplementedError("document.dangerousTestOnlyDecode");
 }

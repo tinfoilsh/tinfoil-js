@@ -153,12 +153,12 @@ async function runStage(stage: string, raw: unknown): Promise<Result> {
 
     case Stage.CheckEnvelope:
       return layer(stage, "ENVELOPE_REJECTED", async () => {
-        document.parse(doc, nonce);
+        await document.parse(doc, nonce);
         return accept(stage);
       });
 
     case Stage.AuthenticateProvenance: {
-      const parsed = decodeOrUndefined(doc);
+      const parsed = await decodeOrUndefined(doc);
       if (parsed === undefined) return malformed(stage);
       const prov = await provClient();
       if (prov === undefined) return malformed(stage);
@@ -178,7 +178,7 @@ async function runStage(stage: string, raw: unknown): Promise<Result> {
     }
 
     case Stage.AssemblePolicy: {
-      const parsed = decodeOrUndefined(doc);
+      const parsed = await decodeOrUndefined(doc);
       if (parsed === undefined) return malformed(stage);
       const prov = await provClient();
       if (prov === undefined) return malformed(stage);
@@ -190,7 +190,7 @@ async function runStage(stage: string, raw: unknown): Promise<Result> {
     }
 
     case Stage.AuthenticateQuote: {
-      const parsed = decodeOrUndefined(doc);
+      const parsed = await decodeOrUndefined(doc);
       if (parsed === undefined) return malformed(stage);
       return layer(stage, "QUOTE_REJECTED", async () => {
         const auth = await quote.authenticate(parsed.cpuEvidence(), parsed.cpuEndorsements(), appraisal, {
@@ -214,9 +214,9 @@ async function verifyFull(
   appraisal: Date,
 ): Promise<Result> {
   const stage = Stage.Verify;
-  const verifier = dangerousTestOnlyVerifier(roots);
   let verified;
   try {
+    const verifier = await dangerousTestOnlyVerifier(roots);
     verified = await verifier.verifyV3At(doc, nonce, repo, appraisal);
   } catch (err) {
     if (err instanceof NotImplementedError) throw err;
@@ -226,15 +226,17 @@ async function verifyFull(
   }
   // A document that verifies but endorses no usable channel keys is useless
   // to every real client, so the full stage requires both.
-  if (verified.tlsPublicKeyFP === undefined || verified.hpkePublicKey === undefined) {
+  const tlsFP = verified.tlsPublicKeyFP();
+  const hpke = verified.hpkePublicKey();
+  if (tlsFP === undefined || hpke === undefined) {
     return reject(stage, "ENVELOPE_REJECTED");
   }
   return accept(stage, {
     code_digest: verified.codeDigest,
-    code_measurement: expectedOf(verified.codeMeasurement),
-    enclave_measurement: measurementOf(verified.enclaveMeasurement),
-    tls_public_key_fp: verified.tlsPublicKeyFP,
-    hpke_public_key: verified.hpkePublicKey,
+    code_measurement: expectedOf(verified.codeMeasurement()),
+    enclave_measurement: measurementOf(verified.enclaveMeasurement()),
+    tls_public_key_fp: tlsFP,
+    hpke_public_key: hpke,
   });
 }
 
@@ -266,9 +268,9 @@ async function layer(stage: string, code: RejectionCode, body: () => Promise<Res
   }
 }
 
-function decodeOrUndefined(doc: Uint8Array): document.Document | undefined {
+async function decodeOrUndefined(doc: Uint8Array): Promise<document.Document | undefined> {
   try {
-    return document.dangerousTestOnlyDecode(doc);
+    return await document.dangerousTestOnlyDecode(doc);
   } catch (err) {
     if (err instanceof NotImplementedError) throw err;
     return undefined;
