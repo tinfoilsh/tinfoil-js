@@ -110,16 +110,6 @@ export function int64(o: JsonObject, key: string): bigint | undefined {
   return v;
 }
 
-/**
- * A nested non-pointer Go struct member: absent or null is the zero struct
- * (an empty object); otherwise an object with exactly `known` members.
- */
-export function struct(o: JsonObject, key: string, known: readonly string[]): JsonObject {
-  const v = o.get(key);
-  if (v === undefined || v === null) return EMPTY;
-  return object(v, key, known);
-}
-
 /** A Go pointer-to-struct member: absent or null is undefined; otherwise an object with exactly `known` members. */
 export function optStruct(o: JsonObject, key: string, known: readonly string[]): JsonObject | undefined {
   const v = o.get(key);
