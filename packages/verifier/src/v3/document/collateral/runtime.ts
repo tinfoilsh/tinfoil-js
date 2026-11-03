@@ -25,6 +25,7 @@ export function validateRuntimeReference(r: RuntimeReference): void {
   decodeLowerHex("runtime digest", r.digest, 32);
 }
 
+/** Go's struct equality on RuntimeReference; used by the provenance layer's runtime authentication. */
 export function runtimeReferenceEqual(a: RuntimeReference, b: RuntimeReference): boolean {
   return a.repo === b.repo && a.tag === b.tag && a.digest === b.digest;
 }

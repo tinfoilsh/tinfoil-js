@@ -6,14 +6,12 @@
  * - escaped surrogates must form a valid pair (`"\ud800"` rejects);
  * - duplicate member names reject at any depth, compared on decoded names;
  * - trailing data after the top-level value rejects;
- * - nesting deeper than 10000 rejects (jsontext's maxNestingDepth); the
- *   engine's own reviver recursion limit (about 2300 levels in V8) also
- *   rejects, so pathologically deep input Go accepts is rejected here;
+ * - nesting deeper than 10000 rejects (jsontext's maxNestingDepth);
  * - numbers keep their raw literal so u64 fields survive above 2^53.
  *
- * Parsing is JSON.parse plus checks: TextDecoder handles UTF-8, the reviver
- * keeps number literals, a name scan rejects duplicates, and a final walk
- * rejects lone surrogates. Unknown-member rejection is per struct in Go, so
+ * Parsing is JSON.parse plus checks: TextDecoder handles UTF-8, a scan over
+ * the validated text rejects duplicates and keeps member order and number
+ * literals, and a final walk rejects lone surrogates. Unknown-member rejection is per struct in Go, so
  * it lives in the decoders (see decode.ts), not here.
  */
 
@@ -58,7 +56,8 @@ export class JsonNumber {
   /**
    * The literal's float64 value, as Go's strconv.ParseFloat gives it (and so
    * json v2 and protojson/structpb): correctly rounded, underflow to ±0 is
-   * fine, overflow to ±Inf is an error.
+   * fine, overflow to ±Inf is an error. Used by the provenance layer, which
+   * reproduces the reference's protobuf round-trip of the platform predicate.
    */
   toFloat64(): number {
     const f = parseNumber(this.raw);
@@ -93,36 +92,36 @@ export function strictParse(bytes: Uint8Array): JsonValue {
 
   let parsed: unknown;
   try {
-    // JSON.parse enforces the RFC 8259 grammar and rejects trailing data. The
-    // reviver keeps each number's source literal (TC39 JSON.parse source text
-    // access) so integers beyond 2^53 and "1" vs "1.0" stay distinguishable.
-    parsed = JSON.parse(text, (_key: string, value: unknown, context?: { source?: string }) => {
-      if (typeof value !== "number") return value;
-      if (context?.source === undefined) {
-        throw new JsonError("this JavaScript engine lacks JSON.parse source text access");
-      }
-      return new JsonNumber(context.source);
-    });
+    // JSON.parse enforces the RFC 8259 grammar and rejects trailing data.
+    // Without a reviver it is iterative, so depth is bounded only by scan().
+    parsed = JSON.parse(text);
   } catch (err) {
-    if (err instanceof JsonError) throw err;
-    // A RangeError here is the engine's own recursion limit in the reviver,
-    // which is lower than MAX_DEPTH; such input is rejected, never accepted.
     throw new JsonError(`invalid JSON: ${(err as Error).message}`);
   }
 
-  return toJsonValue(parsed, checkNames(text));
+  return toJsonValue(parsed, scan(text));
+}
+
+/** What scan() recovers from the text that JSON.parse's output lacks. */
+interface Scan {
+  /** Each object's member names in source order, objects in document order. */
+  readonly orders: readonly string[][];
+  /** Every number literal, in document order. */
+  readonly numbers: readonly string[];
 }
 
 /**
- * Rejects duplicate member names (compared after unescaping) and nesting
- * deeper than MAX_DEPTH, and returns each object's member names in source
- * order, objects listed in document (pre-)order. JSON.parse keeps only the
- * last duplicate and lists integer-like names first, so this scans the text
- * it has already validated: it only tracks nesting and decodes each string
- * that is followed by ':' (a member name).
+ * Scans text JSON.parse has already validated for what its output lacks:
+ * rejects duplicate member names (compared after unescaping) and nesting
+ * deeper than MAX_DEPTH, and records each object's member names in source
+ * order and every number's source literal (so integers beyond 2^53 and "1"
+ * vs "1.0" stay distinguishable). Because the grammar is already checked,
+ * this only tracks nesting, decodes each string followed by ':' (a member
+ * name), and copies number tokens.
  */
-function checkNames(text: string): string[][] {
+function scan(text: string): Scan {
   const orders: string[][] = [];
+  const numbers: string[] = [];
   const stack: ({ readonly seen: Set<string>; readonly order: string[] } | null)[] = [];
   for (let i = 0; i < text.length; i++) {
     const c = text.charCodeAt(i);
@@ -151,9 +150,14 @@ function checkNames(text: string): string[][] {
         top.seen.add(name);
         top.order.push(name);
       }
+    } else if (c === 0x2d /* - */ || (c >= 0x30 && c <= 0x39)) {
+      // A number token; valid JSON puts digits only inside strings or numbers.
+      const start = i;
+      while (i + 1 < text.length && /[-+.0-9eE]/.test(text[i + 1]!)) i++;
+      numbers.push(text.slice(start, i + 1));
     }
   }
-  return orders;
+  return { orders, numbers };
 }
 
 const LONE_SURROGATE = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/;
@@ -167,29 +171,42 @@ function checkString(s: string): string {
 
 /**
  * Converts JSON.parse output to JsonValue without recursion: objects become
- * Maps (so names can't collide with Object.prototype) in source member order
- * (from `orders`, consumed in document order), and every string and member
- * name is checked for lone surrogates.
+ * Maps (so names can't collide with Object.prototype) in source member order,
+ * numbers become JsonNumbers holding their source literal (both consumed from
+ * the scan in document order, which is the order this walk visits values),
+ * and every string and member name is checked for lone surrogates.
  */
-function toJsonValue(root: unknown, orders: readonly string[][]): JsonValue {
-  let next = 0;
+function toJsonValue(root: unknown, { orders, numbers }: Scan): JsonValue {
+  let nextObject = 0;
+  let nextNumber = 0;
   type Frame = { readonly src: Record<string, unknown> | unknown[]; readonly keys: string[]; idx: number; readonly out: Map<string, JsonValue> | JsonValue[] };
   const convert = (v: unknown): JsonValue | Frame => {
-    if (v === null || typeof v === "boolean" || v instanceof JsonNumber) return v;
+    if (v === null || typeof v === "boolean") return v;
     if (typeof v === "string") return checkString(v);
+    if (typeof v === "number") {
+      const raw = numbers[nextNumber++];
+      if (raw === undefined || Number(raw) !== v) throw new JsonError("number scan disagrees with JSON.parse");
+      return new JsonNumber(raw);
+    }
     if (Array.isArray(v)) return { src: v, keys: [], idx: 0, out: [] };
     const o = v as Record<string, unknown>;
-    const keys = orders[next++];
+    const keys = orders[nextObject++];
     if (keys === undefined || keys.length !== Object.keys(o).length) {
       throw new JsonError("member scan disagrees with JSON.parse");
     }
     return { src: o, keys: keys.map(checkString), idx: 0, out: new Map() };
   };
+  const finish = (v: JsonValue): JsonValue => {
+    if (nextNumber !== numbers.length || nextObject !== orders.length) {
+      throw new JsonError("scan disagrees with JSON.parse");
+    }
+    return v;
+  };
   const isFrame = (x: JsonValue | Frame): x is Frame =>
     typeof x === "object" && x !== null && !(x instanceof JsonNumber) && !(x instanceof Map) && !Array.isArray(x);
 
   const first = convert(root);
-  if (!isFrame(first)) return first;
+  if (!isFrame(first)) return finish(first);
   const stack: Frame[] = [first];
   for (;;) {
     const f = stack[stack.length - 1]!;
@@ -198,7 +215,7 @@ function toJsonValue(root: unknown, orders: readonly string[][]): JsonValue {
     if (f.idx === len) {
       stack.pop();
       const done = f.out as JsonValue;
-      if (stack.length === 0) return done;
+      if (stack.length === 0) return finish(done);
       place(stack[stack.length - 1]!, done);
       continue;
     }
@@ -226,7 +243,11 @@ export function canonicalize(value: JsonValue): Uint8Array {
   return write(value, true);
 }
 
-/** Serializes a value compactly, preserving member order and number literals. */
+/**
+ * Serializes a value compactly, preserving member order and number literals.
+ * Used by the provenance layer to hand bundles and statements to the Sigstore
+ * library as bytes.
+ */
 export function serialize(value: JsonValue): Uint8Array {
   return write(value, false);
 }
@@ -399,5 +420,38 @@ class ByteWriter {
 
   bytes(): Uint8Array {
     return this.buf.slice(0, this.len);
+  }
+}
+
+/** A deep copy of a value, sharing no Maps or arrays with the original (Go's slices.Clone of raw bytes). */
+export function cloneJsonValue(root: JsonValue): JsonValue {
+  type Frame = { readonly src: readonly JsonValue[] | ReadonlyArray<readonly [string, JsonValue]>; idx: number; readonly out: JsonValue[] | Map<string, JsonValue> };
+  const frame = (v: JsonValue): Frame | undefined => {
+    if (Array.isArray(v)) return { src: v, idx: 0, out: [] };
+    if (v instanceof Map) return { src: [...v], idx: 0, out: new Map() };
+    return undefined;
+  };
+  const first = frame(root);
+  if (first === undefined) return root;
+  const stack: Frame[] = [first];
+  for (;;) {
+    const f = stack[stack.length - 1]!;
+    if (f.idx === f.src.length) {
+      stack.pop();
+      if (stack.length === 0) return f.out;
+      place(stack[stack.length - 1]!, f.out);
+      continue;
+    }
+    const entry = f.src[f.idx]!;
+    const child: JsonValue = f.out instanceof Map ? (entry as readonly [string, JsonValue])[1] : (entry as JsonValue);
+    const sub = frame(child);
+    if (sub !== undefined) stack.push(sub);
+    else place(f, child);
+  }
+
+  function place(f: Frame, v: JsonValue): void {
+    if (f.out instanceof Map) f.out.set((f.src[f.idx] as readonly [string, JsonValue])[0], v);
+    else f.out.push(v);
+    f.idx++;
   }
 }

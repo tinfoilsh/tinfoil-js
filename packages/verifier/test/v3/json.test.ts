@@ -4,6 +4,7 @@ import {
   JsonError,
   JsonNumber,
   canonicalize,
+  cloneJsonValue,
   serialize,
   strictParse,
   type JsonObject,
@@ -88,19 +89,14 @@ describe("strictParse grammar", () => {
     expect(() => strictParse(bytes([0xef, 0xbb, 0xbf], "{}"))).toThrow(JsonError);
   });
 
-  it("rejects nesting beyond jsontext's max depth of 10000, and the engine's reviver limit below it", () => {
-    // Go accepts up to 10000 levels; JSON.parse with a reviver overflows the
-    // engine's stack well before that, so such input rejects here instead of
-    // being accepted. Either way nothing deeper than Go allows is accepted,
-    // and the failure is a JsonError, never a bare RangeError.
+  it("enforces jsontext's max nesting depth of 10000", () => {
     const arrays = (n: number) => "[".repeat(n) + "]".repeat(n);
     const objects = (n: number) => '{"a":'.repeat(n) + "1" + "}".repeat(n);
-    expect(() => parse(arrays(100))).not.toThrow();
-    expect(() => parse(objects(100))).not.toThrow();
-    for (const n of [10000, 10001, 100000]) {
-      expect(() => parse(arrays(n))).toThrow(JsonError);
-      expect(() => parse(objects(n))).toThrow(JsonError);
-    }
+    expect(() => parse(arrays(10000))).not.toThrow();
+    expect(() => parse(arrays(10001))).toThrow(JsonError);
+    expect(() => parse(objects(10000))).not.toThrow();
+    expect(() => parse(objects(10001))).toThrow(JsonError);
+    expect(() => parse(arrays(100000))).toThrow(JsonError);
   });
 
   it("builds Maps in member order, arrays, and raw-literal numbers", () => {
@@ -465,5 +461,19 @@ describe("JSON.parse-backed strictness", () => {
     expect(() => parse('{"a:":1,"b":"\\"a\\":","a:":2}')).toThrow(JsonError);
     expect(() => parse('{"a":"a","b":{"a":1}}')).not.toThrow();
     expect(() => parse('["a","a",{"k":"k"}]')).not.toThrow();
+  });
+});
+
+describe("cloneJsonValue", () => {
+  it("shares no containers with the original", () => {
+    const v = parse('{"a":[1,{"b":"x"}],"c":{"d":[[]]}}') as JsonObject;
+    const c = cloneJsonValue(v) as JsonObject;
+    expect(c).toEqual(v);
+    expect(c).not.toBe(v);
+    (c.get("a") as JsonValue[]).push("extra");
+    ((c.get("c") as JsonObject).get("d") as JsonValue[][])[0]!.push(null);
+    expect((v.get("a") as JsonValue[]).length).toBe(2);
+    expect(((v.get("c") as JsonObject).get("d") as JsonValue[][])[0]!.length).toBe(0);
+    expect(cloneJsonValue(null)).toBeNull();
   });
 });

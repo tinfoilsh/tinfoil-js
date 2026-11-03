@@ -6,8 +6,6 @@
  */
 import { JsonError, JsonNumber, type JsonObject, type JsonValue } from "./index.js";
 
-const EMPTY: JsonObject = new Map();
-
 /**
  * Requires `v` to be an object. With `known` set, members outside it reject
  * (json.RejectUnknownMembers(true)). As in Go, `null` decodes to the zero
@@ -15,7 +13,7 @@ const EMPTY: JsonObject = new Map();
  * null themselves.
  */
 export function object(v: JsonValue, what: string, known?: readonly string[]): JsonObject {
-  if (v === null) return EMPTY;
+  if (v === null) return new Map();
   if (!(v instanceof Map)) {
     throw new JsonError(`cannot unmarshal JSON ${kind(v)} into ${what}`);
   }
@@ -59,6 +57,16 @@ export function arr(o: JsonObject, key: string): readonly JsonValue[] | undefine
   if (v === undefined || v === null) return undefined;
   if (!Array.isArray(v)) throw typeError(v, "slice", key);
   return v as readonly JsonValue[];
+}
+
+/**
+ * A nested non-pointer Go struct member: absent or null is the zero struct
+ * (an empty object); otherwise an object with exactly `known` members.
+ */
+export function struct(o: JsonObject, key: string, known: readonly string[]): JsonObject {
+  const v = o.get(key);
+  if (v === undefined || v === null) return new Map();
+  return object(v, key, known);
 }
 
 /** A raw member kept undecoded (Go jsontext.Value); absent is undefined, null is null. */

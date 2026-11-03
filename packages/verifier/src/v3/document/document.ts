@@ -7,8 +7,8 @@
  */
 import { concat, sha256, toHex, utf8 } from "../internal/bytes.js";
 import { decodeBase64, decodeLowerHex, isLowerHex } from "../internal/canonical.js";
-import { arr, object, raw, str } from "../internal/json/decode.js";
-import { strictParse, type JsonObject, type JsonValue } from "../internal/json/index.js";
+import { arr, object, raw, str, struct } from "../internal/json/decode.js";
+import { cloneJsonValue, strictParse, type JsonObject, type JsonValue } from "../internal/json/index.js";
 import {
   ARTIFACT_FRESHNESS_V1_FORMAT,
   CONFIG_ID,
@@ -86,11 +86,7 @@ export interface DeviceEvidenceItem {
   readonly evidence: JsonValue | undefined;
 }
 
-/**
- * A parsed v3 attestation document. Accessors return copies of byte buffers;
- * parsed JSON values (bundles, device evidence) are shared and must be
- * treated as read-only.
- */
+/** A parsed v3 attestation document. Accessors return copies, as in the reference. */
 export class Document {
   readonly #d: DecodedDocument;
 
@@ -120,7 +116,11 @@ export class Document {
       case TDX_QUOTE_V1_FORMAT:
         return {
           intelPcs: cpu.intelPcs && {
-            responses: cpu.intelPcs.responses.map((r) => ({ ...r, body: r.body.slice() })),
+            responses: cpu.intelPcs.responses.map((r) => ({
+              url: r.url,
+              headers: r.headers && new Map([...r.headers].map(([k, v]) => [k, [...v]])),
+              body: r.body.slice(),
+            })),
           },
         };
       default:
@@ -138,7 +138,7 @@ export class Document {
   }
 
   deviceEvidenceItems(): DeviceEvidenceItem[] {
-    return this.#d.deviceEvidence.map((i) => ({ ...i }));
+    return this.#d.deviceEvidence.map((i) => ({ ...i, evidence: cloneOpt(i.evidence) }));
   }
 
   /** The code-provenance entry. Throws NotFoundError when absent. */
@@ -157,26 +157,26 @@ export class Document {
     if (f === undefined) {
       throw new NotFoundError(`document carries no ${SIGSTORE_FRESHNESS_V1_FORMAT} reference-values entry "${id}"`);
     }
-    return { ...f };
+    return { format: f.format, bundle: cloneJsonValue(f.bundle) };
   }
 
   /** The decoded, unauthenticated config approval (v3 collateral). Throws NotFoundError when absent. */
   configEndorsement(): ConfigEndorsement {
     const c = this.#d.collateral.config;
     if (c === undefined) throw new NotFoundError(`document carries no "${CONFIG_ID}" reference-values entry`);
-    return { ...c, config: c.config.slice() };
+    return { reference: c.reference, config: c.config.slice(), bundle: cloneOpt(c.bundle) };
   }
 
   /** The decoded, unauthenticated runtime approval (v3 collateral). Throws NotFoundError when absent. */
   runtime(): RuntimeCollateral {
     const r = this.#d.collateral.runtime;
     if (r === undefined) throw new NotFoundError(`document carries no "${RUNTIME_ID}" reference-values entry`);
-    return { ...r, manifest: r.manifest.slice() };
+    return { ...r, manifest: r.manifest.slice(), bundle: cloneJsonValue(r.bundle) };
   }
 
   /** The unambiguous platform reference of a config-based document (v3 collateral). */
   configPlatform(): SigstoreRef {
-    return { ...configPlatform(this.#d.collateral) };
+    return cloneRef(configPlatform(this.#d.collateral));
   }
 
   /**
@@ -191,7 +191,15 @@ export class Document {
 
 function sigstoreRef(ref: SigstoreRef | undefined, format: string): SigstoreRef {
   if (ref === undefined) throw new NotFoundError(`document carries no ${format} reference-values entry`);
-  return { ...ref };
+  return cloneRef(ref);
+}
+
+function cloneRef(ref: SigstoreRef): SigstoreRef {
+  return { ...ref, bundle: cloneJsonValue(ref.bundle) };
+}
+
+function cloneOpt(v: JsonValue | undefined): JsonValue | undefined {
+  return v === undefined ? undefined : cloneJsonValue(v);
 }
 
 /** @internal Everything {@link decode} recovers from the wire. */
@@ -273,16 +281,6 @@ const DOCUMENT_MEMBERS = [
   "collateral_format",
   "collateral",
 ] as const;
-
-/**
- * A nested Go struct member: absent or null is the zero struct (an empty
- * object); otherwise an object with exactly `known` members allowed.
- */
-function struct(o: JsonObject, key: string, known: readonly string[]): JsonObject {
-  const v = raw(o, key);
-  if (v === undefined || v === null) return new Map();
-  return object(v, key, known);
-}
 
 /** Strict unmarshal → format → challenge → cpu_evidence → sections → collateral. */
 export function decode(docBytes: Uint8Array): DecodedDocument {

@@ -26,7 +26,7 @@ export function decodeLowerHex(name: string, value: string, wantLen: number): Ui
 }
 
 const B64 = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-const B64_INDEX: Record<string, number> = {};
+const B64_INDEX: Record<string, number> = Object.create(null) as Record<string, number>;
 for (let i = 0; i < B64.length; i++) B64_INDEX[B64[i]!] = i;
 
 /** Decodes a standard-base64 field, rejecting any non-canonical encoding (re-encode round trip). */

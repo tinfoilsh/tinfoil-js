@@ -46,7 +46,7 @@ import {
   type CryptoMaterialItem,
   type DecodedDocument,
 } from "../../src/v3/document/document.js";
-import type { JsonObject } from "../../src/v3/internal/json/index.js";
+import type { JsonObject, JsonValue } from "../../src/v3/internal/json/index.js";
 import { strictParse } from "../../src/v3/internal/json/index.js";
 import {
   b64,
@@ -697,3 +697,39 @@ function sectionBytes(docBytes: Uint8Array, member: string): Uint8Array {
   const root = strictParse(docBytes) as JsonObject;
   return new Uint8Array(Buffer.from(root.get(member) as string, "base64"));
 }
+
+describe("accessors return deep copies of parsed JSON (Go clones the raw bytes)", () => {
+  it("does not expose the document's bundles, evidence or PCS headers to mutation", async () => {
+    const nonce = repeat(0x09, 32);
+    const { bytes } = await buildDocument(
+      {
+        nonce,
+        cryptoMaterial: [],
+        deviceEvidence: [{ id: "gpu0", kind: "gpu", vendor: "nvidia", format: "f", evidence: `{"k":[1]}` }],
+        collateral: [
+          {
+            id: "code",
+            role: ROLE_REFERENCE_VALUES,
+            format: SIGSTORE_CODE_V1_FORMAT,
+            data: `{"repo":"r","tag":"t","digest":"d","sigstore_bundle":{"m":[1]}}`,
+          },
+          {
+            id: "pcs",
+            role: ROLE_ENDORSEMENT,
+            format: INTEL_PCS_V1_FORMAT,
+            subjects: [SUBJECT_CPU],
+            data: `{"responses":[{"url":"u","headers":{"h":["v"]},"body_base64":""}]}`,
+          },
+        ],
+      },
+      fakeQuote(TDX_QUOTE_V1_FORMAT, repeat(0x01, 8)),
+    );
+    const doc = await parse(bytes, nonce);
+    ((doc.sigstoreCode().bundle as JsonObject).get("m") as JsonValue[]).push("x");
+    ((doc.deviceEvidenceItems()[0]!.evidence as JsonObject).get("k") as JsonValue[]).push("x");
+    (doc.cpuEndorsements().intelPcs!.responses[0]!.headers as Map<string, string[]>).set("h", []);
+    expect(((doc.sigstoreCode().bundle as JsonObject).get("m") as JsonValue[]).length).toBe(1);
+    expect(((doc.deviceEvidenceItems()[0]!.evidence as JsonObject).get("k") as JsonValue[]).length).toBe(1);
+    expect(doc.cpuEndorsements().intelPcs!.responses[0]!.headers!.get("h")).toEqual(["v"]);
+  });
+});
