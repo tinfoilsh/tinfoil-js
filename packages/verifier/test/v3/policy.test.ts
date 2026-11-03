@@ -267,7 +267,25 @@ describe("config_test.go", () => {
     });
 
     const mutations: [string, (t: Tree) => void][] = [
-      ["v1 requires workload measurements", (t) => (t["format"] = ARTIFACT_FORMAT)],
+      // Restore every v1-only policy field from the fixture, so the only v1
+      // violation left is the missing measurements map that the TDX
+      // policies' platform_measurements refer to.
+      [
+        "v1 requires workload measurements",
+        (t) => {
+          t["format"] = ARTIFACT_FORMAT;
+          const original = get(fixtureTree(), "policies");
+          for (const [name, p] of Object.entries(get(t, "policies"))) {
+            const policy = p as Tree;
+            const from = original[name] as Tree;
+            if (policy["sev_snp"] !== undefined) {
+              (policy["sev_snp"] as Tree)["host_data"] = (from["sev_snp"] as Tree)["host_data"];
+            } else {
+              (policy["tdx"] as Tree)["platform_measurements"] = (from["tdx"] as Tree)["platform_measurements"];
+            }
+          }
+        },
+      ],
       [
         "v2 excludes host_data",
         (t) => {
@@ -289,12 +307,14 @@ describe("config_test.go", () => {
       // Go marshals the zero PlatformMeasurement as {"mrtd":"","rtmr0":"","shape":null}.
       ["v2 excludes measurement map", (t) => (t["measurements"] = { legacy: { mrtd: "", rtmr0: "", shape: null } })],
     ];
-    it.each(mutations)("%s", (_name, mutate) => {
+    it.each(mutations)("%s", (name, mutate) => {
       const changed = JSON.parse(data) as Tree;
       mutate(changed);
       const encoded = render(changed);
       expect(encoded).not.toBe(data);
-      expect(() => parse(enc(encoded))).toThrow();
+      expect(() => parse(enc(encoded))).toThrow(
+        name === "v1 requires workload measurements" ? /platform_measurements ref .* not in measurements/ : /./,
+      );
     });
 
     it.each([["sev_snp"], ["tdx"]])("rejects config_binding in %s", (block) => {
