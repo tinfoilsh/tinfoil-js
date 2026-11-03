@@ -1,1 +1,14 @@
-tinfoil-go b3dd922fa829119ef31c1b2da422dc787b75473f
+fetched 2026-11-03T20:32:46.186Z by scripts/sync-trust.mjs
+
+sigstore-trusted-root.ts
+  source: Sigstore TUF repository (trusted_root.json target)
+  sha256: 6494e21ea73fa7ee769f85f57d5a3e6a08725eae1e38c755fc3517c9e6bc0b66
+amd-genoa-chain.ts
+  source: https://kdsintf.amd.com/vcek/v1/Genoa/cert_chain
+  sha256: e6ecc853fa56d3170a624d40851f98a1036f974b50204ea69e6aec91d777aca3
+amd-turin-chain.ts
+  source: https://kdsintf.amd.com/vcek/v1/Turin/cert_chain
+  sha256: 3bc97ef895aa1be2150b2e9fb12403f131e80c68fbc9683d2ae465220188dbfe
+intel-sgx-root.ts
+  source: https://certificates.trustedservices.intel.com/Intel_SGX_Provisioning_Certification_RootCA.pem
+  sha256: 7d4e649fc0951bdd240240b83f59a41cd53015b331dc6264dfc0d07af3fcdfea
