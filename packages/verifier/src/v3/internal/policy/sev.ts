@@ -2,7 +2,7 @@ import { bool, int64, object, str, struct, uint } from "../../internal/json/deco
 import type { JsonObject, JsonValue } from "../../internal/json/index.js";
 import { validatePolicyHex } from "./tdx.js";
 
-/** AMD security patch levels (Go *uint8 each). FMC is Turin-only. */
+/** AMD security patch levels, each an optional uint8. FMC is Turin-only. */
 export interface Tcb {
   readonly fmcSpl?: number;
   readonly blSpl?: number;
@@ -38,25 +38,25 @@ export interface SnpPlatform {
 
 /** The SEV-SNP policy block (JSON snake_case on the wire). */
 export interface SevSnpPolicy {
-  /** Go *uint8. */
+  /** uint8. */
   readonly minimumBuild?: number;
   readonly minimumApiVersion: string;
   readonly minimumAbiVersion: string;
-  /** Go *uint32. */
+  /** uint32. */
   readonly minimumGuestSvn?: number;
   readonly minimumTcb: Tcb;
   readonly minimumLaunchTcb: Tcb;
   readonly guestPolicy: GuestPolicy;
   readonly platformInfo: SnpPlatform;
   readonly permitProvisionalFirmware: boolean;
-  /** Go *int. */
+  /** int64. */
   readonly vmpl?: bigint;
   readonly hostData: string;
   readonly imageId: string;
   readonly familyId: string;
   readonly requireAuthorKey: boolean;
   readonly requireIdBlock: boolean;
-  /** Go *uint64. */
+  /** uint64, kept exact. */
   readonly minimumLaunchMitigationVector?: bigint;
   readonly minimumCurrentMitigationVector?: bigint;
 }

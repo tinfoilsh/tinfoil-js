@@ -1,16 +1,16 @@
 /**
- * Port of tinfoil-go verify/internal/policy/{artifact,config,sev,shape,tdx}_test.go.
- * Test titles are the Go test (and subtest) names; one describe per Go file.
+ * Tests for the policy artifact: parsing and validation (policy.parse), policy
+ * lookup, platform-measurement resolution, and the per-platform policy
+ * validators (sev, tdx, shape).
  *
- * Where Go builds a struct and json.Marshal's it, the tests here render the
- * equivalent JSON text: either a hand-written object (platform-measurement
+ * Inputs are JSON text: either a hand-written object (platform-measurement
  * cases) or the fixture decoded with JSON.parse, mutated, and re-encoded.
- * Go int fields are bigint in TS, uint8/uint32 are number, nil pointers are
- * undefined, maps are Maps.
+ * Counts and 64-bit values are bigint, uint8/uint32 fields are number, absent
+ * members are undefined, and object maps are Maps.
  *
- * The final describe adds decode-level cases the Go tests do not cover; each
- * verdict was confirmed against Go 1.27 (encoding/json/v2) with a scratch
- * program calling policy.Parse on the same mutation of the fixture.
+ * The final describe covers decode-level behaviour: numeric ranges, unknown
+ * and duplicate members, null members and framing, each on a single mutation
+ * of the fixture.
  */
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
@@ -47,7 +47,7 @@ function loadFixture(): Artifact {
 
 type Tree = Record<string, unknown>;
 
-/** The fixture as a plain mutable object tree (Go: json.Unmarshal into a struct or map). */
+/** The fixture as a plain mutable object tree. */
 function fixtureTree(): Tree {
   return JSON.parse(fixtureText) as Tree;
 }
@@ -61,7 +61,7 @@ function get(t: Tree, ...path: string[]): Tree {
 /** Marks a value to be emitted as a raw JSON literal by `render`. */
 const raw = (lit: string): string => `__RAW__:${lit}`;
 
-/** Compact JSON text of a tree, with `raw` markers replaced by their literals (Go: json.Marshal). */
+/** Compact JSON text of a tree, with `raw` markers replaced by their literals. */
 function render(t: Tree): string {
   return JSON.stringify(t).replace(/"__RAW__:([^"]*)"/g, "$1");
 }
@@ -85,26 +85,26 @@ function thrown(f: () => unknown): Error {
   throw new Error("expected an error");
 }
 
-// ---------------------------------------------------------------- artifact_test.go
+// ---------------------------------------------------------------- policy.parse
 
-describe("artifact_test.go", () => {
-  it("TestParseArtifactFixture", () => {
+describe("policy.parse", () => {
+  it("parses the fixture artifact", () => {
     const a = loadFixture();
     expect(a.machines.size).toBe(12);
     expect(a.policies.size).toBe(6);
     expect(a.measurements.size).toBe(16);
   });
 
-  describe("TestParsePlatformMeasurementValidation", () => {
-    /** Go PlatformMeasurement{MRTD, RTMR0, Shape: &Shape{...}}; a null shape is a nil pointer. */
+  describe("validates platform measurements", () => {
+    /** One measurement entry as written in the artifact; a null shape stands for an absent shape. */
     interface MeasurementSpec {
       mrtd: string;
       rtmr0: string;
       shape: { cpus: number; memory_mb: number; gpus?: number; disks: number } | null;
     }
-    // json.Marshal of Artifact{Format, Measurements: {"test": m}}: Shape has no
-    // omitempty (nil marshals as null), GPUs has omitempty (nil is omitted),
-    // Stack is omitted, and nil Machines/Policies maps marshal as {}.
+    // A minimal artifact holding only the measurement under test: shape is
+    // always written (null when absent), gpus is left out when unset, stack
+    // is left out, and the machines and policies maps are empty.
     const artifactJson = (m: MeasurementSpec): string =>
       JSON.stringify({ format: ARTIFACT_FORMAT, measurements: { test: m }, machines: {}, policies: {} });
 
@@ -144,7 +144,7 @@ describe("artifact_test.go", () => {
     });
   });
 
-  it("TestParseArtifactFailClosed", () => {
+  it("fails closed on a malformed artifact", () => {
     const wrongFormat = fixtureText.replace("platform-endorsements/v1", "platform-endorsements/v9");
     expect(() => parse(enc(wrongFormat))).toThrow("unsupported artifact format");
 
@@ -160,7 +160,7 @@ describe("artifact_test.go", () => {
     expect(() => parse(enc(negativeMin))).toThrow("must not be negative");
   });
 
-  it("TestPolicyLookup", () => {
+  it("looks up a machine's policy", () => {
     const a = loadFixture();
 
     let found = policyFor(a, box2TurinID, PLATFORM_SEV_SNP);
@@ -178,7 +178,7 @@ describe("artifact_test.go", () => {
     expect(() => policyFor(a, "ab".repeat(64), PLATFORM_SEV_SNP)).toThrow("not endorsed");
   });
 
-  it("TestResolvePlatformMeasurementShapeFilter", () => {
+  it("filters platform measurements by the required shape", () => {
     const shapeA: Shape = { cpus: 8n, memoryMb: 65536n, gpus: 1n, disks: 4n };
     const shapeB: Shape = { cpus: 32n, memoryMb: 524288n, gpus: 2n, disks: 5n };
     const a: Artifact = {
@@ -226,12 +226,13 @@ describe("artifact_test.go", () => {
   });
 });
 
-// ---------------------------------------------------------------- config_test.go
+// ---------------------------------------------------------------- policy.parse: v2 artifacts
 
-describe("config_test.go", () => {
-  describe("TestPlatformPolicyWithoutWorkloadMeasurements", () => {
-    // Go: artifact.Format = V2, Measurements = nil, HostData = "" / PlatformMeasurements = nil,
-    // then json.Marshal: all three members carry omitempty and so are omitted.
+describe("policy.parse: v2 artifacts without workload measurements", () => {
+  describe("a platform policy without workload measurements", () => {
+    // The fixture as a v2 artifact: the format is bumped and the measurements
+    // map, every SEV host_data and every TDX platform_measurements member are
+    // removed from the text.
     const v2Tree = (): Tree => {
       const t = fixtureTree();
       t["format"] = ARTIFACT_FORMAT_V2;
@@ -245,7 +246,7 @@ describe("config_test.go", () => {
     };
     const data = render(v2Tree());
 
-    /** The Go `artifact` value after its in-memory mutation, for require.Equal(artifact, parsed). */
+    /** The value the v2 text should parse to: the fixture with an empty measurements map, empty host_data and no platform_measurements. */
     const expected = (): Artifact => {
       const a = loadFixture();
       const policies = new Map<string, Policy>();
@@ -304,7 +305,7 @@ describe("config_test.go", () => {
           }
         },
       ],
-      // Go marshals the zero PlatformMeasurement as {"mrtd":"","rtmr0":"","shape":null}.
+      // An all-empty measurement entry; a v2 artifact must not carry a measurements map at all.
       ["v2 excludes measurement map", (t) => (t["measurements"] = { legacy: { mrtd: "", rtmr0: "", shape: null } })],
     ];
     it.each(mutations)("%s", (name, mutate) => {
@@ -328,9 +329,9 @@ describe("config_test.go", () => {
   });
 });
 
-// ---------------------------------------------------------------- sev_test.go
+// ---------------------------------------------------------------- validateSevSnpPolicy
 
-describe("sev_test.go", () => {
+describe("validateSevSnpPolicy", () => {
   function validSevSnpPolicy(): SevSnpPolicy {
     const tcb: Tcb = { blSpl: 0, teeSpl: 0, snpSpl: 0, ucodeSpl: 0 };
     return {
@@ -373,7 +374,7 @@ describe("sev_test.go", () => {
     };
   }
 
-  describe("TestSEVSNPPolicyValidateEncodedFields", () => {
+  describe("validates the encoded fields", () => {
     const p = validSevSnpPolicy();
     it("accepts the valid policy", () => {
       expect(() => validateSevSnpPolicy(p)).not.toThrow();
@@ -395,19 +396,19 @@ describe("sev_test.go", () => {
   });
 });
 
-// ---------------------------------------------------------------- shape_test.go
+// ---------------------------------------------------------------- shape.satisfies
 
-describe("shape_test.go", () => {
-  it("TestShapeSatisfiesNil", () => {
+describe("shape.satisfies", () => {
+  it("is false when either shape is absent", () => {
     const shape: Shape = { cpus: 4n, memoryMb: 4096n, disks: 3n };
     expect(satisfies(shape, undefined)).toBe(false);
     expect(satisfies(undefined, shape)).toBe(false);
   });
 });
 
-// ---------------------------------------------------------------- tdx_test.go
+// ---------------------------------------------------------------- validateTdxPolicy
 
-describe("tdx_test.go", () => {
+describe("validateTdxPolicy", () => {
   function validTdxPolicy(): TdxPolicy {
     return {
       qeVendorId: "ab".repeat(16),
@@ -420,7 +421,7 @@ describe("tdx_test.go", () => {
     };
   }
 
-  describe("TestTDXPolicyValidateHexFields", () => {
+  describe("validates the hex fields", () => {
     const p = validTdxPolicy();
     it("accepts the valid policy", () => {
       expect(() => validateTdxPolicy(p)).not.toThrow();
@@ -440,56 +441,50 @@ describe("tdx_test.go", () => {
   });
 });
 
-// ---------------------------------------------------------------- json v2 decode semantics
+// ---------------------------------------------------------------- decode semantics
 
 /**
- * Decode-level behaviour the Go tests leave implicit. Each case's verdict
- * (and, in the comments, Go's own error text) was confirmed by running
- * policy.Parse in Go 1.27 on the same mutation of the fixture. Where the TS
- * wording differs from Go's the assertion is on the outcome plus the TS
- * message.
+ * Decode-level behaviour of policy.parse: integer ranges and syntax, unknown
+ * and duplicate members, null members, and framing. Each case applies one
+ * mutation to the fixture and asserts the outcome and the error message.
  */
-describe("policy.Parse json v2 semantics (confirmed against Go)", () => {
+describe("policy.parse: decode semantics", () => {
   it("baseline: the re-rendered fixture parses", () => {
     expect(() => parse(enc(mutated(() => {})))).not.toThrow();
   });
 
   describe("uint8 minimum_build", () => {
-    // Go: "unable to unmarshal JSON number 256 into Go uint8 ...: value out of range".
     it("rejects 256 (overflow)", () => {
       const data = mutated((t) => (sevBlock(t)["minimum_build"] = raw("256")));
-      expect(() => parse(enc(data))).toThrow(/parsing policy artifact: .*256 overflows Go uint8/);
+      expect(() => parse(enc(data))).toThrow(/parsing policy artifact: .*256 overflows uint8/);
     });
-    // Go: "unable to unmarshal JSON number -1 into Go uint8 ...: invalid syntax".
     it("rejects -1 (negative)", () => {
       const data = mutated((t) => (sevBlock(t)["minimum_build"] = raw("-1")));
-      expect(() => parse(enc(data))).toThrow(/parsing policy artifact: .*JSON number -1 into Go uint8/);
+      expect(() => parse(enc(data))).toThrow(/parsing policy artifact: .*JSON number -1 into uint8/);
     });
-    // Go: "unable to unmarshal JSON number -0 into Go uint8 ...: invalid syntax" (any '-' rejects for unsigned).
+    // Any leading '-' is rejected for an unsigned field, even on zero.
     it("rejects -0 (signed zero)", () => {
       const data = mutated((t) => (sevBlock(t)["minimum_build"] = raw("-0")));
-      expect(() => parse(enc(data))).toThrow(/parsing policy artifact: .*JSON number -0 into Go uint8/);
+      expect(() => parse(enc(data))).toThrow(/parsing policy artifact: .*JSON number -0 into uint8/);
     });
-    // Go: "unable to unmarshal JSON number 1.0 into Go uint8 ...: invalid syntax".
     it("rejects 1.0 (fraction)", () => {
       const data = mutated((t) => (sevBlock(t)["minimum_build"] = raw("1.0")));
       expect(() => parse(enc(data))).toThrow(/parsing policy artifact: .*1\.0 is not an integer/);
     });
-    // Go: "unable to unmarshal JSON number 1e0 into Go uint8 ...: invalid syntax".
     it("rejects 1e0 (exponent)", () => {
       const data = mutated((t) => (sevBlock(t)["minimum_build"] = raw("1e0")));
       expect(() => parse(enc(data))).toThrow(/parsing policy artifact: .*1e0 is not an integer/);
     });
-    // Go: "unable to unmarshal JSON string into Go uint8" (TS names the kind, "Go number").
+    // A JSON string is rejected for a numeric field; the error names the expected kind and the member path.
     it("rejects a string", () => {
       const data = mutated((t) => (sevBlock(t)["minimum_build"] = "0"));
-      expect(() => parse(enc(data))).toThrow(/parsing policy artifact: .*JSON string into Go number within "\/minimum_build"/);
+      expect(() => parse(enc(data))).toThrow(/parsing policy artifact: .*JSON string into number within "\/minimum_build"/);
     });
     it("accepts 0", () => {
       const data = mutated((t) => (sevBlock(t)["minimum_build"] = raw("0")));
       expect(() => parse(enc(data))).not.toThrow();
     });
-    // Go: a null pointer member is absent; Validate reports "minimum_build is required".
+    // null reads as absent, and the field is required.
     it("rejects null as absent", () => {
       const data = mutated((t) => (sevBlock(t)["minimum_build"] = null));
       expect(() => parse(enc(data))).toThrow(`policy "amd-turin-prod": minimum_build is required`);
@@ -502,29 +497,25 @@ describe("policy.Parse json v2 semantics (confirmed against Go)", () => {
       const a = parse(enc(data));
       expect(a.policies.get("amd-turin-prod")!.sevSnp!.minimumLaunchMitigationVector).toBe(18446744073709551615n);
     });
-    // Go: "unable to unmarshal JSON number 18446744073709551616 into Go uint64 ...: value out of range".
     it("rejects 18446744073709551616 (overflow)", () => {
       const data = mutated((t) => (sevBlock(t)["minimum_launch_mitigation_vector"] = raw("18446744073709551616")));
-      expect(() => parse(enc(data))).toThrow(/parsing policy artifact: .*18446744073709551616 overflows Go uint64/);
+      expect(() => parse(enc(data))).toThrow(/parsing policy artifact: .*18446744073709551616 overflows uint64/);
     });
   });
 
-  // Go: "unable to unmarshal JSON number 4294967296 into Go uint32 ...: value out of range".
   it("rejects uint32 minimum_guest_svn 4294967296 (overflow)", () => {
     const data = mutated((t) => (sevBlock(t)["minimum_guest_svn"] = raw("4294967296")));
-    expect(() => parse(enc(data))).toThrow(/parsing policy artifact: .*4294967296 overflows Go uint32/);
+    expect(() => parse(enc(data))).toThrow(/parsing policy artifact: .*4294967296 overflows uint32/);
   });
 
   describe("int cpus", () => {
-    // Go: "unable to unmarshal JSON number 1.5 into Go int ...: invalid syntax".
     it("rejects 1.5", () => {
       const data = mutated((t) => (get(t, "measurements", "mini_0d", "shape")["cpus"] = raw("1.5")));
       expect(() => parse(enc(data))).toThrow(/parsing policy artifact: .*1\.5 is not an integer/);
     });
-    // Go: "unable to unmarshal JSON number 9223372036854775808 into Go int ...: value out of range".
     it("rejects 9223372036854775808 (int64 overflow)", () => {
       const data = mutated((t) => (get(t, "measurements", "mini_0d", "shape")["cpus"] = raw("9223372036854775808")));
-      expect(() => parse(enc(data))).toThrow(/parsing policy artifact: .*9223372036854775808 overflows Go int64/);
+      expect(() => parse(enc(data))).toThrow(/parsing policy artifact: .*9223372036854775808 overflows int64/);
     });
   });
 
@@ -540,7 +531,6 @@ describe("policy.Parse json v2 semantics (confirmed against Go)", () => {
   });
 
   describe("unknown members", () => {
-    // Go: `unknown object member name "extra" within "/policies/amd-turin-prod/sev_snp/guest_policy"`.
     it("rejects inside guest_policy", () => {
       const data = mutated((t) => (get(sevBlock(t), "guest_policy")["extra"] = true));
       expect(() => parse(enc(data))).toThrow(`unknown object member name "extra"`);
@@ -560,12 +550,12 @@ describe("policy.Parse json v2 semantics (confirmed against Go)", () => {
   });
 
   describe("null members", () => {
-    // Go: nil *Shape fails validation: `measurement "mini_0d": shape is required`.
+    // A null shape reads as absent, and the shape is required.
     it("rejects null shape", () => {
       const data = mutated((t) => (get(t, "measurements", "mini_0d")["shape"] = null));
       expect(() => parse(enc(data))).toThrow(`measurement "mini_0d": shape is required`);
     });
-    // Go: Stack is informational; nil is fine.
+    // stack is informational; a null one reads as absent.
     it("accepts null stack", () => {
       const data = mutated((t) => (get(t, "measurements", "mini_0d")["stack"] = null));
       expect(parse(enc(data)).measurements.get("mini_0d")!.stack).toBeUndefined();
@@ -578,17 +568,17 @@ describe("policy.Parse json v2 semantics (confirmed against Go)", () => {
       const data = mutated((t) => (get(t, "policies", "tdx-h200-prod")["tdx"] = null));
       expect(() => parse(enc(data))).toThrow(`policy "tdx-h200-prod": platform tdx requires exactly the tdx block`);
     });
-    // Go: a nil map has no entries, so the v1 policies' refs dangle.
+    // A null map reads as empty, so the v1 policies' platform_measurements refs dangle.
     it("rejects null measurements in v1 (dangling refs)", () => {
       const data = mutated((t) => (t["measurements"] = null));
       expect(() => parse(enc(data))).toThrow(/platform_measurements ref ".*" not in measurements/);
     });
-    // Go: no machines means nothing to endorse, but the artifact is valid.
+    // No machines means nothing to endorse, but the artifact is valid.
     it("accepts null machines", () => {
       const data = mutated((t) => (t["machines"] = null));
       expect(parse(enc(data)).machines.size).toBe(0);
     });
-    // Go: every machine now names an unknown policy.
+    // With no policies, every machine names an unknown policy.
     it("rejects null policies while machines remain", () => {
       const data = mutated((t) => (t["policies"] = null));
       expect(() => parse(enc(data))).toThrow(/^machine [0-9a-f]{16}\.\.\.: unknown policy "/);
@@ -612,36 +602,34 @@ describe("policy.Parse json v2 semantics (confirmed against Go)", () => {
       const a = parse(enc(data));
       expect(a.policies.size + a.machines.size + a.measurements.size).toBe(0);
     });
-    // Go: a null non-pointer struct is the zero struct; every guest policy bit is false.
-    it("accepts null guest_policy as the zero struct", () => {
+    // A null guest_policy reads as the policy with every bit false.
+    it("accepts null guest_policy as the all-false policy", () => {
       const data = mutated((t) => (sevBlock(t)["guest_policy"] = null));
       expect(parse(enc(data)).policies.get("amd-turin-prod")!.sevSnp!.guestPolicy.smt).toBe(false);
     });
-    // Go: the zero TCB has nil pointers, which Validate rejects.
-    it("rejects null minimum_tcb as the zero struct", () => {
+    // A null minimum_tcb reads as a TCB with no fields set, and each field is required.
+    it("rejects null minimum_tcb as the empty TCB", () => {
       const data = mutated((t) => (sevBlock(t)["minimum_tcb"] = null));
       expect(() => parse(enc(data))).toThrow(`policy "amd-turin-prod": minimum_tcb: bl_spl is required`);
     });
-    // Go: a nil slice is empty, which v1 forbids.
+    // A null list reads as empty, which v1 forbids.
     it("rejects null platform_measurements in v1", () => {
       const data = mutated((t) => (tdxBlock(t)["platform_measurements"] = null));
       expect(() => parse(enc(data))).toThrow(`policy "tdx-h200-prod": platform_measurements are required in v1 and excluded in v2`);
     });
-    // Go: a null string is "", which names no policy.
+    // A null string reads as "", which names no policy.
     it("rejects a null machine policy name", () => {
       const data = mutated((t) => (get(t, "machines")[inf7PPID] = null));
       expect(() => parse(enc(data))).toThrow(`machine 3b064a0f58d5dd36...: unknown policy ""`);
     });
   });
 
-  // Go: "unable to unmarshal JSON string into Go policy.Shape within "/measurements/mini_0d/shape"".
   it("rejects a string where shape is expected", () => {
     const data = mutated((t) => (get(t, "measurements", "mini_0d")["shape"] = "x"));
     expect(() => parse(enc(data))).toThrow(/parsing policy artifact: cannot unmarshal JSON string into shape/);
   });
 
   describe("duplicate member names inside nested blocks", () => {
-    // Go: `jsontext: duplicate object member name "debug" within "/policies/.../guest_policy"`.
     it("rejects inside guest_policy", () => {
       const data = mutated(() => {}).replace(`"debug":false`, `"debug":false,"debug":false`);
       expect(() => parse(enc(data))).toThrow(`duplicate object member name "debug"`);
@@ -656,12 +644,10 @@ describe("policy.Parse json v2 semantics (confirmed against Go)", () => {
     });
   });
 
-  // Go: "jsontext: invalid character '{' after top-level value".
   it("rejects trailing data", () => {
     expect(() => parse(enc(mutated(() => {}) + "\n{}"))).toThrow(/^parsing policy artifact: /);
   });
 
-  // Go: "jsontext: unexpected EOF".
   it("rejects empty input", () => {
     expect(() => parse(enc(""))).toThrow(/^parsing policy artifact: /);
   });

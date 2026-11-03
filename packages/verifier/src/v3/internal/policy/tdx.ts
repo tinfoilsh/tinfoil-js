@@ -9,9 +9,9 @@ export interface TdxPolicy {
   readonly mrSeam: string;
   readonly tdAttributes: string;
   readonly xfam: string;
-  /** Go *int. */
+  /** int64. */
   readonly minimumTcbEvaluationDataNumber?: bigint;
-  /** v1 only: names of acceptable platform measurements. Undefined when absent (Go nil slice). */
+  /** v1 only: names of acceptable platform measurements. Undefined when absent. */
   readonly platformMeasurements?: readonly string[];
 }
 

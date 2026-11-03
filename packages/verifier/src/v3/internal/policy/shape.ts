@@ -1,7 +1,7 @@
 import { int64, object, str } from "../../internal/json/decode.js";
 import type { JsonObject, JsonValue } from "../../internal/json/index.js";
 
-/** A VM shape. Go int fields are int64, kept exact as bigint. */
+/** A VM shape. The counts are int64, kept exact as bigint. */
 export interface Shape {
   readonly cpus: bigint;
   readonly memoryMb: bigint;
@@ -25,7 +25,7 @@ export function satisfies(s: Shape | undefined, required: Shape | undefined): bo
 
 export const SHAPE_MEMBERS = ["cpus", "memory_mb", "gpus", "disks"] as const;
 
-/** Decodes a Shape object (Go struct; absent ints are 0). */
+/** Decodes a Shape object; absent counts are 0. */
 export function decodeShape(o: JsonObject): Shape {
   return {
     cpus: int64(o, "cpus") ?? 0n,
@@ -40,7 +40,7 @@ export function decodeStack(v: JsonValue, what: string): Stack {
   return { qemu: str(o, "qemu"), ovmf: str(o, "ovmf") };
 }
 
-/** Go's %+v rendering of a Shape, for error messages. */
+/** Renders a Shape for error messages. */
 export function formatShape(s: Shape): string {
   const gpus = s.gpus === undefined ? "<nil>" : `0x${s.gpus.toString(16)}`;
   return `{CPUs:${s.cpus} MemoryMB:${s.memoryMb} GPUs:${gpus} Disks:${s.disks}}`;

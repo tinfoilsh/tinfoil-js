@@ -1,15 +1,14 @@
 /**
- * Port of tinfoil-go verify/internal/runtime/manifest_test.go. Test titles
- * are the Go test (and subtest) names.
+ * Tests for the runtime manifest (parseManifest / decodeManifest) and the
+ * runtime pin read from the config (configRuntime).
  *
- * Go's tests json.Marshal a Manifest struct; here `manifestJson` renders the
- * same compact text in struct member order (nil pointers as null, as none of
- * the members carry omitempty). Go int fields are bigint in TS.
+ * Manifest inputs are built from a spec object and rendered by `manifestJson`
+ * as compact JSON in a fixed member order; a null spec member is written as
+ * an explicit JSON null. Integer fields parse as bigint.
  *
- * The trailing describes add decode-level cases the Go tests do not cover;
- * each verdict was confirmed against Go 1.27 (encoding/json/v2, yaml.v3) with
- * a scratch program calling runtime.DecodeManifest / runtime.ConfigRuntime on
- * the same bytes.
+ * The trailing describes cover decode-level behaviour: unknown and duplicate
+ * members, integer and string typing, null members and framing for the
+ * manifest, and document, mapping and scalar handling for the YAML config.
  */
 import { describe, expect, it } from "vitest";
 import { RUNTIME_REPO, type RuntimeReference } from "../../src/v3/document/collateral/runtime.js";
@@ -20,7 +19,7 @@ import { decodeManifest, FORMAT_VERSION, MEASUREMENT_SIZE, parseManifest, type M
 const enc = (s: string): Uint8Array => new TextEncoder().encode(s);
 const dec = (b: Uint8Array): string => new TextDecoder().decode(b);
 
-/** A mutable mirror of Go's Manifest struct for building JSON (null = nil pointer). */
+/** A mutable spec for building manifest JSON (null = an explicit null member). */
 interface TdxLaunchSpec {
   mrtd: string;
   rtmr0: string;
@@ -40,7 +39,7 @@ interface ManifestSpec {
 const measurement = "cd".repeat(MEASUREMENT_SIZE);
 const zeroRegister = "0".repeat(MEASUREMENT_SIZE * 2);
 
-/** Go validManifest() as a JSON-building spec. */
+/** The valid manifest as a JSON-building spec. */
 function validSpec(): ManifestSpec {
   return {
     version: "v0.15.0",
@@ -52,7 +51,7 @@ function validSpec(): ManifestSpec {
   };
 }
 
-/** Go validManifest() as the parsed TS value. */
+/** The valid manifest as its parsed value. */
 function validManifest(): Manifest {
   return {
     version: "v0.15.0",
@@ -64,10 +63,10 @@ function validManifest(): Manifest {
   };
 }
 
-/** json.Marshal of the Go struct: compact, member order version, igvm{format_version, snp_launch, tdx_launch}. */
+/** Compact manifest text in member order: version, igvm{format_version, snp_launch, tdx_launch}. */
 const manifestJson = (m: ManifestSpec): string => JSON.stringify(m);
 
-/** Go manifestBytes: the JSON bytes and the pin whose digest is theirs. */
+/** The manifest's JSON bytes and the pin whose digest is theirs. */
 async function manifestBytes(m: ManifestSpec): Promise<[Uint8Array, RuntimeReference]> {
   const data = enc(manifestJson(m));
   return [data, { repo: RUNTIME_REPO, tag: "v0.15.0", digest: toHex(await sha256(data)) }];
@@ -78,10 +77,10 @@ async function rejects(p: Promise<unknown>, want?: string | RegExp): Promise<voi
   else await expect(p).rejects.toThrow(want);
 }
 
-// ---------------------------------------------------------------- manifest_test.go
+// ---------------------------------------------------------------- parseManifest and configRuntime
 
-describe("manifest_test.go", () => {
-  describe("TestManifestRequiresCompleteSupportedMeasurements", () => {
+describe("parseManifest and configRuntime", () => {
+  describe("requires complete supported measurements", () => {
     it("accepts the valid manifest under its pin", async () => {
       const [data, ref] = await manifestBytes(validSpec());
       expect(await parseManifest(data, ref)).toEqual(validManifest());
@@ -125,7 +124,7 @@ describe("manifest_test.go", () => {
     });
   });
 
-  describe("TestConfigRuntimePin", () => {
+  describe("reads the runtime pin from the config", () => {
     const digest = "ab".repeat(32);
     const accepted: [string, string][] = [
       ["0.15.0", "v0.15.0"],
@@ -162,7 +161,7 @@ describe("manifest_test.go", () => {
     });
   });
 
-  it("TestRuntimeManifestsHaveIndependentPins", async () => {
+  it("pins each runtime manifest independently", async () => {
     const [cpuData, cpuRef] = await manifestBytes(validSpec());
     const gpu = validSpec();
     gpu.version += "+gpu";
@@ -186,15 +185,13 @@ describe("manifest_test.go", () => {
   });
 });
 
-// ---------------------------------------------------------------- json v2 decode semantics
+// ---------------------------------------------------------------- decodeManifest decode semantics
 
 /**
- * DecodeManifest uses plain json.Unmarshal (no RejectUnknownMembers), so
- * unknown members are ignored at every depth, while jsontext still rejects
- * duplicate names at every depth, including among ignored members. Go's
- * error text is in the comments where TS wording differs.
+ * decodeManifest ignores unknown members at every depth, but rejects
+ * duplicate member names at every depth, including among ignored members.
  */
-describe("runtime.DecodeManifest json v2 semantics (confirmed against Go)", () => {
+describe("decodeManifest: decode semantics", () => {
   const base = manifestJson(validSpec());
 
   it("baseline", () => {
@@ -216,7 +213,6 @@ describe("runtime.DecodeManifest json v2 semantics (confirmed against Go)", () =
   });
 
   describe("duplicate members reject", () => {
-    // Go: `jsontext: duplicate object member name "root"`.
     it("ignored member at the top level", () => {
       expect(() => decodeManifest(enc(`{"root":"one","root":"two",` + base.slice(1)))).toThrow(
         /^parsing runtime manifest: .*duplicate object member name "root"/,
@@ -227,25 +223,24 @@ describe("runtime.DecodeManifest json v2 semantics (confirmed against Go)", () =
         /^parsing runtime manifest: .*duplicate object member name "version"/,
       );
     });
-    // Go: `jsontext: duplicate object member name "mrtd" within "/igvm/tdx_launch"`.
     it("inside tdx_launch", () => {
       const text = base.replace(`"mrtd":`, `"mrtd":"x","mrtd":`);
       expect(() => decodeManifest(enc(text))).toThrow(/^parsing runtime manifest: .*duplicate object member name "mrtd"/);
     });
   });
 
-  describe("format_version (Go int)", () => {
-    // Go: "unable to unmarshal JSON number 1.0 into Go int within "/igvm/format_version": invalid syntax".
+  describe("format_version (integer)", () => {
+    // An integer field rejects fractional and exponent literals.
     it.each([["1.0"], ["1e0"]])("rejects %s", (lit) => {
       const text = base.replace(`"format_version":1`, `"format_version":${lit}`);
       expect(() => decodeManifest(enc(text))).toThrow(/^parsing runtime manifest: .* is not an integer/);
     });
-    // Go: "unable to unmarshal JSON string into Go int within "/igvm/format_version"".
+    // A JSON string is rejected for a numeric field.
     it('rejects "1"', () => {
       const text = base.replace(`"format_version":1`, `"format_version":"1"`);
-      expect(() => decodeManifest(enc(text))).toThrow(/^parsing runtime manifest: .*JSON string into Go number/);
+      expect(() => decodeManifest(enc(text))).toThrow(/^parsing runtime manifest: .*JSON string into number/);
     });
-    // Go: null leaves the zero value 0, which is not FormatVersion.
+    // null reads as 0, which is not the supported format version.
     it("rejects null as 0", () => {
       const text = base.replace(`"format_version":1`, `"format_version":null`);
       expect(() => decodeManifest(enc(text))).toThrow("runtime manifest format is unsupported");
@@ -262,15 +257,15 @@ describe("runtime.DecodeManifest json v2 semantics (confirmed against Go)", () =
   });
 
   describe("version", () => {
-    // Go: null leaves "", which is not a valid semver.
+    // null reads as "", which is not a full semantic version.
     it("rejects null", () => {
       const text = base.replace(`"version":"v0.15.0"`, `"version":null`);
       expect(() => decodeManifest(enc(text))).toThrow("runtime manifest version must be a full semantic version");
     });
-    // Go: "unable to unmarshal JSON number into Go string within "/version"".
+    // A JSON number is rejected for a string field.
     it("rejects a number", () => {
       const text = base.replace(`"version":"v0.15.0"`, `"version":1`);
-      expect(() => decodeManifest(enc(text))).toThrow(/^parsing runtime manifest: .*JSON number into Go string/);
+      expect(() => decodeManifest(enc(text))).toThrow(/^parsing runtime manifest: .*JSON number into string/);
     });
     it.each([["0.15.0"], ["v0.15"]])("rejects %s as not a full semver", (v) => {
       const text = base.replace(`"version":"v0.15.0"`, `"version":${JSON.stringify(v)}`);
@@ -279,33 +274,30 @@ describe("runtime.DecodeManifest json v2 semantics (confirmed against Go)", () =
   });
 
   describe("framing", () => {
-    // Go: trailing whitespace is fine for the decoder (the digest pin catches it in ParseManifest).
+    // Trailing whitespace is fine for the decoder; the digest pin in parseManifest catches it.
     it("accepts a trailing newline", () => {
       expect(decodeManifest(enc(base + "\n"))).toEqual(validManifest());
     });
-    // Go: "jsontext: invalid character '{' after top-level value".
     it("rejects a trailing value", () => {
       expect(() => decodeManifest(enc(base + "{}"))).toThrow(/^parsing runtime manifest: /);
     });
     it("rejects empty input by size", () => {
       expect(() => decodeManifest(new Uint8Array(0))).toThrow("runtime manifest size is outside allowed bounds");
     });
-    // Go: "unable to unmarshal JSON array into Go runtime.Manifest".
     it("rejects an array", () => {
       expect(() => decodeManifest(enc("[]"))).toThrow(/^parsing runtime manifest: cannot unmarshal JSON array into runtime manifest/);
     });
   });
 });
 
-// ---------------------------------------------------------------- yaml.v3 decode semantics
+// ---------------------------------------------------------------- configRuntime decode semantics
 
 /**
- * ConfigRuntime decodes with yaml.v3 into struct{ Version string
- * "cvm-version" }: exactly one document, a mapping; any scalar value reads as
- * its text; null reads as "". Go's error text is in the comments where TS
- * wording differs.
+ * configRuntime reads the top-level cvm-version key from the YAML config:
+ * exactly one document, which must be a mapping; any scalar value reads as
+ * its text; null reads as "".
  */
-describe("runtime.ConfigRuntime yaml semantics (confirmed against Go)", () => {
+describe("configRuntime: decode semantics", () => {
   const digest = "ab".repeat(32);
   const good = `cvm-version: 0.15.0@sha256:${digest}\n`;
   const want: RuntimeReference = { repo: RUNTIME_REPO, tag: "v0.15.0", digest };
@@ -315,70 +307,60 @@ describe("runtime.ConfigRuntime yaml semantics (confirmed against Go)", () => {
   });
 
   describe("rejects", () => {
-    // Go: `yaml: unmarshal errors: line 2: mapping key "cvm-version" already defined at line 1`.
     it("duplicate cvm-version keys", () => {
       expect(() => configRuntime(enc(good + good))).toThrow(/^parsing config runtime pin: /);
     });
-    // Go: duplicate keys reject even when the key is not one being decoded.
+    // Duplicate keys reject even when the key is not one being read.
     it("duplicate other keys", () => {
       expect(() => configRuntime(enc("containers: []\ncontainers: []\n" + good))).toThrow(/^parsing config runtime pin: /);
     });
     it("two documents", () => {
       expect(() => configRuntime(enc(good + "---\n" + good))).toThrow("config must contain exactly one YAML document");
     });
-    // Go: the second document decodes as an empty node, not io.EOF.
+    // An empty second document still counts as a second document.
     it("two documents, the second empty", () => {
       expect(() => configRuntime(enc(good + "---\n"))).toThrow("config must contain exactly one YAML document");
     });
-    // Go: "yaml: unmarshal errors: line 1: cannot unmarshal !!seq into struct {...}".
     it("a sequence root", () => {
       expect(() => configRuntime(enc("- " + good))).toThrow("parsing config runtime pin: config is not a mapping");
     });
-    // Go: "cannot unmarshal !!str `just a ...` into struct {...}".
     it("a scalar root", () => {
       expect(() => configRuntime(enc("just a string\n"))).toThrow("parsing config runtime pin: config is not a mapping");
     });
-    // Go: "parsing config runtime pin: EOF".
     it("an empty file", () => {
       expect(() => configRuntime(new Uint8Array(0))).toThrow("parsing config runtime pin: EOF");
     });
-    // Go: "parsing config runtime pin: EOF" (a comment is not a document). The
-    // yaml package yields one empty document instead, so TS rejects the empty
-    // cvm-version; the outcome is the same.
+    // A comments-only file yields one empty document, whose missing cvm-version is rejected.
     it("a comments-only file", () => {
       expect(() => configRuntime(enc("# just a comment\n"))).toThrow();
     });
-    // Go: null decodes as "", so the pin is missing.
+    // null reads as "", so the pin is missing.
     it.each([["cvm-version:\n"], ["cvm-version: null\n"], ["cvm-version: ~\n"]])("%j as unpinned", (config) => {
       expect(() => configRuntime(enc(config))).toThrow("cvm-version must pin a runtime manifest SHA-256 digest");
     });
-    // Go: yaml.v3 reads any scalar into a string as its text, then the pin is missing.
+    // Any scalar reads as its text, and that text carries no pin.
     it.each([["cvm-version: 0.15\n"], ["cvm-version: 1\n"], ["cvm-version: true\n"]])("%j as the unpinned text", (config) => {
       expect(() => configRuntime(enc(config))).toThrow("cvm-version must pin a runtime manifest SHA-256 digest");
     });
-    // Go: "cannot unmarshal !!seq into string" / "cannot unmarshal !!map into string".
     it.each([["cvm-version: [a]\n"], ["cvm-version: {a: b}\n"]])("%j as a non-scalar", (config) => {
       expect(() => configRuntime(enc(config))).toThrow("parsing config runtime pin: cvm-version must be a scalar");
     });
-    // Go: "runtime tag must be a full semantic version" (the text "15" becomes tag "v15").
+    // The text "15" becomes tag "v15", which is not a full semantic version.
     it("an int-like version", () => {
       expect(() => configRuntime(enc(`cvm-version: 15@sha256:${digest}\n`))).toThrow("runtime tag must be a full semantic version");
     });
-    // Go: only the top-level key is read.
+    // Only the top-level key is read.
     it("a nested cvm-version", () => {
       expect(() => configRuntime(enc(`a:\n  cvm-version: 0.15.0@sha256:${digest}\n`))).toThrow(
         "cvm-version must pin a runtime manifest SHA-256 digest",
       );
     });
-    // Go: "yaml: line 1: did not find expected node content".
     it("invalid YAML", () => {
       expect(() => configRuntime(enc("cvm-version: [\n"))).toThrow(/^parsing config runtime pin: /);
     });
-    // Go: "yaml: found character that cannot start any token".
     it("a tab-indented line", () => {
       expect(() => configRuntime(enc("\tcvm-version: x\n"))).toThrow(/^parsing config runtime pin: /);
     });
-    // Go: "yaml: invalid leading UTF-8 octet".
     it("invalid UTF-8", () => {
       expect(() => configRuntime(new Uint8Array([...enc("cvm-version: "), 0xff, 0x0a]))).toThrow(/^parsing config runtime pin: /);
     });

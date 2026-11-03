@@ -1,4 +1,4 @@
-/** The IGVM runtime manifest pinned by a config. Mirrors tinfoil-go verify/internal/runtime/manifest.go. */
+/** The IGVM runtime manifest pinned by a config. */
 import type { RuntimeReference } from "../../document/collateral/runtime.js";
 import { sha256, toHex } from "../bytes.js";
 import { decodeLowerHex } from "../canonical.js";
@@ -49,8 +49,8 @@ export async function parseManifest(data: Uint8Array, expected: RuntimeReference
 
 /**
  * Size limit, full semver, format_version 1, both launches, 48-byte lowercase
- * hex, zero RTMRs. Unknown members are allowed here, as in Go (no
- * RejectUnknownMembers); duplicate names still reject.
+ * hex, zero RTMRs. Unknown members are allowed at every depth so a manifest
+ * may carry download metadata; duplicate names still reject.
  */
 export function decodeManifest(data: Uint8Array): Manifest {
   if (data.length === 0 || data.length > MAX_MANIFEST_SIZE) {
@@ -96,7 +96,7 @@ export function decodeManifest(data: Uint8Array): Manifest {
   return m;
 }
 
-/** A Go pointer-to-struct member decoded without RejectUnknownMembers: absent or null is undefined; unknown members are ignored. */
+/** An optional nested object: absent or null is undefined; unknown members are ignored. */
 function optObject(o: JsonObject, key: string): JsonObject | undefined {
   const v = o.get(key);
   return v === undefined || v === null ? undefined : object(v, key);

@@ -1,7 +1,7 @@
 /**
  * The platform-endorsements artifact: per-machine policies and, in v1, TDX
- * platform measurements. Parsed fail-closed. Mirrors tinfoil-go
- * verify/internal/policy/artifact.go.
+ * platform measurements. Parsed fail-closed: every policy, measurement and
+ * machine entry is validated before the artifact is used.
  */
 import { map, object, optStruct, str } from "../../internal/json/decode.js";
 import { strictParse, type JsonValue } from "../../internal/json/index.js";
@@ -181,7 +181,7 @@ export function policyFor(a: Artifact, identifierHex: string, platform: Platform
   return { name, policy };
 }
 
-/** Hex of an exact byte length, either case (Go policy.DecodeHex). */
+/** Hex of an exact byte length, either case. */
 export function decodeHex(name: string, value: string, wantLen: number): Uint8Array {
   if (value.length % 2 !== 0 || !/^[0-9a-fA-F]*$/.test(value)) throw new Error(`${name} is not hex`);
   if (value.length / 2 !== wantLen) throw new Error(`${name} must be ${wantLen} bytes, got ${value.length / 2}`);
@@ -205,7 +205,8 @@ export function resolvePlatformMeasurement(
   if (required === undefined) throw new Error("required VM shape is missing");
   let anyShapeMatch = false;
   for (const ref of p.platformMeasurements ?? []) {
-    // Go reads a.Measurements[ref], the zero value for a missing name.
+    // A ref that names no measurement reads as an empty measurement, which
+    // has no shape and so never matches.
     const m: PlatformMeasurement = a.measurements.get(ref) ?? { mrtd: "", rtmr0: "" };
     if (!satisfies(m.shape, required)) continue;
     anyShapeMatch = true;

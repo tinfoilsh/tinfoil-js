@@ -1,4 +1,4 @@
-/** Reads the runtime pin from a Tinfoil config. Mirrors tinfoil-go verify/internal/runtime/config.go. */
+/** Reads the runtime pin from a Tinfoil config. */
 import { isAlias, isMap, isScalar, parseAllDocuments } from "yaml";
 import { RUNTIME_REPO, validateRuntimeReference, type RuntimeReference } from "../../document/collateral/runtime.js";
 
@@ -21,10 +21,10 @@ export function configRuntime(config: Uint8Array): RuntimeReference {
 }
 
 /**
- * Decodes the config as yaml.v3 does into `struct{ Version string
- * "cvm-version" }`: the stream must hold exactly one document, a mapping;
- * the value must be a scalar (any scalar reads as its text); an absent or
- * null value is "". Decode errors, including duplicate keys, reject.
+ * Reads the `cvm-version` value of the config: the stream must hold exactly
+ * one document, a mapping; the value must be a scalar (any scalar reads as
+ * its text); an absent or null value is "". Decode errors, including
+ * duplicate keys, reject.
  */
 function readCvmVersion(config: Uint8Array): string {
   let text: string;
@@ -43,7 +43,7 @@ function readCvmVersion(config: Uint8Array): string {
   if (!isMap(root)) throw new Error("parsing config runtime pin: config is not a mapping");
   let node: unknown = root.get("cvm-version", true);
   if (node === undefined || node === null) return "";
-  // yaml.v3 resolves an alias to its anchored node before decoding it.
+  // An alias reads as its anchored node.
   if (isAlias(node)) node = node.resolve(doc);
   if (!isScalar(node)) throw new Error("parsing config runtime pin: cvm-version must be a scalar");
   if (node.value === null) return "";

@@ -1,16 +1,15 @@
 /**
- * Helpers for hand-written struct decoders over strictParse output,
- * reproducing json v2 Unmarshal into a Go struct: member names match
- * case-sensitively, absent members take the zero value, a wrong JSON type is
- * an error, and `null` leaves the zero value.
+ * Helpers for hand-written record decoders over strictParse output. Member
+ * names match case-sensitively, an absent member takes its zero value ("",
+ * false, 0, none), `null` also takes the zero value, and a member of the
+ * wrong JSON type is an error.
  */
 import { JsonError, JsonNumber, type JsonObject, type JsonValue } from "./index.js";
 
 /**
- * Requires `v` to be an object. With `known` set, members outside it reject
- * (json.RejectUnknownMembers(true)). As in Go, `null` decodes to the zero
- * struct, i.e. an empty object; callers modelling a Go *T must check for
- * null themselves.
+ * Requires `v` to be an object. With `known` set, members outside it reject.
+ * `null` decodes to an empty object (the zero record); callers that need to
+ * tell null from an object must check before calling.
  */
 export function object(v: JsonValue, what: string, known?: readonly string[]): JsonObject {
   if (v === null) return new Map();
@@ -43,7 +42,7 @@ export function bool(o: JsonObject, key: string): boolean {
   return v;
 }
 
-/** A number member, or undefined when absent or null (Go *T fields). */
+/** A number member, or undefined when absent or null. */
 export function num(o: JsonObject, key: string): JsonNumber | undefined {
   const v = o.get(key);
   if (v === undefined || v === null) return undefined;
@@ -51,7 +50,7 @@ export function num(o: JsonObject, key: string): JsonNumber | undefined {
   return v;
 }
 
-/** An array member; absent or null is undefined (Go nil slice). */
+/** An array member; absent or null is undefined. */
 export function arr(o: JsonObject, key: string): readonly JsonValue[] | undefined {
   const v = o.get(key);
   if (v === undefined || v === null) return undefined;
@@ -60,8 +59,8 @@ export function arr(o: JsonObject, key: string): readonly JsonValue[] | undefine
 }
 
 /**
- * A nested non-pointer Go struct member: absent or null is the zero struct
- * (an empty object); otherwise an object with exactly `known` members.
+ * A nested record member whose absence means "all fields zero": absent or
+ * null is an empty object; otherwise an object with exactly `known` members.
  */
 export function struct(o: JsonObject, key: string, known: readonly string[]): JsonObject {
   const v = o.get(key);
@@ -69,7 +68,7 @@ export function struct(o: JsonObject, key: string, known: readonly string[]): Js
   return object(v, key, known);
 }
 
-/** A raw member kept undecoded (Go jsontext.Value); absent is undefined, null is null. */
+/** A member kept as parsed JSON; absent is undefined, null is null. */
 export function raw(o: JsonObject, key: string): JsonValue | undefined {
   return o.get(key);
 }
@@ -83,41 +82,41 @@ function kind(v: JsonValue): string {
   return "object";
 }
 
-function typeError(v: JsonValue, goType: string, key: string): JsonError {
-  return new JsonError(`cannot unmarshal JSON ${kind(v)} into Go ${goType} within ${JSON.stringify("/" + key)}`);
+function typeError(v: JsonValue, wantType: string, key: string): JsonError {
+  return new JsonError(`cannot unmarshal JSON ${kind(v)} into ${wantType} within ${JSON.stringify("/" + key)}`);
 }
 
 /**
  * An unsigned integer member of `bits` width, or undefined when absent or
- * null (Go *uintN). Go's unsigned decoding rejects any leading '-', so "-0"
- * rejects here too; a fraction, exponent or out-of-range value rejects.
+ * null. Any leading '-' rejects, so "-0" rejects; so does a fraction, an
+ * exponent or an out-of-range value.
  */
 export function uint(o: JsonObject, key: string, bits: 8 | 32 | 64): bigint | undefined {
   const n = num(o, key);
   if (n === undefined) return undefined;
-  if (n.raw.startsWith("-")) throw new JsonError(`cannot unmarshal JSON number ${n.raw} into Go uint${bits} within ${JSON.stringify("/" + key)}`);
+  if (n.raw.startsWith("-")) throw new JsonError(`cannot unmarshal JSON number ${n.raw} into uint${bits} within ${JSON.stringify("/" + key)}`);
   const v = n.toBigInt();
-  if (v >= 1n << BigInt(bits)) throw new JsonError(`JSON number ${n.raw} overflows Go uint${bits} within ${JSON.stringify("/" + key)}`);
+  if (v >= 1n << BigInt(bits)) throw new JsonError(`JSON number ${n.raw} overflows uint${bits} within ${JSON.stringify("/" + key)}`);
   return v;
 }
 
-/** A signed 64-bit integer member (Go *int / *int64), or undefined when absent or null. */
+/** A signed 64-bit integer member, or undefined when absent or null. */
 export function int64(o: JsonObject, key: string): bigint | undefined {
   const n = num(o, key);
   if (n === undefined) return undefined;
   const v = n.toBigInt();
-  if (v >= 1n << 63n || v < -(1n << 63n)) throw new JsonError(`JSON number ${n.raw} overflows Go int64 within ${JSON.stringify("/" + key)}`);
+  if (v >= 1n << 63n || v < -(1n << 63n)) throw new JsonError(`JSON number ${n.raw} overflows int64 within ${JSON.stringify("/" + key)}`);
   return v;
 }
 
-/** A Go pointer-to-struct member: absent or null is undefined; otherwise an object with exactly `known` members. */
+/** An optional nested record member: absent or null is undefined; otherwise an object with exactly `known` members. */
 export function optStruct(o: JsonObject, key: string, known: readonly string[]): JsonObject | undefined {
   const v = o.get(key);
   if (v === undefined || v === null) return undefined;
   return object(v, key, known);
 }
 
-/** A Go map[string]T member: absent or null is an empty map; values decoded by `value`. */
+/** A string-keyed map member: absent or null is an empty map; values decoded by `value`. */
 export function map<T>(o: JsonObject, key: string, value: (v: JsonValue, name: string) => T): Map<string, T> {
   const v = o.get(key);
   const out = new Map<string, T>();
@@ -127,12 +126,12 @@ export function map<T>(o: JsonObject, key: string, value: (v: JsonValue, name: s
   return out;
 }
 
-/** A Go []string member: absent or null is undefined; null elements are "". */
+/** A string-array member: absent or null is undefined; null elements are "". */
 export function strArr(o: JsonObject, key: string): string[] | undefined {
   const a = arr(o, key);
   return a?.map((s) => {
     if (s === null) return "";
-    if (typeof s !== "string") throw new JsonError(`cannot unmarshal JSON ${kind(s)} into Go string within ${JSON.stringify("/" + key)}`);
+    if (typeof s !== "string") throw new JsonError(`cannot unmarshal JSON ${kind(s)} into string within ${JSON.stringify("/" + key)}`);
     return s;
   });
 }
