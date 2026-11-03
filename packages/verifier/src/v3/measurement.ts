@@ -85,3 +85,55 @@ export function cloneExpected<E extends Expected>(e: E): E {
       } as E;
   }
 }
+
+const TDX_LABELS = ["MRTD", "RTMR0", "RTMR1", "RTMR2", "RTMR3"] as const;
+
+/** Decodes a register from hex in either case. Throws on bad hex or length. */
+export function parseRegister(s: string): Register {
+  if (s.length !== 2 * REGISTER_SIZE) {
+    throw new Error(`register must be ${2 * REGISTER_SIZE} hex characters, got ${s.length}`);
+  }
+  if (!/^[0-9a-fA-F]*$/.test(s)) throw new Error("register is not hex");
+  const r = new Uint8Array(REGISTER_SIZE);
+  for (let i = 0; i < REGISTER_SIZE; i++) r[i] = parseInt(s.slice(2 * i, 2 * i + 2), 16);
+  return r;
+}
+
+/** One register, or undefined for "". */
+function parseExpectedRegister(label: string, value: string): Register | undefined {
+  if (value === "") return undefined;
+  try {
+    return parseRegister(value);
+  } catch (err) {
+    throw new Error(`${label}: ${(err as Error).message}`);
+  }
+}
+
+/** Parses an SEV-SNP expectation; "" leaves the launch register unconstrained. */
+export function parseExpectedSevSnp(launch: string): ExpectedSevSnp {
+  return { platform: "sev-snp", launch: parseExpectedRegister("Launch", launch) };
+}
+
+/** Parses a TDX expectation; "" leaves that register unconstrained. */
+export function parseExpectedTdx(mrtd: string, rtmr0: string, rtmr1: string, rtmr2: string, rtmr3: string): ExpectedTdx {
+  const [m, r0, r1, r2, r3] = [mrtd, rtmr0, rtmr1, rtmr2, rtmr3].map((v, i) => parseExpectedRegister(TDX_LABELS[i], v));
+  return { platform: "tdx", mrtd: m, rtmr0: r0, rtmr1: r1, rtmr2: r2, rtmr3: r3 };
+}
+
+/** Expectations that pin every register of `m` (Go Measurement.Expected). */
+export function expectedOf(m: Measurement): Expected {
+  return cloneMeasurement(m);
+}
+
+/** Human-readable form, matching Go's String() layout: one labeled register per line, "any" if unset. */
+export function formatMeasurement(m: Measurement | Expected): string {
+  const [platform, labels, registers]: [string, readonly string[], (Register | undefined)[]] =
+    m.platform === "sev-snp"
+      ? ["SEV-SNP", ["Launch"], [m.launch]]
+      : ["TDX", TDX_LABELS, [m.mrtd, m.rtmr0, m.rtmr1, m.rtmr2, m.rtmr3]];
+  let out = platform;
+  registers.forEach((r, i) => {
+    out += `\n${labels[i].padEnd(6)} ${r === undefined ? "any" : registerHex(r)}`;
+  });
+  return out;
+}
