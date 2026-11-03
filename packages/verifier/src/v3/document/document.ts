@@ -3,7 +3,6 @@
  * checks the challenge against the caller's nonce. Parsing authenticates
  * nothing: the CPU quote must prove the hardware bound the recomputed
  * REPORT_DATA before any part of the document is trusted.
- * Mirrors tinfoil-go verify/document (builder.go is enclave-side; not ported).
  */
 import { concat, sha256, toHex, utf8 } from "../internal/bytes.js";
 import { decodeBase64, decodeLowerHex, isLowerHex } from "../internal/canonical.js";
@@ -51,8 +50,9 @@ export const NONCE_SIZE = 32;
 
 /**
  * A mistake in the caller's input to {@link parse} (a nonce of the wrong
- * length), as opposed to a document that fails to parse. The verifier reports
- * it as a UsageError (Go document.ErrInvalidInput).
+ * length), as opposed to a document that fails to parse. Callers that
+ * classify failures can treat it as a caller error rather than a rejected
+ * document.
  */
 export class InvalidInputError extends Error {
   constructor(message: string) {
@@ -296,7 +296,7 @@ export function decode(docBytes: Uint8Array): DecodedDocument {
   } catch (err) {
     throw new Error(`parsing attestation document: ${(err as Error).message}`);
   }
-  // Go unmarshals the whole document (including the collateral array's shape)
+  // The whole document (including the collateral array's shape) is decoded
   // before any semantic check, so every type error surfaces first.
   const scalars = readScalars(root, challenge, cpu, endorsed);
   const entries = parseStage("attestation document", () => decodeEntries(raw(root, "collateral")));
