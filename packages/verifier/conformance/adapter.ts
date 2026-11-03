@@ -13,8 +13,8 @@
  */
 import * as document from "../src/v3/document/document.js";
 import { NotImplementedError, UsageError, VerificationError } from "../src/v3/errors.js";
-import * as endorsement from "../src/v3/internal/endorsement/provenance.js";
-import { MULTI_PLATFORM_PREDICATE_TYPE } from "../src/v3/internal/endorsement/provenance.js";
+import { MULTI_PLATFORM_PREDICATE_TYPE, ProvenanceClient } from "../src/v3/internal/endorsement/provenance.js";
+import { parseReference } from "../src/v3/internal/endorsement/reference.js";
 import { ARTIFACT_FORMAT } from "../src/v3/internal/policy/artifact.js";
 import * as quote from "../src/v3/internal/quote/quote.js";
 import { registerHex, type Expected, type Measurement as V3Measurement, type Register } from "../src/v3/measurement.js";
@@ -141,7 +141,7 @@ async function runStage(stage: string, raw: unknown): Promise<Result> {
   // blocked on it.
   const provClient = async () => {
     try {
-      return roots.sigstore ? await endorsement.ProvenanceClient.fromJSON(roots.sigstore) : await endorsement.ProvenanceClient.default();
+      return roots.sigstore ? await ProvenanceClient.fromJSON(roots.sigstore) : await ProvenanceClient.default();
     } catch (err) {
       if (err instanceof NotImplementedError) throw err;
       return undefined;
@@ -165,7 +165,7 @@ async function runStage(stage: string, raw: unknown): Promise<Result> {
       if (prov === undefined) return malformed(stage);
       return layer(stage, "PROVENANCE_REJECTED", async () => {
         const codeRef = parsed.sigstoreCode();
-        const pin = endorsement.parseReference(in_.repo);
+        const pin = parseReference(in_.repo);
         const code = await prov.authenticateCode(codeRef.bundle, pin, codeRef.tag, codeRef.digest);
         return accept(stage, {
           code_digest: code.digest,

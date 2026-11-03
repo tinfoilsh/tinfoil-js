@@ -23,7 +23,8 @@
     "test:browser:integration": "vitest run --config vite.config.integration.ts",
     "check:es2020": "test -n \"$(find dist -name '*.js')\" && find dist -name '*.js' -exec acorn --ecma2020 --module --silent {} +",
     "clean": "rm -rf dist dist-conformance",
-    "prepublishOnly": "npm run build"
+    "prepublishOnly": "npm run build",
+    "sync:trust": "node scripts/sync-trust.mjs"
   },
   "keywords": [
     "attestation",
