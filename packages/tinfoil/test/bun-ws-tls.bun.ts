@@ -5,16 +5,17 @@
  * Background: our pinning model verifies the enclave's leaf TLS public key
  * (SPKI fingerprint from attestation) via a `checkServerIdentity` callback.
  * In Node, the `ws` package forwards that callback to `tls.connect`. Bun
- * replaces `ws` with a native implementation that drops it, so WebSocket
- * pinning fails closed on Bun.
+ * replaces `ws` with a native implementation that, before Bun 1.4, dropped it,
+ * so production WebSocket pinning refuses to run on Bun (fails closed).
  *
  * This file records, as executable assertions, which Bun primitives honor
  * `checkServerIdentity`, so a Bun release that changes either flips a test.
  * Findings on Bun 1.4.4:
  *   - Native `WebSocket` `tls` bag: HONORS checkServerIdentity (since 1.4; on
  *     1.3.14 it was ignored and the pin silently skipped).
- *   - `node:tls` `tls.connect`: HONORS it and exposes `cert.raw`, which the
- *     production WebSocket pinning path still uses.
+ *   - `node:tls` `tls.connect`: HONORS it and exposes `cert.raw`.
+ * Production does not yet pin WebSockets on Bun via either primitive; see
+ * https://github.com/tinfoilsh/tinfoil-js/issues/224.
  */
 import { describe, it, expect } from "bun:test";
 import * as tls from "tls";
