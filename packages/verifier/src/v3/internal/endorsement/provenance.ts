@@ -1,4 +1,5 @@
 import { NotImplementedError } from "../../errors.js";
+import type { JsonValue } from "../json/index.js";
 import type { ExpectedSevSnp, ExpectedTdx } from "../../measurement.js";
 
 /** Predicate type of a release's multi-platform code measurement. */
@@ -52,8 +53,8 @@ export class ProvenanceClient {
    * Verifies code provenance against the pinned reference. Pins in `ref` take
    * precedence over the document's tag and digest hints.
    */
-  async authenticateCode(bundleJSON: Uint8Array, ref: Reference, tag: string, hexDigest: string): Promise<Code> {
-    void bundleJSON;
+  async authenticateCode(bundle: JsonValue, ref: Reference, tag: string, hexDigest: string): Promise<Code> {
+    void bundle;
     void ref;
     void tag;
     void hexDigest;
@@ -62,13 +63,13 @@ export class ProvenanceClient {
 
   /** Verifies the platform-endorsements artifact's provenance. */
   async authenticatePlatformEndorsements(
-    bundleJSON: Uint8Array,
+    bundle: JsonValue,
     repo: string,
     tag: string,
     hexDigest: string,
     format: string,
   ): Promise<PlatformEndorsements> {
-    void bundleJSON;
+    void bundle;
     void repo;
     void tag;
     void hexDigest;

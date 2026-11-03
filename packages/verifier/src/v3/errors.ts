@@ -54,3 +54,8 @@ export class NotImplementedError extends Error {
     this.name = "NotImplementedError";
   }
 }
+
+/** Placeholder body for a function not yet ported. TODO(v3): delete with NotImplementedError. */
+export function notImplemented(what: string): never {
+  throw new NotImplementedError(what);
+}
