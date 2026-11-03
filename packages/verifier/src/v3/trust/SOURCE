@@ -1,7 +1,7 @@
-fetched 2026-11-03T20:32:46.186Z by scripts/sync-trust.mjs
+fetched 2026-11-03T20:48:13.591Z by scripts/sync-trust.mjs; sha256 is of the embedded bytes
 
 sigstore-trusted-root.ts
-  source: Sigstore TUF repository (trusted_root.json target)
+  source: https://tuf-repo-cdn.sigstore.dev/ target trusted_root.json (raw bytes)
   sha256: 6494e21ea73fa7ee769f85f57d5a3e6a08725eae1e38c755fc3517c9e6bc0b66
 amd-genoa-chain.ts
   source: https://kdsintf.amd.com/vcek/v1/Genoa/cert_chain
