@@ -15,10 +15,18 @@
 // last one self-signed. Nothing is written unless every source fetched and
 // checked, so the generated modules and SOURCE always agree.
 //
+// The AMD and Intel roots are self-signed, so nothing but the publisher's
+// transport authenticates a fetch of them, and they are not expected to
+// change for decades. The committed copies therefore act as pins: a fetched
+// chain whose certificates differ from the committed ones is refused, with
+// both fingerprints printed, unless --accept-root-change is given. The
+// Sigstore root is authenticated by TUF and changes routinely, so it is
+// always accepted.
+//
 // Tinfoil's signing key in src/v3/trust/signing-keys.ts is maintained by
 // hand, not fetched.
 //
-//   npm run sync:trust
+//   npm run sync:trust [-- --accept-root-change]
 //
 // Each module exports one string constant. src/v3/trust/SOURCE records where
 // each file came from, when, and the SHA-256 of the embedded bytes.
@@ -31,24 +39,54 @@ import { fileURLToPath } from "node:url";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const out = join(here, "..", "src", "v3", "trust");
+const acceptRootChange = process.argv.includes("--accept-root-change");
 
 const SIGSTORE_TUF = "https://tuf-repo-cdn.sigstore.dev/";
 const AMD_KDS = "https://kdsintf.amd.com/vcek/v1";
 const INTEL_SGX_ROOT = "https://certificates.trustedservices.intel.com/Intel_SGX_Provisioning_Certification_RootCA.pem";
 
-async function fetchChain(url, expectedCount) {
+/** The certificates of a PEM chain, parsed; the text must be nothing but certificate blocks. */
+function parseChain(text, what) {
+  const blocks = text.match(/-----BEGIN CERTIFICATE-----\n[\s\S]*?\n-----END CERTIFICATE-----\n/g) ?? [];
+  if (blocks.join("") !== text) throw new Error(`${what}: not a PEM certificate chain`);
+  return blocks.map((b) => X509Certificate.parse(b));
+}
+
+const fingerprint = (cert) => createHash("sha256").update(cert.root.toDER()).digest("hex");
+
+/** The committed chain's certificates, or [] when the module does not exist yet. */
+function committedChain(name) {
+  let module;
+  try {
+    module = readFileSync(join(out, name), "utf8");
+  } catch {
+    return [];
+  }
+  const text = JSON.parse(module.slice(module.indexOf("= ") + 2, module.lastIndexOf(";")));
+  return parseChain(text, name);
+}
+
+async function fetchChain(name, url, expectedCount) {
   const res = await fetch(url);
   if (!res.ok) throw new Error(`${url}: HTTP ${res.status}`);
   // Publishers differ in line endings; the certificates are what matter.
   let text = (await res.text()).replace(/\r\n/g, "\n");
   if (!text.endsWith("\n")) text += "\n";
-  const blocks = text.match(/-----BEGIN CERTIFICATE-----\n[\s\S]*?\n-----END CERTIFICATE-----\n/g) ?? [];
-  if (blocks.join("") !== text) throw new Error(`${url}: not a PEM certificate chain`);
-  if (blocks.length !== expectedCount) throw new Error(`${url}: expected ${expectedCount} certificates, got ${blocks.length}`);
-  const certs = blocks.map((b) => X509Certificate.parse(b));
+  const certs = parseChain(text, url);
+  if (certs.length !== expectedCount) throw new Error(`${url}: expected ${expectedCount} certificates, got ${certs.length}`);
   for (let i = 0; i < certs.length; i++) {
     const issuer = certs[i + 1];
     if (!(await certs[i].verify(issuer))) throw new Error(`${url}: certificate ${i} is not signed by ${issuer ? "the next certificate" : "itself"}`);
+  }
+  const committed = committedChain(name);
+  const changed = committed.length !== certs.length || certs.some((c, i) => fingerprint(c) !== fingerprint(committed[i]));
+  if (changed && committed.length > 0 && !acceptRootChange) {
+    throw new Error(
+      `${url}: the fetched chain differs from the committed ${name}\n` +
+        `  committed: ${committed.map(fingerprint).join(", ")}\n` +
+        `  fetched:   ${certs.map(fingerprint).join(", ")}\n` +
+        "  A trust anchor changing is unexpected; rerun with --accept-root-change only after confirming the new chain out of band.",
+    );
   }
   return text;
 }
@@ -75,21 +113,21 @@ const files = [
     constant: "AMD_GENOA_CERT_CHAIN_PEM",
     doc: "AMD KDS certificate chain for Genoa: the ASK followed by the self-signed ARK.",
     source: `${AMD_KDS}/Genoa/cert_chain`,
-    fetch: () => fetchChain(`${AMD_KDS}/Genoa/cert_chain`, 2),
+    fetch: () => fetchChain("amd-genoa-chain.ts", `${AMD_KDS}/Genoa/cert_chain`, 2),
   },
   {
     name: "amd-turin-chain.ts",
     constant: "AMD_TURIN_CERT_CHAIN_PEM",
     doc: "AMD KDS certificate chain for Turin: the ASK followed by the self-signed ARK.",
     source: `${AMD_KDS}/Turin/cert_chain`,
-    fetch: () => fetchChain(`${AMD_KDS}/Turin/cert_chain`, 2),
+    fetch: () => fetchChain("amd-turin-chain.ts", `${AMD_KDS}/Turin/cert_chain`, 2),
   },
   {
     name: "intel-sgx-root.ts",
     constant: "INTEL_SGX_ROOT_CA_PEM",
     doc: "The Intel SGX Root CA that anchors every TDX PCK certificate chain.",
     source: INTEL_SGX_ROOT,
-    fetch: () => fetchChain(INTEL_SGX_ROOT, 1),
+    fetch: () => fetchChain("intel-sgx-root.ts", INTEL_SGX_ROOT, 1),
   },
 ];
 
