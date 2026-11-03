@@ -3,13 +3,14 @@
  * parsing (trusted-root.ts), bundle decoding (bundle.ts) and certificate
  * bundle verification with the workflow identity policy (certificate.ts).
  *
- * Fixtures under fixtures/sigstore/ are the Sigstore collateral of
- * conformance documents: each carries the bundles of its document, the
- * synthetic trusted root they were signed under (or null for the embedded
- * production root), and a note on what the document mutates.
+ * The bundles come from the shared tinfoil-conformance vectors (see
+ * helpers/conformance.ts for where they are read from): each vector's
+ * document carries the bundles, and its input the synthetic trusted root they
+ * were signed under (or none, for the embedded production root). The suites
+ * that need the vectors are skipped when the checkout is not available; the
+ * embedded-root and pattern tests run regardless.
  */
-import { readFileSync } from "node:fs";
-import { describe, expect, it } from "vitest";
+import { beforeAll, describe, expect, it } from "vitest";
 import { sha256, toHex, utf8 } from "../../src/v3/internal/bytes.js";
 import { strictParse, type JsonValue } from "../../src/v3/internal/json/index.js";
 import { BUNDLE_MEDIA_TYPE, bundleBytes, IN_TOTO_PAYLOAD_TYPE, MAX_BUNDLE_SIZE, parseBundle } from "../../src/v3/internal/sigstore/bundle.js";
@@ -21,22 +22,43 @@ import {
 } from "../../src/v3/internal/sigstore/certificate.js";
 import { embeddedTrustedRoot, parseTrustedRoot, TRUSTED_ROOT_MEDIA_TYPE, type TrustedRoot } from "../../src/v3/internal/sigstore/trusted-root.js";
 import { SIGSTORE_TRUSTED_ROOT_JSON } from "../../src/v3/trust/sigstore-trusted-root.js";
+import {
+  conformanceAvailable,
+  decodeDocument,
+  loadFixture,
+  repoOf,
+  sigstoreCollateral,
+  syntheticTrustedRoot,
+  vectorsTitle,
+  type SigstoreEntry,
+} from "./helpers/conformance.js";
 
+/** The Sigstore material of one conformance vector. */
 interface Fixture {
   readonly id: string;
-  readonly note: string;
   readonly expected: "accept" | "reject";
   readonly repo: string;
+  /** The synthetic trusted root the bundles were signed under; undefined for the embedded production root. */
   readonly trusted_root: unknown;
-  readonly collateral: readonly {
-    readonly id: string;
-    readonly format: string;
-    readonly data: { readonly repo?: string; readonly tag?: string; readonly digest?: string; readonly sigstore_bundle: unknown };
-  }[];
+  readonly collateral: readonly SigstoreEntry[];
+}
+
+/** The vector a fixture id names: the golden and real-frozen documents by name, anything else a provenance case. */
+function vectorPath(id: string): string {
+  if (id === "golden-happy") return "golden/golden-happy.json";
+  if (id === "real-sev-inference-tinfoil") return "real-frozen/real-sev-inference-tinfoil.json";
+  return `provenance/${id}.json`;
 }
 
 function fixture(id: string): Fixture {
-  return JSON.parse(readFileSync(new URL(`./fixtures/sigstore/${id}.json`, import.meta.url), "utf8")) as Fixture;
+  const f = loadFixture(vectorPath(id));
+  return {
+    id: f.id,
+    expected: f.expected.accepted ? "accept" : "reject",
+    repo: repoOf(f),
+    trusted_root: syntheticTrustedRoot(f),
+    collateral: sigstoreCollateral(decodeDocument(f)),
+  };
 }
 
 /** A plain value as the strict parser would read it. */
@@ -44,7 +66,7 @@ function toJson(value: unknown): JsonValue {
   return strictParse(utf8(JSON.stringify(value)));
 }
 
-function entry(f: Fixture, collateralId: string): Fixture["collateral"][number] {
+function entry(f: Fixture, collateralId: string): SigstoreEntry {
   const e = f.collateral.find((c) => c.id === collateralId);
   if (e === undefined) throw new Error(`${f.id} has no ${collateralId} collateral`);
   return e;
@@ -62,7 +84,7 @@ function mutated(bundle: unknown, mutate: (b: Record<string, any>) => void): Jso
 }
 
 function rootOf(f: Fixture): Promise<TrustedRoot> {
-  return f.trusted_root === null ? embeddedTrustedRoot() : parseTrustedRoot(utf8(JSON.stringify(f.trusted_root)));
+  return f.trusted_root === undefined ? embeddedTrustedRoot() : parseTrustedRoot(utf8(JSON.stringify(f.trusted_root)));
 }
 
 const decode = (b64: string): Uint8Array => new Uint8Array(Buffer.from(b64, "base64"));
@@ -72,12 +94,26 @@ const codeIdentity = (repo: string): RegExp => workflowIdentityPattern(repo, "[^
 /** The identity accepted for platform endorsements. */
 const platformIdentity = workflowIdentityPattern("tinfoilsh/cvmimage", "platform-release\\.yml", "refs/tags/platform-v[0-9][^@]*");
 
-const golden = fixture("golden-happy");
-const real = fixture("real-sev-inference-tinfoil");
-const goldenCode = entry(golden, "sigstore-code");
-const goldenPlatform = entry(golden, "sigstore-platform");
-const realCode = entry(real, "code");
-const realPlatform = entry(real, "platform");
+const withoutVectors = !conformanceAvailable();
+
+// The vectors shared across suites. They are read in beforeAll of the suites
+// that use them (not at import time) so a missing checkout only skips those.
+let golden: Fixture;
+let real: Fixture;
+let goldenCode: SigstoreEntry;
+let goldenPlatform: SigstoreEntry;
+let realCode: SigstoreEntry;
+let realPlatform: SigstoreEntry;
+
+function loadShared(): void {
+  if (golden !== undefined) return;
+  golden = fixture("golden-happy");
+  real = fixture("real-sev-inference-tinfoil");
+  goldenCode = entry(golden, "sigstore-code");
+  goldenPlatform = entry(golden, "sigstore-platform");
+  realCode = entry(real, "code");
+  realPlatform = entry(real, "platform");
+}
 
 async function rejects(p: Promise<unknown>, pattern: RegExp): Promise<void> {
   await expect(p).rejects.toThrow(pattern);
@@ -130,50 +166,6 @@ describe("trusted root", () => {
     expect(await embeddedTrustedRoot()).toBe(await embeddedTrustedRoot());
   });
 
-  it("parses a synthetic root", async () => {
-    const root = await rootOf(golden);
-    expect(root.certificateAuthorities).toHaveLength(1);
-    expect(root.transparencyLogs).toHaveLength(1);
-    expect(root.ctLogs).toHaveLength(1);
-    expect(root.timestampAuthorities).toHaveLength(0);
-    const wire = golden.trusted_root as Record<string, any>;
-    // The synthetic logs state the id SHA-256 of the key yields.
-    const keyId = toHex(await sha256(decode(wire.tlogs[0].publicKey.rawBytes)));
-    expect(root.transparencyLogs[0]!.logId).toBe(keyId);
-    expect(root.transparencyLogs[0]!.validTo).toBeUndefined();
-  });
-
-  it("derives the log id from the key when the root states none", async () => {
-    const wire = structuredClone(golden.trusted_root) as Record<string, any>;
-    delete wire.tlogs[0].logId;
-    const root = await parseTrustedRoot(utf8(JSON.stringify(wire)));
-    expect(root.transparencyLogs[0]!.logId).toBe(toHex(await sha256(decode(wire.tlogs[0].publicKey.rawBytes))));
-  });
-
-  const withRoot = (mutate: (r: Record<string, any>) => void): Uint8Array => {
-    const wire = structuredClone(golden.trusted_root) as Record<string, any>;
-    mutate(wire);
-    return utf8(JSON.stringify(wire));
-  };
-
-  it.each<[string, (r: Record<string, any>) => void, RegExp]>([
-    ["a wrong media type", (r) => (r.mediaType = "application/vnd.dev.sigstore.trustedroot+json;version=0.2"), /media type/],
-    ["an unknown member", (r) => (r.extra = 1), /unknown object member name "extra"/],
-    ["an unknown log member", (r) => (r.tlogs[0].extra = 1), /unknown object member name "extra"/],
-    ["an unsupported key type", (r) => (r.tlogs[0].publicKey.keyDetails = "PKIX_RSA_PKCS1V15_2048_SHA256"), /unsupported transparency log key type/],
-    ["a key that is not the declared type", (r) => (r.tlogs[0].publicKey.keyDetails = "PKIX_ED25519"), /importing transparency log key/],
-    ["an unsupported hash algorithm", (r) => (r.ctlogs[0].hashAlgorithm = "SHA2_384"), /hash algorithm/],
-    ["a validity window without a start", (r) => delete r.certificateAuthorities[0].validFor.start, /no start/],
-    ["a validity window that is not RFC 3339", (r) => (r.certificateAuthorities[0].validFor.start = "yesterday"), /not RFC 3339/],
-    ["a validity window ending before it starts", (r) => (r.ctlogs[0].publicKey.validFor.end = "2000-01-01T00:00:00Z"), /ends before it starts/],
-    ["an empty certificate chain", (r) => (r.certificateAuthorities[0].certChain.certificates = []), /empty certificate chain/],
-    ["a certificate that is not base64", (r) => (r.certificateAuthorities[0].certChain.certificates[0].rawBytes = "*"), /illegal base64/],
-    ["a log id that is not 32 bytes", (r) => (r.tlogs[0].logId.keyId = "AQID"), /not 32 bytes/],
-    ["a null log", (r) => (r.ctlogs = [null]), /is null/],
-  ])("rejects %s", async (_what, mutate, pattern) => {
-    await rejects(parseTrustedRoot(withRoot(mutate)), pattern);
-  });
-
   it("rejects text that is not a JSON object", async () => {
     await rejects(parseTrustedRoot(utf8("null")), /is null/);
     await rejects(parseTrustedRoot(utf8("[]")), /cannot unmarshal/);
@@ -183,121 +175,57 @@ describe("trusted root", () => {
   it("exposes the media type", () => {
     expect(TRUSTED_ROOT_MEDIA_TYPE).toBe(embeddedJson.mediaType);
   });
+
+  describe.skipIf(withoutVectors)(vectorsTitle("synthetic root"), () => {
+    beforeAll(loadShared);
+
+    it("parses a synthetic root", async () => {
+      const root = await rootOf(golden);
+      expect(root.certificateAuthorities).toHaveLength(1);
+      expect(root.transparencyLogs).toHaveLength(1);
+      expect(root.ctLogs).toHaveLength(1);
+      expect(root.timestampAuthorities).toHaveLength(0);
+      const wire = golden.trusted_root as Record<string, any>;
+      // The synthetic logs state the id SHA-256 of the key yields.
+      const keyId = toHex(await sha256(decode(wire.tlogs[0].publicKey.rawBytes)));
+      expect(root.transparencyLogs[0]!.logId).toBe(keyId);
+      expect(root.transparencyLogs[0]!.validTo).toBeUndefined();
+    });
+
+    it("derives the log id from the key when the root states none", async () => {
+      const wire = structuredClone(golden.trusted_root) as Record<string, any>;
+      delete wire.tlogs[0].logId;
+      const root = await parseTrustedRoot(utf8(JSON.stringify(wire)));
+      expect(root.transparencyLogs[0]!.logId).toBe(toHex(await sha256(decode(wire.tlogs[0].publicKey.rawBytes))));
+    });
+
+    const withRoot = (mutate: (r: Record<string, any>) => void): Uint8Array => {
+      const wire = structuredClone(golden.trusted_root) as Record<string, any>;
+      mutate(wire);
+      return utf8(JSON.stringify(wire));
+    };
+
+    it.each<[string, (r: Record<string, any>) => void, RegExp]>([
+      ["a wrong media type", (r) => (r.mediaType = "application/vnd.dev.sigstore.trustedroot+json;version=0.2"), /media type/],
+      ["an unknown member", (r) => (r.extra = 1), /unknown object member name "extra"/],
+      ["an unknown log member", (r) => (r.tlogs[0].extra = 1), /unknown object member name "extra"/],
+      ["an unsupported key type", (r) => (r.tlogs[0].publicKey.keyDetails = "PKIX_RSA_PKCS1V15_2048_SHA256"), /unsupported transparency log key type/],
+      ["a key that is not the declared type", (r) => (r.tlogs[0].publicKey.keyDetails = "PKIX_ED25519"), /importing transparency log key/],
+      ["an unsupported hash algorithm", (r) => (r.ctlogs[0].hashAlgorithm = "SHA2_384"), /hash algorithm/],
+      ["a validity window without a start", (r) => delete r.certificateAuthorities[0].validFor.start, /no start/],
+      ["a validity window that is not RFC 3339", (r) => (r.certificateAuthorities[0].validFor.start = "yesterday"), /not RFC 3339/],
+      ["a validity window ending before it starts", (r) => (r.ctlogs[0].publicKey.validFor.end = "2000-01-01T00:00:00Z"), /ends before it starts/],
+      ["an empty certificate chain", (r) => (r.certificateAuthorities[0].certChain.certificates = []), /empty certificate chain/],
+      ["a certificate that is not base64", (r) => (r.certificateAuthorities[0].certChain.certificates[0].rawBytes = "*"), /illegal base64/],
+      ["a log id that is not 32 bytes", (r) => (r.tlogs[0].logId.keyId = "AQID"), /not 32 bytes/],
+      ["a null log", (r) => (r.ctlogs = [null]), /is null/],
+    ])("rejects %s", async (_what, mutate, pattern) => {
+      await rejects(parseTrustedRoot(withRoot(mutate)), pattern);
+    });
+  });
 });
 
 describe("bundle", () => {
-  const goldenBundle = goldenCode.data.sigstore_bundle as Record<string, any>;
-
-  it("decodes a certificate-signed bundle", () => {
-    const b = parseBundle(toJson(goldenBundle));
-    expect(b.mediaType).toBe(BUNDLE_MEDIA_TYPE);
-    expect(b.certificate).toEqual(decode(goldenBundle.verificationMaterial.certificate.rawBytes));
-    expect(b.publicKeyHint).toBeUndefined();
-    expect(b.rfc3161Timestamps).toEqual([]);
-    expect(b.dsse.payloadType).toBe(IN_TOTO_PAYLOAD_TYPE);
-    expect(b.dsse.payload).toEqual(decode(goldenBundle.dsseEnvelope.payload));
-    expect(b.dsse.signature).toEqual(decode(goldenBundle.dsseEnvelope.signatures[0].sig));
-    expect(b.dsse.keyId).toBe("");
-    expect(b.tlogEntries).toHaveLength(1);
-    const wire = goldenBundle.verificationMaterial.tlogEntries[0];
-    const e = b.tlogEntries[0]!;
-    expect(e.logId).toBe(toHex(decode(wire.logId.keyId)));
-    expect(e.kind).toBe("dsse");
-    expect(e.version).toBe("0.0.1");
-    expect(e.integratedTime).toBe(BigInt(wire.integratedTime));
-    expect(e.canonicalizedBody).toEqual(decode(wire.canonicalizedBody));
-    expect(e.inclusionPromise).toEqual(decode(wire.inclusionPromise.signedEntryTimestamp));
-    expect(e.inclusionProof).toEqual({
-      logIndex: 0n,
-      rootHash: decode(wire.inclusionProof.rootHash),
-      treeSize: 1n,
-      hashes: [],
-      checkpoint: wire.inclusionProof.checkpoint.envelope,
-    });
-    expect(b.json).toBeInstanceOf(Map);
-  });
-
-  it("decodes a production bundle whose timestamp data is an empty record", () => {
-    const wire = realCode.data.sigstore_bundle as Record<string, any>;
-    expect(wire.verificationMaterial.timestampVerificationData).toEqual({});
-    const b = parseBundle(toJson(wire));
-    expect(b.rfc3161Timestamps).toEqual([]);
-    expect(b.tlogEntries[0]!.inclusionProof!.hashes).toHaveLength(wire.verificationMaterial.tlogEntries[0].inclusionProof.hashes.length);
-    expect(b.tlogEntries[0]!.inclusionProof!.logIndex).toBe(BigInt(wire.verificationMaterial.tlogEntries[0].inclusionProof.logIndex));
-  });
-
-  it("keeps the DSSE key id and a public key hint", () => {
-    const b = parseBundle(
-      mutated(goldenBundle, (w) => {
-        w.dsseEnvelope.signatures[0].keyid = "key-1";
-        delete w.verificationMaterial.certificate;
-        w.verificationMaterial.publicKey = { hint: "hint-1" };
-      }),
-    );
-    expect(b.dsse.keyId).toBe("key-1");
-    expect(b.publicKeyHint).toBe("hint-1");
-    expect(b.certificate).toBeUndefined();
-  });
-
-  it("reads integer fields written as numbers and omits a zero integration time", () => {
-    const b = parseBundle(
-      mutated(goldenBundle, (w) => {
-        w.verificationMaterial.tlogEntries[0].integratedTime = 0;
-        w.verificationMaterial.tlogEntries[0].inclusionProof.treeSize = 7;
-      }),
-    );
-    expect(b.tlogEntries[0]!.integratedTime).toBeUndefined();
-    expect(b.tlogEntries[0]!.inclusionProof!.treeSize).toBe(7n);
-  });
-
-  it("rejects the legacy certificate-chain layout", () => {
-    const legacy = fixture("p3");
-    expect(() => parseBundle(bundleOf(legacy, "sigstore-code"))).toThrow(/legacy bundle format not supported/);
-  });
-
-  it("rejects an envelope with two signatures", () => {
-    expect(() => parseBundle(bundleOf(fixture("p4-two-sigs"), "sigstore-code"))).toThrow(/exactly one signature, got 2/);
-  });
-
-  it("rejects an envelope with no signature", () => {
-    expect(() => parseBundle(bundleOf(fixture("p4-zero-sigs"), "sigstore-code"))).toThrow(/exactly one signature, got 0/);
-  });
-
-  it.each<[string, (b: Record<string, any>) => void, RegExp]>([
-    ["the versioned media type", (w) => (w.mediaType = "application/vnd.dev.sigstore.bundle+json;version=0.3"), /media type/],
-    ["an older media type", (w) => (w.mediaType = "application/vnd.dev.sigstore.bundle.v0.2+json"), /media type/],
-    ["an unknown member", (w) => (w.extra = true), /unknown object member name "extra"/],
-    ["an unknown verification material member", (w) => (w.verificationMaterial.extra = true), /unknown object member name "extra"/],
-    ["a certificate chain beside the certificate", (w) => (w.verificationMaterial.x509CertificateChain = { certificates: [] }), /legacy bundle format/],
-    ["a certificate beside a key hint", (w) => (w.verificationMaterial.publicKey = { hint: "h" }), /exactly one of a certificate or a public key hint/],
-    ["neither certificate nor key hint", (w) => delete w.verificationMaterial.certificate, /exactly one of a certificate or a public key hint/],
-    ["an empty certificate", (w) => (w.verificationMaterial.certificate.rawBytes = ""), /certificate is empty/],
-    ["a certificate that is not canonical base64", (w) => (w.verificationMaterial.certificate.rawBytes = "AB"), /base64/],
-    ["a message signature", (w) => (w.messageSignature = { messageDigest: { algorithm: "SHA2_256", digest: "" }, signature: "" }), /message signature/],
-    ["a missing envelope", (w) => delete w.dsseEnvelope, /no DSSE envelope/],
-    ["a null envelope", (w) => (w.dsseEnvelope = null), /no DSSE envelope/],
-    ["an empty payload", (w) => (w.dsseEnvelope.payload = ""), /no payload/],
-    ["an empty payload type", (w) => (w.dsseEnvelope.payloadType = ""), /no payload type/],
-    ["an empty signature", (w) => (w.dsseEnvelope.signatures[0].sig = ""), /signature is empty/],
-    ["a null signature", (w) => (w.dsseEnvelope.signatures = [null]), /signature is null/],
-    ["an unknown signature member", (w) => (w.dsseEnvelope.signatures[0].extra = 1), /unknown object member name "extra"/],
-    ["a log id that is not 32 bytes", (w) => (w.verificationMaterial.tlogEntries[0].logId.keyId = "AQID"), /not 32 bytes/],
-    ["an entry without a kind", (w) => (w.verificationMaterial.tlogEntries[0].kindVersion.kind = ""), /no kind and version/],
-    ["an entry without a body", (w) => (w.verificationMaterial.tlogEntries[0].canonicalizedBody = ""), /no body/],
-    ["a null entry", (w) => (w.verificationMaterial.tlogEntries = [null]), /is null/],
-    ["a negative integration time", (w) => (w.verificationMaterial.tlogEntries[0].integratedTime = "-1"), /not a non-negative integer/],
-    ["a fractional integration time", (w) => (w.verificationMaterial.tlogEntries[0].integratedTime = 1.5), /not an integer/],
-    ["an integration time beyond int64", (w) => (w.verificationMaterial.tlogEntries[0].integratedTime = "9223372036854775808"), /overflows int64/],
-    ["an integration time of another type", (w) => (w.verificationMaterial.tlogEntries[0].integratedTime = true), /not an integer/],
-    ["an empty inclusion promise", (w) => (w.verificationMaterial.tlogEntries[0].inclusionPromise.signedEntryTimestamp = ""), /promise is empty/],
-    ["a proof without a checkpoint", (w) => (w.verificationMaterial.tlogEntries[0].inclusionProof.checkpoint = {}), /no checkpoint/],
-    ["a proof without a root hash", (w) => (w.verificationMaterial.tlogEntries[0].inclusionProof.rootHash = ""), /no root hash/],
-    ["an empty timestamp", (w) => (w.verificationMaterial.timestampVerificationData = { rfc3161Timestamps: [{ signedTimestamp: "" }] }), /timestamp is empty/],
-    ["a null document", (w) => Object.keys(w).forEach((k) => delete w[k]), /media type/],
-  ])("rejects %s", (_what, mutate, pattern) => {
-    expect(() => parseBundle(mutated(goldenBundle, mutate))).toThrow(pattern);
-  });
-
   it("rejects null", () => {
     expect(() => parseBundle(null)).toThrow(/bundle is null/);
   });
@@ -307,15 +235,137 @@ describe("bundle", () => {
     expect(() => parseBundle(huge)).toThrow(/exceeds/);
   });
 
-  it("serializes a bundle back to the value it was read from", () => {
-    const bytes = bundleBytes(toJson(goldenBundle));
-    expect(JSON.parse(new TextDecoder().decode(bytes))).toEqual(goldenBundle);
-    expect(bytes.length).toBeLessThanOrEqual(MAX_BUNDLE_SIZE);
+  describe.skipIf(withoutVectors)(vectorsTitle("decoding"), () => {
+    let goldenBundle: Record<string, any>;
+    beforeAll(() => {
+      loadShared();
+      goldenBundle = goldenCode.data.sigstore_bundle as Record<string, any>;
+    });
+
+    it("decodes a certificate-signed bundle", () => {
+      const b = parseBundle(toJson(goldenBundle));
+      expect(b.mediaType).toBe(BUNDLE_MEDIA_TYPE);
+      expect(b.certificate).toEqual(decode(goldenBundle.verificationMaterial.certificate.rawBytes));
+      expect(b.publicKeyHint).toBeUndefined();
+      expect(b.rfc3161Timestamps).toEqual([]);
+      expect(b.dsse.payloadType).toBe(IN_TOTO_PAYLOAD_TYPE);
+      expect(b.dsse.payload).toEqual(decode(goldenBundle.dsseEnvelope.payload));
+      expect(b.dsse.signature).toEqual(decode(goldenBundle.dsseEnvelope.signatures[0].sig));
+      expect(b.dsse.keyId).toBe("");
+      expect(b.tlogEntries).toHaveLength(1);
+      const wire = goldenBundle.verificationMaterial.tlogEntries[0];
+      const e = b.tlogEntries[0]!;
+      expect(e.logId).toBe(toHex(decode(wire.logId.keyId)));
+      expect(e.kind).toBe("dsse");
+      expect(e.version).toBe("0.0.1");
+      expect(e.integratedTime).toBe(BigInt(wire.integratedTime));
+      expect(e.canonicalizedBody).toEqual(decode(wire.canonicalizedBody));
+      expect(e.inclusionPromise).toEqual(decode(wire.inclusionPromise.signedEntryTimestamp));
+      expect(e.inclusionProof).toEqual({
+        logIndex: 0n,
+        rootHash: decode(wire.inclusionProof.rootHash),
+        treeSize: 1n,
+        hashes: [],
+        checkpoint: wire.inclusionProof.checkpoint.envelope,
+      });
+      expect(b.json).toBeInstanceOf(Map);
+    });
+
+    it("decodes a production bundle whose timestamp data is an empty record", () => {
+      const wire = realCode.data.sigstore_bundle as Record<string, any>;
+      expect(wire.verificationMaterial.timestampVerificationData).toEqual({});
+      const b = parseBundle(toJson(wire));
+      expect(b.rfc3161Timestamps).toEqual([]);
+      expect(b.tlogEntries[0]!.inclusionProof!.hashes).toHaveLength(wire.verificationMaterial.tlogEntries[0].inclusionProof.hashes.length);
+      expect(b.tlogEntries[0]!.inclusionProof!.logIndex).toBe(BigInt(wire.verificationMaterial.tlogEntries[0].inclusionProof.logIndex));
+    });
+
+    it("keeps the DSSE key id and a public key hint", () => {
+      const b = parseBundle(
+        mutated(goldenBundle, (w) => {
+          w.dsseEnvelope.signatures[0].keyid = "key-1";
+          delete w.verificationMaterial.certificate;
+          w.verificationMaterial.publicKey = { hint: "hint-1" };
+        }),
+      );
+      expect(b.dsse.keyId).toBe("key-1");
+      expect(b.publicKeyHint).toBe("hint-1");
+      expect(b.certificate).toBeUndefined();
+    });
+
+    it("reads integer fields written as numbers and omits a zero integration time", () => {
+      const b = parseBundle(
+        mutated(goldenBundle, (w) => {
+          w.verificationMaterial.tlogEntries[0].integratedTime = 0;
+          w.verificationMaterial.tlogEntries[0].inclusionProof.treeSize = 7;
+        }),
+      );
+      expect(b.tlogEntries[0]!.integratedTime).toBeUndefined();
+      expect(b.tlogEntries[0]!.inclusionProof!.treeSize).toBe(7n);
+    });
+
+    it("rejects the legacy certificate-chain layout", () => {
+      const legacy = fixture("p3");
+      expect(() => parseBundle(bundleOf(legacy, "sigstore-code"))).toThrow(/legacy bundle format not supported/);
+    });
+
+    it("rejects an envelope with two signatures", () => {
+      expect(() => parseBundle(bundleOf(fixture("p4-two-sigs"), "sigstore-code"))).toThrow(/exactly one signature, got 2/);
+    });
+
+    it("rejects an envelope with no signature", () => {
+      expect(() => parseBundle(bundleOf(fixture("p4-zero-sigs"), "sigstore-code"))).toThrow(/exactly one signature, got 0/);
+    });
+
+    it.each<[string, (b: Record<string, any>) => void, RegExp]>([
+      ["the versioned media type", (w) => (w.mediaType = "application/vnd.dev.sigstore.bundle+json;version=0.3"), /media type/],
+      ["an older media type", (w) => (w.mediaType = "application/vnd.dev.sigstore.bundle.v0.2+json"), /media type/],
+      ["an unknown member", (w) => (w.extra = true), /unknown object member name "extra"/],
+      ["an unknown verification material member", (w) => (w.verificationMaterial.extra = true), /unknown object member name "extra"/],
+      ["a certificate chain beside the certificate", (w) => (w.verificationMaterial.x509CertificateChain = { certificates: [] }), /legacy bundle format/],
+      ["a certificate beside a key hint", (w) => (w.verificationMaterial.publicKey = { hint: "h" }), /exactly one of a certificate or a public key hint/],
+      ["neither certificate nor key hint", (w) => delete w.verificationMaterial.certificate, /exactly one of a certificate or a public key hint/],
+      ["an empty certificate", (w) => (w.verificationMaterial.certificate.rawBytes = ""), /certificate is empty/],
+      ["a certificate that is not canonical base64", (w) => (w.verificationMaterial.certificate.rawBytes = "AB"), /base64/],
+      ["a message signature", (w) => (w.messageSignature = { messageDigest: { algorithm: "SHA2_256", digest: "" }, signature: "" }), /message signature/],
+      ["a missing envelope", (w) => delete w.dsseEnvelope, /no DSSE envelope/],
+      ["a null envelope", (w) => (w.dsseEnvelope = null), /no DSSE envelope/],
+      ["an empty payload", (w) => (w.dsseEnvelope.payload = ""), /no payload/],
+      ["an empty payload type", (w) => (w.dsseEnvelope.payloadType = ""), /no payload type/],
+      ["an empty signature", (w) => (w.dsseEnvelope.signatures[0].sig = ""), /signature is empty/],
+      ["a null signature", (w) => (w.dsseEnvelope.signatures = [null]), /signature is null/],
+      ["an unknown signature member", (w) => (w.dsseEnvelope.signatures[0].extra = 1), /unknown object member name "extra"/],
+      ["a log id that is not 32 bytes", (w) => (w.verificationMaterial.tlogEntries[0].logId.keyId = "AQID"), /not 32 bytes/],
+      ["an entry without a kind", (w) => (w.verificationMaterial.tlogEntries[0].kindVersion.kind = ""), /no kind and version/],
+      ["an entry without a body", (w) => (w.verificationMaterial.tlogEntries[0].canonicalizedBody = ""), /no body/],
+      ["a null entry", (w) => (w.verificationMaterial.tlogEntries = [null]), /is null/],
+      ["a negative integration time", (w) => (w.verificationMaterial.tlogEntries[0].integratedTime = "-1"), /not a non-negative integer/],
+      ["a fractional integration time", (w) => (w.verificationMaterial.tlogEntries[0].integratedTime = 1.5), /not an integer/],
+      ["an integration time beyond int64", (w) => (w.verificationMaterial.tlogEntries[0].integratedTime = "9223372036854775808"), /overflows int64/],
+      ["an integration time of another type", (w) => (w.verificationMaterial.tlogEntries[0].integratedTime = true), /not an integer/],
+      ["an empty inclusion promise", (w) => (w.verificationMaterial.tlogEntries[0].inclusionPromise.signedEntryTimestamp = ""), /promise is empty/],
+      ["a proof without a checkpoint", (w) => (w.verificationMaterial.tlogEntries[0].inclusionProof.checkpoint = {}), /no checkpoint/],
+      ["a proof without a root hash", (w) => (w.verificationMaterial.tlogEntries[0].inclusionProof.rootHash = ""), /no root hash/],
+      ["an empty timestamp", (w) => (w.verificationMaterial.timestampVerificationData = { rfc3161Timestamps: [{ signedTimestamp: "" }] }), /timestamp is empty/],
+      ["a null document", (w) => Object.keys(w).forEach((k) => delete w[k]), /media type/],
+    ])("rejects %s", (_what, mutate, pattern) => {
+      expect(() => parseBundle(mutated(goldenBundle, mutate))).toThrow(pattern);
+    });
+
+    it("serializes a bundle back to the value it was read from", () => {
+      const bytes = bundleBytes(toJson(goldenBundle));
+      expect(JSON.parse(new TextDecoder().decode(bytes))).toEqual(goldenBundle);
+      expect(bytes.length).toBeLessThanOrEqual(MAX_BUNDLE_SIZE);
+    });
   });
 });
 
-describe("verifyCertificateBundle", () => {
-  const goldenRoot = rootOf(golden);
+describe.skipIf(withoutVectors)(vectorsTitle("verifyCertificateBundle"), () => {
+  let goldenRoot: Promise<TrustedRoot>;
+  beforeAll(() => {
+    loadShared();
+    goldenRoot = rootOf(golden);
+  });
 
   it("verifies the code bundle of a synthetic release", async () => {
     const digest = goldenCode.data.digest!;

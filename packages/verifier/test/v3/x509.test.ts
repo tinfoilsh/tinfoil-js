@@ -3,13 +3,17 @@
  * signature verification, chain verification, and revocation lists.
  *
  * DER rules are exercised on hand-built bytes. Certificates and CRLs come
- * from the embedded AMD and Intel trust material, a captured production AMD
- * VCEK/ASK/ARK/CRL set, and the synthetic conformance sets whose verdict
- * depends only on this layer (CRL windows, revoked issuer, wrong root).
+ * from the embedded AMD and Intel trust material, a local RSA PKCS#1 test
+ * certificate, and the shared tinfoil-conformance vectors (see
+ * helpers/conformance.ts for where they are read from): the captured
+ * production AMD VCEK/ASK/ARK/CRL set of the real-frozen document, and the
+ * synthetic quote-sev and quote-tdx sets whose verdict depends only on this
+ * layer (CRL windows, revoked issuer, wrong root). The suites that need the
+ * vectors are skipped when the checkout is not available.
  */
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
-import { describe, expect, it } from "vitest";
+import { beforeAll, describe, expect, it } from "vitest";
 import {
   basicConstraints,
   extension,
@@ -36,6 +40,7 @@ import {
 import { AMD_GENOA_CERT_CHAIN_PEM } from "../../src/v3/trust/amd-genoa-chain.js";
 import { AMD_TURIN_CERT_CHAIN_PEM } from "../../src/v3/trust/amd-turin-chain.js";
 import { INTEL_SGX_ROOT_CA_PEM } from "../../src/v3/trust/intel-sgx-root.js";
+import { amdMaterial, conformanceAvailable, intelMaterial, loadFixture, vectorsTitle, type AmdMaterial, type IntelMaterial } from "./helpers/conformance.js";
 
 // ---------------------------------------------------------------- helpers
 
@@ -60,37 +65,35 @@ const seq = (...parts: Uint8Array[]): Uint8Array => tlv(0x30, ...parts);
 const int = (...bytes: number[]): Uint8Array => tlv(0x02, bytes);
 const utcTime = (s: string): Uint8Array => tlv(0x17, ascii(s));
 
-function fixture<T>(name: string): T {
-  return JSON.parse(readFileSync(new URL(`./fixtures/x509/${name}`, import.meta.url), "utf8")) as T;
-}
-
-interface AmdSet {
-  readonly verification_time_unix?: number;
-  readonly root_pem?: string;
-  readonly ask_pem?: string;
-  readonly vcek_der_base64: string;
-  readonly cert_chain_pem: string;
-  readonly crl_der_base64: string;
-}
-interface IntelSet {
-  readonly verification_time_unix?: number;
-  readonly root_pem: string;
-  readonly pck_chain_pem: string;
-  readonly pck_crl_der_base64: string;
-  readonly pck_crl_issuer_chain_pem: string;
-  readonly root_crl_der_base64: string;
-}
-
-const amdReal = fixture<AmdSet & { verification_time_unix: number }>("amd-real.json");
-const amdSynthetic = fixture<{ cases: Record<string, AmdSet> }>("amd-synthetic.json").cases;
-const intelSynthetic = fixture<{ cases: Record<string, IntelSet> }>("intel-synthetic.json").cases;
 const rsaPkcs1Pem = readFileSync(new URL("./fixtures/x509/rsa-pkcs1-selfsigned.pem", import.meta.url), "utf8");
+
+const withoutVectors = !conformanceAvailable();
+
+// The conformance material: the production set of the real-frozen document
+// and the synthetic quote-sev and quote-tdx sets, by vector name. They are
+// read in beforeAll of the suites that use them (not at import time) so a
+// missing checkout only skips those.
+const AMD_SYNTHETIC = ["sev-happy", "s26-revoked-ask", "struct-crl-expired", "struct-crl-not-yet-valid", "struct-crl-at-this-update", "struct-bad-chain", "s26-wrong-root"];
+const INTEL_SYNTHETIC = ["tdx-happy", "t24-crl-expired", "t24-crl-not-yet-valid", "t24-crl-at-this-update", "t25-wrong-root"];
+
+let amdReal: AmdMaterial & { verification_time_unix: number };
+let amdSynthetic: Record<string, AmdMaterial>;
+let intelSynthetic: Record<string, IntelMaterial>;
+
+function loadMaterial(): void {
+  if (amdReal !== undefined) return;
+  const real = amdMaterial(loadFixture("real-frozen/real-sev-inference-tinfoil.json"));
+  if (real.verification_time_unix === undefined) throw new Error("real-frozen vector states no verification time");
+  amdReal = { ...real, verification_time_unix: real.verification_time_unix };
+  amdSynthetic = Object.fromEntries(AMD_SYNTHETIC.map((name) => [name, amdMaterial(loadFixture(`quote-sev/${name}.json`))]));
+  intelSynthetic = Object.fromEntries(INTEL_SYNTHETIC.map((name) => [name, intelMaterial(loadFixture(`quote-tdx/${name}.json`))]));
+}
 
 const certs = (pem: string): Certificate[] => pemBlocks(pem, "CERTIFICATE").map(parseCertificate);
 const unix = (s: number): Date => new Date(s * 1000);
 
 /** The leaf, intermediate(s) and root of an AMD set, leaf first. */
-function amdChain(set: AmdSet): Certificate[] {
+function amdChain(set: AmdMaterial): Certificate[] {
   return [parseCertificate(b64(set.vcek_der_base64)), ...certs(set.cert_chain_pem)];
 }
 
@@ -388,12 +391,16 @@ describe("parseCertificate", () => {
     expect(new TextDecoder().decode(crlDp?.value)).toContain("https://kdsintf.amd.com/vcek/v1/Genoa/crl");
   });
 
-  it("reads a production VCEK with its AMD extensions", () => {
-    const [vcek] = amdChain(amdReal);
-    expect(vcek.subjectCommonName).toBe("SEV-VCEK");
-    expect(vcek.signatureAlgorithm).toBe("rsa-pss-sha384");
-    expect(extension(vcek, "1.3.6.1.4.1.3704.1.4")?.value.length).toBe(64);
-    expect(basicConstraints(vcek)).toBeUndefined();
+  describe.skipIf(withoutVectors)(vectorsTitle("production VCEK"), () => {
+    beforeAll(loadMaterial);
+
+    it("reads a production VCEK with its AMD extensions", () => {
+      const [vcek] = amdChain(amdReal);
+      expect(vcek.subjectCommonName).toBe("SEV-VCEK");
+      expect(vcek.signatureAlgorithm).toBe("rsa-pss-sha384");
+      expect(extension(vcek, "1.3.6.1.4.1.3704.1.4")?.value.length).toBe(64);
+      expect(basicConstraints(vcek)).toBeUndefined();
+    });
   });
 
   it("reads an RSA PKCS#1 v1.5 SHA-256 certificate", () => {
@@ -457,19 +464,23 @@ describe("parseCertificate", () => {
 // ---------------------------------------------------------------- verifyCertificateSignature
 
 describe("verifyCertificateSignature", () => {
-  it("verifies RSA-PSS SHA-384 signatures in the AMD chains", async () => {
-    await expect(verifyCertificateSignature(genoaArk, genoaArk.spki)).resolves.toBe(true);
-    await expect(verifyCertificateSignature(genoaAsk, genoaArk.spki)).resolves.toBe(true);
-    await expect(verifyCertificateSignature(turinAsk, turinArk.spki)).resolves.toBe(true);
-    const [vcek, ask] = amdChain(amdReal);
-    await expect(verifyCertificateSignature(vcek, ask.spki)).resolves.toBe(true);
-  });
+  describe.skipIf(withoutVectors)(vectorsTitle("conformance chains"), () => {
+    beforeAll(loadMaterial);
 
-  it("verifies ECDSA P-256 signatures", async () => {
-    await expect(verifyCertificateSignature(intelRoot, intelRoot.spki)).resolves.toBe(true);
-    const [pck, platformCa, root] = certs(intelSynthetic["tdx-happy"].pck_chain_pem);
-    await expect(verifyCertificateSignature(pck, platformCa.spki)).resolves.toBe(true);
-    await expect(verifyCertificateSignature(platformCa, root.spki)).resolves.toBe(true);
+    it("verifies RSA-PSS SHA-384 signatures in the AMD chains", async () => {
+      await expect(verifyCertificateSignature(genoaArk, genoaArk.spki)).resolves.toBe(true);
+      await expect(verifyCertificateSignature(genoaAsk, genoaArk.spki)).resolves.toBe(true);
+      await expect(verifyCertificateSignature(turinAsk, turinArk.spki)).resolves.toBe(true);
+      const [vcek, ask] = amdChain(amdReal);
+      await expect(verifyCertificateSignature(vcek, ask.spki)).resolves.toBe(true);
+    });
+
+    it("verifies ECDSA P-256 signatures", async () => {
+      await expect(verifyCertificateSignature(intelRoot, intelRoot.spki)).resolves.toBe(true);
+      const [pck, platformCa, root] = certs(intelSynthetic["tdx-happy"].pck_chain_pem);
+      await expect(verifyCertificateSignature(pck, platformCa.spki)).resolves.toBe(true);
+      await expect(verifyCertificateSignature(platformCa, root.spki)).resolves.toBe(true);
+    });
   });
 
   it("verifies RSA PKCS#1 v1.5 SHA-256 signatures", async () => {
@@ -521,8 +532,12 @@ describe("verifyCertificateSignature", () => {
 
 // ---------------------------------------------------------------- verifyChain
 
-describe("verifyChain", () => {
-  const realAt = unix(amdReal.verification_time_unix);
+describe.skipIf(withoutVectors)(vectorsTitle("verifyChain"), () => {
+  let realAt: Date;
+  beforeAll(() => {
+    loadMaterial();
+    realAt = unix(amdReal.verification_time_unix);
+  });
 
   it("accepts the production VCEK → ASK → ARK chain at the capture time", async () => {
     const chain = amdChain(amdReal);
@@ -634,36 +649,42 @@ describe("spkiFingerprint", () => {
 // ---------------------------------------------------------------- revocation lists
 
 describe("parseRevocationList", () => {
-  const crl = parseRevocationList(b64(amdReal.crl_der_base64));
+  describe.skipIf(withoutVectors)(vectorsTitle("conformance CRLs"), () => {
+    let crl: ReturnType<typeof parseRevocationList>;
+    beforeAll(() => {
+      loadMaterial();
+      crl = parseRevocationList(b64(amdReal.crl_der_base64));
+    });
 
-  it("reads the production AMD CRL", () => {
-    expect(crl.issuer).toEqual(genoaArk.subject);
-    expect(crl.signatureAlgorithm).toBe("rsa-pss-sha384");
-    expect(crl.signature.length).toBe(512);
-    expect(crl.thisUpdate.toISOString()).toBe("2026-07-28T04:07:23.000Z");
-    expect(crl.nextUpdate.toISOString()).toBe("2026-09-09T00:00:00.000Z");
-    expect(crl.revokedSerials).toEqual([0x020001n]);
-    expect(crl.tbs[0]).toBe(0x30);
-    expect(crl.raw.length).toBeGreaterThan(crl.tbs.length);
-  });
+    it("reads the production AMD CRL", () => {
+      expect(crl.issuer).toEqual(genoaArk.subject);
+      expect(crl.signatureAlgorithm).toBe("rsa-pss-sha384");
+      expect(crl.signature.length).toBe(512);
+      expect(crl.thisUpdate.toISOString()).toBe("2026-07-28T04:07:23.000Z");
+      expect(crl.nextUpdate.toISOString()).toBe("2026-09-09T00:00:00.000Z");
+      expect(crl.revokedSerials).toEqual([0x020001n]);
+      expect(crl.tbs[0]).toBe(0x30);
+      expect(crl.raw.length).toBeGreaterThan(crl.tbs.length);
+    });
 
-  it("reads ECDSA CRLs from the Intel collateral", () => {
-    const set = intelSynthetic["tdx-happy"];
-    const pckCrl = parseRevocationList(b64(set.pck_crl_der_base64));
-    const [platformCa] = certs(set.pck_crl_issuer_chain_pem);
-    expect(pckCrl.signatureAlgorithm).toBe("ecdsa-p256-sha256");
-    expect(pckCrl.issuer).toEqual(platformCa.subject);
-    expect(pckCrl.revokedSerials).toEqual([]);
-    const rootCrl = parseRevocationList(b64(set.root_crl_der_base64));
-    expect(rootCrl.issuer).toEqual(certs(set.root_pem)[0].subject);
-  });
+    it("reads ECDSA CRLs from the Intel collateral", () => {
+      const set = intelSynthetic["tdx-happy"];
+      const pckCrl = parseRevocationList(b64(set.pck_crl_der_base64));
+      const [platformCa] = certs(set.pck_crl_issuer_chain_pem);
+      expect(pckCrl.signatureAlgorithm).toBe("ecdsa-p256-sha256");
+      expect(pckCrl.issuer).toEqual(platformCa.subject);
+      expect(pckCrl.revokedSerials).toEqual([]);
+      const rootCrl = parseRevocationList(b64(set.root_crl_der_base64));
+      expect(rootCrl.issuer).toEqual(certs(set.root_pem)[0].subject);
+    });
 
-  it("rejects trailing bytes, truncation and non-CRLs", () => {
-    const raw = crl.raw;
-    expect(() => parseRevocationList(new Uint8Array([...raw, 0]))).toThrow(X509Error);
-    expect(() => parseRevocationList(raw.subarray(0, raw.length - 1))).toThrow(X509Error);
-    expect(() => parseRevocationList(genoaArk.raw)).toThrow(X509Error);
-    expect(() => parseRevocationList(int(1))).toThrow(/SEQUENCE/);
+    it("rejects trailing bytes, truncation and non-CRLs", () => {
+      const raw = crl.raw;
+      expect(() => parseRevocationList(new Uint8Array([...raw, 0]))).toThrow(X509Error);
+      expect(() => parseRevocationList(raw.subarray(0, raw.length - 1))).toThrow(X509Error);
+      expect(() => parseRevocationList(genoaArk.raw)).toThrow(X509Error);
+      expect(() => parseRevocationList(int(1))).toThrow(/SEQUENCE/);
+    });
   });
 
   it("rejects a CRL without nextUpdate", () => {
@@ -681,9 +702,14 @@ describe("parseRevocationList", () => {
   });
 });
 
-describe("verifyRevocationList", () => {
-  const crl = parseRevocationList(b64(amdReal.crl_der_base64));
-  const realAt = unix(amdReal.verification_time_unix);
+describe.skipIf(withoutVectors)(vectorsTitle("verifyRevocationList"), () => {
+  let crl: ReturnType<typeof parseRevocationList>;
+  let realAt: Date;
+  beforeAll(() => {
+    loadMaterial();
+    crl = parseRevocationList(b64(amdReal.crl_der_base64));
+    realAt = unix(amdReal.verification_time_unix);
+  });
 
   it("accepts the production CRL under the ARK inside its window", async () => {
     await expect(verifyRevocationList(crl, genoaArk, realAt)).resolves.toBeUndefined();
@@ -732,8 +758,8 @@ describe("verifyRevocationList", () => {
   });
 
   it("matches the conformance CRL-window verdicts for AMD", async () => {
-    const at = (set: AmdSet): Date => (set.verification_time_unix !== undefined ? unix(set.verification_time_unix) : new Date());
-    const run = (set: AmdSet): Promise<void> => {
+    const at = (set: AmdMaterial): Date => (set.verification_time_unix !== undefined ? unix(set.verification_time_unix) : new Date());
+    const run = (set: AmdMaterial): Promise<void> => {
       const [, , ark] = amdChain(set);
       return verifyRevocationList(parseRevocationList(b64(set.crl_der_base64)), ark, at(set));
     };
@@ -745,8 +771,8 @@ describe("verifyRevocationList", () => {
   });
 
   it("matches the conformance CRL-window verdicts for Intel", async () => {
-    const at = (set: IntelSet): Date => (set.verification_time_unix !== undefined ? unix(set.verification_time_unix) : new Date());
-    const run = (set: IntelSet): Promise<void> => {
+    const at = (set: IntelMaterial): Date => (set.verification_time_unix !== undefined ? unix(set.verification_time_unix) : new Date());
+    const run = (set: IntelMaterial): Promise<void> => {
       const [platformCa] = certs(set.pck_crl_issuer_chain_pem);
       return verifyRevocationList(parseRevocationList(b64(set.pck_crl_der_base64)), platformCa, at(set));
     };
@@ -756,7 +782,9 @@ describe("verifyRevocationList", () => {
   });
 });
 
-describe("isRevoked", () => {
+describe.skipIf(withoutVectors)(vectorsTitle("isRevoked"), () => {
+  beforeAll(loadMaterial);
+
   it("matches serials exactly", () => {
     const crl = parseRevocationList(b64(amdReal.crl_der_base64));
     expect(isRevoked(crl, 0x020001n)).toBe(true);

@@ -38,6 +38,7 @@ import {
   verifyTimestamp,
 } from "../../src/v3/internal/sigstore/timestamp.js";
 import { embeddedTrustedRoot, parseTrustedRoot, TRUSTED_ROOT_MEDIA_TYPE, type TrustedRoot } from "../../src/v3/internal/sigstore/trusted-root.js";
+import { conformanceAvailable, decodeDocument, loadFixture, sigstoreCollateral, vectorsTitle } from "./helpers/conformance.js";
 import { PUBLIC_SIGNING_KEY_PEM } from "../../src/v3/trust/signing-keys.js";
 
 // ---------------------------------------------------------------- helpers
@@ -534,9 +535,9 @@ describe("verifyKeyedBundle", () => {
     await expect(verify(root, built.json, keys, built.digest)).rejects.toThrow("is not hex");
   });
 
-  it("rejects a certificate-signed bundle", async () => {
-    const fixture = JSON.parse(readFileSync(new URL("./fixtures/sigstore/golden-happy.json", import.meta.url), "utf8"));
-    const bundle = fixture.collateral.find((c: any) => c.id === "sigstore-code").data.sigstore_bundle;
+  it.skipIf(!conformanceAvailable())(vectorsTitle("rejects a certificate-signed bundle"), async () => {
+    const golden = decodeDocument(loadFixture("golden/golden-happy.json"));
+    const bundle = sigstoreCollateral(golden).find((c) => c.id === "sigstore-code")!.data.sigstore_bundle;
     await expect(verify(root, bundle, keys, happy.digest)).rejects.toThrow("not a certificate");
   });
 
