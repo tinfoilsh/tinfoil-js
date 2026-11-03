@@ -334,8 +334,10 @@ function checkedRaw(raw: string): string {
 }
 
 /**
- * RFC 8785 number canonicalization: parse as float64, map ±0 to 0 and ±Inf
- * (overflow) to ±MAX_VALUE, then format as ES6 Number::toString.
+ * Number canonicalization: parse as float64, map ±0 to 0, then format as ES6
+ * Number::toString (the RFC 8785 form). A literal that overflows float64 is
+ * written as ±MAX_VALUE rather than rejected, so any number literal strict
+ * parsing accepted can be canonicalized.
  */
 function canonicalNumber(raw: string): string {
   let f = parseNumber(raw);

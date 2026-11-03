@@ -211,9 +211,8 @@ describe("document parsing", () => {
     const doc = docWith({ deviceEvidence: [{ id: "gpu", kind: "", vendor: "", format: "", evidence }] });
     const items = doc.deviceEvidenceItems();
     (items[0] as { id: string }).id = "changed";
-    // The parsed evidence is shared as a ReadonlyMap by design (see Document's
-    // doc comment), so mutating it is not expressible without casting away
-    // readonly.
+    // The evidence value is typed read-only; the deep-copy test below covers
+    // mutation through a cast.
     const again = doc.deviceEvidenceItems();
     expect(again[0]!.id).toBe("gpu");
     expect(bundleMember(again[0]!.evidence, "nonce")).toBe("original");

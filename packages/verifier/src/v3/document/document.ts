@@ -50,8 +50,9 @@ export const NONCE_SIZE = 32;
 
 /**
  * A mistake in the caller's input to {@link parse} (a nonce of the wrong
- * length), as opposed to a document that fails to parse. The verifier reports
- * it as a UsageError.
+ * length), as opposed to a document that fails to parse. Callers that
+ * classify failures can treat it as a caller error rather than a rejected
+ * document.
  */
 export class InvalidInputError extends Error {
   constructor(message: string) {
