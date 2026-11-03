@@ -9,7 +9,7 @@
  * by calling the internal document, endorsement and quote modules directly.
  *
  * Test roots and the appraisal clock are per-call arguments; the adapter
- * mutates no production state. Mirrors tinfoil-go verify/conformance.
+ * mutates no production state.
  */
 import * as document from "../src/v3/document/document.js";
 import { NotImplementedError, UsageError, VerificationError } from "../src/v3/errors.js";
@@ -135,9 +135,10 @@ async function runStage(stage: string, raw: unknown): Promise<Result> {
   const roots = rootsOf(in_);
   if (roots === undefined) return malformed(stage);
 
-  // TODO(v3): tinfoil-go builds the provenance client before dispatch, so a
-  // bad sigstore root is MALFORMED_INPUT on every stage. It's lazy here until
-  // ProvenanceClient is implemented, so the envelope stage isn't blocked on it.
+  // TODO(v3): a bad sigstore root should be MALFORMED_INPUT on every stage,
+  // which means building the provenance client before dispatch. It's lazy
+  // here until ProvenanceClient is implemented, so the envelope stage isn't
+  // blocked on it.
   const provClient = async () => {
     try {
       return roots.sigstore ? await endorsement.ProvenanceClient.fromJSON(roots.sigstore) : await endorsement.ProvenanceClient.default();
@@ -316,7 +317,7 @@ function malformed(stage: string): Result {
   return { output: { stage, accepted: false, rejection: { code: "MALFORMED_INPUT" } }, exitCode: ExitCode.Malformed };
 }
 
-// --- input decoding (matches Go encoding/json + encoding/base64 + encoding/hex) ---
+// --- input decoding ---
 
 const STRING_FIELDS = [
   "schema_version",
@@ -330,9 +331,9 @@ const STRING_FIELDS = [
 ] as const;
 
 /**
- * Validates the parsed stdin value against the Input shape. Like Go's
- * json.Unmarshal into a struct: unknown members are ignored, absent members
- * take their zero value, and a member of the wrong type is malformed.
+ * Validates the parsed stdin value against the Input shape: unknown members
+ * are ignored, absent or null members take their zero value ("" or 0), and a
+ * member of the wrong type is malformed.
  */
 function decodeInput(raw: unknown): Input | undefined {
   if (typeof raw !== "object" || raw === null || Array.isArray(raw)) return undefined;
@@ -359,7 +360,7 @@ function decodeInput(raw: unknown): Input | undefined {
   return out as unknown as Input;
 }
 
-/** Go base64.StdEncoding: padded standard alphabet; CR and LF are ignored. */
+/** Standard base64: the +/ alphabet, padded to a multiple of 4; CR and LF are ignored. */
 export function decodeBase64Std(s: string): Uint8Array | undefined {
   const clean = s.replace(/[\r\n]/g, "");
   if (clean.length % 4 !== 0 || !/^[A-Za-z0-9+/]*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(clean)) {
@@ -368,7 +369,7 @@ export function decodeBase64Std(s: string): Uint8Array | undefined {
   return new Uint8Array(Buffer.from(clean, "base64"));
 }
 
-/** Go hex.DecodeString: even length, either case. */
+/** Hex of even length, either case. */
 export function decodeHex(s: string): Uint8Array | undefined {
   if (s.length % 2 !== 0 || !/^[0-9a-fA-F]*$/.test(s)) return undefined;
   return new Uint8Array(Buffer.from(s, "hex"));

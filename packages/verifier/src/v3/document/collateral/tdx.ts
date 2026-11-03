@@ -33,7 +33,7 @@ export function decodeIntelPcs(entry: Entry): IntelPcs {
   return { responses };
 }
 
-/** Go map[string][]string: null/absent → undefined; each value a string array (null → empty). */
+/** Headers as name → string array: null/absent → undefined; each value a string array (null → empty). */
 function headersOf(v: JsonValue | undefined): ReadonlyMap<string, readonly string[]> | undefined {
   if (v === undefined || v === null) return undefined;
   if (!(v instanceof Map)) throw new JsonError("headers must be an object");

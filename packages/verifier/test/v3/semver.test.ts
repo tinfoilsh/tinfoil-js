@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { build, canonical, isValid } from "../../src/v3/internal/semver.js";
 
-// [version, IsValid, Canonical, Build], confirmed against golang.org/x/mod v0.41.0 semver.
+// [version, isValid, canonical, build].
 const cases: [string, boolean, string, string][] = [
   ["v1", true, "v1.0.0", ""],
   ["v1.2", true, "v1.2.0", ""],

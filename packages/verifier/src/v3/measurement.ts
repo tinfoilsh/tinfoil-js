@@ -120,12 +120,12 @@ export function parseExpectedTdx(mrtd: string, rtmr0: string, rtmr1: string, rtm
   return { platform: "tdx", mrtd: m, rtmr0: r0, rtmr1: r1, rtmr2: r2, rtmr3: r3 };
 }
 
-/** Expectations that pin every register of `m` (Go Measurement.Expected). */
+/** Expectations that pin every register of `m`. */
 export function expectedOf(m: Measurement): Expected {
   return cloneMeasurement(m);
 }
 
-/** Human-readable form, matching Go's String() layout: one labeled register per line, "any" if unset. */
+/** Human-readable form: the platform name, then one labeled register per line, "any" if unset. */
 export function formatMeasurement(m: Measurement | Expected): string {
   const [platform, labels, registers]: [string, readonly string[], (Register | undefined)[]] =
     m.platform === "sev-snp"

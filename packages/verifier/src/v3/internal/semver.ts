@@ -1,4 +1,8 @@
-/** The subset of golang.org/x/mod/semver the verifier uses. Versions carry a leading "v". */
+/**
+ * Semantic versions with a leading "v": vMAJOR.MINOR.PATCH, optionally
+ * followed by "-prerelease" and "+build" metadata. MINOR and PATCH may be
+ * omitted ("v1", "v1.2") and canonicalize to 0.
+ */
 
 interface Parsed {
   /** ".0.0" or ".0" when MINOR or PATCH was omitted ("v1", "v1.2"). */
@@ -25,8 +29,8 @@ export function build(v: string): string {
   return parse(v)?.build ?? "";
 }
 
-// A direct port of semver.go's parse. Every accepted character is ASCII, so
-// indexing UTF-16 code units is equivalent to Go's byte indexing.
+// Every accepted character is ASCII, so indexing UTF-16 code units is byte
+// indexing.
 function parse(v: string): Parsed | undefined {
   if (v === "" || v[0] !== "v") return undefined;
   let r = parseNum(v.slice(1));
