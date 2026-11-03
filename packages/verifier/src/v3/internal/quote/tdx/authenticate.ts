@@ -65,7 +65,8 @@ export interface TdxQuote {
   /** PPID, lowercase hex. */
   readonly identity: string;
   readonly measurement: TdxMeasurement;
-  readonly tcbEvaluationDataNumber: number;
+  /** The lower of the TCB info's and QE identity's evaluation numbers used. */
+  readonly tcbEvaluationDataNumber: bigint;
   readonly quote: ParsedQuote;
 }
 

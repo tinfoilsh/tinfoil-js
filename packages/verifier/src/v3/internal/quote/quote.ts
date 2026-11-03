@@ -50,8 +50,8 @@ export interface ResolvedValues {
   readonly code: Expected;
   /** Every register, after pins fill what the reference leaves open. */
   readonly expected: Expected;
-  /** SEV-SNP HOST_DATA, lowercase hex. */
-  readonly hostData: string;
+  /** The 32-byte SEV-SNP HOST_DATA expectation, carried into the assembled expectations. */
+  readonly hostData: Uint8Array;
   /** TDX MRCONFIGID. */
   readonly configId: Uint8Array;
 }

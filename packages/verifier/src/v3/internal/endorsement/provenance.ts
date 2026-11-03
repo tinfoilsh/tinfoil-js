@@ -52,10 +52,12 @@ export class ProvenanceClient {
   }
 
   /**
-   * Verifies the platform-endorsements artifact: a bundle signed by the
-   * platform-release workflow of the platform repository, whose predicate
-   * type and artifact format both equal `format`. The artifact is parsed
-   * from the signed payload bytes.
+   * Verifies the platform-endorsements artifact: `repo` must equal
+   * PLATFORM_ENDORSEMENTS_REPO (a document naming any other repository is
+   * rejected before any verification), the bundle must be signed by that
+   * repository's platform-release workflow at a platform tag, and the
+   * predicate type and artifact format must both equal `format`. The
+   * artifact is parsed from the signed payload bytes.
    */
   async authenticatePlatformEndorsements(bundle: JsonValue, repo: string, tag: string, hexDigest: string, format: string): Promise<PlatformEndorsements> {
     return notImplemented("ProvenanceClient.authenticatePlatformEndorsements");

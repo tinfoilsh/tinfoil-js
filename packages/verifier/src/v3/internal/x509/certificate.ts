@@ -47,8 +47,9 @@ export function extension(cert: Certificate, oid: string): Extension | undefined
 
 /**
  * Verifies a chain leaf → … → root: each signature with the next
- * certificate's key, issuer/subject names matching byte for byte, and every
- * certificate valid at `at`. The root must be one of `roots`.
+ * certificate's key, issuer/subject names matching byte for byte, every
+ * certificate valid at `at`, and every issuing certificate (intermediates and
+ * the root) asserting basicConstraints cA. The root must be one of `roots`.
  */
 export async function verifyChain(chain: readonly Certificate[], roots: readonly Certificate[], at: Date): Promise<void> {
   return notImplemented("x509.verifyChain");

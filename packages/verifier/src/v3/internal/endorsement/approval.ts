@@ -15,6 +15,7 @@ export const MAX_CONFIG_SIZE = 1 << 20;
 
 export const KIND_PLATFORM = "platform";
 export const KIND_RUNTIME = "runtime";
+export type ArtifactKind = typeof KIND_PLATFORM | typeof KIND_RUNTIME;
 export const PLATFORM_ARTIFACT_NAME = "platform-endorsements.json";
 
 /** Tinfoil's embedded public signing keys. */
@@ -70,7 +71,7 @@ export class ConfigVerifier {
 
 /** Exact release bytes an artifact-freshness approval covers. */
 export interface FreshnessArtifact {
-  readonly kind: string;
+  readonly kind: ArtifactKind;
   readonly repo: string;
   readonly tag: string;
   readonly name: string;

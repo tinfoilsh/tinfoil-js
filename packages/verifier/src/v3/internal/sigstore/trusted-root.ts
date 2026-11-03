@@ -36,6 +36,6 @@ export async function parseTrustedRoot(json: Uint8Array): Promise<TrustedRoot> {
 }
 
 /** The embedded production trusted root. */
-export function embeddedTrustedRoot(): Promise<TrustedRoot> {
+export async function embeddedTrustedRoot(): Promise<TrustedRoot> {
   return notImplemented("sigstore.embeddedTrustedRoot");
 }

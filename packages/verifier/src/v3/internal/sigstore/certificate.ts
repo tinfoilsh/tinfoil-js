@@ -49,7 +49,11 @@ export async function verifyCertificateBundle(
   return notImplemented("sigstore.verifyCertificateBundle");
 }
 
-/** Builds the anchored SAN pattern for a workflow file and ref pattern in `repo`. */
+/**
+ * Builds the anchored SAN pattern `^https://github\.com/<repo>/\.github/workflows/<workflow>@<ref>$`.
+ * `repo` is a literal and is escaped; `workflowPattern` and `refPattern` are
+ * regular-expression fragments and are inserted as written.
+ */
 export function workflowIdentityPattern(repo: string, workflowPattern: string, refPattern: string): RegExp {
   return notImplemented("sigstore.workflowIdentityPattern");
 }

@@ -98,13 +98,16 @@ export interface SevExpectations {
   readonly launch: Register;
   readonly reportData: Uint8Array;
   readonly chipId: Uint8Array;
+  /** The 32-byte HOST_DATA the report must carry: the policy's, or for a config-pinned runtime the config hash. */
+  readonly hostData: Uint8Array;
 }
 
 /**
  * Builds expectations from a policy: Genoa policies must omit fmc_spl and
  * iommu_write_safe, Turin policies must set both; versions parse as maj.min.
+ * `hostData` is the resolved expectation, since a v2 policy declares none.
  */
-export function assembleSev(policy: SevSnpPolicy, q: SevQuote, launch: Register, reportData: Uint8Array): SevExpectations {
+export function assembleSev(policy: SevSnpPolicy, q: SevQuote, launch: Register, reportData: Uint8Array, hostData: Uint8Array): SevExpectations {
   return notImplemented("sev.assembleSev");
 }
 

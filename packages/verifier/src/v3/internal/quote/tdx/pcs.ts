@@ -18,7 +18,7 @@ export function indexCollateral(responses: readonly PcsResponse[]): PcsCollatera
 export interface TcbInfo {
   readonly issueDate: Date;
   readonly nextUpdate: Date;
-  readonly tcbEvaluationDataNumber: number;
+  readonly tcbEvaluationDataNumber: bigint;
   readonly fmspc: string;
   readonly tcbLevels: readonly TcbLevel[];
   readonly raw: Uint8Array;
@@ -34,7 +34,7 @@ export interface TcbLevel {
 export interface QeIdentity {
   readonly issueDate: Date;
   readonly nextUpdate: Date;
-  readonly tcbEvaluationDataNumber: number;
+  readonly tcbEvaluationDataNumber: bigint;
   readonly mrSigner: Uint8Array;
   readonly isvProdId: number;
   readonly attributes: Uint8Array;
