@@ -1,8 +1,8 @@
 /**
- * Port of tinfoil-go verify/document/{document,collateral,collateral_accessors,
- * config,attested_keys}_test.go. Test titles are the Go test (and subtest)
- * names. builder_test.go's Build-specific assertions are not ported; the
- * builder in helpers/builder.ts only makes fixtures.
+ * Tests for the v3 attestation document: parsing and REPORT_DATA binding,
+ * collateral format handling, collateral accessors, config and runtime
+ * accessors, and the attested-keys envelope vectors. The builder in
+ * helpers/builder.ts only makes fixtures; it is not itself under test.
  */
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
@@ -70,8 +70,8 @@ function testNonce(): Uint8Array {
 }
 
 /**
- * Go buildTestDocument: a well-formed document around a dummy 1184-byte SEV
- * report, with tls and hpke keys, no devices, and one vcek entry.
+ * A well-formed document around a dummy 1184-byte SEV report, with tls and
+ * hpke keys, no devices, and one vcek entry.
  */
 async function buildTestDocument(nonce: Uint8Array): Promise<{ raw: RawDocument; bytes: Uint8Array }> {
   return buildDocument(
@@ -101,7 +101,7 @@ function decodeWire(entries: WireEntry[]): CollateralSet {
   return decodeCollateralSet(decodeEntries(strictParse(enc(marshalEntries(entries)))));
 }
 
-/** A Document from decoded fields, as Go tests build &Document{...} directly. Unbound: no REPORT_DATA. */
+/** A Document constructed from decoded fields, bypassing parse. Unbound: no REPORT_DATA. */
 function docWith(fields: Partial<DecodedDocument>): Document {
   return new Document({
     challenge: { nonce: "", reportData: "" },
@@ -117,14 +117,14 @@ function docWith(fields: Partial<DecodedDocument>): Document {
   });
 }
 
-/** Go documentWithCollateral: decodes entries as parse does, for CPU evidence of the given format. */
+/** Decodes entries as parse does, into a Document whose CPU evidence has the given format. */
 function documentWithCollateral(evidenceFormat: string, entries: WireEntry[]): Document {
   return docWith({ cpuEvidence: { format: evidenceFormat, report: new Uint8Array() }, collateral: decodeWire(entries) });
 }
 
 /**
- * Go mutateSection: decodes the endorsed section field, applies mutate to its
- * text, re-encodes it without updating the endorsed hashes.
+ * Decodes the endorsed section field, applies mutate to its text, and
+ * re-encodes it without updating the endorsed hashes.
  */
 function mutateSection(docBytes: Uint8Array, field: string, mutate: (section: string) => string): Uint8Array {
   const loose = JSON.parse(dec(docBytes)) as Record<string, unknown>;
@@ -160,10 +160,10 @@ function thrown(f: () => unknown): Error {
 
 const bundleMember = (v: unknown, key: string): unknown => (v as JsonObject).get(key);
 
-// ---------------------------------------------------------------- document_test.go
+// ---------------------------------------------------------------- document parsing
 
-describe("document_test.go", () => {
-  it("TestBuildAndVerify", async () => {
+describe("document parsing", () => {
+  it("a built document parses, binds REPORT_DATA and returns copies of its items", async () => {
     const nonce = testNonce();
     const { raw: built, bytes } = await buildTestDocument(nonce);
 
@@ -187,40 +187,39 @@ describe("document_test.go", () => {
     expect(doc.deviceEvidenceItems()).toEqual([]);
   });
 
-  it("TestExpectedReportDataRequiresParse", async () => {
-    // Go checks a nil and a zero-value Document; TS has neither, so check an
-    // unbound decode and a Document built from fields.
+  it("expectedReportData is undefined unless the document was parsed", async () => {
+    // Both an unbound decode and a Document built from fields are unbound.
     const { bytes } = await buildTestDocument(testNonce());
     for (const doc of [await dangerousTestOnlyDecode(bytes), docWith({})]) {
       expect(doc.expectedReportData()).toBeUndefined();
     }
   });
 
-  // CpuEvidence is a plain interface in TS with no Clone method; copying is
-  // covered by TestCPUEvidenceReturnsCopies.
-  it.skip("TestCPUEvidenceClone (no CPUEvidence.Clone in TS)", () => {});
+  // CpuEvidence is a plain interface in TS with no clone method; copying is
+  // covered by the next test.
+  it.skip("cpu evidence clone (no clone method in TS)", () => {});
 
-  it("TestCPUEvidenceReturnsCopies", () => {
+  it("cpuEvidence returns a copy", () => {
     const doc = docWith({ cpuEvidence: { format: SEV_SNP_REPORT_V1_FORMAT, report: enc("report") } });
     const evidence = doc.cpuEvidence();
     evidence.report[0] = "!".charCodeAt(0);
     expect(doc.cpuEvidence().report).toEqual(enc("report"));
   });
 
-  it("TestDeviceEvidenceItemsReturnsCopies", () => {
+  it("deviceEvidenceItems returns copies", () => {
     const evidence = strictParse(enc(`{"nonce":"original"}`));
     const doc = docWith({ deviceEvidence: [{ id: "gpu", kind: "", vendor: "", format: "", evidence }] });
     const items = doc.deviceEvidenceItems();
     (items[0] as { id: string }).id = "changed";
-    // Go also mutates the evidence bytes. TS shares the parsed evidence as a
-    // ReadonlyMap by design (see Document's doc comment), so that half is not
-    // expressible without casting away readonly.
+    // The parsed evidence is shared as a ReadonlyMap by design (see Document's
+    // doc comment), so mutating it is not expressible without casting away
+    // readonly.
     const again = doc.deviceEvidenceItems();
     expect(again[0]!.id).toBe("gpu");
     expect(bundleMember(again[0]!.evidence, "nonce")).toBe("original");
   });
 
-  it("TestVerifyNonceMismatch", async () => {
+  it("rejects a nonce that does not match the challenge", async () => {
     const nonce = testNonce();
     const { bytes } = await buildTestDocument(nonce);
     const other = testNonce();
@@ -228,7 +227,7 @@ describe("document_test.go", () => {
     await expect(parse(bytes, other)).rejects.toThrow("challenge nonce does not match the expected nonce");
   });
 
-  it("TestParseRejectsWrongNonceLength", async () => {
+  it("a nonce of the wrong length is an InvalidInputError", async () => {
     const nonce = testNonce();
     const { bytes } = await buildTestDocument(nonce);
     const longer = new Uint8Array(NONCE_SIZE + 1);
@@ -238,7 +237,7 @@ describe("document_test.go", () => {
     }
   });
 
-  it("TestVerifyTamperedDeviceEvidence", async () => {
+  it("rejects tampered device_evidence", async () => {
     const nonce = testNonce();
     const { bytes } = await buildTestDocument(nonce);
     const tampered = mutateSection(bytes, "device_evidence", (s) => s.replace(`{"format"`, `{ "format"`));
@@ -246,7 +245,7 @@ describe("document_test.go", () => {
     await expect(parse(tampered, nonce)).rejects.toThrow("device_evidence hash does not match");
   });
 
-  it("TestVerifyReportDataMismatch", async () => {
+  it("rejects a challenge report_data that does not match the recomputed value", async () => {
     const nonce = testNonce();
     const { bytes } = await buildTestDocument(nonce);
     const tampered = setTopLevel(bytes, (loose) => {
@@ -255,7 +254,7 @@ describe("document_test.go", () => {
     await expect(parse(tampered, nonce)).rejects.toThrow("challenge report_data does not match the recomputed value");
   });
 
-  it("TestVerifyTransportedBytes", async () => {
+  it("rejects crypto_material whose transported bytes changed", async () => {
     const nonce = testNonce();
     const { bytes } = await buildTestDocument(nonce);
     const tampered = mutateCryptoSection(bytes, (s) => s.replace(`{"format"`, `{ "format"`));
@@ -263,7 +262,7 @@ describe("document_test.go", () => {
     await expect(parse(tampered, nonce)).rejects.toThrow("crypto_material hash");
   });
 
-  it("TestVerifyTamperedKey", async () => {
+  it("rejects a tampered key", async () => {
     const nonce = testNonce();
     const { bytes } = await buildTestDocument(nonce);
     const tampered = mutateCryptoSection(bytes, (s) => s.replace(hex(repeat(0xaa, 32)), hex(repeat(0xac, 32))));
@@ -271,7 +270,7 @@ describe("document_test.go", () => {
     await expect(parse(tampered, nonce)).rejects.toThrow("crypto_material hash");
   });
 
-  it("TestVerifyRejectsUnknownTopLevelMembers", async () => {
+  it("rejects unknown top-level members", async () => {
     const nonce = testNonce();
     const { bytes } = await buildTestDocument(nonce);
     const tampered = setTopLevel(bytes, (loose) => {
@@ -280,14 +279,14 @@ describe("document_test.go", () => {
     await expect(parse(tampered, nonce)).rejects.toThrow();
   });
 
-  it("TestVerifyRejectsUnknownAlgorithm", async () => {
+  it("rejects an unknown report_data_algorithm", async () => {
     const nonce = testNonce();
     const { bytes } = await buildTestDocument(nonce);
     const tampered = replaceOnce(bytes, REPORT_DATA_V1_ALGORITHM, "https://tinfoil.sh/report-data/v2");
     await expect(parse(tampered, nonce)).rejects.toThrow("report_data_algorithm");
   });
 
-  it("TestParseRejectsDuplicateItemIDs", async () => {
+  it("rejects duplicate crypto_material item ids", async () => {
     const nonce = testNonce();
     const { bytes } = await buildTestDocument(nonce);
     const filler = hex(repeat(0xcc, 32));
@@ -301,7 +300,7 @@ describe("document_test.go", () => {
     await expect(parse(dup, nonce)).rejects.toThrow(`duplicate crypto_material item id "tls"`);
   });
 
-  it("TestParseRejectsMalformedKeyMaterial", async () => {
+  it("rejects key material of the wrong length", async () => {
     const nonce = testNonce();
     const { bytes } = await buildTestDocument(nonce);
     const short = mutateCryptoSection(bytes, (s) => s.replace(hex(repeat(0xaa, 32)), hex(repeat(0xaa, 8))));
@@ -309,14 +308,14 @@ describe("document_test.go", () => {
     await expect(parse(short, nonce)).rejects.toThrow("must be 32 bytes");
   });
 
-  it("TestParseRejectsUppercaseHex", async () => {
+  it("rejects uppercase hex", async () => {
     const nonce = testNonce();
     const { raw: built, bytes } = await buildTestDocument(nonce);
     const upper = replaceOnce(bytes, built.challenge.nonce, built.challenge.nonce.toUpperCase());
     await expect(parse(upper, nonce)).rejects.toThrow("lowercase hex");
   });
 
-  it("TestParseRejectsNonCanonicalBase64", async () => {
+  it("rejects non-canonical section base64", async () => {
     const nonce = testNonce();
     const { bytes } = await buildTestDocument(nonce);
     const tampered = setTopLevel(bytes, (loose) => {
@@ -326,7 +325,7 @@ describe("document_test.go", () => {
     await expect(parse(tampered, nonce)).rejects.toThrow("crypto_material is not canonical base64");
   });
 
-  describe("TestParseRejectsNonCanonicalReportBase64", async () => {
+  describe("rejects non-canonical report base64", async () => {
     const nonce = testNonce();
     const { raw: built, bytes } = await buildTestDocument(nonce);
     const encoded = built.cpu_evidence.report_base64;
@@ -344,7 +343,7 @@ describe("document_test.go", () => {
     });
   });
 
-  it("TestParseRejectsOddLengthUnknownFormatData", async () => {
+  it("rejects odd-length or empty data of an unknown key format", async () => {
     const nonce = testNonce();
     const { bytes } = await buildTestDocument(nonce);
     const insert = (item: string) => mutateCryptoSection(bytes, (s) => s.replace(`"items":[`, `"items":[${item},`));
@@ -357,7 +356,7 @@ describe("document_test.go", () => {
     );
   });
 
-  it("TestParseRejectsDuplicateCollateralIDs", async () => {
+  it("rejects duplicate collateral entry ids", async () => {
     const nonce = testNonce();
     const { raw } = await buildTestDocument(nonce);
     raw.collateral.push({
@@ -369,7 +368,7 @@ describe("document_test.go", () => {
     await expect(parse(marshalDocument(raw), nonce)).rejects.toThrow(`duplicate collateral entry id "cpu-endorsement"`);
   });
 
-  it("TestFreshnessSelectsArtifactID", () => {
+  it("freshness selects the witness by artifact id", () => {
     const doc = documentWithCollateral("", [
       {
         id: FRESHNESS_ID_CODE,
@@ -392,7 +391,7 @@ describe("document_test.go", () => {
     }
   });
 
-  it("TestSigstoreReferences", () => {
+  it("sigstoreCode and sigstorePlatform return the references or NotFoundError", () => {
     const entry = (format: string, repo: string): WireEntry => ({
       id: format,
       role: ROLE_REFERENCE_VALUES,
@@ -421,7 +420,7 @@ describe("document_test.go", () => {
     expect(err).not.toBeInstanceOf(NotFoundError);
   });
 
-  it("TestParseRejectsDuplicateFreshnessArtifactID", async () => {
+  it("rejects duplicate freshness artifact ids", async () => {
     const nonce = testNonce();
     const { raw } = await buildTestDocument(nonce);
     const entry: WireEntry = {
@@ -436,7 +435,7 @@ describe("document_test.go", () => {
     );
   });
 
-  it("TestComputeReportData", async () => {
+  it("computeReportData hashes the algorithm, nonce and section hashes into 64 zero-padded bytes", async () => {
     const nonce = testNonce();
     const cmHash = sha("crypto");
     const deHash = sha("device");
@@ -452,7 +451,7 @@ describe("document_test.go", () => {
     await expect(computeReportData(nonce.slice(0, 16), cmHash, deHash)).rejects.toThrow();
   });
 
-  it("TestDocumentRoundTripPreservesEndorsedBytes", async () => {
+  it("the endorsed hashes are over the transported section bytes", async () => {
     const nonce = testNonce();
     const { raw: built, bytes } = await buildTestDocument(nonce);
     const loose = JSON.parse(dec(bytes)) as Record<string, string>;
@@ -462,10 +461,10 @@ describe("document_test.go", () => {
   });
 });
 
-// ---------------------------------------------------------------- collateral_test.go
+// ---------------------------------------------------------------- collateral format
 
-describe("collateral_test.go", () => {
-  describe("TestCollateralFormatRoundTrip", () => {
+describe("collateral format", () => {
+  describe("round-trips through build and parse", () => {
     it.each(["", FORMAT_V2, FORMAT_V3])("%j", async (format) => {
       const nonce = testNonce();
       const data = await build(
@@ -482,7 +481,7 @@ describe("collateral_test.go", () => {
     });
   });
 
-  describe("TestRejectsIncompatibleCollateralFormat", () => {
+  describe("rejects incompatible collateral formats in build and parse", () => {
     const legacy: WireEntry = {
       id: "code",
       role: ROLE_REFERENCE_VALUES,
@@ -516,7 +515,7 @@ describe("collateral_test.go", () => {
   });
 });
 
-// ---------------------------------------------------------------- collateral_accessors_test.go
+// ---------------------------------------------------------------- collateral accessors
 
 const cpuEntry = (id: string, format: string, data: string): WireEntry => ({
   id,
@@ -537,8 +536,8 @@ const allPlatformEntries = (): WireEntry[] => [
   ),
 ];
 
-describe("collateral_accessors_test.go", () => {
-  it("TestCPUEndorsementsSelectsEvidencePlatform", () => {
+describe("collateral accessors", () => {
+  it("cpuEndorsements selects the evidence platform", () => {
     const sev = documentWithCollateral(SEV_SNP_REPORT_V1_FORMAT, allPlatformEntries()).cpuEndorsements();
     expect(sev).toEqual({
       amdVcek: { vcekDer: enc("vcek der"), certChainPem: "chain" },
@@ -554,7 +553,7 @@ describe("collateral_accessors_test.go", () => {
     expect(unknown).toEqual({});
   });
 
-  it("TestCPUEndorsementsLeavesMissingCollateralNil", () => {
+  it("cpuEndorsements leaves missing collateral unset", () => {
     for (const format of [SEV_SNP_REPORT_V1_FORMAT, TDX_QUOTE_V1_FORMAT]) {
       const en = documentWithCollateral(format, []).cpuEndorsements();
       expect(en.amdVcek).toBeUndefined();
@@ -563,7 +562,7 @@ describe("collateral_accessors_test.go", () => {
     }
   });
 
-  it("TestCPUEndorsementsReturnsCopies", () => {
+  it("cpuEndorsements returns copies", () => {
     const doc = documentWithCollateral(SEV_SNP_REPORT_V1_FORMAT, allPlatformEntries());
     const en = doc.cpuEndorsements();
     en.amdVcek!.vcekDer[0] = "!".charCodeAt(0);
@@ -573,10 +572,10 @@ describe("collateral_accessors_test.go", () => {
     expect(again.amdCrl).toBeDefined();
   });
 
-  it("TestReferenceValuesReturnCopies", () => {
-    // Go mutates the returned bundle bytes. TS bundles are parsed, ReadonlyMap
-    // JSON values shared by design, so the port checks the returned struct is
-    // a fresh copy and the bundles decode as sent.
+  it("reference-value accessors return copies", () => {
+    // Bundles are parsed, ReadonlyMap JSON values shared by design, so the
+    // test checks the returned struct is a fresh copy and the bundles decode
+    // as sent.
     const doc = documentWithCollateral("", [
       {
         id: "code",
@@ -605,10 +604,10 @@ describe("collateral_accessors_test.go", () => {
   });
 });
 
-// ---------------------------------------------------------------- config_test.go
+// ---------------------------------------------------------------- config and runtime accessors
 
-describe("config_test.go", () => {
-  it("TestConfigCollateralAccessorsReturnCopies", () => {
+describe("config and runtime accessors", () => {
+  it("configEndorsement and runtime return copies, or NotFoundError when absent", () => {
     const bundle = strictParse(enc(`{}`));
     const doc = docWith({
       collateral: {
@@ -637,7 +636,7 @@ describe("config_test.go", () => {
   });
 });
 
-// ---------------------------------------------------------------- attested_keys_test.go
+// ---------------------------------------------------------------- attested-keys vectors
 
 interface Vector {
   algorithm: string;
@@ -650,10 +649,9 @@ interface Vector {
   report_data: string;
 }
 
-// Public-only vectors shared with sdk-flywheel/v3/attested-keys-vectors.json
-// (copied from tinfoil-go verify/document/testdata). Parse must accept and
-// preserve key formats the SDK does not interpret.
-describe("TestAttestedKeyEnvelopeVectors", () => {
+// Public-only vectors shared with sdk-flywheel/v3/attested-keys-vectors.json.
+// Parse must accept and preserve key formats the SDK does not interpret.
+describe("attested-key envelope vectors", () => {
   const vectors = JSON.parse(
     readFileSync(new URL("./fixtures/attested-keys-vectors.json", import.meta.url), "utf8"),
   ) as Vector[];
@@ -698,7 +696,7 @@ function sectionBytes(docBytes: Uint8Array, member: string): Uint8Array {
   return new Uint8Array(Buffer.from(root.get(member) as string, "base64"));
 }
 
-describe("accessors return deep copies of parsed JSON (Go clones the raw bytes)", () => {
+describe("accessors return deep copies of parsed JSON", () => {
   it("does not expose the document's bundles, evidence or PCS headers to mutation", async () => {
     const nonce = repeat(0x09, 32);
     const { bytes } = await buildDocument(

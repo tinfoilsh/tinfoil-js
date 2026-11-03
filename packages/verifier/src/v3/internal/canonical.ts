@@ -42,9 +42,9 @@ export function decodeBase64(name: string, value: string): Uint8Array {
 }
 
 /**
- * base64.StdEncoding.Strict().DecodeString: like Go, it skips '\r' and '\n',
- * requires padding to a multiple of 4, and rejects non-zero padding bits.
- * Returns undefined where Go returns an error.
+ * Strict standard base64: skips '\r' and '\n', requires padding to a
+ * multiple of 4, and rejects non-zero padding bits. Returns undefined on any
+ * other malformed input.
  */
 function strictDecode(input: string): Uint8Array | undefined {
   const s = input.replace(/[\r\n]/g, "");

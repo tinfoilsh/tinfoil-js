@@ -11,9 +11,6 @@ import {
   type JsonValue,
 } from "../../src/v3/internal/json/index.js";
 
-// Accept/reject results below were confirmed against Go 1.27.3
-// encoding/json/v2 and jsontext (json.Unmarshal into jsontext.Value and any).
-
 const utf8 = (s: string) => new TextEncoder().encode(s);
 const text = (b: Uint8Array) => new TextDecoder().decode(b);
 const bytes = (...parts: (string | number[])[]) => {
@@ -89,7 +86,7 @@ describe("strictParse grammar", () => {
     expect(() => strictParse(bytes([0xef, 0xbb, 0xbf], "{}"))).toThrow(JsonError);
   });
 
-  it("enforces jsontext's max nesting depth of 10000", () => {
+  it("enforces the max nesting depth of 10000", () => {
     const arrays = (n: number) => "[".repeat(n) + "]".repeat(n);
     const objects = (n: number) => '{"a":'.repeat(n) + "1" + "}".repeat(n);
     expect(() => parse(arrays(10000))).not.toThrow();
@@ -200,7 +197,7 @@ describe("JsonNumber", () => {
     },
   );
 
-  it("toBigInt handles any size and rejects fractions and exponents like Go int fields", () => {
+  it("toBigInt handles any size and rejects fractions, exponents and non-JSON forms", () => {
     expect(n("9223372036854775807").toBigInt()).toBe(9223372036854775807n);
     expect(n("-9223372036854775809").toBigInt()).toBe(-9223372036854775809n);
     expect(n("18446744073709551616").toBigInt()).toBe(18446744073709551616n);
@@ -210,7 +207,7 @@ describe("JsonNumber", () => {
     }
   });
 
-  it("toFloat64 matches strconv.ParseFloat", () => {
+  it("toFloat64 rounds correctly, underflows to zero and keeps the sign of -0", () => {
     expect(n("0.1").toFloat64()).toBe(0.1);
     expect(Object.is(n("-0").toFloat64(), -0)).toBe(true);
     expect(n("1e-400").toFloat64()).toBe(0);
@@ -251,7 +248,7 @@ describe("canonicalize", () => {
   });
 
   // RFC 8785 Appendix B number vectors; inputs are the IEEE values printed with
-  // 17 fractional digits, outputs are Go's Canonicalize results.
+  // 17 fractional digits, outputs are the canonical forms.
   it.each([
     ["0.00000000000000000e+00", "0"],
     ["-0.00000000000000000e+00", "0"],
@@ -297,7 +294,7 @@ describe("canonicalize", () => {
     ["-1e400", "-1.7976931348623157e+308"],
     ["1e-400", "0"],
     ["-1e-400", "0"],
-  ])("number %s -> %s (Go)", (input, want) => {
+  ])("number %s -> %s", (input, want) => {
     expect(canon(input)).toBe(want);
   });
 
@@ -358,9 +355,9 @@ describe("serialize", () => {
   });
 });
 
-// Struct-decoding results confirmed against Go json.Unmarshal(b, &s,
-// json.RejectUnknownMembers(true)) into a struct with string, bool, *int64,
-// []int, jsontext.Value and nested struct fields.
+// The decode helpers read typed members out of a parsed object: a known
+// member set rejects unknown members, names match case-sensitively, and an
+// absent member yields the type's zero value.
 describe("decode helpers", () => {
   it("object accepts objects and treats null as the zero struct", () => {
     expect(object(parse('{"a":1}'), "S").get("a")).toBeInstanceOf(JsonNumber);

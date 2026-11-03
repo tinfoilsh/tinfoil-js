@@ -1,18 +1,19 @@
 /**
- * Strict JSON with Go encoding/json/v2 semantics, which the reference
- * verifier relies on throughout:
+ * Strict JSON: parsing that rejects what lenient parsers accept, and
+ * serialization in canonical and compact forms.
  *
  * - invalid UTF-8 rejects, as does a leading byte-order mark;
  * - escaped surrogates must form a valid pair (`"\ud800"` rejects);
  * - duplicate member names reject at any depth, compared on decoded names;
  * - trailing data after the top-level value rejects;
- * - nesting deeper than 10000 rejects (jsontext's maxNestingDepth);
- * - numbers keep their raw literal so u64 fields survive above 2^53.
+ * - nesting deeper than 10000 levels rejects;
+ * - numbers keep their source literal so u64 fields survive above 2^53.
  *
  * Parsing is JSON.parse plus checks: TextDecoder handles UTF-8, a scan over
  * the validated text rejects duplicates and keeps member order and number
- * literals, and a final walk rejects lone surrogates. Unknown-member rejection is per struct in Go, so
- * it lives in the decoders (see decode.ts), not here.
+ * literals, and a final walk rejects lone surrogates. Unknown-member rejection
+ * depends on the member set each decoder expects, so it lives in the decoders
+ * (see decode.ts), not here.
  */
 
 /** A parsed JSON value. Objects are Maps so member names can't collide with Object.prototype. */
@@ -21,7 +22,7 @@ export type JsonObject = ReadonlyMap<string, JsonValue>;
 
 /** RFC 8259 number grammar. */
 const NUMBER_RE = /^-?(?:0|[1-9][0-9]*)(?:\.[0-9]+)?(?:[eE][+-]?[0-9]+)?$/;
-/** The subset Go's jsonwire.ParseUint (with optional '-') accepts for integer fields. */
+/** An optional '-' then digits with no leading zero: the only literals integer fields accept. */
 const INTEGER_RE = /^-?(?:0|[1-9][0-9]*)$/;
 const MAX_SAFE = BigInt(Number.MAX_SAFE_INTEGER);
 
@@ -31,7 +32,7 @@ export class JsonNumber {
 
   /**
    * The number as an integer, if the literal is one (no fraction or exponent) within ±(2^53-1).
-   * Go rejects "1.0" and "1e2" for integer fields; "-0" is 0.
+   * "1.0" and "1e2" are not integers; "-0" is 0.
    */
   toSafeInteger(): number {
     const n = this.toBigInt();
@@ -42,9 +43,9 @@ export class JsonNumber {
   }
 
   /**
-   * The number as an integer of any size, if the literal is one. "-0" yields 0n;
-   * Go rejects any leading '-' for unsigned fields, so uint64 callers must check
-   * `raw` for a sign as well as range-checking the result.
+   * The number as an integer of any size, if the literal is one. "-0" yields 0n,
+   * so unsigned fields, which reject any leading '-', must check `raw` for a
+   * sign as well as range-checking the result.
    */
   toBigInt(): bigint {
     if (!INTEGER_RE.test(this.raw)) {
@@ -54,10 +55,9 @@ export class JsonNumber {
   }
 
   /**
-   * The literal's float64 value, as Go's strconv.ParseFloat gives it (and so
-   * json v2 and protojson/structpb): correctly rounded, underflow to ±0 is
-   * fine, overflow to ±Inf is an error. Used by the provenance layer, which
-   * reproduces the reference's protobuf round-trip of the platform predicate.
+   * The literal's float64 value: correctly rounded, underflow to ±0 is fine,
+   * overflow to ±Inf is an error. Used by the provenance layer's protobuf
+   * round-trip of the platform predicate.
    */
   toFloat64(): number {
     const f = parseNumber(this.raw);
@@ -76,7 +76,7 @@ export class JsonError extends Error {
   }
 }
 
-/** jsontext's maxNestingDepth. */
+/** The deepest container nesting parse and write accept. */
 const MAX_DEPTH = 10000;
 
 /** Parses exactly one JSON value from UTF-8 bytes. Throws JsonError. */
@@ -84,7 +84,7 @@ export function strictParse(bytes: Uint8Array): JsonValue {
   let text: string;
   try {
     // fatal: invalid UTF-8 rejects. ignoreBOM: a leading BOM stays in the
-    // text, where JSON.parse rejects it as Go does.
+    // text, where JSON.parse rejects it.
     text = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(bytes);
   } catch {
     throw new JsonError("invalid UTF-8");
@@ -164,7 +164,7 @@ const LONE_SURROGATE = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[
 
 function checkString(s: string): string {
   // Valid UTF-8 can't encode a surrogate, so a lone one came from an escape
-  // such as "\ud800", which Go rejects.
+  // such as "\ud800", which is invalid.
   if (LONE_SURROGATE.test(s)) throw new JsonError("invalid escaped surrogate in string");
   return s;
 }
@@ -232,13 +232,13 @@ function toJsonValue(root: unknown, { orders, numbers }: Scan): JsonValue {
   }
 }
 
-/** Parses a JSON number literal as float64 (round-to-nearest-even, like strconv.ParseFloat). */
+/** Parses a JSON number literal as float64 (round-to-nearest-even). */
 function parseNumber(raw: string): number {
   if (!NUMBER_RE.test(raw)) throw new JsonError(`invalid JSON number ${JSON.stringify(raw)}`);
   return Number(raw);
 }
 
-/** Serializes a value in RFC 8785 canonical form (Go jsontext.Value.Canonicalize). */
+/** Serializes a value in RFC 8785 canonical form: sorted members, minimal escaping, ES6 number formatting. */
 export function canonicalize(value: JsonValue): Uint8Array {
   return write(value, true);
 }
@@ -334,9 +334,8 @@ function checkedRaw(raw: string): string {
 }
 
 /**
- * jsonwire.ReformatNumber with CanonicalizeNumbers: parse as float64, map
- * ±0 to 0 and ±Inf to ±MaxFloat64, then format as ES6 Number::toString
- * (which is what Go's AppendFloat reproduces).
+ * RFC 8785 number canonicalization: parse as float64, map ±0 to 0 and ±Inf
+ * (overflow) to ±MAX_VALUE, then format as ES6 Number::toString.
  */
 function canonicalNumber(raw: string): string {
   let f = parseNumber(raw);
@@ -348,7 +347,7 @@ function canonicalNumber(raw: string): string {
 
 const HEX = "0123456789abcdef";
 
-/** Writes a string with minimal escaping (RFC 8785 section 3.2.2.2; also Go's default encoder). */
+/** Writes a string with minimal escaping (RFC 8785 section 3.2.2.2). */
 function writeString(out: ByteWriter, s: string): void {
   out.byte(0x22);
   for (let k = 0; k < s.length; k++) {
@@ -423,7 +422,7 @@ class ByteWriter {
   }
 }
 
-/** A deep copy of a value, sharing no Maps or arrays with the original (Go's slices.Clone of raw bytes). */
+/** A deep copy of a value, sharing no Maps or arrays with the original. */
 export function cloneJsonValue(root: JsonValue): JsonValue {
   type Frame = { readonly src: readonly JsonValue[] | ReadonlyArray<readonly [string, JsonValue]>; idx: number; readonly out: JsonValue[] | Map<string, JsonValue> };
   const frame = (v: JsonValue): Frame | undefined => {
