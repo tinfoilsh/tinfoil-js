@@ -1,9 +1,9 @@
 /**
- * Port of tinfoil-go verify/document/collateral/{collateral,config,runtime}_test.go.
- * Test titles are the Go test (and subtest) names.
+ * Tests for collateral decoding: the collateral set built from wire entries
+ * (collateral.ts), config endorsement entries (config.ts) and runtime and
+ * platform entries (runtime.ts).
  *
- * Go's tests call collateral.Decode on entries whose Data is raw JSON. Here
- * entries carry their data as JSON text and go through the same path parse
+ * Entries carry their data as JSON text and go through the same path parse
  * uses (strict JSON, decodeEntries, decode). Data that is not valid JSON at
  * all ("{bad", duplicate members, trailing values) is therefore rejected by
  * the strict JSON parser rather than by decode; the outcome is the same.
@@ -46,7 +46,7 @@ import { b64, marshalEntries, type WireEntry } from "./helpers/builder.js";
 const enc = (s: string): Uint8Array => new TextEncoder().encode(s);
 const q = (s: string): string => JSON.stringify(s);
 
-/** Decodes entries as parse does. Throws where Go's Decode returns an error. */
+/** Decodes entries as parse does; throws on any rejection. */
 function decodeWire(entries: WireEntry[]): CollateralSet {
   return decode(decodeEntries(strictParse(enc(marshalEntries(entries)))));
 }
@@ -60,7 +60,7 @@ function thrown(f: () => unknown): Error {
   throw new Error("expected an error");
 }
 
-/** Go testEntry: a cpu endorsement entry with the given JSON payload. */
+/** A cpu endorsement entry with the given JSON payload. */
 const testEntry = (id: string, format: string, data: string): WireEntry => ({
   id,
   role: ROLE_ENDORSEMENT,
@@ -80,17 +80,17 @@ const sevEntries = (): WireEntry[] => [
   testEntry("cpu-crl", AMD_CRL_V1_FORMAT, crlData(b64("crl der"))),
 ];
 
-// ---------------------------------------------------------------- collateral_test.go
+// ---------------------------------------------------------------- collateral set decoding
 
-describe("collateral_test.go", () => {
-  it("TestDecodeSEVCollateral", () => {
+describe("collateral set decoding", () => {
+  it("decodes SEV-SNP collateral (vcek and crl)", () => {
     expect(decodeWire(sevEntries()).cpu).toEqual({
       amdVcek: { vcekDer: enc("vcek der"), certChainPem: "chain" },
       amdCrl: { crlDer: enc("crl der") },
     });
   });
 
-  it("TestDecodeTDXCollateral", () => {
+  it("decodes TDX collateral (intel-pcs responses)", () => {
     const url = "https://api.trustedservices.intel.com/tdx/certification/v4/qe/identity";
     const headers = { "Sgx-Enclave-Identity-Issuer-Chain": ["chain"] };
     const body = enc(`{"enclaveIdentity":{}}`);
@@ -100,7 +100,7 @@ describe("collateral_test.go", () => {
     });
   });
 
-  it("TestDecodeEmpty", () => {
+  it("an empty array decodes to an empty set", () => {
     const set = decodeWire([]);
     expect(set.cpu).toEqual({});
     expect(set.sigstoreCode).toBeUndefined();
@@ -108,7 +108,7 @@ describe("collateral_test.go", () => {
     expect(set.freshness.size).toBe(0);
   });
 
-  it("TestDecodeRequiresCPUSubject", () => {
+  it("cpu collateral requires the cpu subject", () => {
     const entries = sevEntries();
     entries[0]!.subjects = ["gpu0"];
     const set = decodeWire(entries);
@@ -116,7 +116,7 @@ describe("collateral_test.go", () => {
     expect(set.cpu.amdCrl).toBeDefined();
   });
 
-  describe("TestDecodeRejectsMalformedEntryList", () => {
+  describe("rejects a malformed entry list", () => {
     const entry: WireEntry = {
       id: "crl",
       role: ROLE_ENDORSEMENT,
@@ -124,7 +124,7 @@ describe("collateral_test.go", () => {
       data: `{}`,
     };
     const unknownRole = { ...entry, role: "unknown" };
-    // Go's withData("") is an empty jsontext.Value: the data member is absent.
+    // An empty data string means the data member is absent.
     const withData = (data: string): WireEntry[] => [{ ...entry, data: data === "" ? undefined : data }];
     it.each<[string, WireEntry[], string | undefined]>([
       ["missing id", [{ role: ROLE_ENDORSEMENT, format: AMD_CRL_V1_FORMAT }], "collateral entry 0 is incomplete"],
@@ -145,7 +145,7 @@ describe("collateral_test.go", () => {
     });
   });
 
-  describe("TestDecodeRejectsMalformedKnownFormats", () => {
+  describe("rejects malformed data of known formats", () => {
     const good = sevEntries();
     const unusedBody = b64(`{"unused":true}`);
     it.each<[string, WireEntry[], string]>([
@@ -208,7 +208,7 @@ describe("collateral_test.go", () => {
     });
   });
 
-  it("TestDecodeIgnoresUnknownFormats", () => {
+  it("ignores entries of unknown formats and of a format under the wrong role", () => {
     for (const entry of [
       { id: "future", role: ROLE_ENDORSEMENT, format: "https://tinfoil.sh/collateral/unknown/v9", data: `{"x":1}` },
       { id: "misrole", role: ROLE_REFERENCE_VALUES, format: AMD_VCEK_V1_FORMAT, data: `{"unknown":1}` },
@@ -217,7 +217,7 @@ describe("collateral_test.go", () => {
     }
   });
 
-  it("TestDecodeSelectsFirstEntryPerPurpose", () => {
+  it("selects the first entry per purpose", () => {
     const pcs = (id: string, url: string) => testEntry(id, INTEL_PCS_V1_FORMAT, pcsData([{ url, body: b64("body") }]));
     const ref = (id: string, format: string, repo: string): WireEntry => ({
       id,
@@ -244,7 +244,7 @@ describe("collateral_test.go", () => {
     expect(set.sigstorePlatform!.repo).toBe("org/first-platform");
   });
 
-  it("TestDecodeKeysFreshnessByID", () => {
+  it("keys freshness witnesses by entry id", () => {
     const witness = (id: string, bundle: string): WireEntry => ({
       id,
       role: ROLE_REFERENCE_VALUES,
@@ -260,7 +260,7 @@ describe("collateral_test.go", () => {
     );
   });
 
-  describe("TestDecodeRequiresSigstoreBundleAndDigest", () => {
+  describe("sigstore references require a bundle and a digest", () => {
     const ref = (format: string, data: string): WireEntry => ({ id: "ref", role: ROLE_REFERENCE_VALUES, format, data });
     it.each<[string, WireEntry, string]>([
       ["code without bundle", ref(SIGSTORE_CODE_V1_FORMAT, `{"repo":"o/r","tag":"v1","digest":"ab"}`), "is missing sigstore_bundle"],
@@ -292,14 +292,14 @@ describe("collateral_test.go", () => {
   });
 
   // TS collateral types are plain readonly interfaces with no Clone methods.
-  it.skip("TestPCSResponseCloneIsDeep (no PCSResponse.Clone in TS)", () => {});
-  it.skip("TestClonesPreserveNil (no Clone methods in TS)", () => {});
+  it.skip("PCS response clones are deep (no clone methods in TS)", () => {});
+  it.skip("clones preserve unset fields (no clone methods in TS)", () => {});
 });
 
-// ---------------------------------------------------------------- config_test.go
+// ---------------------------------------------------------------- config collateral
 
-describe("config_test.go", () => {
-  it("TestPlainConfigCollateral", () => {
+describe("config collateral", () => {
+  it("decodes plain config collateral and rejects an endorsement in it", () => {
     const entry: WireEntry = {
       id: CONFIG_ID,
       role: ROLE_REFERENCE_VALUES,
@@ -317,7 +317,7 @@ describe("config_test.go", () => {
     ).toThrow("cannot contain an endorsement");
   });
 
-  describe("TestConfigEndorsement", () => {
+  describe("config endorsement", () => {
     const config = "cvm-version: 1.0.0\n";
     const reference = "sha256:" + "ab".repeat(32);
     const data = `{"endorsement_ref":${q(reference)},"config_base64":${q(b64(config))},"sigstore_bundle":{"mediaType":"test"}}`;
@@ -352,10 +352,10 @@ describe("config_test.go", () => {
   });
 });
 
-// ---------------------------------------------------------------- runtime_test.go
+// ---------------------------------------------------------------- runtime and platform collateral
 
-describe("runtime_test.go", () => {
-  it("TestRuntimeReference", () => {
+describe("runtime and platform collateral", () => {
+  it("validates runtime references", () => {
     const valid: RuntimeReference = { repo: RUNTIME_REPO, tag: "v0.15.0-rc.1", digest: "ab".repeat(32) };
     expect(() => validateRuntimeReference(valid)).not.toThrow();
     for (const bad of [
@@ -370,7 +370,7 @@ describe("runtime_test.go", () => {
     }
   });
 
-  it("TestRuntime", () => {
+  it("decodes runtime collateral and rejects a second runtime entry", () => {
     const ref: RuntimeReference = { repo: RUNTIME_REPO, tag: "v0.15.0", digest: "ab".repeat(32) };
     const manifest = `{"version":"v0.15.0"}`;
     const data = `{"repo":${q(ref.repo)},"tag":${q(ref.tag)},"digest":${q(ref.digest)},"manifest_base64":${q(b64(manifest))},"sigstore_bundle":{}}`;
@@ -382,7 +382,7 @@ describe("runtime_test.go", () => {
     expect(() => decodeWire([entry, { ...entry, id: "other-runtime" }])).toThrow("conflicting collateral");
   });
 
-  describe("TestConfigPlatform", () => {
+  describe("config platform reference", () => {
     const entry: WireEntry = {
       id: PLATFORM_ID,
       role: ROLE_REFERENCE_VALUES,
@@ -391,8 +391,8 @@ describe("runtime_test.go", () => {
     };
 
     it("selects the platform reference", () => {
-      // Go also mutates the returned bundle bytes; TS bundles are shared
-      // ReadonlyMap JSON values by design, so only the struct copy is checked.
+      // Bundles are shared ReadonlyMap JSON values by design, so only the
+      // struct copy is checked.
       const set = decodeWire([entry]);
       const platform = configPlatform(set);
       expect(platform.repo).toBe("tinfoilsh/cvmimage");
@@ -415,7 +415,7 @@ describe("runtime_test.go", () => {
     });
   });
 
-  describe("TestArtifactFreshnessRequiresReservedProfile", () => {
+  describe("artifact freshness requires a reserved id", () => {
     for (const id of [FRESHNESS_ID_PLATFORM, FRESHNESS_ID_RUNTIME]) {
       const entry: WireEntry = {
         id,

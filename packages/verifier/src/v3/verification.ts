@@ -16,7 +16,7 @@ export interface VerificationFields {
  * creates one, and it can't be changed: the state is runtime-private and
  * accessors return copies.
  * TODO(v3): crypto material, freshness expiry, config/runtime/platform
- * artifacts and metadata (tinfoil-go verify.Verification).
+ * artifacts and metadata.
  */
 export class Verification {
   readonly #fields: VerificationFields;

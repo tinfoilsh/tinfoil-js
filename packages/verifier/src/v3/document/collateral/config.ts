@@ -24,7 +24,7 @@ export function decodeConfigEndorsement(entry: Entry): ConfigEndorsement {
   }));
   const { reference, bundle } = c;
   if (entry.format === CONFIG_V1_FORMAT) {
-    // Go: c.Reference != "" || len(c.Bundle) != 0; an explicit null counts as present.
+    // A non-empty reference or any sigstore_bundle member, including an explicit null, counts as an endorsement.
     if (reference !== "" || bundle !== undefined) {
       throw new Error("plain config collateral cannot contain an endorsement");
     }

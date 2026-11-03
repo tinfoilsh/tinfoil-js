@@ -5,7 +5,7 @@ import type { Verification } from "./verification.js";
 /**
  * Public verifier options.
  * TODO(v3): pinned registers, freshness max age, config authorizer and
- * signing keys, embedded references (tinfoil-go verify/options.go, config.go).
+ * signing keys, embedded references.
  */
 export interface VerifierOptions {}
 

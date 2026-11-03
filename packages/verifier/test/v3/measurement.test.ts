@@ -1,4 +1,4 @@
-/** Port of tinfoil-go verify/measurement/measurement_test.go. Test titles are the Go test names. */
+/** Tests for measurements: register parsing, expectations, formatting and cloning. */
 import { describe, expect, it } from "vitest";
 import {
   cloneExpected,
@@ -15,7 +15,7 @@ import {
   type TdxMeasurement,
 } from "../../src/v3/measurement.js";
 
-/** Go Register{b0, b1, ...}: the given leading bytes, zero-padded to 48. */
+/** A register with the given leading bytes, zero-padded to 48. */
 function reg(...prefix: number[]): Register {
   const r = new Uint8Array(REGISTER_SIZE);
   r.set(prefix);
@@ -31,8 +31,8 @@ const tdxFixture = (): TdxMeasurement => ({
   rtmr3: reg(5),
 });
 
-describe("measurement_test.go", () => {
-  describe("TestParseRegister", () => {
+describe("measurement", () => {
+  describe("parseRegister", () => {
     const want = reg(0xab, 0xcd);
     const lower = "abcd" + "00".repeat(REGISTER_SIZE - 2);
     it.each([lower, lower.toUpperCase()])("accepts %s", (input) => {
@@ -53,11 +53,11 @@ describe("measurement_test.go", () => {
     });
   });
 
-  // Go's Register implements encoding.TextMarshaler so ExpectedTDX round-trips
-  // through JSON. The TS registers are plain Uint8Arrays with no JSON codec.
-  it.skip("TestRegisterTextRoundTrip (no JSON text codec for registers in TS)", () => {});
+  // Registers are plain Uint8Arrays with no JSON codec, so there is no text
+  // round trip to test.
+  it.skip("register text round trip (no JSON text codec for registers in TS)", () => {});
 
-  it("TestParseExpected", () => {
+  it("parseExpectedTdx and parseExpectedSevSnp read registers in order, leaving empty ones unset", () => {
     const tdx = tdxFixture();
     const all = parseExpectedTdx(
       registerHex(tdx.mrtd),
@@ -78,7 +78,7 @@ describe("measurement_test.go", () => {
     expect(() => parseExpectedSevSnp("zz".repeat(REGISTER_SIZE))).toThrow("Launch: register is not hex");
   });
 
-  it("TestExpectedPinsEveryRegister", () => {
+  it("expectedOf pins every register", () => {
     const tdx = tdxFixture();
     expect(expectedOf(tdx)).toEqual({
       platform: "tdx",
@@ -92,7 +92,7 @@ describe("measurement_test.go", () => {
     expect(expectedOf(sev)).toEqual({ platform: "sev-snp", launch: sev.launch });
   });
 
-  it("TestString", () => {
+  it("formatMeasurement lists one labeled register per line", () => {
     const register = reg(0xab);
     expect(formatMeasurement({ platform: "sev-snp", launch: register })).toBe(
       "SEV-SNP\nLaunch " + registerHex(register),
@@ -102,7 +102,7 @@ describe("measurement_test.go", () => {
     );
   });
 
-  it("TestCloneSharesNoRegisters", () => {
+  it("cloneExpected shares no registers with the original", () => {
     const register = reg(0xab);
     for (const original of [
       { platform: "sev-snp", launch: register },

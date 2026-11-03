@@ -2,7 +2,6 @@
  * The document's collateral array: untrusted transport for vendor
  * endorsements, reference values and freshness proofs. Every entry is
  * authenticated by its own signature chain later; decoding only checks shape.
- * Mirrors tinfoil-go verify/document/collateral.
  */
 import { arr, object, raw, str } from "../../internal/json/decode.js";
 import { JsonError, type JsonObject, type JsonValue } from "../../internal/json/index.js";
@@ -72,8 +71,8 @@ export interface CollateralSet {
 }
 
 /**
- * Decodes the wire array into entries, as json v2 unmarshals []Entry with
- * unknown members rejected. null decodes as no entries.
+ * Decodes the wire array into entries; an entry with a member outside the
+ * known set rejects. null decodes as no entries.
  */
 export function decodeEntries(v: JsonValue | undefined): Entry[] {
   if (v === undefined || v === null) return [];
@@ -174,10 +173,9 @@ function validate(entries: readonly Entry[]): void {
 }
 
 /**
- * Strictly decodes an entry's data object with the given member set
- * (json.RejectUnknownMembers) and reads its fields with `read`. Any shape or
- * type error from either step carries the entry's context, as Go's
- * json.Unmarshal into the data struct does.
+ * Strictly decodes an entry's data object with the given member set (any
+ * other member rejects) and reads its fields with `read`. Any shape or type
+ * error from either step carries the entry's context.
  */
 export function unmarshalData<T>(entry: Entry, label: string, known: readonly string[], read: (data: JsonObject) => T): T {
   try {

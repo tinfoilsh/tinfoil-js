@@ -1,8 +1,9 @@
 import { describe, expect, it } from "vitest";
 import { decodeBase64, decodeLowerHex, isLowerHex } from "../../src/v3/internal/canonical.js";
 
-// Expected results confirmed against Go 1.27.3: base64.StdEncoding.Strict()
-// followed by the EncodeToString round trip, and encoding/hex.
+// decodeBase64 accepts only canonical standard base64: strict decoding whose
+// result re-encodes to the input text. decodeLowerHex accepts only lowercase
+// hex of the given byte length.
 
 describe("isLowerHex", () => {
   it.each([[""], ["0"], ["0123456789abcdef"], ["abc"]])("accepts %j", (s) => {
