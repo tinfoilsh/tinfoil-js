@@ -59,12 +59,15 @@ export function stripUnsafeWebSocketOptions(
 export async function pinnedWsClientOptions(
   expectedFingerprintHex: string,
 ): Promise<WS.ClientOptions> {
-  // Bun substitutes its own native implementation for the `ws` package, which
-  // does not honor checkServerIdentity — the pin would be silently skipped.
+  // Bun substitutes its own native implementation for the `ws` package. Before
+  // Bun 1.4 it ignored checkServerIdentity, so the pin would be silently
+  // skipped; 1.4+ calls it, but that path is not yet verified for pinning
+  // (https://github.com/tinfoilsh/tinfoil-js/issues/224). Fail closed on all Bun.
   if (isBun()) {
     throw new ConfigurationError(
       "WebSocket TLS pinning is not supported on Bun: Bun replaces the 'ws' package " +
-        "with a native implementation that does not honor checkServerIdentity.",
+        "with a native implementation whose checkServerIdentity handling is not " +
+        "verified for pinning (it is ignored before Bun 1.4).",
     );
   }
 
