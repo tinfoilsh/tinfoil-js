@@ -41,6 +41,7 @@ const CERTIFICATE_VALIDITY = 10 * 60 * 1000;
 const CERTIFICATE_CLOCK_SKEW = 60 * 1000;
 const CODE_SIGNING = "1.3.6.1.5.5.7.3.3";
 const ECDSA_SHA256 = "1.2.840.10045.4.3.2";
+const MAX_APPROVAL_RECEIPTS = 8;
 const SCOPE =
   /^https:\/\/registry\.tinfoil\.sh\/scopes\/(?:public|[0-9a-f]{32})$/;
 export function validateScope(value: unknown): string {
@@ -79,7 +80,7 @@ export function configName(value: unknown): {
   return { name, identity: `/${m[1]}/${m[2]}`, revision: m[3] };
 }
 export function validateConfigPins(ref: Reference): void {
-  configName("/" + ref.repo + "/" + (ref.tag || "revision"));
+  if (ref.repo) configName("/" + ref.repo + "/" + (ref.tag || "revision"));
   if (ref.digest) unhex(ref.digest, 32);
 }
 interface Signer {
@@ -166,6 +167,7 @@ async function certifiedSigner(
   )
     throw new Error("Invalid config signing certificate profile");
   const scope = validateScope(text(names[0].value));
+  validateSigningKey(cert.publicKey);
   const times = await verifyBundleTimestamp(
     vm.timestampVerificationData,
     b.signature,
@@ -202,6 +204,8 @@ async function approval(
   const signer = issuer
     ? await certifiedSigner(b, issuer, keys, root)
     : await keySigner(b, keys);
+  if (issuer && b.raw.dsseEnvelope.signatures[0].keyid)
+    throw new Error("Certified approval requires an empty DSSE key ID");
   if (
     b.raw.dsseEnvelope.signatures[0].keyid &&
     b.raw.dsseEnvelope.signatures[0].keyid !== signer.hint
@@ -209,6 +213,8 @@ async function approval(
     throw new Error("DSSE key ID does not match hint");
   if (!(await verifySignature(signer.key, pae(b.payload), b.signature)))
     throw new Error("Invalid approval DSSE signature");
+  if (!b.vm.tlogEntries?.length || b.vm.tlogEntries.length > MAX_APPROVAL_RECEIPTS)
+    throw new Error("Invalid transparency receipt count");
   for (const e of b.vm.tlogEntries ?? []) {
     if (
       e.kindVersion?.kind !== "hashedrekord" ||
@@ -303,7 +309,7 @@ export async function verifyConfigApproval(
   const subject = singleSubject(s),
     name = configName(subject.name);
   if (
-    name.identity !== "/" + ref.repo ||
+    (ref.repo && name.identity !== "/" + ref.repo) ||
     (ref.tag && ref.tag !== name.revision) ||
     (ref.digest && ref.digest !== subject.digest)
   )

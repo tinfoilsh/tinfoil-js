@@ -150,9 +150,10 @@ function buildState(
   ];
   for (const k of Object.keys(options))
     if (!allowed.includes(k)) throw new Error(`Unknown verifier option ${k}`);
-  const maxAge = options.freshnessMaxAgeMs ?? DEFAULT_MAX_AGE;
-  if (!Number.isSafeInteger(maxAge) || maxAge < 0)
+  const age = options.freshnessMaxAgeMs ?? 0;
+  if (!Number.isSafeInteger(age) || age < 0)
     throw new Error("Freshness maximum age must be a nonnegative integer");
+  const maxAge = age || DEFAULT_MAX_AGE;
   let pins = options.pinnedRegisters && { ...options.pinnedRegisters };
   if (pins) {
     const names =

@@ -18,6 +18,14 @@ function deferred<T>() { let resolve!: (value: T) => void, reject!: (reason: unk
 beforeEach(() => { mocks.verify.mockReset().mockResolvedValue(success()); mocks.fetchEvidence.mockReset().mockResolvedValue(new Uint8Array([1])); mocks.build.mockReset().mockResolvedValue({ fetch: vi.fn(async () => new Response("ok")), getSessionRecoveryToken: vi.fn() }); mocks.nonce = 0; });
 afterEach(() => vi.useRealTimers());
 describe("SecureClient v3 ownership", () => {
+  it("allows registry scope policy without a repository pin", async () => {
+    const client = new SecureClient({ ...options, configRepo: "", verification: { configScopes: ["https://registry.tinfoil.sh/scopes/" + "0".repeat(32)] } });
+    await client.ready();
+    expect(mocks.verify.mock.calls[0][2]).toBe("");
+    const facade = new Client({ ...options, configRepo: "" });
+    await facade.ready();
+    expect(facade.inspect()?.endpoint).toBe(options.enclaveURL);
+  });
   it("requires a fixed endpoint, rejects plaintext TLS/proxy TLS and keeps inspection passive", () => {
     expect(() => new SecureClient(undefined as never)).toThrow(ConfigurationError);
     expect(() => new SecureClient({ ...options, transport: "tls", baseURL: "http://proxy.test" })).toThrow(ConfigurationError);

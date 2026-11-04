@@ -79,7 +79,7 @@ export class SecureClient {
     if (this.#mode !== "ehbp" && this.#mode !== "tls") throw new ConfigurationError("Unknown transport mode");
     if (this.#mode === "tls" && (new URL(this.#baseURL).origin !== endpoint.origin || isRealBrowser())) throw new ConfigurationError("TLS requires the direct HTTPS enclave origin and a runtime that exposes peer certificates");
     this.#reference = options.configRepo ?? "";
-    validateReference(this.#reference, !!(options.verification?.embeddedReferences?.config || options.verification?.configAuthorizer));
+    validateReference(this.#reference, true);
     if (options.verification?.configAuthorizer && this.#reference) throw new ConfigurationError("Config authorizer requires an empty repository reference");
     this.#verifier = configuredVerifier(options.verification);
     this.#acquisition = copyAcquisitionOptions(options.acquisition);
