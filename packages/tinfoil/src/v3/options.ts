@@ -34,6 +34,55 @@ export type TransportMode = "tls" | "ehbp";
  */
 export type VerificationCheck = (verification: Verification) => void | Promise<void>;
 
+/** Configures a WebSocket opened by {@link createWebSocket}. */
+export interface WebSocketOptions {
+  /** The subprotocols offered in the handshake. */
+  readonly protocols?: string | readonly string[];
+  /** Headers sent with the handshake, such as `Authorization`. */
+  readonly headers?: Readonly<Record<string, string>>;
+  /**
+   * Settings for the `ws` client on Node, such as `perMessageDeflate` or
+   * `maxPayload`. Settings that would change which peer is connected to or
+   * how its certificate is checked are ignored. Bun's WebSocket takes no
+   * such settings, so they are ignored there.
+   */
+  readonly wsOptions?: Readonly<Record<string, unknown>>;
+  /** Aborts the verification the call performs before connecting. */
+  readonly signal?: AbortSignal;
+}
+
+/** Configures a realtime session opened by {@link createRealtimeWebSocket}. */
+export interface RealtimeOptions {
+  /** The realtime model to start a session with. */
+  readonly model: string;
+  /** As {@link WebSocketOptions.wsOptions}. */
+  readonly wsOptions?: Readonly<Record<string, unknown>>;
+  /** Aborts the verification the call performs before connecting. */
+  readonly signal?: AbortSignal;
+}
+
+/**
+ * A WebSocket whose connection is pinned to the attested TLS key, in the
+ * CONNECTING state when returned. A pin failure surfaces as an `error`
+ * event whose error is an {@link AttestationError}; a failure of the
+ * runtime's own certificate check surfaces as that runtime's error. Either
+ * makes the client verify again before its next connection. The socket
+ * supports the standard event-target API; on Node it is a `ws` WebSocket
+ * and also supports that library's `on` listeners.
+ */
+export interface PinnedWebSocket {
+  readonly readyState: number;
+  readonly url: string;
+  readonly protocol: string;
+  send(data: string | ArrayBufferLike | ArrayBufferView): void;
+  close(code?: number, reason?: string): void;
+  addEventListener(type: "open", listener: (event: unknown) => void, options?: { once?: boolean }): void;
+  addEventListener(type: "message", listener: (event: { readonly data: unknown }) => void, options?: { once?: boolean }): void;
+  addEventListener(type: "error", listener: (event: { readonly error?: unknown; readonly message?: string }) => void, options?: { once?: boolean }): void;
+  addEventListener(type: "close", listener: (event: { readonly code: number; readonly reason: string }) => void, options?: { once?: boolean }): void;
+  removeEventListener(type: "open" | "message" | "error" | "close", listener: (event: never) => void): void;
+}
+
 /** Configures an {@link EnclaveHTTPClient}. */
 export interface EnclaveOptions {
   /** Defaults to `"tls"` on Node and Bun, `"ehbp"` in browsers. */

@@ -11,6 +11,7 @@ import { resolveUserCacheSecret } from "./internal/cachesecret.js";
 import { discoverRouter } from "./internal/router.js";
 import { validateBaseURL } from "./internal/transport/base-url.js";
 import type { KeyedTransport } from "./internal/transport/transport.js";
+import { registerWebSocketAccess } from "./internal/websocket.js";
 import type { Fetch, RouterOptions } from "./options.js";
 
 /** Seams for tests: the enclave client's, and the fetch that retrieves the router list. */
@@ -56,6 +57,7 @@ export async function createRouterHTTPClient(options: RouterOptions, seams: Rout
     baseURL !== "" ? baseURL : `https://${host}/v1/`,
     attestedFetch(transport, host, baseURL, secret),
   );
+  registerWebSocketAccess(client, transport, seams.tls ?? {});
   // Discovery leaves its fallback unverified.
   await client.ensureVerified(options.signal);
   return client;
