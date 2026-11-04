@@ -41,7 +41,7 @@ function browserField(): Plugin {
 export default defineConfig({
   plugins: [browserField()],
   optimizeDeps: {
-    include: ["openai"],
+    include: ["openai", "ai", "@ai-sdk/openai-compatible"],
   },
   test: {
     include: ["test/*.browser.test.ts", "test/v3/*.browser.test.ts"],
