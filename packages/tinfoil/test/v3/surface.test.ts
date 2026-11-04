@@ -157,6 +157,13 @@ describe("public surface", () => {
   });
 
   it("checks router client options before any network I/O", async () => {
+    await expect(surface.RouterHTTPClient.create({ transportMode: "tls", baseURL: "https://proxy.example/" })).rejects.toBeInstanceOf(
+      surface.ConfigurationError,
+    );
+    await expect(surface.RouterOpenAIClient.create({ baseURL: "http://proxy.example/" })).rejects.toBeInstanceOf(surface.ConfigurationError);
+  });
+
+  it("fetches nothing before rejecting router client options", async () => {
     const fetches = countingFetch();
     const seams = { routersFetch: fetches.fetch, documentFetch: fetches.fetch };
     await expect(createRouterHTTPClient({ transportMode: "tls", baseURL: "https://proxy.example/" }, seams)).rejects.toBeInstanceOf(surface.ConfigurationError);
