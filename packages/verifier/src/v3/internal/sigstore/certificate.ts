@@ -152,13 +152,14 @@ class WorkflowIdentityPolicy implements VerificationPolicy {
 const STATEMENT_MEMBERS = ["_type", "subject", "predicateType", "predicate"];
 const SUBJECT_MEMBERS = ["name", "digest"];
 
-interface Subject {
+/** One in-toto subject: its name and its sha256 digest ("" when it carries none). */
+export interface Subject {
   readonly name: string;
   readonly sha256: string;
 }
 
 /** Parses the signed payload as an in-toto statement and returns its subjects; a null subject rejects. */
-function statementSubjects(payload: Uint8Array): Subject[] {
+export function statementSubjects(payload: Uint8Array): Subject[] {
   let statement: JsonObject;
   let subjects: readonly JsonValue[];
   try {
