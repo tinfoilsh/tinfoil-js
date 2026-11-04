@@ -57,6 +57,11 @@ export async function startTlsServer(route: (seen: Seen) => Reply | Promise<Repl
           res.end();
         }
       })().catch((err: unknown) => {
+        // Once headers are out, the client already has a status; cut the connection instead.
+        if (res.headersSent) {
+          res.destroy(err instanceof Error ? err : new Error(String(err)));
+          return;
+        }
         res.writeHead(500, { "content-type": "text/plain" });
         res.end(String(err));
       });
