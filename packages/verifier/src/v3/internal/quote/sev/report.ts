@@ -24,6 +24,10 @@ const SIGNATURE_OFFSET = 0x2a0;
 /** Each of r and s occupies 72 little-endian bytes. */
 const ECDSA_RS_SIZE = 72;
 const REPORT_VERSION_3 = 3;
+/** The first report version that carries LAUNCH_MIT_VECTOR and CURRENT_MIT_VECTOR; earlier versions reserve those bytes. */
+const REPORT_VERSION_5 = 5;
+const MIT_VECTORS_OFFSET = 0x1f8;
+const MIT_VECTORS_END = 0x208;
 
 /** Which key signed the report (SIGNER_INFO bits 4:2). */
 export const SIGNER_VCEK = 0;
@@ -96,6 +100,7 @@ export interface SevReport {
   readonly committedMinor: number;
   readonly committedMajor: number;
   readonly launchTcb: bigint;
+  /** Zero in reports before version 5, which reserve the field. */
   readonly launchMitVector: bigint;
   readonly currentMitVector: bigint;
   /** r‖s, each 72 little-endian bytes. */
@@ -211,7 +216,11 @@ export function parseReport(bytes: Uint8Array): SevReport {
   mustBeZero(bytes, reservedFrom, 0x1a0);
   mustBeZero(bytes, 0x1eb, 0x1ec);
   mustBeZero(bytes, 0x1ef, 0x1f0);
-  mustBeZero(bytes, 0x208, SIGNATURE_OFFSET);
+  // The mitigation vectors exist from version 5; earlier versions reserve
+  // their bytes, so a value there is not evidence and rejects.
+  const hasMitVectors = version >= REPORT_VERSION_5;
+  if (!hasMitVectors) mustBeZero(bytes, MIT_VECTORS_OFFSET, MIT_VECTORS_END);
+  mustBeZero(bytes, MIT_VECTORS_END, SIGNATURE_OFFSET);
   const signatureAlgo = u32(0x34);
   if (signatureAlgo === SIGNATURE_ALGO_ECDSA_P384_SHA384) {
     mustBeZero(bytes, SIGNATURE_OFFSET + 2 * ECDSA_RS_SIZE, REPORT_SIZE);
@@ -247,8 +256,8 @@ export function parseReport(bytes: Uint8Array): SevReport {
     committedMinor: bytes[0x1ed],
     committedMajor: bytes[0x1ee],
     launchTcb: u64(0x1f0),
-    launchMitVector: u64(0x1f8),
-    currentMitVector: u64(0x200),
+    launchMitVector: hasMitVectors ? u64(MIT_VECTORS_OFFSET) : 0n,
+    currentMitVector: hasMitVectors ? u64(MIT_VECTORS_OFFSET + 8) : 0n,
     signature: slice(SIGNATURE_OFFSET, 2 * ECDSA_RS_SIZE),
   };
 }

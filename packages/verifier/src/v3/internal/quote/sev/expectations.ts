@@ -167,8 +167,15 @@ function checkTcb(e: SevExpectations, q: SevQuote): void {
       throw new Error(`the ${higherName} ${formatTcb(higher)} is lower than the ${lowerName} ${formatTcb(lower)} in at least one component`);
     }
   };
-  if (e.policy.permitProvisionalFirmware) atMost(committed, "report's COMMITTED_TCB", current, "report's CURRENT_TCB");
-  else equal(committed, "report's COMMITTED_TCB", current, "report's CURRENT_TCB");
+  if (e.policy.permitProvisionalFirmware) {
+    // Provisional firmware may run ahead of what is committed, but the
+    // committed level is what the machine can fall back to, so it must meet
+    // the floor as well.
+    atMost(committed, "report's COMMITTED_TCB", current, "report's CURRENT_TCB");
+    atMost(e.minimumTcb, "policy minimum TCB", committed, "report's COMMITTED_TCB");
+  } else {
+    equal(committed, "report's COMMITTED_TCB", current, "report's CURRENT_TCB");
+  }
   atMost(e.minimumLaunchTcb, "policy minimum launch TCB", launch, "report's LAUNCH_TCB");
   // The VCEK endorses exactly the reported TCB; a certificate for another
   // level, higher or lower, is not the certificate for this machine state.
@@ -207,6 +214,16 @@ function checkVersion(e: SevExpectations, r: SevReport): void {
         `committed API version (${r.committedMajor}.${r.committedMinor}) is greater than the current API version (${r.currentMajor}.${r.currentMinor})`,
       );
     }
+    // The committed firmware is what the machine can fall back to, so the
+    // floors apply to it as well as to the running firmware.
+    if (minimumBuild > r.committedBuild) {
+      throw new Error(`committed build number ${r.committedBuild} is less than the required minimum ${minimumBuild}`);
+    }
+    if (e.minimumVersion > committed) {
+      throw new Error(
+        `committed API version (${r.committedMajor}.${r.committedMinor}) is less than the required minimum (${e.minimumVersion >> 8}.${e.minimumVersion & 0xff})`,
+      );
+    }
   }
 }
 
@@ -218,9 +235,14 @@ function checkSigner(r: SevReport): void {
   if (!allZero(r.authorKeyDigest)) throw new Error("report carries an author key digest; ID-block launches are unsupported");
 }
 
-/** An unmasked CHIP_ID must equal the VCEK's hardware id (its first 8 bytes under TCB layout 1). */
+/**
+ * CHIP_ID must equal the VCEK's hardware id (its first 8 bytes under TCB
+ * layout 1). An all-zero CHIP_ID is what a masked report carries; masked
+ * reports are rejected, so a zero id under an unmasked report is not a
+ * machine identity either.
+ */
 function checkHwid(r: SevReport, hwid: Uint8Array): void {
-  if (allZero(r.chipId)) return;
+  if (allZero(r.chipId)) throw new Error("report field CHIP_ID is all zero and cannot identify the machine");
   let reportHwid: Uint8Array;
   switch (hwid.length) {
     case CHIP_ID_SIZE:

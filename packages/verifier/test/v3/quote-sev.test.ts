@@ -110,6 +110,22 @@ describe("sev report", () => {
     expect(() => parseReport(r)).toThrow(/reserved and must be zero/);
   });
 
+  it("reads the mitigation vectors from version 5 on and reserves their bytes before", () => {
+    const r = blankReport();
+    r[0x1f8] = 0x05;
+    r[0x207] = 0x80;
+    expect(() => parseReport(r)).toThrow(/0x1f8:0x208 are reserved/);
+    new DataView(r.buffer).setUint32(0x00, 4, true);
+    expect(() => parseReport(r)).toThrow(/0x1f8:0x208 are reserved/);
+    new DataView(r.buffer).setUint32(0x00, 5, true);
+    const v5 = parseReport(r);
+    expect(v5.launchMitVector).toBe(5n);
+    expect(v5.currentMitVector).toBe(1n << 63n);
+    r[0x1f8] = r[0x207] = 0;
+    new DataView(r.buffer).setUint32(0x00, 3, true);
+    expect(parseReport(r)).toMatchObject({ launchMitVector: 0n, currentMitVector: 0n });
+  });
+
   it("reserves the CPUID bytes in a version-2 report", () => {
     const r = blankReport();
     new DataView(r.buffer).setUint32(0x00, 2, true);
@@ -496,6 +512,17 @@ describe.skipIf(withoutVectors)(vectorsTitle("sev expectations"), () => {
     const provisional = assemble({ ...policy, permitProvisionalFirmware: true });
     expect(() => validateSev(provisional, withReport({ committedTcb: r.committedTcb - 1n }))).not.toThrow();
     expect(() => validateSev(provisional, withReport({ committedTcb: r.committedTcb + 1n }))).toThrow(/COMMITTED_TCB/);
+    // The committed level must meet the floor even when provisional firmware is permitted.
+    const reported = decomposeTcb(TCB_LAYOUT_0, r.reportedTcb);
+    const atReported = assemble({
+      ...policy,
+      permitProvisionalFirmware: true,
+      minimumTcb: { blSpl: reported.blSpl, teeSpl: reported.teeSpl, snpSpl: reported.snpSpl, ucodeSpl: reported.ucodeSpl },
+    });
+    expect(() => validateSev(atReported, q)).not.toThrow();
+    expect(() => validateSev(atReported, withReport({ committedTcb: r.committedTcb - 1n }))).toThrow(
+      /COMMITTED_TCB .* is lower than the policy minimum TCB/,
+    );
     const floor = { ...policy.minimumTcb, ucodeSpl: 255 };
     expect(() => validateSev(assemble({ ...policy, minimumTcb: floor }), q)).toThrow(/REPORTED_TCB .* is lower than the policy minimum TCB/);
     expect(() => validateSev(assemble({ ...policy, minimumLaunchTcb: floor }), q)).toThrow(/LAUNCH_TCB .* is lower than the policy minimum launch TCB/);
@@ -511,6 +538,11 @@ describe.skipIf(withoutVectors)(vectorsTitle("sev expectations"), () => {
     expect(() => validateSev(e, withReport({ committedMinor: r.currentMinor + 1 }))).toThrow(/committed API version .* does not match/);
     const provisional = assemble({ ...policy, permitProvisionalFirmware: true });
     expect(() => validateSev(provisional, withReport({ committedBuild: r.currentBuild + 1 }))).toThrow(/is greater than the current build number/);
+    // Provisional firmware does not lift the floors off the committed firmware.
+    const buildFloor = assemble({ ...policy, permitProvisionalFirmware: true, minimumBuild: r.currentBuild });
+    expect(() => validateSev(buildFloor, withReport({ committedBuild: r.currentBuild - 1 }))).toThrow(/committed build number .* is less than the required minimum/);
+    const versionFloor = assemble({ ...policy, permitProvisionalFirmware: true, minimumApiVersion: `${r.currentMajor}.${r.currentMinor}` });
+    expect(() => validateSev(versionFloor, withReport({ committedMinor: r.currentMinor - 1 }))).toThrow(/committed API version .* is less than the required minimum/);
     expect(() => validateSev(assemble({ ...policy, minimumGuestSvn: r.guestSvn + 1 }), q)).toThrow(/GUEST_SVN .* is less than the required minimum/);
     expect(() => validateSev(assemble({ ...policy, vmpl: 3n }), withReport({ vmpl: 2 }))).toThrow(/report VMPL 2 is not 3/);
   });
@@ -532,6 +564,8 @@ describe.skipIf(withoutVectors)(vectorsTitle("sev expectations"), () => {
     expect(() => validateSev(e, { ...q, vcek: { ...q.vcek, hwid: otherHwid } })).toThrow(/CHIP_ID is not the same as the VCEK certificate's HWID/);
     expect(() => validateSev(e, { ...q, vcek: { ...q.vcek, hwid: otherHwid.subarray(0, 7) } })).toThrow(/HWID has unsupported size 7/);
     expect(() => validateSev(e, { ...q, vcek: { ...q.vcek, hwid: q.vcek.hwid.subarray(0, 8) } })).not.toThrow();
+    const zeroId = new Uint8Array(64);
+    expect(() => validateSev({ ...e, chipId: zeroId }, withReport({ chipId: zeroId }))).toThrow(/CHIP_ID is all zero/);
     const signer = (bits: number) => withReport({ signer: parseSignerInfo(bits) });
     expect(() => validateSev(e, signer(1))).toThrow(/author key; ID-block launches are unsupported/);
     expect(() => validateSev(e, signer(2))).toThrow(/masks CHIP_ID/);
