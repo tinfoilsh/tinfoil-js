@@ -542,16 +542,17 @@ describe("GatewayTransport", () => {
   });
 
   it("forwards a Request's other options with the rebuilt request", async () => {
-    const seen: RequestInit[] = [];
+    const seen: Request[] = [];
     const g = gateway();
+    // The sealed request arrives as a Request; its body must stay unread here, so the fields are read off it directly.
     const recording: Fetch = async (input, init) => {
-      seen.push(init ?? {});
+      seen.push(input as Request);
       return g.fetch(input, init);
     };
     const t = transport({ policy: await GatewayPolicy.create(undefined, false, perHost()), gatewayFetch: recording });
     const request = new Request("https://gateway.example/v1/chat/completions", { method: "POST", body: '{"model":"test-model"}', headers: { "content-type": "application/json" }, credentials: "include", redirect: "manual", cache: "no-store", referrerPolicy: "no-referrer" });
     expect((await t.fetch(request)).status).toBe(200);
-    const rebuilt = new Request("https://gateway.example/v1/chat/completions", seen[0]);
+    const rebuilt = seen[0]!;
     expect([rebuilt.credentials, rebuilt.redirect, rebuilt.cache, rebuilt.referrerPolicy]).toEqual(["include", "manual", "no-store", "no-referrer"]);
     // A keep-alive request can't carry the sealed body stream, so the sealing refuses it rather than dropping the option.
     const keepalive = new Request("https://gateway.example/v1/chat/completions", { method: "POST", body: '{"model":"test-model"}', headers: { "content-type": "application/json" }, keepalive: true });
