@@ -757,11 +757,15 @@ describe("parseRevocationList", () => {
       seq(tlv(0x06, hex(oid)), ...(critical ? [tlv(0x01, [0xff])] : []), tlv(0x04, int(5)));
     const crlExtensions = (...exts: Uint8Array[]): Uint8Array => tlv(0xa0, seq(...exts));
     const entry = (...exts: Uint8Array[]): Uint8Array => seq(seq(int(7), utcTime("240601000000Z"), ...(exts.length ? [seq(...exts)] : [])));
-    // A delta CRL indicator (2.5.29.27) is critical by definition; a CRL number (2.5.29.20) is not.
-    expect(() => parseRevocationList(build(crlExtensions(ext("55 1d 1b", true))))).toThrow(/unsupported critical CRL extension 2\.5\.29\.27/);
+    // A delta CRL indicator (2.5.29.27) is critical by definition and rejects even without the flag; a CRL number (2.5.29.20) is not.
+    expect(() => parseRevocationList(build(crlExtensions(ext("55 1d 1b", true))))).toThrow(/unsupported CRL extension 2\.5\.29\.27/);
+    expect(() => parseRevocationList(build(crlExtensions(ext("55 1d 1b", false))))).toThrow(/unsupported CRL extension 2\.5\.29\.27/);
+    expect(() => parseRevocationList(build(crlExtensions(ext("55 1d 1c", false))))).toThrow(/unsupported CRL extension 2\.5\.29\.28/);
+    expect(() => parseRevocationList(build(crlExtensions(ext("55 1d 14", true))))).toThrow(/unsupported CRL extension 2\.5\.29\.20/);
     expect(parseRevocationList(build(crlExtensions(ext("55 1d 14", false)))).revokedSerials).toEqual([]);
-    // A certificate issuer (2.5.29.29) on an entry is critical; a reason code (2.5.29.21) is not.
-    expect(() => parseRevocationList(build(entry(ext("55 1d 1d", true))))).toThrow(/unsupported critical CRL entry extension 2\.5\.29\.29/);
+    // A certificate issuer (2.5.29.29) on an entry likewise; a reason code (2.5.29.21) is not.
+    expect(() => parseRevocationList(build(entry(ext("55 1d 1d", true))))).toThrow(/unsupported CRL entry extension 2\.5\.29\.29/);
+    expect(() => parseRevocationList(build(entry(ext("55 1d 1d", false))))).toThrow(/unsupported CRL entry extension 2\.5\.29\.29/);
     expect(parseRevocationList(build(entry(ext("55 1d 15", false)))).revokedSerials).toEqual([7n]);
     expect(() => parseRevocationList(build(crlExtensions(ext("55 1d 14", false), ext("55 1d 14", false))))).toThrow(/duplicate extension/);
   });

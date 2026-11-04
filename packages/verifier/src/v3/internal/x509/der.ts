@@ -8,8 +8,10 @@
  * BER encodings, so `decode` walks the raw bytes alongside its tree and
  * rejects every one of them: a length that fits a shorter form, an INTEGER
  * with a redundant sign byte, a BOOLEAN other than 0x00/0xFF, a constructed
- * string, an unused-bit count with set bits, a time with fractional seconds
- * or a missing 'Z', and any bytes after the top-level element.
+ * string, an unused-bit count with set bits, a time with a missing 'Z' or a
+ * non-DER fraction, and any bytes after the top-level element. A DER
+ * fraction on a GeneralizedTime passes `decode`; whether a schema admits it
+ * is decided by `time()`, which rejects fractions unless asked to accept them.
  */
 import { ASN1Obj } from "@freedomofpress/crypto-browser";
 
