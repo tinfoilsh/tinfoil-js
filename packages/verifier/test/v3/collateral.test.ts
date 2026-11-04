@@ -14,6 +14,7 @@ import {
   AMD_VCEK_V1_FORMAT,
   ARTIFACT_FRESHNESS_V1_FORMAT,
   CONFIG_ENDORSEMENT_V1_FORMAT,
+  CONFIG_ENDORSEMENT_V2_FORMAT,
   CONFIG_ID,
   CONFIG_V1_FORMAT,
   configPlatform,
@@ -315,6 +316,30 @@ describe("config collateral", () => {
     expect(() =>
       decodeWire([{ ...entry, data: `{"config_base64":"Y29uZmln","sigstore_bundle":{}}` }]),
     ).toThrow("cannot contain an endorsement");
+  });
+
+  describe("config endorsement v2", () => {
+    const reference = "sha256:" + "ab".repeat(32);
+    const issuer = b64("not really DER, but bytes");
+    const data = `{"endorsement_ref":${q(reference)},"sigstore_bundle":{"mediaType":"test"},"issuer_certificate_der":${q(issuer)}}`;
+    const entry: WireEntry = { id: CONFIG_ID, role: ROLE_REFERENCE_VALUES, format: CONFIG_ENDORSEMENT_V2_FORMAT, data };
+
+    it("decodes an issuer certificate and admits a digest-only endorsement without config bytes", () => {
+      const got = decodeWire([entry]).config!;
+      expect(got.reference).toBe(reference);
+      expect(got.config).toBeUndefined();
+      expect(got.issuer).toEqual(enc("not really DER, but bytes"));
+      const withConfig = decodeWire([{ ...entry, data: data.replace(`"sigstore_bundle"`, `"config_base64":"Y29uZmln","sigstore_bundle"`) }]).config!;
+      expect(withConfig.config).toEqual(enc("config"));
+      const withoutIssuer = decodeWire([{ ...entry, data: data.replace(`,"issuer_certificate_der":${q(issuer)}`, "") }]).config!;
+      expect(withoutIssuer.issuer).toBeUndefined();
+    });
+
+    it("rejects an issuer certificate in v1 collateral, a bad issuer encoding, and an empty config", () => {
+      expect(() => decodeWire([{ ...entry, format: CONFIG_ENDORSEMENT_V1_FORMAT }])).toThrow(/issuer certificates require v2/);
+      expect(() => decodeWire([{ ...entry, data: data.replace(q(issuer), `"*"`) }])).toThrow(/issuer_certificate_der/);
+      expect(decodeWire([{ ...entry, data: data.replace(`"sigstore_bundle"`, `"config_base64":"","sigstore_bundle"`) }]).config!.config).toBeUndefined();
+    });
   });
 
   describe("config endorsement", () => {
