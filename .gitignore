@@ -12,3 +12,4 @@ sigstore-browser/
 packages/tinfoil/src/version.ts
 packages/tinfoil/README.md
 tinfoil-conformance/
+packages/*/.vitest-attachments/
