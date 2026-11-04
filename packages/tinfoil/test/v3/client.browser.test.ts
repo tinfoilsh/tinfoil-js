@@ -11,6 +11,9 @@ import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { createEnclaveHTTPClient, EnclaveHTTPClient, resolveTransportMode, type EnclaveClientSeams } from "../../src/v3/enclave-client.js";
 import { ConfigurationError } from "../../src/v3/errors.js";
 import { resetEphemeralUserCacheSecretForTests, resolveUserCacheSecret } from "../../src/v3/internal/cachesecret.js";
+import { loadOrPersistUserCacheSecret } from "../../src/v3/internal/cachesecret-store.js";
+import { PLATFORM } from "../../src/v3/internal/platform.js";
+import { tlsMode } from "../../src/v3/internal/transport/tls.js";
 import { createEnclaveOpenAIClient, createTinfoilClient, EnclaveOpenAIClient, TinfoilClient } from "../../src/v3/openai-client.js";
 import type { Fetch } from "../../src/v3/options.js";
 import { RouterHTTPClient, type RouterClientSeams } from "../../src/v3/router-client.js";
@@ -73,6 +76,12 @@ afterEach(() => {
 });
 
 describe("the browser entry", () => {
+  it("runs the browser variants of the platform-specific modules", () => {
+    expect(PLATFORM).toBe("browser");
+    expect(() => tlsMode()).toThrow(/not available in browsers/);
+    expect(loadOrPersistUserCacheSecret(() => "generated")).toBeNull();
+  });
+
   it("exports the same surface as the Node entry", async () => {
     const node = await import("../../src/v3/index.js");
     expect(Object.keys(browserEntry).sort()).toEqual(Object.keys(node).sort());

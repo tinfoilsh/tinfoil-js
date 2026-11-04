@@ -6,6 +6,9 @@
 import { ConfigurationError } from "../errors.js";
 import type { TransportMode } from "../options.js";
 
+/** Which build this module belongs to; the browser build's bundling is checked against it. */
+export const PLATFORM: "node" | "browser" = "browser";
+
 /** Why the TLS mode is refused in a browser. */
 export const TLS_UNAVAILABLE_IN_BROWSERS = 'the "tls" transport mode pins the server certificate, which browsers don\'t expose to scripts; use "ehbp", the browser default, which seals request and response bodies to the enclave\'s key instead';
 
