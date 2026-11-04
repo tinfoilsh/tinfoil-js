@@ -6,11 +6,11 @@
 import { SEV_SNP_REPORT_V1_FORMAT, TDX_QUOTE_V1_FORMAT, type CpuEndorsements, type CpuEvidence, type Document } from "../../document/document.js";
 import { notImplemented } from "../../errors.js";
 import { cloneMeasurement, type Expected, type Measurement } from "../../measurement.js";
-import { PLATFORM_SEV_SNP, type Artifact, type Platform, type Policy } from "../policy/artifact.js";
+import { PLATFORM_SEV_SNP, PLATFORM_TDX, type Artifact, type Platform, type Policy } from "../policy/artifact.js";
 import type { ConfigReferenceValues } from "./config.js";
 import type { LegacyReferenceValues } from "./legacy.js";
 import { authenticateSev, type SevExpectations, type SevQuote } from "./sev/authenticate.js";
-import type { TdxExpectations, TdxQuote } from "./tdx/authenticate.js";
+import { authenticateTdx, type TdxExpectations, type TdxQuote } from "./tdx/authenticate.js";
 
 /** Vendor trust anchors that replace the embedded production roots. Test-only. */
 export interface VendorRoots {
@@ -97,8 +97,22 @@ export async function authenticate(evidence: CpuEvidence, endorsements: CpuEndor
         sev: q,
       };
     }
-    case TDX_QUOTE_V1_FORMAT:
-      return notImplemented("quote.authenticate (tdx)");
+    case TDX_QUOTE_V1_FORMAT: {
+      if (endorsements.intelPcs === undefined) throw new Error("no intel-pcs endorsement collateral for the cpu");
+      const intel = opts?.dangerousTestOnlyRoots?.intel;
+      const q = await authenticateTdx(
+        { quote: evidence.report, pcs: endorsements.intelPcs.responses },
+        now,
+        intel === undefined ? undefined : { dangerousTestOnlyRoot: intel },
+      );
+      return {
+        platform: PLATFORM_TDX,
+        identity: q.identity,
+        measurement: q.measurement,
+        evidence: { format: evidence.format, report: evidence.report.slice() },
+        tdx: q,
+      };
+    }
     default:
       throw new Error(`unsupported cpu_evidence format ${JSON.stringify(evidence.format)}`);
   }
