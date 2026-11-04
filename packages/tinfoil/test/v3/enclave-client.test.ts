@@ -180,12 +180,12 @@ describe("EnclaveHTTPClient over TLS", () => {
     expect(() => new (EnclaveOpenAIClient as unknown as new (...a: unknown[]) => unknown)(Symbol("x"), ai.httpClient(), {})).toThrow(ConfigurationError);
   });
 
-  it("keeps the attested transport through option changes and clones", async () => {
+  it("keeps the attested transport and its own settings through option changes and clones", async () => {
     const ai = await createEnclaveOpenAIClient(
       tls.host,
       "tinfoilsh/repo",
       { verifier: verifier(() => ({ tls: TEST_PIN })), transportMode: "tls" },
-      { apiKey: "k" },
+      { apiKey: "k", timeout: 1234, maxRetries: 0, defaultHeaders: { "x-custom": "kept" }, dangerouslyAllowBrowser: true },
       { documentFetch: docs.fetch, tls: { ca: TEST_CERT } },
     );
     const evil: Fetch = async () => new Response("intercepted");
@@ -197,9 +197,16 @@ describe("EnclaveHTTPClient over TLS", () => {
     expect(clone.httpClient()).toBe(ai.httpClient());
     expect(clone.baseURL).toBe(`https://${tls.host}/v1/`);
     expect(fetchOf(clone)).toBe(fetchOf(ai));
+    expect(clone.timeout).toBe(1234);
+    expect(clone.maxRetries).toBe(0);
+    expect((clone as unknown as { _options: { dangerouslyAllowBrowser?: boolean } })._options.dangerouslyAllowBrowser).toBe(true);
     const completion = await clone.chat.completions.create({ model: "test", messages: [{ role: "user", content: "hi" }] });
     expect(completion.choices[0]!.message.content).toBe("pinned");
     expect(tls.seen[tls.seen.length - 1]!.headers.authorization).toBe("Bearer k2");
+    expect(tls.seen[tls.seen.length - 1]!.headers["x-custom"]).toBe("kept");
+    const again = clone.withOptions({ timeout: 99 });
+    expect(again.timeout).toBe(99);
+    expect(again.apiKey).toBe("k2");
   });
 });
 

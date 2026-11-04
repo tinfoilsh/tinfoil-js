@@ -13,7 +13,7 @@ describe("v3 client surface under Bun", () => {
     expect(new surface.ConfigurationError("x")).toBeInstanceOf(surface.TinfoilError);
   });
 
-  it("rejects a placeholder factory with a not-implemented error", async () => {
-    await expect(surface.EnclaveHTTPClient.create("enclave.example", "tinfoilsh/repo")).rejects.toThrow(/not implemented/);
+  it("checks client options before any network I/O", async () => {
+    await expect(surface.EnclaveHTTPClient.create("", "tinfoilsh/repo")).rejects.toBeInstanceOf(surface.ConfigurationError);
   });
 });
