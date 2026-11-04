@@ -81,13 +81,13 @@ export class Enclave {
   /** Checks the repository pin against the verifier's rules; no network I/O. */
   static async create(config: EnclaveConfig): Promise<Enclave> {
     if (config.host === "") throw new ConfigurationError("enclave host is required");
-    const verifier = config.verifier ?? (await Verifier.create());
     try {
+      const verifier = config.verifier ?? (await Verifier.create());
       verifier.checkRepoVerifiability(config.repo);
+      return new Enclave(config, verifier);
     } catch (err) {
       throw fromVerify(err);
     }
-    return new Enclave(config, verifier);
   }
 
   host(): string {

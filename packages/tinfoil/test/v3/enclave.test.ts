@@ -3,15 +3,15 @@
  * under the policy, the retry, the verification check, the transport-key
  * requirement, and the cache that shares one verification among callers and
  * refreshes it when it expires or is invalidated. The vector-backed cases
- * serve a golden document from a mocked fetch under the vector's injected
+ * serve golden documents from a mocked fetch under the vector's injected
  * roots and clock; the live case verifies a production enclave.
  */
 import { AttestationError, ConfigurationError, NetworkError } from "../../src/v3/errors.js";
-import { Enclave, RejectedError, VERIFICATION_RETRY_DELAY_MS, type EnclaveConfig } from "../../src/v3/internal/enclave.js";
+import { Enclave, fromVerify, RejectedError, VERIFICATION_RETRY_DELAY_MS, type EnclaveConfig } from "../../src/v3/internal/enclave.js";
 import { VerifiedEnclave } from "../../src/v3/internal/verified.js";
 import type { Fetch } from "../../src/v3/options.js";
 import { dangerousTestOnlyVerifier } from "../../../verifier/src/v3/verifier.js";
-import type { Verification, Verifier } from "../../../verifier/src/v3/index.js";
+import { KEY_SPKI_FP_SHA256_V1_FORMAT, KEY_X25519_HPKE_V1_FORMAT, UsageError, VerificationError, type Verification, type Verifier } from "../../../verifier/src/v3/index.js";
 import { conformanceAvailable, inputBytes, loadFixture, vectorsTitle, type ConformanceFixture } from "../../../verifier/test/v3/helpers/conformance.js";
 import { clockOf, rootsOf } from "../../../verifier/test/v3/helpers/verify.js";
 import { beforeAll, describe, expect, it } from "vitest";
@@ -20,6 +20,7 @@ const RUN_INTEGRATION = process.env.RUN_TINFOIL_INTEGRATION === "true";
 const HOST = "enclave.example";
 
 const hex = (s: string): Uint8Array => new Uint8Array(Buffer.from(s, "hex"));
+const noBinding = (): undefined => undefined;
 
 /** A vector served from a mocked fetch: the document, the nonce it is bound to, the clock, and the verifier under its roots. */
 interface Served {
@@ -33,18 +34,18 @@ interface Served {
 
 async function serve(relPath: string): Promise<Served> {
   const fixture = loadFixture(relPath);
-  const e = fixture.expected as Record<string, string>;
+  const e = fixture.expected as Record<string, string | undefined>;
   return {
     fixture,
     verifier: await dangerousTestOnlyVerifier(rootsOf(fixture)),
     document: new Uint8Array(inputBytes(fixture, "document_b64")),
     nonce: hex(fixture.input.nonce_hex as string),
     at: clockOf(fixture),
-    expected: { codeDigest: e.code_digest!, tls: e.tls_public_key_fp!, hpke: e.hpke_public_key! },
+    expected: { codeDigest: e.code_digest ?? "", tls: e.tls_public_key_fp ?? "", hpke: e.hpke_public_key ?? "" },
   };
 }
 
-/** A fetch answering the enclave's attestation endpoint from a queue of responses; the last one repeats. */
+/** A fetch answering from a queue of responses, the last one repeating, recording the URLs asked. */
 function serving(responses: (() => Response)[]): { fetch: Fetch; urls: string[] } {
   const urls: string[] = [];
   const fetch: Fetch = async (input) => {
@@ -55,7 +56,46 @@ function serving(responses: (() => Response)[]): { fetch: Fetch; urls: string[] 
   return { fetch, urls };
 }
 
+/** A fetch that serves `document` only once `release` is called, so callers can be lined up first. */
+function gated(document: Uint8Array<ArrayBuffer>): { fetch: Fetch; urls: string[]; release: () => void } {
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => (release = resolve));
+  const inner = serving([() => new Response(document)]);
+  const fetch: Fetch = async (input, init) => {
+    await gate;
+    return inner.fetch(input, init);
+  };
+  return { fetch, urls: inner.urls, release };
+}
+
 const noSleep = { slept: [] as number[], sleep: async (ms: number): Promise<void> => void noSleep.slept.push(ms) };
+
+/** A verifier whose verification carries only the given crypto material, for the transport-key rules. */
+function stubVerifier(material: { id: string; format: string; data: string }[], expiresAt: Date): Verifier {
+  const verification = {
+    cryptoMaterial: () => material.map((m) => ({ ...m })),
+    cryptoMaterialData: (id: string, format: string) => material.find((m) => m.id === id && m.format === format)?.data,
+    tlsPublicKeyFP: () => material.find((m) => m.id === "tls" && m.format === KEY_SPKI_FP_SHA256_V1_FORMAT)?.data,
+    hpkePublicKey: () => material.find((m) => m.id === "hpke" && m.format === KEY_X25519_HPKE_V1_FORMAT)?.data,
+    freshnessExpiresAt: () => new Date(expiresAt.getTime()),
+  } as unknown as Verification;
+  return {
+    checkRepoVerifiability: () => {},
+    verifyV3At: async () => verification,
+  } as unknown as Verifier;
+}
+
+describe("fromVerify", () => {
+  it("reports a usage error as configuration and any other rejection as attestation, keeping the cause", () => {
+    const usage = fromVerify(new UsageError("bad pin"));
+    expect(usage).toBeInstanceOf(ConfigurationError);
+    expect(usage.cause).toBeInstanceOf(UsageError);
+    const rejected = fromVerify(new VerificationError("quote", "bad report"));
+    expect(rejected).toBeInstanceOf(AttestationError);
+    expect(rejected.message).toBe("attestation error: verification error: quote: bad report");
+    expect(fromVerify(new NetworkError("down"))).toBeInstanceOf(NetworkError);
+  });
+});
 
 describe.skipIf(!conformanceAvailable())(vectorsTitle("Enclave"), () => {
   let golden: Served;
@@ -111,6 +151,40 @@ describe.skipIf(!conformanceAvailable())(vectorsTitle("Enclave"), () => {
     const { fetch } = serving([() => new Response(rejected.document)]);
     const enclave = await Enclave.create(config({ fetch, verifier: rejected.verifier, nonce: () => rejected.nonce, clock: () => rejected.at }));
     await expect(enclave.verifyOnce()).rejects.toBeInstanceOf(AttestationError);
+  });
+
+  it("requires the TLS key and a well-formed HPKE key a transport binds traffic to", async () => {
+    const noTls = await serve("golden/e-missing-tls-key.json");
+    const missing = await Enclave.create(config({ fetch: serving([() => new Response(noTls.document)]).fetch, verifier: noTls.verifier, nonce: () => noTls.nonce, clock: () => noTls.at }));
+    const missingErr = await missing.verifyOnce().catch((e: unknown) => e);
+    expect(missingErr).toBeInstanceOf(AttestationError);
+    expect((missingErr as Error).message).toBe('attestation error: document endorses no "tls" key');
+
+    const badHpke = await serve("golden/e-hpke-wrong-format.json");
+    const malformed = await Enclave.create(config({ fetch: serving([() => new Response(badHpke.document)]).fetch, verifier: badHpke.verifier, nonce: () => badHpke.nonce, clock: () => badHpke.at }));
+    const malformedErr = await malformed.verifyOnce().catch((e: unknown) => e);
+    expect(malformedErr).toBeInstanceOf(AttestationError);
+    expect((malformedErr as Error).message).toMatch(/^attestation error: crypto_material item "hpke" has format ".*", want "https:\/\/tinfoil.sh\/key\/x25519-hpke\/v1"$/);
+  });
+
+  it("accepts a document that endorses no HPKE key and rejects a TLS key in another format", async () => {
+    const later = new Date(golden.at.getTime() + 60_000);
+    const tlsOnly = stubVerifier([{ id: "tls", format: KEY_SPKI_FP_SHA256_V1_FORMAT, data: "ab".repeat(32) }], later);
+    const { fetch } = serving([() => new Response(golden.document)]);
+    const v = await (await Enclave.create(config({ fetch, verifier: tlsOnly }))).verifyOnce();
+    expect(v.tlsPublicKeyFP()).toBe("ab".repeat(32));
+    expect(v.hpkePublicKey()).toBeUndefined();
+
+    const oddTls = stubVerifier([{ id: "tls", format: "https://example.com/other", data: "x" }], later);
+    const err = await (await Enclave.create(config({ fetch, verifier: oddTls }))).verifyOnce().catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(AttestationError);
+    expect((err as Error).message).toMatch(/crypto_material item "tls" has format "https:\/\/example.com\/other"/);
+  });
+
+  it("rejects a verification whose freshness window is already closed", async () => {
+    const expired = stubVerifier([{ id: "tls", format: KEY_SPKI_FP_SHA256_V1_FORMAT, data: "ab".repeat(32) }], golden.at);
+    const { fetch } = serving([() => new Response(golden.document)]);
+    await expect((await Enclave.create(config({ fetch, verifier: expired }))).verifyOnce()).rejects.toThrow(/freshness witnesses have expired/);
   });
 
   it("retries once after a network failure and reports the terminal failure with the first", async () => {
@@ -209,7 +283,7 @@ describe.skipIf(!conformanceAvailable())(vectorsTitle("Enclave"), () => {
 
     it("verifies again after a state is invalidated, and ignores invalidation of a replaced state", async () => {
       const { fetch, urls } = serving([() => new Response(golden.document)]);
-      const cache = new VerifiedEnclave(await Enclave.create(config({ fetch })), () => undefined, () => golden.at);
+      const cache = new VerifiedEnclave(await Enclave.create(config({ fetch })), noBinding, () => golden.at);
       const first = await cache.ensureVerified();
       const second = await cache.reverify();
       cache.invalidate(first);
@@ -221,46 +295,23 @@ describe.skipIf(!conformanceAvailable())(vectorsTitle("Enclave"), () => {
     });
 
     it("shares one verification among concurrent callers, including its failure", async () => {
-      let release!: () => void;
-      const gate = new Promise<void>((resolve) => (release = resolve));
-      const { fetch, urls } = serving([
-        () => {
-          throw new Error("unexpected");
-        },
-      ]);
-      const slow: Fetch = async (input, init) => {
-        await gate;
-        return fetch(input, init);
-      };
-      const good = serving([() => new Response(golden.document)]);
-      const slowGood: Fetch = async (input, init) => {
-        await gate;
-        return good.fetch(input, init);
-      };
-      const cache = new VerifiedEnclave(await Enclave.create(config({ fetch: slowGood })), () => undefined, () => golden.at);
+      const { fetch, urls, release } = gated(golden.document);
+      const cache = new VerifiedEnclave(await Enclave.create(config({ fetch })), noBinding, () => golden.at);
       const waiters = [cache.ensureVerified(), cache.ensureVerified(), cache.reverify()];
       release();
       const states = await Promise.all(waiters);
       expect(new Set(states).size).toBe(1);
-      expect(good.urls).toHaveLength(1);
-      void slow;
-      void urls;
+      expect(urls).toHaveLength(1);
 
-      const failing = new VerifiedEnclave(await Enclave.create(config({ fetch: serving([() => new Response("", { status: 500 })]).fetch })), () => undefined, () => golden.at);
+      const failing = new VerifiedEnclave(await Enclave.create(config({ fetch: serving([() => new Response("", { status: 500 })]).fetch })), noBinding, () => golden.at);
       const results = await Promise.allSettled([failing.ensureVerified(), failing.ensureVerified()]);
       expect(results.map((r) => r.status)).toEqual(["rejected", "rejected"]);
       expect((results[0] as PromiseRejectedResult).reason).toBe((results[1] as PromiseRejectedResult).reason);
     });
 
     it("lets a caller stop waiting without aborting the verification others need", async () => {
-      let release!: () => void;
-      const gate = new Promise<void>((resolve) => (release = resolve));
-      const good = serving([() => new Response(golden.document)]);
-      const slowGood: Fetch = async (input, init) => {
-        await gate;
-        return good.fetch(input, init);
-      };
-      const cache = new VerifiedEnclave(await Enclave.create(config({ fetch: slowGood })), () => undefined, () => golden.at);
+      const { fetch, urls, release } = gated(golden.document);
+      const cache = new VerifiedEnclave(await Enclave.create(config({ fetch })), noBinding, () => golden.at);
       const controller = new AbortController();
       const impatient = cache.ensureVerified(controller.signal);
       const patient = cache.ensureVerified();
@@ -268,7 +319,7 @@ describe.skipIf(!conformanceAvailable())(vectorsTitle("Enclave"), () => {
       await expect(impatient).rejects.toThrow(/impatient/);
       release();
       expect((await patient).verification.tlsPublicKeyFP()).toBe(golden.expected.tls);
-      expect(good.urls).toHaveLength(1);
+      expect(urls).toHaveLength(1);
     });
   });
 });
@@ -280,7 +331,7 @@ describe("Enclave against a live enclave", () => {
     expect(v.tlsPublicKeyFP()).toMatch(/^[0-9a-f]{64}$/);
     expect(v.hpkePublicKey()).toMatch(/^[0-9a-f]{64}$/);
     expect(v.freshnessExpiresAt()!.getTime()).toBeGreaterThan(Date.now());
-    const cache = new VerifiedEnclave(enclave);
+    const cache = new VerifiedEnclave(enclave, noBinding);
     const state = await cache.ensureVerified();
     expect(cache.current()).toBe(state.verification);
   }, 120_000);

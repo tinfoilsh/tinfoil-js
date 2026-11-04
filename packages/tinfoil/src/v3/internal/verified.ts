@@ -30,10 +30,10 @@ export class VerifiedEnclave<T = void> {
   #refreshing: Promise<void> | undefined;
 
   /**
-   * `bind` makes what the transport ties to a verification's keys; a
-   * `void`-binding cache just caches verifications.
+   * `bind` makes what the transport ties to a verification's keys; a cache
+   * that only caches verifications binds `() => undefined`.
    */
-  constructor(enclave: Enclave, bind: (v: Verification) => T | Promise<T> = () => undefined as T, clock: () => Date = () => new Date()) {
+  constructor(enclave: Enclave, bind: (v: Verification) => T | Promise<T>, clock: () => Date = () => new Date()) {
     this.#enclave = enclave;
     this.#bind = bind;
     this.#clock = clock;

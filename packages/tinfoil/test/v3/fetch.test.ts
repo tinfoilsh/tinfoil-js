@@ -50,7 +50,7 @@ describe("attestationURL", () => {
 
 describe("isAuthority", () => {
   it("accepts hosts with an optional port, including IPv6 and an explicit default port", () => {
-    for (const ok of ["enclave.example", "enclave.example:8443", "enclave.example:443", "10.0.0.1:9000", "[::1]:8443", "localhost"]) {
+    for (const ok of ["enclave.example", "Enclave.Example:8443", "enclave.example:443", "10.0.0.1:9000", "[::1]:8443", "localhost"]) {
       expect(isAuthority(ok), ok).toBe(true);
     }
     for (const bad of ["", "https://x", "x/", "x?y", "u@x", "x#f", "x:y"]) expect(isAuthority(bad), bad).toBe(false);
