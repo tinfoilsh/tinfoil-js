@@ -65,6 +65,29 @@ const VERIFICATION_METHODS = [
   "metadata",
 ].sort();
 
+/** The type-only exports, pinned under the test typecheck: a removed or renamed type fails compilation here. */
+type TypeExports = [
+  surface.VerifierOptions,
+  surface.EmbeddedReferences,
+  surface.ConfigVerification,
+  surface.ArtifactVerification,
+  surface.VerificationMetadata,
+  surface.ReferenceSource,
+  surface.ConfigEndorsement,
+  surface.Layer,
+  surface.Reference,
+  surface.CryptoMaterialItem,
+  surface.Measurement,
+  surface.Expected,
+  surface.Register,
+  surface.SevSnpMeasurement,
+  surface.TdxMeasurement,
+  surface.ExpectedSevSnp,
+  surface.ExpectedTdx,
+];
+const typeExports: TypeExports | undefined = undefined;
+void typeExports;
+
 const methodsOf = (cls: { prototype: object }): string[] =>
   Object.getOwnPropertyNames(cls.prototype)
     .filter((n) => n !== "constructor")

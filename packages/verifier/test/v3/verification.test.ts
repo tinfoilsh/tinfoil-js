@@ -49,7 +49,7 @@ describe("Verification", () => {
     const { v } = makeVerification();
     (v.enclaveMeasurement() as SevSnpMeasurement).launch.fill(0xff);
     (v.codeMeasurement() as ExpectedTdx).rtmr1!.fill(0xff);
-    v.cryptoMaterial()[0]!.data = "changed";
+    (v.cryptoMaterial()[0] as { data: string }).data = "changed";
     v.freshnessExpiresAt()!.setFullYear(1999);
     v.metadata().verifiedAt.setFullYear(1999);
     v.config()!.approvalTime!.setFullYear(1999);
