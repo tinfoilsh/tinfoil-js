@@ -617,10 +617,10 @@ describe("config and runtime accessors", () => {
     });
     const config = doc.configEndorsement();
     (config as { reference: string }).reference = "changed";
-    config.config[0] = "!".charCodeAt(0);
+    config.config![0] = "!".charCodeAt(0);
     const againConfig = doc.configEndorsement();
     expect(againConfig.reference).toBe("ref");
-    expect(dec(againConfig.config)).toBe("config");
+    expect(dec(againConfig.config!)).toBe("config");
     expect(againConfig.bundle).toEqual(new Map());
 
     const runtime = doc.runtime();
