@@ -4,9 +4,10 @@ import {
   verifyArtifactApproval,
   verifyConfigApproval,
 } from "../src/approvals.js";
-import { base64, parseJSON, unbase64, utf8 } from "../src/encoding.js";
+import { base64, hex, parseJSON, sha256, unbase64, utf8 } from "../src/encoding.js";
 import { parseReference } from "../src/references.js";
 import boundaries from "./fixtures/approval-v3/boundaries.json";
+import certified from "./fixtures/approval-v3/certified.json";
 const input = fixture.input;
 const document = parseJSON(unbase64(input.document_b64));
 const root = parseJSON(unbase64(input.sigstore_trusted_root_json_b64));
@@ -137,5 +138,42 @@ describe("authentic approval trust boundaries", () => {
       extension: "x".repeat(4 * 1024 * 1024),
     };
     await expect(verify(oversizedBundle)).rejects.toThrow("Approval size");
+  });
+});
+
+describe("certified registry approvals", () => {
+  const verify = (bundle: unknown, scopes = [certified.scope]) =>
+    verifyConfigApproval(
+      undefined, bundle, { repo: "", tag: "", digest: "" },
+      [unbase64(certified.rootKey)], certified.root as any,
+      new Date(certified.now), maxAge,
+      { issuer: unbase64(certified.issuer), scopes },
+    );
+
+  it("authenticates the scope and digest without config bytes or identity pins", async () => {
+    const approved = await verify(certified.bundles["normal-p256"]);
+    expect(approved.digest).toBe(hex(await sha256(unbase64(certified.config))));
+    expect(approved.scope).toBe(certified.scope);
+    expect(approved.name).toBe("/acme/app/v7");
+    expect(approved.runtime?.tag).toBe("v1.2.3");
+    await expect(verify(certified.bundles["normal-p256"], [
+      "https://registry.tinfoil.sh/scopes/" + "0".repeat(32),
+    ])).rejects.toThrow("scope is not accepted");
+  });
+
+  it.each([
+    ["p384-leaf", "P-256"],
+    ["nine-receipts", "receipt count"],
+  ] as const)("rejects the signed %s profile", async (name, message) => {
+    await expect(verify(certified.bundles[name])).rejects.toThrow(message);
+  });
+
+  it("rejects a nonempty certified DSSE key ID", async () => {
+    const bundle = structuredClone(certified.bundles["normal-p256"]);
+    const { signingKeyHint } = await verify(bundle);
+    for (const keyid of [signingKeyHint, 0, false, null]) {
+      Object.assign(bundle.dsseEnvelope.signatures[0], { keyid });
+      await expect(verify(bundle)).rejects.toThrow("empty DSSE key ID");
+    }
   });
 });

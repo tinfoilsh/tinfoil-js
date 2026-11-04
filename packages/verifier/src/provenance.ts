@@ -290,7 +290,7 @@ async function configReferences(
       "Config authorizer requires an empty trusted identity",
     );
   let pin: Reference | undefined;
-  if (identity || (!opts.embedded.config && !opts.authorizer)) {
+  if (identity) {
     pin = parseReference(identity);
     try {
       validateConfigPins(pin);
@@ -353,7 +353,7 @@ async function configReferences(
         await verifyConfigApproval(
           bytes,
           material.bundle,
-          pin!,
+          pin ?? { repo: "", tag: "", digest: "" },
           opts.configKeys,
           opts.root,
           now,

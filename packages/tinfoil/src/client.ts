@@ -35,7 +35,7 @@ export class Client {
     if (!options.enclaveURL && (options.verification?.embeddedReferences?.config || options.verification?.configAuthorizer)) throw new ConfigurationError("Caller-authorized configuration requires an explicit enclaveURL");
     const customConfig = !!(options.verification?.embeddedReferences?.config || options.verification?.configAuthorizer);
     const reference = options.configRepo ?? (customConfig ? "" : TINFOIL_CONFIG.DEFAULT_ROUTER_REPO);
-    validateReference(reference, customConfig);
+    validateReference(reference, customConfig || !!options.enclaveURL);
     // Verifier validates and copies nested trust data. Each handle gets an independently
     // copied configuration below; retain a detached input for handles discovered later.
     configuredVerifier(options.verification);

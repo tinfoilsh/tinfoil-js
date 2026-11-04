@@ -188,17 +188,32 @@ describe("immutable caller policy and verification time", () => {
   });
 });
 
-it("enforces a zero-age policy at the approval instant and rejects one millisecond later", async () => {
+it("uses the default freshness window when zero is supplied", async () => {
   const input = signedFixture.input;
   const verifier = createVerifierForConformance({
     freshnessMaxAgeMs: 0,
     configSigningKeys: input.verifier_options.config_signing_keys_b64.map(unbase64),
     freshnessSigningKeys: input.verifier_options.freshness_signing_keys_b64.map(unbase64),
   }, trust(input));
-  expect(verifier.freshnessMaxAgeMs).toBe(0);
+  const maxAge = new Verifier().freshnessMaxAgeMs;
+  expect(verifier.freshnessMaxAgeMs).toBe(maxAge);
   const now = input.verification_time_unix * 1000;
   const verify = (at: number) => verifier.verifyDocumentV3At(unbase64(input.document_b64), unhex(input.nonce_hex), input.repo, new Date(at));
   const result = await verify(now);
-  expect(result.freshnessExpiresAt?.getTime()).toBe(now);
-  await expect(verify(now + 1)).rejects.toMatchObject({ layer: "provenance" });
+  expect(result.freshnessExpiresAt?.getTime()).toBe(now + maxAge);
+  await expect(verify(now + maxAge + 1)).rejects.toMatchObject({ layer: "provenance" });
+});
+
+it("verifies an approved config without a repository pin", async () => {
+  const input = signedFixture.input;
+  const verifier = createVerifierForConformance({
+    configSigningKeys: input.verifier_options.config_signing_keys_b64.map(unbase64),
+    freshnessSigningKeys: input.verifier_options.freshness_signing_keys_b64.map(unbase64),
+  }, trust(input));
+  const result = await verifier.verifyDocumentV3At(
+    unbase64(input.document_b64), unhex(input.nonce_hex), "",
+    new Date(input.verification_time_unix * 1000),
+  );
+  expect(result.config?.digest).toBe(signedFixture.expected.config.digest);
+  expect(result.config?.source).toBe("endorsement");
 });
