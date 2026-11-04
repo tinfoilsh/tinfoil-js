@@ -6,7 +6,10 @@
     "types": ["node", "bun"],
     "declaration": false,
     "declarationMap": false,
-    "sourceMap": false
+    "sourceMap": false,
+    "paths": {
+      "@tinfoilsh/verifier/v3": ["../verifier/src/v3/index.ts"]
+    }
   },
   "include": ["src/v3/**/*", "src/version.ts", "test/v3/**/*"],
   "exclude": ["node_modules", "dist"]
