@@ -83,6 +83,7 @@ describe("GatewayHTTPClient.create", () => {
       { verifier: v, url: "http://gateway.example/v1/" },
       { verifier: v, url: "not a url" },
       { verifier: v, url: "ftp://gateway.example/v1/" },
+      { verifier: v, url: "https://user:pw@gateway.example/v1/" },
       { verifier: v, pinnedModelsOnly: true },
       { verifier: verifier(gateway.publicKeyHex, true) },
       { verifier: v, modelPins: new Map([["m", { repo: "other/m" }]]) },
@@ -155,6 +156,26 @@ describe("GatewayHTTPClient", () => {
       seams(),
     );
     await expect(swapped.ensureVerified("other")).rejects.toBeInstanceOf(AttestationError);
+  });
+
+  it("falls over to the replica the caller's check accepts", async () => {
+    const checked: string[] = [];
+    const c = await createGatewayHTTPClient(
+      {
+        verifier: verifier(gateway.publicKeyHex),
+        url: GATEWAY_URL,
+        verificationCheck: (v) => {
+          checked.push(v.hpkePublicKey()!);
+          if (checked.length === 1) throw new Error("not this replica");
+        },
+      },
+      seams(),
+    );
+    const res = await c.fetch(`${GATEWAY_URL}chat/completions`, { method: "POST", body: '{"model":"test-model"}', headers: { "content-type": "application/json", "x-raw": "1" } });
+    expect(res.status).toBe(200);
+    expect(checked).toHaveLength(2);
+    expect(c.current().map((r) => r.host)).toHaveLength(1);
+    expect(gateway.seen[gateway.seen.length - 1]!.headers["x-tinfoil-seal"]).toBe(c.current()[0]!.host);
   });
 
   it("falls over to a replica that verifies and runs the caller's check", async () => {

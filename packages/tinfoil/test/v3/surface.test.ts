@@ -1,8 +1,8 @@
 /**
  * The public surface of the client: exactly the names the surface
  * specification lists, with the shapes callers rely on. A name added or
- * removed by accident fails here. Placeholders still reject with a clear
- * "not implemented" error, which pins the shape before the behaviour lands.
+ * removed by accident fails here, as does an option check that reaches the
+ * network or an experimental export that doesn't say so.
  */
 import { readFileSync } from "node:fs";
 import OpenAI from "openai";

@@ -22,23 +22,28 @@ const utf8 = (s: string): Uint8Array<ArrayBuffer> => new TextEncoder().encode(s)
 const enclaveOf = (input: string | URL | Request): string => new URL(String(input)).searchParams.get("enclave") ?? "";
 const catalogOf = (entries: Record<string, { repo: string; hosts: string[] }>): Catalog => new Map(Object.entries(entries));
 
-/** A verifier accepting every document, whose verifications carry `hpke`; `authorizes` makes it caller-authorized. */
-function verifier(hpke: string, authorizes = false, seen: string[] = []): Verifier {
+/**
+ * A verifier accepting every document, whose verifications carry `hpke`: a
+ * fixed key, or one chosen from the document's text (the host name the
+ * mocked attestation fetch serves). `authorizes` makes it caller-authorized.
+ */
+function verifier(hpke: string | ((document: string) => string), authorizes = false, seen: string[] = []): Verifier {
   return {
     checkRepoVerifiability: (repo: string) => {
       if (repo === "") throw new UsageError("repo required");
     },
     callerAuthorizesConfig: () => authorizes,
-    verifyV3At: async (_doc: Uint8Array, _nonce: Uint8Array, repo: string) => {
+    verifyV3At: async (doc: Uint8Array, _nonce: Uint8Array, repo: string) => {
       seen.push(repo);
+      const key = typeof hpke === "function" ? hpke(new TextDecoder().decode(doc)) : hpke;
       const material = [
         { id: "tls", format: KEY_SPKI_FP_SHA256_V1_FORMAT, data: "ab".repeat(32) },
-        { id: "hpke", format: KEY_X25519_HPKE_V1_FORMAT, data: hpke },
+        { id: "hpke", format: KEY_X25519_HPKE_V1_FORMAT, data: key },
       ];
       return {
         cryptoMaterial: () => material.map((m) => ({ ...m })),
         tlsPublicKeyFP: () => "ab".repeat(32),
-        hpkePublicKey: () => hpke,
+        hpkePublicKey: () => key,
         codeDigest: () => "11".repeat(32),
         freshnessExpiresAt: () => new Date(Date.now() + 60_000),
       } as unknown as Verification;
@@ -63,6 +68,9 @@ describe("catalog", () => {
     );
     expect([...catalog.keys()]).toEqual(["good"]);
     expect(catalog.get("good")).toEqual({ repo: "tinfoilsh/model", hosts: ["a.example", "b.example"] });
+    const odd = parseCatalog(utf8(JSON.stringify({ "": { repo: "tinfoilsh/model", hosts: ["a.example"] }, mixed: { repo: "tinfoilsh/model", hosts: ["not a host", "https://x.example", "ok.example:8443", ""] }, none: { repo: "tinfoilsh/model", hosts: ["not a host"] } })));
+    expect([...odd.keys()]).toEqual(["mixed"]);
+    expect(odd.get("mixed")!.hosts).toEqual(["ok.example:8443"]);
     expect(parseCatalog(utf8("null")).size).toBe(0);
     for (const bad of ["[]", '"s"', "nope", '{"m":{"repo":1}}', '{"m":{"hosts":"a"}}', '{"m":[]}']) {
       expect(() => parseCatalog(utf8(bad)), bad).toThrow(NetworkError);
@@ -89,6 +97,18 @@ describe("catalog", () => {
         throw new TypeError("fetch failed");
       }),
     ).rejects.toBeInstanceOf(NetworkError);
+  });
+
+  it("rejects a caller that has already given up before starting any fetch", async () => {
+    let fetches = 0;
+    const cache = new CatalogCache(async () => {
+      fetches++;
+      return catalogOf({});
+    });
+    const gone = new AbortController();
+    gone.abort(new Error("gone"));
+    await expect(cache.get(gone.signal)).rejects.toThrow(/gone/);
+    expect(fetches).toBe(0);
   });
 
   it("fetches on first use, shares the fetch, retries a failure on the next use, and keeps a success", async () => {
@@ -248,6 +268,54 @@ describe("prepare", () => {
     expect(prompt.get(CACHE_PREFIX_HEADER)).toMatch(/^[0-9a-f]{64}$/);
   });
 
+  it("refuses a body that names its model, its secret, or its cache salt more than once", async () => {
+    const json = new Headers({ "content-type": "application/json" });
+    await expect(prepare(shapeOf(url, { method: "POST", body: "{}" }), json, '{"model":"a","model":"b"}', "s")).rejects.toThrow(/names a model more than once/);
+    await expect(scopeCache(new Headers(), '{"model":"m","user_cache_secret":"a","user_cache_secret":"b"}', "s")).rejects.toThrow(/user_cache_secret more than once/);
+    await expect(scopeCache(new Headers(), '{"model":"m","cache_salt":"a","cache_salt":"b"}', "s")).rejects.toThrow(/cache_salt more than once/);
+    const replaced = await scopeCache(new Headers(), '{"cache_salt":"stale","model":"m"}', "s");
+    expect(replaced).toMatch(/^\{"cache_salt":"[A-Za-z0-9_-]{43}","model":"m"\}$/);
+    expect(replaced).not.toContain("stale");
+    const explicit = new Headers({ "content-type": "application/json", [MODEL_HEADER]: "set" });
+    const out = await prepare(shapeOf(url, { method: "POST", body: "{}" }), explicit, '{"model":"a","model":"b"}', "");
+    expect(out.body).toBe('{"model":"a","model":"b"}');
+  });
+
+  it("bounds what it reads of a body, counting a string's encoded bytes", async () => {
+    const json = () => new Headers({ "content-type": "application/json" });
+    const big = `{"model":"${"é".repeat(40)}"}`;
+    await expect(prepare(shapeOf(url, { method: "POST", body: big }), json(), big, "s", 64)).rejects.toThrow(/exceeds 64 bytes/);
+    await expect(prepare(shapeOf(url, { method: "POST", body: big }), json(), new Response(big).body, "s", 64)).rejects.toThrow(/exceeds 64 bytes/);
+    const form = ['--b', 'Content-Disposition: form-data; name="model"', "", "w".repeat(80), "--b--", ""].join("\r\n");
+    await expect(prepare(shapeOf(url, { method: "POST", body: form }), new Headers({ "content-type": "multipart/form-data; boundary=b" }), form, "s", 64)).rejects.toThrow(/multipart upload: body exceeds 64 bytes/);
+    const small = '{"model":"m"}';
+    expect((await prepare(shapeOf(url, { method: "POST", body: small }), json(), small, "", 64)).headers.get(MODEL_HEADER)).toBe("m");
+  });
+
+  it("passes a request that names its model and needs no cache scope through unread", async () => {
+    const stream = new Response('{"model":"ignored"}').body!;
+    const out = await prepare(shapeOf("https://gateway.example/v1/embeddings", { method: "POST", body: stream }), new Headers({ "content-type": "application/json", [MODEL_HEADER]: "set" }), stream, "s");
+    expect(out.body).toBe(stream);
+    expect(stream.locked).toBe(false);
+    expect(out.replayable).toBe(false);
+    const form = new FormData();
+    form.append("model", "from-form");
+    const detected = await prepare(shapeOf(url, { method: "POST", body: form }), new Headers(), form, "s");
+    expect(detected.headers.get(MODEL_HEADER)).toBe("from-form");
+  });
+
+  it("splits multipart parts only at delimiter positions and decodes only the model field", async () => {
+    const parts = (model: string, extra: string[] = []) => ['--b', 'Content-Disposition: form-data; name="model"', "", model, ...extra, "--b--", ""].join("\r\n");
+    expect(multipartModel(utf8(parts("line with --b inside")), "b")).toBe("line with --b inside");
+    expect(multipartModel(utf8("preamble\r\n" + parts("m")), "b")).toBe("m");
+    expect(multipartModel(utf8(parts("tęst")), "b")).toBe("tęst");
+    const binary = new Uint8Array([...utf8('--b\r\nContent-Disposition: form-data; name="model"\r\n\r\n'), 0xff, 0xfe, ...utf8("\r\n--b--\r\n")]);
+    expect(() => multipartModel(binary, "b")).toThrow(/not UTF-8/);
+    expect(() => multipartModel(utf8('--bx\r\nContent-Disposition: form-data; name="model"\r\n\r\nm\r\n--bx--\r\n'), "b")).toThrow(/malformed boundary/);
+    expect(() => multipartModel(utf8('--b\r\nContent-Disposition: form-data; name="model"\r\n\r\nm'), "b")).toThrow(/unterminated/);
+    expect(() => multipartModel(utf8("no delimiter"), "b")).toThrow(/no boundary delimiter/);
+  });
+
   it("leaves other requests alone and takes the model from uploads", async () => {
     const plain = await prepare(shapeOf(url, { method: "POST", body: "x=1" }), new Headers({ "content-type": "text/plain" }), "x=1", "s");
     expect(plain.body).toBe("x=1");
@@ -295,14 +363,18 @@ describe("rank", () => {
 });
 
 describe("GatewayTransport", () => {
-  let peer: EhbpPeer;
+  /** One EHBP peer per replica host, each with its own key, so a body sealed to the wrong replica can't be opened. */
+  const peers = new Map<string, EhbpPeer>();
   const MODEL = "test-model";
   const HOSTS = ["a.example", "b.example", "c.example"];
+  const keyOf = (host: string): string => peers.get(host)!.publicKeyHex;
+  /** The verifier endorsing each host's own key; the mocked attestation fetch serves the host name as the document. */
+  const perHost = (): Verifier => verifier((document) => keyOf(document));
+  const documentsNamingHosts: Fetch = async (input) => new Response(enclaveOf(input));
 
-  /** A gateway that forwards sealed requests to the peer, or answers 412 naming another replica when `reroute` says so. */
+  /** A gateway that forwards a sealed request to the replica the enclave header names, or answers 412 naming another replica when `reroute` says so. */
   function gateway(reroute: (seal: string, enclave: string) => string | undefined = () => undefined): { fetch: Fetch; seen: { seal: string; enclave: string; model: string; prefix: string }[] } {
     const seen: { seal: string; enclave: string; model: string; prefix: string }[] = [];
-    const forward = fetchOf(peer);
     return {
       seen,
       fetch: async (input, init) => {
@@ -312,7 +384,9 @@ describe("GatewayTransport", () => {
         seen.push({ seal, enclave, model: request.headers.get(MODEL_HEADER) ?? "", prefix: request.headers.get(CACHE_PREFIX_HEADER) ?? "" });
         const routed = reroute(seal, enclave);
         if (routed !== undefined) return new Response(null, { status: 412, headers: { [SEAL_HEADER]: routed } });
-        return forward(request);
+        const replica = peers.get(new URL(enclave).host);
+        if (replica === undefined) return new Response("unknown replica", { status: 502 });
+        return fetchOf(replica)(request);
       },
     };
   }
@@ -324,7 +398,7 @@ describe("GatewayTransport", () => {
       relay: "gateway.example",
       catalog: () => catalogOf({ [MODEL]: { repo: "tinfoilsh/test", hosts: HOSTS } }),
       secret: "test-secret",
-      documentFetch: async () => new Response(new Uint8Array([1])),
+      documentFetch: documentsNamingHosts,
       sleep: async () => {},
       ehbp: { fetch: gatewayFetch },
       ...rest,
@@ -332,13 +406,15 @@ describe("GatewayTransport", () => {
   }
 
   beforeAll(async () => {
-    peer = await createEhbpPeer((seen) => ({ headers: { "content-type": "application/json" }, body: JSON.stringify({ path: seen.path, sealed: seen.sealed, text: new TextDecoder().decode(seen.body) }) }));
+    for (const host of [...HOSTS, "only.example"]) {
+      peers.set(host, await createEhbpPeer((seen) => ({ headers: { "content-type": "application/json" }, body: JSON.stringify({ path: seen.path, host, sealed: seen.sealed, text: new TextDecoder().decode(seen.body) }) })));
+    }
   });
 
   it("refuses an upgrade before reading the catalog or touching a replica", async () => {
     let catalogReads = 0;
     const t = transport({
-      policy: await GatewayPolicy.create(undefined, false, verifier(peer.publicKeyHex)),
+      policy: await GatewayPolicy.create(undefined, false, perHost()),
       gatewayFetch: gateway().fetch,
       catalog: () => {
         catalogReads++;
@@ -356,30 +432,38 @@ describe("GatewayTransport", () => {
     const verified: string[] = [];
     const g = gateway();
     const t = transport({
-      policy: await GatewayPolicy.create(undefined, false, verifier(peer.publicKeyHex)),
+      policy: await GatewayPolicy.create(undefined, false, perHost()),
       gatewayFetch: g.fetch,
       documentFetch: async (input) => {
         const host = enclaveOf(input);
         verified.push(host);
-        return host === order[2] ? new Response(new Uint8Array([1])) : new Response("no", { status: 503 });
+        return host === order[2] ? new Response(host) : new Response("no", { status: 503 });
       },
     });
     const res = await t.fetch("https://gateway.example/v1/chat/completions", { method: "POST", body: SPEC_BODY, headers: { "content-type": "application/json", authorization: "Bearer test-api-key" } });
     expect(res.status).toBe(200);
-    expect(await res.json()).toMatchObject({ path: "/v1/chat/completions", sealed: true });
+    expect(await res.json()).toMatchObject({ path: "/v1/chat/completions", host: order[2], sealed: true });
     expect([...new Set(verified)]).toEqual(order);
     expect(g.seen).toEqual([{ seal: order[2], enclave: `https://${order[2]}`, model: MODEL, prefix: SPEC_PREFIX }]);
     const current = t.verifications();
     expect(current).toHaveLength(1);
     expect(current[0]).toMatchObject({ host: order[2], models: [MODEL], reference: "tinfoilsh/test", pinnedModel: "" });
-    expect(current[0]!.verification.hpkePublicKey()).toBe(peer.publicKeyHex);
+    expect(current[0]!.verification.hpkePublicKey()).toBe(keyOf(order[2]!));
+  });
+
+  it("seals to the replica's own key, so a body sealed under another replica's key is rejected by the peer", async () => {
+    // Every host is endorsed with a.example's key: only a.example can open what is sealed.
+    const g = gateway();
+    const t = transport({ policy: await GatewayPolicy.create(undefined, false, verifier(keyOf("a.example"))), gatewayFetch: g.fetch, catalog: () => catalogOf({ [MODEL]: { repo: "tinfoilsh/test", hosts: ["b.example"] } }) });
+    await expect(t.fetch("https://gateway.example/v1/chat/completions", { method: "POST", body: '{"model":"test-model"}', headers: { "content-type": "application/json" } })).rejects.toThrow();
+    expect(g.seen.map((s) => s.enclave)).toEqual(["https://b.example", "https://b.example"]);
   });
 
   it("follows a reroute to a verified replica, remembers it for the prefix, and gives up after the limit", async () => {
     const order = await rank(HOSTS, SPEC_PREFIX, undefined);
     let reroutes = 0;
     const g = gateway((seal) => (seal === order[0] && reroutes++ < 1 ? order[1] : undefined));
-    const t = transport({ policy: await GatewayPolicy.create(undefined, false, verifier(peer.publicKeyHex)), gatewayFetch: g.fetch });
+    const t = transport({ policy: await GatewayPolicy.create(undefined, false, perHost()), gatewayFetch: g.fetch });
     const send = () => t.fetch("https://gateway.example/v1/chat/completions", { method: "POST", body: SPEC_BODY, headers: { "content-type": "application/json", authorization: "Bearer test-api-key" } });
     expect((await send()).status).toBe(200);
     expect(g.seen.map((s) => s.seal)).toEqual([order[0], order[1]]);
@@ -387,11 +471,11 @@ describe("GatewayTransport", () => {
     expect(g.seen.map((s) => s.seal)).toEqual([order[0], order[1], order[1]]);
 
     const bouncing = gateway((seal) => HOSTS.find((h) => h !== seal));
-    const forever = transport({ policy: await GatewayPolicy.create(undefined, false, verifier(peer.publicKeyHex)), gatewayFetch: bouncing.fetch });
+    const forever = transport({ policy: await GatewayPolicy.create(undefined, false, perHost()), gatewayFetch: bouncing.fetch });
     await expect(forever.fetch("https://gateway.example/v1/chat/completions", { method: "POST", body: SPEC_BODY, headers: { "content-type": "application/json" } })).rejects.toThrow(/kept routing away/);
     expect(bouncing.seen).toHaveLength(MAX_SEAL_REDIRECTS + 1);
 
-    const unreplayable = transport({ policy: await GatewayPolicy.create(undefined, false, verifier(peer.publicKeyHex)), gatewayFetch: bouncing.fetch });
+    const unreplayable = transport({ policy: await GatewayPolicy.create(undefined, false, perHost()), gatewayFetch: bouncing.fetch });
     const res = await unreplayable.fetch("https://gateway.example/v1/audio/transcriptions", { method: "POST", body: new Response("upload").body, duplex: "half", headers: { "content-type": "multipart/form-data; boundary=b", [MODEL_HEADER]: MODEL } } as RequestInit);
     expect(res.status).toBe(412);
   });
@@ -401,18 +485,18 @@ describe("GatewayTransport", () => {
     const attempts: string[] = [];
     const repos: string[] = [];
     const t = transport({
-      policy: await GatewayPolicy.create(new Map([[MODEL, { repo: "tinfoilsh/test@v1" }], ["unlisted", { repo: "tinfoilsh/unlisted" }]]), false, verifier(peer.publicKeyHex, false, repos)),
+      policy: await GatewayPolicy.create(new Map([[MODEL, { repo: "tinfoilsh/test@v1" }], ["unlisted", { repo: "tinfoilsh/unlisted" }]]), false, verifier((document) => keyOf(document), false, repos)),
       gatewayFetch: gateway().fetch,
       catalog: () => catalogOf({ [MODEL]: { repo: "tinfoilsh/test", hosts: HOSTS }, other: { repo: "tinfoilsh/other", hosts: ["o.example"] } }),
       documentFetch: async (input) => {
         const host = enclaveOf(input);
         attempts.push(host);
-        return host === order[1] ? new Response(new Uint8Array([1])) : new Response("no", { status: 503 });
+        return host === order[1] ? new Response(host) : new Response("no", { status: 503 });
       },
     });
     expect(await t.models()).toEqual(["other", MODEL]);
     const v = await t.ensureVerified(MODEL);
-    expect(v.hpkePublicKey()).toBe(peer.publicKeyHex);
+    expect(v.hpkePublicKey()).toBe(keyOf(order[1]!));
     expect([...new Set(attempts)]).toEqual([order[0], order[1]]);
     expect(repos).toEqual(["tinfoilsh/test@v1"]);
     await t.ensureVerified(MODEL);
@@ -427,13 +511,34 @@ describe("GatewayTransport", () => {
   it("replays once after a replica rotates its key, naming the replica on every attempt", async () => {
     const stale = await (await Identity.generate()).getPublicKeyHex();
     let verifications = 0;
-    const rotating = verifier(peer.publicKeyHex);
-    const flaky = { ...rotating, verifyV3At: (...args: unknown[]) => (verifier(verifications++ === 0 ? stale : peer.publicKeyHex).verifyV3At as (...a: unknown[]) => Promise<Verification>)(...args) } as Verifier;
+    const rotating = verifier(keyOf("only.example"));
+    const flaky = { ...rotating, verifyV3At: (...args: unknown[]) => (verifier(verifications++ === 0 ? stale : keyOf("only.example")).verifyV3At as (...a: unknown[]) => Promise<Verification>)(...args) } as Verifier;
     const g = gateway();
     const t = transport({ policy: await GatewayPolicy.create(undefined, false, flaky), gatewayFetch: g.fetch, catalog: () => catalogOf({ [MODEL]: { repo: "tinfoilsh/test", hosts: ["only.example"] } }) });
     const res = await t.fetch("https://gateway.example/v1/chat/completions", { method: "POST", body: '{"model":"test-model"}', headers: { "content-type": "application/json" } });
     expect(res.status).toBe(200);
     expect(verifications).toBe(2);
     expect(g.seen.map((s) => s.enclave)).toEqual(["https://only.example", "https://only.example"]);
+  });
+
+  it("honours a Request's own signal before verifying and while sending", async () => {
+    const g = gateway();
+    const t = transport({ policy: await GatewayPolicy.create(undefined, false, perHost()), gatewayFetch: g.fetch });
+    const aborted = new AbortController();
+    aborted.abort(new Error("caller gave up"));
+    const request = new Request("https://gateway.example/v1/chat/completions", { method: "POST", body: '{"model":"test-model"}', headers: { "content-type": "application/json" }, signal: aborted.signal });
+    await expect(t.fetch(request)).rejects.toThrow(/caller gave up/);
+    expect(g.seen).toEqual([]);
+    // The signal reaches the fetch that sends the sealed request, as fetch itself would observe it.
+    const late = new AbortController();
+    const slow = gateway();
+    const observing: Fetch = async (input, init) => {
+      late.abort(new Error("too slow"));
+      init?.signal?.throwIfAborted();
+      return slow.fetch(input, init);
+    };
+    const u = transport({ policy: await GatewayPolicy.create(undefined, false, perHost()), gatewayFetch: observing });
+    const sent = new Request("https://gateway.example/v1/chat/completions", { method: "POST", body: '{"model":"test-model"}', headers: { "content-type": "application/json" }, signal: late.signal });
+    await expect(u.fetch(sent)).rejects.toThrow(/too slow/);
   });
 });
