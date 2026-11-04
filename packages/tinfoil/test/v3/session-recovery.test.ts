@@ -8,6 +8,7 @@ import { AeadDecryptFailedError, Identity, PROTOCOL } from "ehbp";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { ConfigurationError } from "../../src/v3/errors.js";
 import { ehbpMode } from "../../src/v3/internal/transport/ehbp.js";
+import { PeerLacksKeyError } from "../../src/v3/internal/transport/transport.js";
 import type { Fetch } from "../../src/v3/options.js";
 import { decryptResponseWithToken, deserializeSessionRecoveryToken, serializeSessionRecoveryToken, sessionRecoveryToken } from "../../src/v3/session-recovery.js";
 import { KEY_X25519_HPKE_V1_FORMAT, type Verification } from "../../../verifier/src/v3/index.js";
@@ -26,8 +27,8 @@ function verification(hpke: string): Verification {
 
 /**
  * A fetch that keeps the sealed form of every response it returns, as a
- * relay forwarding the exchange would hold it: the same status and headers
- * over a copy of the body the client never opened.
+ * relay forwarding the exchange would hold it: a clone, with the same
+ * status and headers over a copy of the body the client never opened.
  */
 function recording(): { fetch: Fetch; sealed: Response[] } {
   const sealed: Response[] = [];
@@ -35,13 +36,8 @@ function recording(): { fetch: Fetch; sealed: Response[] } {
     sealed,
     fetch: async (input, init) => {
       const response = await fetch(input, init);
-      if (response.body === null) {
-        sealed.push(response.clone());
-        return response;
-      }
-      const [forClient, forRelay] = response.body.tee();
-      sealed.push(new Response(forRelay, { status: response.status, headers: response.headers }));
-      return new Response(forClient, { status: response.status, headers: response.headers });
+      sealed.push(response.clone());
+      return response;
     },
   };
 }
@@ -142,13 +138,12 @@ describe("sessionRecoveryToken", () => {
     await expect(sessionRecoveryToken(new Response("unrelated"))).rejects.toThrow(ConfigurationError);
   });
 
-  it("gives a token for the response of a replayed request, not the rejected attempt", async () => {
-    // A stale key is refused by the peer before any response is opened, so
-    // no token exists for that attempt; the request sent under the right key
-    // gets one.
+  it("has no token for an attempt the peer rejects for a stale key; a fresh request under the right key gets one", async () => {
+    // The peer refuses a stale key before any response is opened, so that
+    // attempt yields no response and no token.
     const other = await (await Identity.generate()).getPublicKeyHex();
     const stale = await ehbpMode().bind(verification(other));
-    await expect(stale.fetch(`${server.origin}/echo`, { method: "POST", body: "x" })).rejects.toThrow();
+    await expect(stale.fetch(`${server.origin}/echo`, { method: "POST", body: "x" })).rejects.toBeInstanceOf(PeerLacksKeyError);
     const fresh = await ehbpMode().bind(verification(server.publicKeyHex));
     const response = await fresh.fetch(`${server.origin}/echo`, { method: "POST", body: "x" });
     expect(await text(response)).toBe("echo: x");
