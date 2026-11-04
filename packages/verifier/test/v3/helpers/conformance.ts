@@ -12,8 +12,11 @@
  * Each vector is `{id, stage, input, expected}`; `input.document_b64` carries
  * the attestation document whose collateral the unit tests pick apart. The
  * accessors below return that material in the shapes the tests consume.
+ * The block stages (`rfc3161/`, `approval-bundle/`) have no document; their
+ * inputs are read directly with `inputBytes` and `trustedRootBytes`, and
+ * `loadFixtures` reads a whole stage directory.
  */
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -54,6 +57,13 @@ export interface FixtureInput {
   readonly ask_pem?: string;
   readonly intel_sgx_root_pem?: string;
   readonly sigstore_trusted_root_json_b64?: string;
+  // v3-verify-timestamp
+  readonly timestamp_response_b64?: string;
+  readonly timestamp_input_b64?: string;
+  // v3-authenticate-approval
+  readonly bundle_json_b64?: string;
+  readonly signing_keys_pem?: readonly string[];
+  readonly artifact_digest_hex?: string;
   readonly [key: string]: unknown;
 }
 
@@ -88,8 +98,33 @@ export function loadFixture(relPath: string): ConformanceFixture {
   return JSON.parse(readFileSync(resolve(conformanceDir!, relPath), "utf8")) as ConformanceFixture;
 }
 
+/** Reads every vector of one stage directory, e.g. "rfc3161", in file-name order. */
+export function loadFixtures(relDir: string): ConformanceFixture[] {
+  if (!conformanceAvailable()) {
+    throw new Error(`${vectorsTitle()} not available: set ${CONFORMANCE_ENV} to a tinfoil-conformance vectors/v3 directory`);
+  }
+  const dir = resolve(conformanceDir!, relDir);
+  return readdirSync(dir)
+    .filter((name) => name.endsWith(".json"))
+    .sort()
+    .map((name) => loadFixture(`${relDir}/${name}`));
+}
+
 const base64 = (s: string): Uint8Array => new Uint8Array(Buffer.from(s, "base64"));
 const base64Json = (s: string): unknown => JSON.parse(Buffer.from(s, "base64").toString("utf8"));
+
+/** The bytes a base64 input member carries; the vector must have it. */
+export function inputBytes(fixture: ConformanceFixture, member: string): Uint8Array {
+  const value = fixture.input[member];
+  if (typeof value !== "string") throw new Error(`${fixture.id}: input has no ${member}`);
+  return base64(value);
+}
+
+/** The synthetic Sigstore trusted root of a vector as the JSON bytes parseTrustedRoot reads; undefined when the vector uses the embedded root. */
+export function trustedRootBytes(fixture: ConformanceFixture): Uint8Array | undefined {
+  const b64 = fixture.input.sigstore_trusted_root_json_b64;
+  return b64 === undefined || b64 === "" ? undefined : base64(b64);
+}
 
 /** The attestation document of a vector, parsed. */
 export function decodeDocument(fixture: ConformanceFixture): ConformanceDocument {

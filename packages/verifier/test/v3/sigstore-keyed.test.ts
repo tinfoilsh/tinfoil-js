@@ -5,11 +5,17 @@
  *
  * Key-signed bundles are built here with WebCrypto: a fresh signing key, a
  * transparency log key (ECDSA or Ed25519) that signs checkpoints over small
- * Merkle trees, and a trusted root listing that log. Timestamp responses
- * come from fixtures/sigstore/rfc3161-tokens.json, minted by the generator
- * next to it over synthetic authorities, and rfc3161-production.json, one
- * response from the production authority that verifies under the embedded
- * trusted root.
+ * Merkle trees, and a trusted root listing that log. The shared
+ * tinfoil-conformance vectors (see helpers/conformance.ts) supply the rest:
+ * `approval-bundle/*.json` (stage v3-authenticate-approval) carry key-signed
+ * bundles, the pinned keys and the artifact digest with the expected verdict,
+ * and `rfc3161/*.json` (stage v3-verify-timestamp) carry timestamp responses
+ * from synthetic authorities with the input they timestamp, the trusted root
+ * that lists the authorities and the expected verdict; the negative cases no
+ * vector covers are derived from the granted-p256 vector's bytes. Those
+ * suites skip when the vectors are not available. fixtures/sigstore/
+ * rfc3161-production.json is one response from the production authority that
+ * verifies under the embedded trusted root.
  */
 import { createHash, createPublicKey } from "node:crypto";
 import { readFileSync } from "node:fs";
@@ -37,7 +43,17 @@ import {
   verifyTimestamp,
 } from "../../src/v3/internal/sigstore/timestamp.js";
 import { embeddedTrustedRoot, parseTrustedRoot, TRUSTED_ROOT_MEDIA_TYPE, type TrustedRoot } from "../../src/v3/internal/sigstore/trusted-root.js";
-import { conformanceAvailable, decodeDocument, loadFixture, sigstoreCollateral, vectorsTitle } from "./helpers/conformance.js";
+import {
+  conformanceAvailable,
+  decodeDocument,
+  inputBytes,
+  loadFixture,
+  loadFixtures,
+  sigstoreCollateral,
+  trustedRootBytes,
+  vectorsTitle,
+  type ConformanceFixture,
+} from "./helpers/conformance.js";
 import { PUBLIC_SIGNING_KEY_PEM } from "../../src/v3/trust/signing-keys.js";
 
 // ---------------------------------------------------------------- helpers
@@ -546,6 +562,29 @@ describe("verifyKeyedBundle", () => {
   });
 });
 
+const approvalFixtures = conformanceAvailable() ? loadFixtures("approval-bundle") : [];
+
+describe.skipIf(!conformanceAvailable())(vectorsTitle("verifyKeyedBundle"), () => {
+  for (const fixture of approvalFixtures) {
+    const { expected } = fixture;
+    it(`${fixture.id}: ${expected.accepted ? "accepts" : "rejects"}`, async () => {
+      const { signing_keys_pem: pems, artifact_digest_hex: hex } = fixture.input;
+      if (pems === undefined || hex === undefined) throw new Error(`${fixture.id}: input lacks signing_keys_pem or artifact_digest_hex`);
+      const rootBytes = trustedRootBytes(fixture);
+      const root = rootBytes === undefined ? await embeddedTrustedRoot() : await parseTrustedRoot(rootBytes);
+      const digest = new Uint8Array(Buffer.from(hex, "hex"));
+      // The vector's verdict covers parsing as well as verification, so both run under the expectation.
+      const run = async (): Promise<string> =>
+        verifyKeyedBundle(root, parseBundle(strictParse(inputBytes(fixture, "bundle_json_b64"))), await pinnedKeys(pems), digest);
+      if (expected.accepted) {
+        expect(await run()).toBe(expected.signing_key_hint);
+      } else {
+        await expect(run()).rejects.toThrow();
+      }
+    });
+  }
+});
+
 describe("verifyMerkleInclusion", () => {
   it("verifies every leaf of a five-leaf tree and rejects wrong indexes", async () => {
     const leaves = ["a", "b", "c", "d", "e"].map((s) => utf8(s));
@@ -563,51 +602,33 @@ describe("verifyMerkleInclusion", () => {
 
 // ---------------------------------------------------------------- timestamps
 
-interface AuthorityFixture {
-  readonly note: string;
-  readonly curve: string;
-  readonly certificates: readonly string[];
-  readonly notBefore: string;
-  readonly notAfter: string;
-}
-
-interface TokenFixture {
-  readonly note: string;
-  readonly authority: string;
-  readonly status: number;
-  readonly policy?: string;
-  readonly hashAlgorithm?: string;
-  readonly genTime?: string;
-  readonly response: string;
-}
-
-interface TokensFixture {
-  readonly note: string;
-  readonly domain: string;
-  readonly core: unknown;
-  readonly input: string;
-  readonly authorities: Record<string, AuthorityFixture>;
-  readonly tokens: Record<string, TokenFixture>;
-}
-
 interface ProductionFixture {
   readonly input: string;
   readonly genTime: string;
   readonly response: string;
 }
 
-const tokens = JSON.parse(readFileSync(new URL("./fixtures/sigstore/rfc3161-tokens.json", import.meta.url), "utf8")) as TokensFixture;
 const production = JSON.parse(readFileSync(new URL("./fixtures/sigstore/rfc3161-production.json", import.meta.url), "utf8")) as ProductionFixture;
-const input = unb64(tokens.input);
-const token = (id: string): Uint8Array => unb64(tokens.tokens[id].response);
 
-const WINDOW = { start: "2026-01-01T00:00:00Z" };
+/** The response, the bytes it timestamps, and the trusted root of a v3-verify-timestamp vector. */
+interface TimestampCase {
+  readonly fixture: ConformanceFixture;
+  readonly response: Uint8Array;
+  readonly input: Uint8Array;
+  readonly rootJson: unknown;
+  readonly root: TrustedRoot;
+}
 
-function authorityRoot(names: readonly string[], window: { start: string; end?: string } = WINDOW): Promise<TrustedRoot> {
-  return rootOf(
-    [],
-    names.map((name) => ({ certificates: tokens.authorities[name].certificates, ...window })),
-  );
+async function timestampCase(fixture: ConformanceFixture): Promise<TimestampCase> {
+  const rootBytes = trustedRootBytes(fixture);
+  if (rootBytes === undefined) throw new Error(`${fixture.id}: input has no sigstore_trusted_root_json_b64`);
+  return {
+    fixture,
+    response: inputBytes(fixture, "timestamp_response_b64"),
+    input: inputBytes(fixture, "timestamp_input_b64"),
+    rootJson: JSON.parse(new TextDecoder().decode(rootBytes)),
+    root: await parseTrustedRoot(rootBytes),
+  };
 }
 
 /** The response with its PKIStatus set to grantedWithMods. */
@@ -623,10 +644,19 @@ function withMods(response: Uint8Array): Uint8Array {
   throw new Error("status not found");
 }
 
+const timestampFixtures = conformanceAvailable() ? loadFixtures("rfc3161") : [];
+
 describe("timestampInput and endorsementReference", () => {
   it("prefixes the domain to the canonical core", () => {
-    expect(timestampInput(tokens.domain, toJson(tokens.core))).toEqual(input);
     expect(new TextDecoder().decode(timestampInput("d", toJson({ b: 1, a: [true, null] })))).toBe('d{"a":[true,null],"b":1}');
+  });
+
+  it.skipIf(!conformanceAvailable())(vectorsTitle("reproduces the input the rfc3161 vectors timestamp"), () => {
+    // The vectors' input is a domain followed by a canonical JSON core.
+    const text = new TextDecoder().decode(inputBytes(timestampFixtures.find((f) => f.id === "granted-p256")!, "timestamp_input_b64"));
+    const at = text.indexOf("{");
+    expect(at).toBeGreaterThan(0);
+    expect(new TextDecoder().decode(timestampInput(text.slice(0, at), toJson(JSON.parse(text.slice(at)))))).toBe(text);
   });
 
   it("references the SHA-256 of the pre-authentication encoding", async () => {
@@ -639,102 +669,97 @@ describe("timestampInput and endorsementReference", () => {
 });
 
 describe("verifyTimestamp", () => {
-  let p256: TrustedRoot;
-  let p384: TrustedRoot;
-  let both: TrustedRoot;
-
-  beforeAll(async () => {
-    p256 = await authorityRoot(["p256"]);
-    p384 = await authorityRoot(["p384"]);
-    both = await authorityRoot(["p384", "p256"]);
-  });
-
-  it("parses what a granted response states", () => {
-    const ts = parseTimestampResponse(token("granted-p256"));
-    expect(ts.status).toBe(STATUS_GRANTED);
-    expect(ts.policy).toBe(SIGSTORE_TIMESTAMP_POLICY);
-    expect(ts.genTime.toISOString()).toBe("2026-06-15T12:00:00.000Z");
-    expect(ts.imprintAlgorithm).toBe("2.16.840.1.101.3.4.2.1");
-    expect(toHex(ts.imprint)).toBe(createHash("sha256").update(input).digest("hex"));
-    expect(ts.signerSerial).toBe(2n);
-    expect(() => parseTimestampResponse(withMods(token("granted-p256")))).toThrow(/not granted \(status 1\)/);
-  });
-
-  it("accepts granted responses from P-256 and P-384 authorities", async () => {
-    const genTime = new Date(tokens.tokens["granted-p256"].genTime!);
-    expect(await verifyTimestamp(p256, token("granted-p256"), input)).toEqual(genTime);
-    expect(await verifyTimestamp(p256, token("granted-p256-no-cert"), input)).toEqual(genTime);
-    expect(await verifyTimestamp(p384, token("granted-p384"), input)).toEqual(genTime);
-    expect(await verifyTimestamp(p384, token("granted-p384-sha384"), input)).toEqual(genTime);
-    expect(await verifyTimestamp(both, token("granted-p256"), input)).toEqual(genTime);
-  });
-
-  it("rejects a grant with modifications", async () => {
-    await expect(verifyTimestamp(p256, withMods(token("granted-p256")), input)).rejects.toThrow(/not granted/);
-  });
-
   it("accepts a production response under the embedded trusted root", async () => {
     const at = await verifyTimestamp(await embeddedTrustedRoot(), unb64(production.response), utf8(production.input));
     expect(at).toEqual(new Date(production.genTime));
-    await expect(verifyTimestamp(await embeddedTrustedRoot(), unb64(production.response), input)).rejects.toThrow("does not match the input");
+    await expect(verifyTimestamp(await embeddedTrustedRoot(), unb64(production.response), utf8("other input"))).rejects.toThrow("does not match the input");
+  });
+});
+
+describe.skipIf(!conformanceAvailable())(vectorsTitle("verifyTimestamp"), () => {
+  for (const fixture of timestampFixtures) {
+    const { expected } = fixture;
+    it(`${fixture.id}: ${expected.accepted ? `accepts at ${expected.timestamp}` : "rejects"}`, async () => {
+      const c = await timestampCase(fixture);
+      if (expected.accepted) {
+        expect(await verifyTimestamp(c.root, c.response, c.input)).toEqual(new Date(expected.timestamp as string));
+      } else {
+        await expect(verifyTimestamp(c.root, c.response, c.input)).rejects.toThrow();
+      }
+    });
+  }
+
+  // The cases below start from the granted-p256 vector and alter the response,
+  // the input or the root in ways no vector does.
+  let granted: TimestampCase;
+  let genTime: Date;
+
+  beforeAll(async () => {
+    granted = await timestampCase(timestampFixtures.find((f) => f.id === "granted-p256")!);
+    genTime = new Date(granted.fixture.expected.timestamp as string);
   });
 
-  it("rejects a response that was not granted", async () => {
-    await expect(verifyTimestamp(p256, token("rejected"), input)).rejects.toThrow("not granted (status 2)");
+  /** The granted-p256 root with every authority's validity window replaced. */
+  function windowed(window: { start: string; end?: string }): Promise<TrustedRoot> {
+    const json = mutated(granted.rootJson, (r: any) => r.timestampAuthorities.forEach((a: any) => (a.validFor = window)));
+    return parseTrustedRoot(utf8(JSON.stringify(json)));
+  }
+
+  it("parses what a granted response states", () => {
+    const ts = parseTimestampResponse(granted.response);
+    expect(ts.status).toBe(STATUS_GRANTED);
+    expect(ts.policy).toBe(SIGSTORE_TIMESTAMP_POLICY);
+    expect(ts.genTime).toEqual(genTime);
+    expect(ts.imprintAlgorithm).toBe("2.16.840.1.101.3.4.2.1");
+    expect(toHex(ts.imprint)).toBe(createHash("sha256").update(granted.input).digest("hex"));
+    expect(ts.signerSerial).toBeGreaterThan(0n);
+    expect(() => parseTimestampResponse(withMods(granted.response))).toThrow(/not granted \(status 1\)/);
   });
 
-  it("rejects an imprint that is not SHA-256 of the input", async () => {
-    await expect(verifyTimestamp(p256, token("granted-p256"), concat(input, utf8("x")))).rejects.toThrow("does not match the input");
-    await expect(verifyTimestamp(p256, token("sha384-imprint"), input)).rejects.toThrow("does not match the input");
+  it("rejects a grant with modifications", async () => {
+    await expect(verifyTimestamp(granted.root, withMods(granted.response), granted.input)).rejects.toThrow(/not granted/);
   });
 
-  it("rejects a policy other than the Sigstore one", async () => {
-    await expect(verifyTimestamp(p256, token("other-policy"), input)).rejects.toThrow("unexpected timestamp policy 1.2.3.4");
+  it("rejects an input other than the one timestamped", async () => {
+    await expect(verifyTimestamp(granted.root, granted.response, concat(granted.input, utf8("x")))).rejects.toThrow("does not match the input");
   });
 
-  it("rejects a response no listed authority signed", async () => {
-    await expect(verifyTimestamp(p384, token("granted-p256"), input)).rejects.toThrow("no trusted timestamp authority");
-    await expect(verifyTimestamp(await authorityRoot([]), token("granted-p256"), input)).rejects.toThrow("no trusted timestamp authority");
+  it("rejects a root listing no authority", async () => {
+    const empty = await parseTrustedRoot(utf8(JSON.stringify(mutated(granted.rootJson, (r: any) => (r.timestampAuthorities = [])))));
+    await expect(verifyTimestamp(empty, granted.response, granted.input)).rejects.toThrow("no trusted timestamp authority");
   });
 
-  it("rejects a time outside the authority's window", async () => {
-    const late = await authorityRoot(["p256"], { start: "2026-06-15T12:00:01Z" });
-    await expect(verifyTimestamp(late, token("granted-p256"), input)).rejects.toThrow("not valid at 2026-06-15T12:00:00.000Z");
-    const early = await authorityRoot(["p256"], { start: "2026-01-01T00:00:00Z", end: "2026-06-15T11:59:59Z" });
-    await expect(verifyTimestamp(early, token("granted-p256"), input)).rejects.toThrow("not valid at");
-    const exact = await authorityRoot(["p256"], { start: "2026-06-15T12:00:00Z", end: "2026-06-15T12:00:00Z" });
-    expect(await verifyTimestamp(exact, token("granted-p256"), input)).toEqual(new Date("2026-06-15T12:00:00Z"));
-  });
-
-  it("rejects a time at which the signing certificate was not valid", async () => {
-    await expect(verifyTimestamp(p256, token("after-signer-expiry"), input)).rejects.toThrow("is not valid at 2027-06-15T12:00:00.000Z");
-  });
-
-  it("rejects a signing certificate not restricted to timestamping", async () => {
-    const lax = await authorityRoot(["lax-eku"]);
-    await expect(verifyTimestamp(lax, token("lax-eku"), input)).rejects.toThrow("extended key usage must be critical");
-    const none = await authorityRoot(["no-eku"]);
-    await expect(verifyTimestamp(none, token("no-eku"), input)).rejects.toThrow("no extended key usage");
+  it("rejects a time outside the authority's window and accepts one on its edges", async () => {
+    const iso = genTime.toISOString();
+    const second = new Date(genTime.getTime() + 1000).toISOString();
+    const late = await windowed({ start: second });
+    await expect(verifyTimestamp(late, granted.response, granted.input)).rejects.toThrow(`not valid at ${iso}`);
+    const early = await windowed({ start: "2000-01-01T00:00:00Z", end: new Date(genTime.getTime() - 1000).toISOString() });
+    await expect(verifyTimestamp(early, granted.response, granted.input)).rejects.toThrow("not valid at");
+    const exact = await windowed({ start: iso, end: iso });
+    expect(await verifyTimestamp(exact, granted.response, granted.input)).toEqual(genTime);
   });
 
   it("rejects inputs and responses outside the size bounds", async () => {
-    await expect(verifyTimestamp(p256, token("granted-p256"), new Uint8Array(MAX_STATEMENT_SIZE + 1))).rejects.toThrow("input size");
-    await expect(verifyTimestamp(p256, token("granted-p256"), new Uint8Array(0))).rejects.toThrow("input size");
-    await expect(verifyTimestamp(p256, new Uint8Array(MAX_TIMESTAMP_SIZE + 1), input)).rejects.toThrow("response size");
-    await expect(verifyTimestamp(p256, new Uint8Array(0), input)).rejects.toThrow("response size");
+    await expect(verifyTimestamp(granted.root, granted.response, new Uint8Array(MAX_STATEMENT_SIZE + 1))).rejects.toThrow("input size");
+    await expect(verifyTimestamp(granted.root, granted.response, new Uint8Array(0))).rejects.toThrow("input size");
+    await expect(verifyTimestamp(granted.root, new Uint8Array(MAX_TIMESTAMP_SIZE + 1), granted.input)).rejects.toThrow("response size");
+    await expect(verifyTimestamp(granted.root, new Uint8Array(0), granted.input)).rejects.toThrow("response size");
   });
 
   it("rejects malformed and tampered responses", async () => {
-    const granted = token("granted-p256");
-    await expect(verifyTimestamp(p256, granted.subarray(0, granted.length - 1), input)).rejects.toThrow("timestamp response:");
-    await expect(verifyTimestamp(p256, concat(granted, bytes(0)), input)).rejects.toThrow("timestamp response:");
-    const genTime = mutated(granted, (r: Uint8Array) => {
-      const i = Buffer.from(r).indexOf("20260615120000Z");
+    const { root, response, input } = granted;
+    await expect(verifyTimestamp(root, response.subarray(0, response.length - 1), input)).rejects.toThrow("timestamp response:");
+    await expect(verifyTimestamp(root, concat(response, bytes(0)), input)).rejects.toThrow("timestamp response:");
+    // genTime is a GeneralizedTime, YYYYMMDDHHMMSSZ; bump its seconds digit.
+    const stated = genTime.toISOString().replace(/[-:T]|\.\d+/g, "");
+    const tampered = mutated(response, (r: Uint8Array) => {
+      const i = Buffer.from(r).indexOf(stated);
       expect(i).toBeGreaterThan(0);
-      r[i + 13] = 0x31;
+      r[i + 13] = r[i + 13] === 0x39 ? 0x30 : r[i + 13] + 1;
     });
-    await expect(verifyTimestamp(p256, genTime, input)).rejects.toThrow("do not commit to the TSTInfo");
-    const signature = mutated(granted, (r: Uint8Array) => (r[r.length - 1] ^= 0x01));
-    await expect(verifyTimestamp(p256, signature, input)).rejects.toThrow();
+    await expect(verifyTimestamp(root, tampered, input)).rejects.toThrow("do not commit to the TSTInfo");
+    const signature = mutated(response, (r: Uint8Array) => (r[r.length - 1] ^= 0x01));
+    await expect(verifyTimestamp(root, signature, input)).rejects.toThrow();
   });
 });
