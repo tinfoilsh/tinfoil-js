@@ -153,6 +153,25 @@ describe("EnclaveHTTPClient in a browser", () => {
     expect((await reader.read()).done).toBe(true);
     expect(sseEnded).toBe(true);
   });
+
+  it("gives a sealed response a session recovery token that opens its sealed form in another page", async () => {
+    // The relay keeps the sealed form of the response, as a server handing a stream to a page would.
+    const sealedForms: Response[] = [];
+    const relay: Fetch = async (input, init) => {
+      const response = await fetchOf(peer)(input, init);
+      const [forClient, forRelay] = response.body!.tee();
+      sealedForms.push(new Response(forRelay, { status: response.status, headers: response.headers }));
+      return new Response(forClient, { status: response.status, headers: response.headers });
+    };
+    const client = await createEnclaveHTTPClient(ENCLAVE, "tinfoilsh/repo", { verifier: verifier(peer.publicKeyHex) }, { ...seams(), ehbp: { fetch: relay } });
+    const res = await client.fetch(`https://${ENCLAVE}/echo`, { method: "POST", body: "resume me" });
+    const token = browserEntry.serializeSessionRecoveryToken(await browserEntry.sessionRecoveryToken(res));
+    expect(await res.json()).toEqual({ path: "/echo", sealed: true, text: "resume me" });
+
+    const opened = await browserEntry.decryptResponseWithToken(sealedForms[sealedForms.length - 1]!, browserEntry.deserializeSessionRecoveryToken(token));
+    expect(await opened.json()).toEqual({ path: "/echo", sealed: true, text: "resume me" });
+    await expect(browserEntry.sessionRecoveryToken(new Response("plain"))).rejects.toBeInstanceOf(ConfigurationError);
+  });
 });
 
 describe("OpenAI clients in a browser", () => {
