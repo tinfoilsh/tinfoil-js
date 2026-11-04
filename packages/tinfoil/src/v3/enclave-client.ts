@@ -5,7 +5,6 @@
  * origin other than the one it is bound to.
  */
 import type { Verification } from "@tinfoilsh/verifier/v3";
-import { isRealBrowser } from "../env.js";
 import { ConfigurationError } from "./errors.js";
 import { withCacheSecret } from "./internal/cachesecret.js";
 import { Enclave, type EnclaveConfig } from "./internal/enclave.js";
@@ -13,6 +12,7 @@ import { validateBaseURL, validateTLSBaseURL } from "./internal/transport/base-u
 import { ehbpMode, type EHBPOptions } from "./internal/transport/ehbp.js";
 import { withEnclaveURL } from "./internal/transport/header.js";
 import { withOriginRestriction } from "./internal/transport/origin.js";
+import { checkTransportMode, defaultTransportMode } from "./internal/platform.js";
 import { withReplay } from "./internal/transport/replay.js";
 import { tlsMode, type TLSOptions } from "./internal/transport/tls.js";
 import { isKeyRejection, KeyedTransport, type Mode } from "./internal/transport/transport.js";
@@ -42,11 +42,16 @@ export function setOpenAIURL(client: object, url: string): void {
   openAIURLs.set(client, url);
 }
 
-/** `mode`, or the platform's default: pinned connections where the runtime exposes them, sealed bodies in browsers. */
+/**
+ * `mode`, or the platform's default: pinned connections where the runtime
+ * exposes them, sealed bodies in browsers. A mode the platform can't provide
+ * is a {@link ConfigurationError}.
+ */
 export function resolveTransportMode(mode: TransportMode | undefined): TransportMode {
-  if (mode === undefined) return isRealBrowser() ? "ehbp" : "tls";
-  if (mode === "tls" || mode === "ehbp") return mode;
-  throw new ConfigurationError(`unknown transport mode ${JSON.stringify(mode)}`);
+  if (mode === undefined) return defaultTransportMode();
+  if (mode !== "tls" && mode !== "ehbp") throw new ConfigurationError(`unknown transport mode ${JSON.stringify(mode)}`);
+  checkTransportMode(mode);
+  return mode;
 }
 
 export function modeFor(mode: TransportMode, seams: EnclaveClientSeams): Mode {

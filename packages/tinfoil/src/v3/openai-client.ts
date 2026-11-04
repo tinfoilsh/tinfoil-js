@@ -17,7 +17,22 @@ import type { EnclaveOptions, GatewayOptions, RouterOptions } from "./options.js
 import { createRouterHTTPClient, RouterHTTPClient, type RouterClientSeams } from "./router-client.js";
 
 /** The OpenAI options a client takes: everything but the transport it is bound to. */
-export type OpenAIOptions = Omit<ClientOptions, "fetch" | "baseURL">;
+export type OpenAIOptions = Omit<ClientOptions, "fetch" | "baseURL"> & {
+  /**
+   * A credential a browser page may hold, such as a short-lived token from
+   * the application's own sign-in: sent as the API key, and allows browser
+   * use without `dangerouslyAllowBrowser`. A long-lived API key belongs in
+   * `apiKey` on a server, never in a page.
+   */
+  readonly bearerToken?: string;
+};
+
+/** The options as the OpenAI client takes them, with a bearer token applied. */
+function openAIClientOptions(options: OpenAIOptions): Omit<ClientOptions, "fetch" | "baseURL"> {
+  const { bearerToken, ...rest } = options;
+  if (bearerToken === undefined || bearerToken === "") return rest;
+  return { ...rest, apiKey: bearerToken, dangerouslyAllowBrowser: true };
+}
 
 /** The options each client was created with, which its clones inherit. */
 const givenOptions = new WeakMap<OpenAI, OpenAIOptions>();
@@ -51,7 +66,7 @@ export class TinfoilClient extends OpenAI {
   /** @internal Only {@link create} constructs a client; anything else is refused. */
   constructor(token: symbol, httpClient: RouterHTTPClient, options: OpenAIOptions) {
     if (token !== TOKEN) throw new ConfigurationError("TinfoilClient is created with createClient");
-    super({ ...options, fetch: httpClient.fetch, baseURL: openAIURLOf(httpClient) });
+    super({ ...openAIClientOptions(options), fetch: httpClient.fetch, baseURL: openAIURLOf(httpClient) });
     this.#httpClient = httpClient;
     attest(this, httpClient.fetch, openAIURLOf(httpClient), options);
   }
@@ -115,7 +130,7 @@ export class EnclaveOpenAIClient extends OpenAI {
   constructor(token: symbol, httpClient: EnclaveHTTPClient, options: OpenAIOptions) {
     if (token !== TOKEN) throw new ConfigurationError("EnclaveOpenAIClient is created with EnclaveOpenAIClient.create");
     // The transport and base URL come last, so the caller's options can't replace them.
-    super({ ...options, fetch: httpClient.fetch, baseURL: openAIURLOf(httpClient) });
+    super({ ...openAIClientOptions(options), fetch: httpClient.fetch, baseURL: openAIURLOf(httpClient) });
     this.#httpClient = httpClient;
     attest(this, httpClient.fetch, openAIURLOf(httpClient), options);
   }
@@ -152,7 +167,7 @@ export class RouterOpenAIClient extends OpenAI {
   /** @internal Only {@link create} constructs a client; anything else is refused. */
   constructor(token: symbol, httpClient: RouterHTTPClient, options: OpenAIOptions) {
     if (token !== TOKEN) throw new ConfigurationError("RouterOpenAIClient is created with RouterOpenAIClient.create");
-    super({ ...options, fetch: httpClient.fetch, baseURL: openAIURLOf(httpClient) });
+    super({ ...openAIClientOptions(options), fetch: httpClient.fetch, baseURL: openAIURLOf(httpClient) });
     this.#httpClient = httpClient;
     attest(this, httpClient.fetch, openAIURLOf(httpClient), options);
   }
@@ -184,7 +199,7 @@ export class GatewayOpenAIClient extends OpenAI {
   readonly #httpClient: GatewayHTTPClient;
 
   private constructor(httpClient: GatewayHTTPClient, options: OpenAIOptions) {
-    super({ ...options, fetch: httpClient.fetch, baseURL: httpClient.baseURL() });
+    super({ ...openAIClientOptions(options), fetch: httpClient.fetch, baseURL: httpClient.baseURL() });
     this.#httpClient = httpClient;
     attest(this, httpClient.fetch, httpClient.baseURL(), options);
   }
