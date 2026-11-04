@@ -133,9 +133,18 @@ describe("createTinfoil's option checks", () => {
     await expect(failure).rejects.toBeInstanceOf(ConfigurationError);
     await expect(failure).rejects.toThrow(/bearerToken/);
     expect(s.documentFetches).toBe(0);
-    // A bearer token is accepted there; the server runtime accepts either.
+    // The worker's transport check runs through the same globals: TLS is refused there.
+    const pinned = createTinfoilProvider({ bearerToken: "t", transportMode: "tls", verifier: verifier({ tls: TEST_PIN }) }, { ...s, globals: worker });
+    await expect(pinned).rejects.toBeInstanceOf(ConfigurationError);
+    await expect(pinned).rejects.toThrow(/browsers don't expose/);
+    expect(s.documentFetches).toBe(0);
+    // A bearer token over sealed bodies is accepted there; the server runtime accepts either credential and either mode.
+    const sealed = await createTinfoilProvider(
+      { bearerToken: "t", enclave: { host: "enclave.example", repo: "tinfoilsh/repo" }, baseURL: `${ehbp.origin}/`, verifier: verifier({ tls: "ab".repeat(32), hpke: ehbp.publicKeyHex }) },
+      { ...seams([]), globals: worker },
+    );
+    expect(sealed.httpClient()).toBeInstanceOf(EnclaveHTTPClient);
     const node = { process: { versions: { node: "22.0.0" } } } as RuntimeGlobals;
-    await expect(createTinfoilProvider({ bearerToken: "t", transportMode: "tls", verifier: verifier({ tls: TEST_PIN }) }, { ...s, globals: worker })).resolves.toBeDefined();
     await expect(createTinfoilProvider({ apiKey: "k", transportMode: "tls", verifier: verifier({ tls: TEST_PIN }) }, { ...s, globals: node })).resolves.toBeDefined();
   });
 
