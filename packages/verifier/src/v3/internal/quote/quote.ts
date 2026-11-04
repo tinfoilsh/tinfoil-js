@@ -3,13 +3,13 @@
  * root, then assembling and validating the expected state from reference
  * values.
  */
-import type { CpuEndorsements, CpuEvidence, Document } from "../../document/document.js";
+import { SEV_SNP_REPORT_V1_FORMAT, TDX_QUOTE_V1_FORMAT, type CpuEndorsements, type CpuEvidence, type Document } from "../../document/document.js";
 import { notImplemented } from "../../errors.js";
-import type { Expected, Measurement } from "../../measurement.js";
-import type { Artifact, Platform, Policy } from "../policy/artifact.js";
+import { cloneMeasurement, type Expected, type Measurement } from "../../measurement.js";
+import { PLATFORM_SEV_SNP, type Artifact, type Platform, type Policy } from "../policy/artifact.js";
 import type { ConfigReferenceValues } from "./config.js";
 import type { LegacyReferenceValues } from "./legacy.js";
-import type { SevExpectations, SevQuote } from "./sev/authenticate.js";
+import { authenticateSev, type SevExpectations, type SevQuote } from "./sev/authenticate.js";
 import type { TdxExpectations, TdxQuote } from "./tdx/authenticate.js";
 
 /** Vendor trust anchors that replace the embedded production roots. Test-only. */
@@ -73,7 +73,35 @@ export interface AssembledPolicy {
  * SEV-SNP report, or PCS collateral for a TDX quote.
  */
 export async function authenticate(evidence: CpuEvidence, endorsements: CpuEndorsements, now: Date, opts?: QuoteOptions): Promise<Authenticated> {
-  return notImplemented("quote.authenticate");
+  switch (evidence.format) {
+    case SEV_SNP_REPORT_V1_FORMAT: {
+      // A document is single-request: missing collateral rejects rather than
+      // being fetched.
+      if (endorsements.amdVcek === undefined) throw new Error("no amd-vcek endorsement collateral for the cpu");
+      if (endorsements.amdCrl === undefined) throw new Error("no amd-crl endorsement collateral for the cpu");
+      const q = await authenticateSev(
+        {
+          report: evidence.report,
+          vcekDer: endorsements.amdVcek.vcekDer,
+          certChainPem: endorsements.amdVcek.certChainPem,
+          crlDer: endorsements.amdCrl.crlDer,
+        },
+        now,
+        { dangerousTestOnlyRoot: opts?.dangerousTestOnlyRoots?.amd },
+      );
+      return {
+        platform: PLATFORM_SEV_SNP,
+        identity: q.identity,
+        measurement: cloneMeasurement(q.measurement),
+        evidence: { format: evidence.format, report: evidence.report.slice() },
+        sev: q,
+      };
+    }
+    case TDX_QUOTE_V1_FORMAT:
+      return notImplemented("quote.authenticate (tdx)");
+    default:
+      throw new Error(`unsupported cpu_evidence format ${JSON.stringify(evidence.format)}`);
+  }
 }
 
 /**
