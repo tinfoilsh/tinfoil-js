@@ -8,6 +8,13 @@ export { RouterHTTPClient } from "./router-client.js";
 export { GatewayHTTPClient, fetchCatalog } from "./gateway-client.js";
 export { TinfoilClient, createClient, EnclaveOpenAIClient, RouterOpenAIClient, GatewayOpenAIClient, type OpenAIOptions } from "./openai-client.js";
 export { TinfoilError, ConfigurationError, NetworkError, AttestationError, type ErrorCategory } from "./errors.js";
+export {
+  sessionRecoveryToken,
+  serializeSessionRecoveryToken,
+  deserializeSessionRecoveryToken,
+  decryptResponseWithToken,
+  type SessionRecoveryToken,
+} from "./session-recovery.js";
 export type {
   Fetch,
   TransportMode,
