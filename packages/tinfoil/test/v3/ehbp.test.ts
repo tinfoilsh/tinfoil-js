@@ -78,6 +78,7 @@ describe("checkEHBP", () => {
     expect(() => checkEHBP(shapeOf("http://127.0.0.1:8080/"))).not.toThrow();
     expect(() => checkEHBP(shapeOf("https://x.example/", { method: "GET", body: "x" }))).toThrow(/request with GET method cannot have a body/);
     expect(() => checkEHBP(shapeOf(new Request("https://x.example/", { method: "HEAD" })))).not.toThrow();
+    expect(() => checkEHBP(shapeOf("https://x.example/", { method: "HEAD", body: "x" }))).toThrow(/request with HEAD method cannot have a body/);
     expect(() => checkEHBP(shapeOf("https://x.example/", { method: "POST", body: "x", headers: { "Ehbp-Encapsulated-Key": "00" } }))).toThrow(/reserved request header/);
     expect(() => checkEHBP(shapeOf("https://x.example/", { method: "POST", body: "x", headers: { "content-length": "1" } }))).toThrow(/reserved request header/);
   });
