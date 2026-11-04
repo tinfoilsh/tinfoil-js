@@ -101,7 +101,9 @@ export async function createUnverifiedClient(options: UnverifiedOptions, seams: 
     try {
       return await sealed.fetch(target, { ...init, headers, redirect: "error" });
     } catch (err) {
-      if (err instanceof TinfoilError || init?.signal?.aborted) throw err;
+      // An aborted request surfaces its own reason, whichever signal carried it.
+      const aborted = init?.signal?.aborted === true || (input instanceof Request && input.signal.aborted);
+      if (err instanceof TinfoilError || aborted) throw err;
       throw new NetworkError(messageOf(err), { cause: err });
     }
   };

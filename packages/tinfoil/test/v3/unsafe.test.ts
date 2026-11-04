@@ -51,14 +51,16 @@ afterAll(async () => {
   await server.close();
 });
 
-/** Creates a client with a counting fetch and a captured warning. */
+/** Creates a client with a recording fetch that refuses to leave the local server, and a captured warning. */
 async function client(options: UnverifiedOptions): Promise<{ client: UnverifiedClient; warnings: string[]; requested: string[] }> {
   const warnings: string[] = [];
   const requested: string[] = [];
   const c = await createUnverifiedClient(options, {
     warn: (m) => warnings.push(m),
     fetch: (input, init) => {
-      requested.push(input instanceof Request ? input.url : String(input));
+      const url = input instanceof Request ? input.url : String(input);
+      requested.push(url);
+      if (new URL(url).hostname === "other.example") throw new Error(`request left the server for ${url}`);
       return fetch(input, init);
     },
   });
@@ -144,10 +146,21 @@ describe("UnverifiedClient", () => {
   });
 
   it("follows no redirect, so a sealed body never leaves the origin it was addressed to", async () => {
-    const { client: c } = await client({ baseURL: `${server.origin}/v1/` });
+    const { client: c, requested } = await client({ baseURL: `${server.origin}/v1/` });
     const attempt = c.fetch("/v1/elsewhere", { method: "POST", body: "secret" });
     await expect(attempt).rejects.toThrow(NetworkError);
+    await expect(attempt).rejects.not.toThrow(/left the server/);
     expect(server.seen.filter((s) => s.path === "/v1/elsewhere")).toHaveLength(1);
+    // The only request after the key fetch went to the local server; the redirect's target was never asked for.
+    expect(requested.slice(1)).toEqual([`${server.origin}/v1/elsewhere`]);
+  });
+
+  it("surfaces an abort as the abort reason, whichever signal carried it", async () => {
+    const { client: c } = await client({ baseURL: `${server.origin}/v1/` });
+    const reason = new Error("caller gave up");
+    const aborted = AbortSignal.abort(reason);
+    await expect(c.fetch("/v1/echo", { method: "POST", body: "x", signal: aborted })).rejects.toBe(reason);
+    await expect(c.fetch(new Request(`${server.origin}/v1/echo`, { method: "POST", body: "x", signal: aborted }))).rejects.toBe(reason);
   });
 
   it("is constructed only through its factory", () => {
