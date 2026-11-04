@@ -104,7 +104,9 @@ export function fetchOf(peer: EhbpPeer): (input: string | URL | Request, init?: 
       },
       cancel: () => void iterator.return?.(),
     });
-    return new Response(stream, { status: produced.status, headers: produced.headers });
+    // A status that forbids a body takes none, as a server's response would carry none.
+    const body = [204, 205, 304].includes(produced.status) ? null : stream;
+    return new Response(body, { status: produced.status, headers: produced.headers });
   };
 }
 
