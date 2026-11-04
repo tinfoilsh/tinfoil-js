@@ -256,9 +256,9 @@ export function pckCrl(c: PcsCollateral, ca: string): { body: Uint8Array; signin
   return { body: response.body, ...issuerChain(response, HEADER_PCK_CRL_ISSUER_CHAIN) };
 }
 
-/** The captured root CA CRL body: the first of `uris` with a captured response. */
+/** The captured root CA CRL body: the first of `uris` (the trusted root's distribution points) with a captured response. */
 export function rootCrl(c: PcsCollateral, uris: readonly string[]): Uint8Array {
-  if (uris.length === 0) throw new Error("the issuer chain's root certificate names no CRL distribution point");
+  if (uris.length === 0) throw new Error("the trusted root certificate names no CRL distribution point");
   for (const uri of uris) {
     const r = c.get(uri);
     if (r !== undefined) return r.body;
