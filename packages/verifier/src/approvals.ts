@@ -204,7 +204,8 @@ async function approval(
   const signer = issuer
     ? await certifiedSigner(b, issuer, keys, root)
     : await keySigner(b, keys);
-  if (issuer && b.raw.dsseEnvelope.signatures[0].keyid)
+  const keyID = b.raw.dsseEnvelope.signatures[0].keyid;
+  if (issuer && keyID !== undefined && keyID !== "")
     throw new Error("Certified approval requires an empty DSSE key ID");
   if (
     b.raw.dsseEnvelope.signatures[0].keyid &&

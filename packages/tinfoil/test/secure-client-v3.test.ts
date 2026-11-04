@@ -1,9 +1,9 @@
 import { beforeEach, afterEach, describe, expect, it, vi } from "vitest";
 import { KeyConfigMismatchError } from "ehbp";
-const mocks = vi.hoisted(() => ({ verify: vi.fn(), fetchEvidence: vi.fn(), build: vi.fn(), nonce: 0 }));
+const mocks = vi.hoisted(() => ({ verify: vi.fn(), policy: vi.fn(), fetchEvidence: vi.fn(), build: vi.fn(), nonce: 0 }));
 vi.mock("@tinfoilsh/verifier", () => ({
   UsageError: class UsageError extends Error {}, VerificationError: class VerificationError extends Error {},
-  Verifier: class { verify = mocks.verify; },
+  Verifier: class { constructor(options: unknown) { mocks.policy(options); } verify = mocks.verify; },
   parseReference: (value: string) => { if (!value.includes("/")) throw new Error("bad reference"); },
   randomNonce: () => new Uint8Array(32).fill(++mocks.nonce),
 }));
@@ -19,11 +19,14 @@ beforeEach(() => { mocks.verify.mockReset().mockResolvedValue(success()); mocks.
 afterEach(() => vi.useRealTimers());
 describe("SecureClient v3 ownership", () => {
   it("allows registry scope policy without a repository pin", async () => {
-    const client = new SecureClient({ ...options, configRepo: "", verification: { configScopes: ["https://registry.tinfoil.sh/scopes/" + "0".repeat(32)] } });
+    const verification = { configScopes: ["https://registry.tinfoil.sh/scopes/" + "0".repeat(32)] };
+    const client = new SecureClient({ ...options, configRepo: "", verification });
     await client.ready();
     expect(mocks.verify.mock.calls[0][2]).toBe("");
-    const facade = new Client({ ...options, configRepo: "" });
+    expect(mocks.policy).toHaveBeenLastCalledWith(verification);
+    const facade = new Client({ ...options, configRepo: "", verification });
     await facade.ready();
+    expect(mocks.policy).toHaveBeenLastCalledWith(verification);
     expect(facade.inspect()?.endpoint).toBe(options.enclaveURL);
   });
   it("requires a fixed endpoint, rejects plaintext TLS/proxy TLS and keeps inspection passive", () => {

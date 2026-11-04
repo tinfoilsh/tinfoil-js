@@ -4,7 +4,7 @@ import {
   verifyArtifactApproval,
   verifyConfigApproval,
 } from "../src/approvals.js";
-import { base64, parseJSON, unbase64, utf8 } from "../src/encoding.js";
+import { base64, hex, parseJSON, sha256, unbase64, utf8 } from "../src/encoding.js";
 import { parseReference } from "../src/references.js";
 import boundaries from "./fixtures/approval-v3/boundaries.json";
 import certified from "./fixtures/approval-v3/certified.json";
@@ -152,6 +152,7 @@ describe("certified registry approvals", () => {
 
   it("authenticates the scope and digest without config bytes or identity pins", async () => {
     const approved = await verify(certified.bundles["normal-p256"]);
+    expect(approved.digest).toBe(hex(await sha256(unbase64(certified.config))));
     expect(approved.scope).toBe(certified.scope);
     expect(approved.name).toBe("/acme/app/v7");
     expect(approved.runtime?.tag).toBe("v1.2.3");
@@ -170,7 +171,9 @@ describe("certified registry approvals", () => {
   it("rejects a nonempty certified DSSE key ID", async () => {
     const bundle = structuredClone(certified.bundles["normal-p256"]);
     const { signingKeyHint } = await verify(bundle);
-    Object.assign(bundle.dsseEnvelope.signatures[0], { keyid: signingKeyHint });
-    await expect(verify(bundle)).rejects.toThrow("empty DSSE key ID");
+    for (const keyid of [signingKeyHint, 0, false, null]) {
+      Object.assign(bundle.dsseEnvelope.signatures[0], { keyid });
+      await expect(verify(bundle)).rejects.toThrow("empty DSSE key ID");
+    }
   });
 });
