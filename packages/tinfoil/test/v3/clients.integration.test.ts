@@ -1,15 +1,15 @@
 /**
- * The enclave clients against a live enclave, in both transport modes: a
- * verified client, a chat completion, and a streamed completion whose
- * chunks arrive before the final one. Runs in the integration lane with a
- * Tinfoil API key. The live model reasons before it answers, so the
+ * The enclave and router clients against live services, in both transport
+ * modes: a verified client, a chat completion, and a streamed completion
+ * whose chunks arrive before the final one. Runs in the integration lane
+ * with a Tinfoil API key. The live model reasons before it answers, so the
  * assertions are on the completion's shape and its terminal finish reason,
  * and on the text only when the model finished its answer.
  */
 import { describe, expect, it } from "vitest";
 import type OpenAI from "openai";
 import { EnclaveHTTPClient } from "../../src/v3/enclave-client.js";
-import { EnclaveOpenAIClient } from "../../src/v3/openai-client.js";
+import { createClient, EnclaveOpenAIClient, RouterOpenAIClient } from "../../src/v3/openai-client.js";
 import type { TransportMode } from "../../src/v3/options.js";
 
 const RUN_INTEGRATION = process.env.RUN_TINFOIL_INTEGRATION === "true";
@@ -55,6 +55,31 @@ describe.each<TransportMode>(["tls", "ehbp"])("EnclaveHTTPClient against %s on a
       expect(ai.baseURL).toBe(`https://${HOST}/v1/`);
       await completeChat(ai);
       await streamChat(ai);
+    },
+    180_000,
+  );
+});
+
+describe.each<TransportMode>(["tls", "ehbp"])("RouterOpenAIClient against %s on the live router", (transportMode) => {
+  it.skipIf(!RUN_INTEGRATION || apiKey === "")(
+    "discovers and verifies a router and completes a chat through it",
+    async () => {
+      const ai = await RouterOpenAIClient.create({ transportMode }, { apiKey });
+      const router = ai.httpClient();
+      expect(router.repo()).toBe(REPO);
+      expect(router.current()?.tlsPublicKeyFP()).toMatch(/^[0-9a-f]{64}$/);
+      expect(ai.baseURL).toBe(`https://${router.enclave()}/v1/`);
+      await completeChat(ai);
+    },
+    180_000,
+  );
+});
+
+describe("createClient on the live router", () => {
+  it.skipIf(!RUN_INTEGRATION || apiKey === "")(
+    "completes a chat through the recommended route",
+    async () => {
+      await completeChat(await createClient({ apiKey }));
     },
     180_000,
   );

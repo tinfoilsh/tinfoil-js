@@ -49,17 +49,17 @@ export class VerifiedEnclave<T = void> {
 
   /** A state valid now, verifying first only if the current one has expired or been invalidated. */
   ensureVerified(signal?: AbortSignal): Promise<State<T>> {
-    return this.#verified(signal, false, (e, s) => e.verify(s));
+    return this.#verified(signal, false, (e) => e.verify());
   }
 
   /** Verifies again even if the current verification is still valid. */
   reverify(signal?: AbortSignal): Promise<State<T>> {
-    return this.#verified(signal, true, (e, s) => e.verify(s));
+    return this.#verified(signal, true, (e) => e.verify());
   }
 
   /** Verifies like {@link reverify} but without the retry, so a caller trying several enclaves moves on quickly. */
   verifyOnce(signal?: AbortSignal): Promise<State<T>> {
-    return this.#verified(signal, true, (e, s) => e.verifyOnce(s));
+    return this.#verified(signal, true, (e) => e.verifyOnce());
   }
 
   /** The last successful verification without checking it, or undefined before the first. */
@@ -76,13 +76,16 @@ export class VerifiedEnclave<T = void> {
     return !entry.rejected && freshAt(entry.verification, this.#clock());
   }
 
-  async #verified(signal: AbortSignal | undefined, force: boolean, verify: (e: Enclave, signal?: AbortSignal) => Promise<Verification>): Promise<State<T>> {
+  async #verified(signal: AbortSignal | undefined, force: boolean, verify: (e: Enclave) => Promise<Verification>): Promise<State<T>> {
     for (;;) {
       signal?.throwIfAborted();
       const current = this.#current;
       if (current !== undefined && this.#valid(current) && !force) return current;
       // A caller's cancellation does not abort a refresh other callers need,
       // so the refresh runs without the signal; the caller stops waiting.
+      // That holds for a one-shot probe too: its fetch is bounded by its
+      // own timeout, and a probe that joined a refresh can't abort it from
+      // under the callers that share it.
       const refresh = (this.#refreshing ??= this.#refresh(verify).finally(() => {
         this.#refreshing = undefined;
       }));
