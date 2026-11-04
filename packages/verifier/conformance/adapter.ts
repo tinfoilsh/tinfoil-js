@@ -154,18 +154,16 @@ async function runStage(stage: string, raw: unknown): Promise<Result> {
   const nonce = decodeHex(in_.nonce_hex);
   if (nonce === undefined) return malformed(stage);
 
-  // TODO(v3): a bad sigstore root should be MALFORMED_INPUT on every stage,
-  // which means building the provenance client before dispatch. It's lazy
-  // here until ProvenanceClient is implemented, so the envelope stage isn't
-  // blocked on it.
-  const provClient = async () => {
-    try {
-      return roots.sigstore ? await ProvenanceClient.fromJSON(roots.sigstore) : await ProvenanceClient.default();
-    } catch (err) {
-      if (err instanceof NotImplementedError) throw err;
-      return undefined;
-    }
-  };
+  // An injected Sigstore root that is not a trusted root is malformed input
+  // on every document stage, so the provenance client is built before
+  // dispatch.
+  let prov: ProvenanceClient;
+  try {
+    prov = roots.sigstore ? await ProvenanceClient.fromJSON(roots.sigstore) : await ProvenanceClient.default();
+  } catch (err) {
+    if (err instanceof NotImplementedError) throw err;
+    return malformed(stage);
+  }
 
   switch (stage) {
     case Stage.Verify:
@@ -180,8 +178,6 @@ async function runStage(stage: string, raw: unknown): Promise<Result> {
     case Stage.AuthenticateProvenance: {
       const parsed = await decodeOrUndefined(doc);
       if (parsed === undefined) return malformed(stage);
-      const prov = await provClient();
-      if (prov === undefined) return malformed(stage);
       return layer(stage, "PROVENANCE_REJECTED", async () => {
         const codeRef = parsed.sigstoreCode();
         const pin = parseReference(in_.repo);
@@ -200,8 +196,6 @@ async function runStage(stage: string, raw: unknown): Promise<Result> {
     case Stage.AssemblePolicy: {
       const parsed = await decodeOrUndefined(doc);
       if (parsed === undefined) return malformed(stage);
-      const prov = await provClient();
-      if (prov === undefined) return malformed(stage);
       return layer(stage, "PROVENANCE_REJECTED", async () => {
         const ref = parsed.sigstorePlatform();
         await prov.authenticatePlatformEndorsements(ref.bundle, ref.repo, ref.tag, ref.digest, ARTIFACT_FORMAT);
