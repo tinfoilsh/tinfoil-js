@@ -27,8 +27,8 @@ const CERT_MISMATCH = "enclave certificate does not match the attested key; re-v
 export function tlsMode(options: TLSOptions = {}): Mode {
   return {
     name: "tls",
-    validateRequest(url) {
-      if (url.protocol !== "https:") throw new ConfigurationError("TLS transport mode requires an HTTPS request");
+    validateRequest(request) {
+      if (request.url.protocol !== "https:") throw new ConfigurationError("TLS transport mode requires an HTTPS request");
     },
     async bind(v: Verification) {
       const key = v.tlsPublicKeyFP();
