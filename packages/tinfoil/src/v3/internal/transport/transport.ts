@@ -21,11 +21,28 @@ export interface BoundFetch {
   readonly close?: () => void;
 }
 
+/** What a mode inspects about a request before any network I/O. */
+export interface RequestShape {
+  readonly url: URL;
+  readonly method: string;
+  readonly headers: Headers;
+}
+
+/** The shape of the request a fetch call describes. */
+export function shapeOf(input: string | URL | Request, init?: RequestInit): RequestShape {
+  const request = input instanceof Request ? input : undefined;
+  return {
+    url: requestURL(input),
+    method: (init?.method ?? request?.method ?? "GET").toUpperCase(),
+    headers: new Headers(init?.headers ?? request?.headers),
+  };
+}
+
 /** How requests are protected with a verification's keys. */
 export interface Mode {
   readonly name: TransportMode;
   /** Rejects, before any network I/O, a request the mode can't protect. */
-  validateRequest(url: URL): void;
+  validateRequest(request: RequestShape): void;
   /**
    * A fetch tied to `v`'s keys. Its errors meaning the peer doesn't hold
    * those keys, detected before the application processes the request, are
@@ -76,7 +93,7 @@ export class KeyedTransport {
 
   async #send(input: string | URL | Request, init?: RequestInit): Promise<Response> {
     // Validate first, so a request the mode can't protect never triggers a verification.
-    this.#mode.validateRequest(requestURL(input));
+    this.#mode.validateRequest(shapeOf(input, init));
     const state = await this.#cache.ensureVerified(init?.signal ?? undefined);
     try {
       return await state.bound.fetch(input, init);
