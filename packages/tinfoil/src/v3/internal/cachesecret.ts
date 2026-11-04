@@ -1,0 +1,282 @@
+/**
+ * The per-user prompt-cache secret: the router derives a request's
+ * prefix-cache namespace from it, so requests carrying the same secret share
+ * cached prompt prefixes and requests carrying different secrets cannot
+ * observe each other's cache timing.
+ *
+ * Clients for Tinfoil's inference routes resolve it in this order; a client
+ * for an explicit enclave uses only the first two, since other enclaves
+ * don't read the field:
+ *
+ *  1. a non-empty `user_cache_secret` string in the request body,
+ *  2. the client's `userCacheSecret` option,
+ *  3. the TINFOIL_USER_CACHE_SECRET environment variable,
+ *  4. a generated secret persisted at ~/.tinfoil/user_cache_secret (0600),
+ *     shared with the other Tinfoil SDKs on the machine; where nothing can
+ *     be persisted, a secret kept for the life of the process.
+ *
+ * The field is spliced into the body's text, so every other byte the caller
+ * wrote reaches the enclave unchanged. Injection happens below the origin
+ * guard and above the sealing transport, so the secret is only ever visible
+ * to the verified enclave.
+ */
+import { isRealBrowser } from "../../env.js";
+import type { Fetch } from "../options.js";
+import { shapeOf, type RequestShape } from "./transport/transport.js";
+
+/** The request-body field. A non-empty string scopes the prompt cache to that secret. */
+export const USER_CACHE_SECRET_FIELD = "user_cache_secret";
+/** Provisions the secret through the environment; an empty value is unset. */
+export const USER_CACHE_SECRET_ENV = "TINFOIL_USER_CACHE_SECRET";
+
+/**
+ * The endpoints whose bodies carry the field, matched by path suffix so a
+ * path-prefixed proxy or a `/v1`-less root still qualifies. Other endpoints
+ * (embeddings, audio, files) don't prefix-cache and may reject the field.
+ */
+const ELIGIBLE_PATHS = ["/chat/completions", "/completions", "/responses"];
+
+/** Whether a request can carry the field: a POST with a body to one of the endpoints. */
+export function pathEligible(request: RequestShape): boolean {
+  return request.method === "POST" && request.hasBody && ELIGIBLE_PATHS.some((p) => request.url.pathname.endsWith(p));
+}
+
+/**
+ * Resolves the client-level secret: a non-empty explicit option wins, then a
+ * non-empty environment value, then the persisted (or generated) secret.
+ * Never throws; "" means no secret could be provisioned.
+ */
+export async function resolveUserCacheSecret(explicit: string | undefined): Promise<string> {
+  if (explicit !== undefined && explicit !== "") return explicit;
+  const env = typeof process !== "undefined" ? process.env?.[USER_CACHE_SECRET_ENV] : undefined;
+  if (env !== undefined && env !== "") return env;
+  return loadOrGenerateUserCacheSecret();
+}
+
+/** A fresh 256-bit random secret, hex-encoded; "" when no secure randomness is available. */
+export function newUserCacheSecret(): string {
+  try {
+    const bytes = new Uint8Array(32);
+    crypto.getRandomValues(bytes);
+    return Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
+  } catch {
+    console.warn("[tinfoil] could not generate a user cache secret; requests stay in the tenant-wide cache namespace");
+    return "";
+  }
+}
+
+/**
+ * The fallback for when the secret cannot be persisted: one secret for the
+ * life of the process. It still isolates this process's cache namespace, but
+ * continuity resets on restart, which is worth a warning where persistence
+ * was expected (not in browsers, where nothing persists).
+ */
+let ephemeral: string | undefined;
+function ephemeralUserCacheSecret(): string {
+  if (ephemeral === undefined) {
+    ephemeral = newUserCacheSecret();
+    if (ephemeral !== "" && !isRealBrowser()) {
+      console.warn(
+        `[tinfoil] could not persist the user cache secret; using an in-memory secret, so prompt-cache continuity resets when this process exits (set ${USER_CACHE_SECRET_ENV} or the userCacheSecret option to pin one)`,
+      );
+    }
+  }
+  return ephemeral;
+}
+
+async function loadOrGenerateUserCacheSecret(): Promise<string> {
+  if (!isRealBrowser()) {
+    try {
+      // The store needs a filesystem; the browser build maps it to a stub.
+      const { loadOrPersistUserCacheSecret } = await import("./cachesecret-store.js");
+      const secret = loadOrPersistUserCacheSecret(newUserCacheSecret);
+      if (secret !== null) return secret;
+    } catch {
+      // No usable filesystem in this runtime.
+    }
+  }
+  return ephemeralUserCacheSecret();
+}
+
+/** Resets the process-lifetime secret; for tests. */
+export function resetEphemeralUserCacheSecretForTests(): void {
+  ephemeral = undefined;
+}
+
+/**
+ * `next` with `secret` added to the bodies of the requests that carry it. A
+ * non-empty or non-string field already in the body is never overwritten; an
+ * empty string is replaced. A body that is not UTF-8 text holding one JSON
+ * object, or carries the field more than once, is forwarded untouched. An
+ * empty secret returns `next`.
+ */
+export function withCacheSecret(next: Fetch, secret: string): Fetch {
+  if (secret === "") return next;
+  return async (input, init) => {
+    if (!pathEligible(shapeOf(input, init))) return next(input, init);
+    const body = await readBody(input, init);
+    if (body === undefined) return next(input, init);
+    const injected = body.text === undefined ? null : injectUserCacheSecret(body.text, secret);
+    if (injected === null) {
+      // A stream read here is forwarded as the bytes it carried.
+      return body.consumed ? next(input, { ...init, body: body.bytes }) : next(input, init);
+    }
+    const headers = new Headers(init?.headers ?? (input instanceof Request ? input.headers : undefined));
+    headers.delete("content-length");
+    return next(input, { ...init, body: injected, headers });
+  };
+}
+
+interface Body {
+  readonly bytes: Uint8Array<ArrayBuffer>;
+  /** The bytes as UTF-8 text; undefined when they are not valid UTF-8. */
+  readonly text: string | undefined;
+  /** Whether reading consumed the caller's body, so it must be forwarded as `bytes`. */
+  readonly consumed: boolean;
+}
+
+/**
+ * The request body's bytes, read without consuming the caller's body where
+ * the body can be read again. Undefined for a body kind that can't hold a
+ * JSON text (form data, URL parameters), which is forwarded untouched.
+ */
+async function readBody(input: string | URL | Request, init: RequestInit | undefined): Promise<Body | undefined> {
+  const source = init?.body;
+  let bytes: Uint8Array<ArrayBuffer>;
+  let consumed = false;
+  if (source === undefined || source === null) {
+    if (!(input instanceof Request) || input.body === null) return undefined;
+    bytes = new Uint8Array(await input.clone().arrayBuffer());
+  } else if (typeof source === "string") {
+    return { bytes: new TextEncoder().encode(source), text: source, consumed: false };
+  } else if (source instanceof ArrayBuffer) {
+    bytes = new Uint8Array(source.slice(0));
+  } else if (ArrayBuffer.isView(source)) {
+    bytes = new Uint8Array(source.buffer.slice(source.byteOffset, source.byteOffset + source.byteLength));
+  } else if (typeof Blob !== "undefined" && source instanceof Blob) {
+    bytes = new Uint8Array(await source.arrayBuffer());
+  } else if (typeof ReadableStream !== "undefined" && source instanceof ReadableStream) {
+    bytes = new Uint8Array(await new Response(source).arrayBuffer());
+    consumed = true;
+  } else {
+    return undefined;
+  }
+  let text: string | undefined;
+  try {
+    text = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(bytes);
+  } catch {
+    text = undefined;
+  }
+  return { bytes, text, consumed };
+}
+
+/**
+ * Adds the field to a JSON-object body by splicing it into the text, so the
+ * caller's bytes, including numbers beyond double precision, are preserved.
+ * Returns null, meaning forward the original, for a body that is not one
+ * JSON object with nothing but whitespace around it, carries the field more
+ * than once, or carries it with a non-empty or non-string value. An existing
+ * empty string is replaced.
+ */
+export function injectUserCacheSecret(raw: string, secret: string): string | null {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return null;
+  }
+  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return null;
+  const members = topLevelMembers(raw);
+  if (members === null) return null;
+  const existing = members.filter((m) => m.key === USER_CACHE_SECRET_FIELD);
+  const field = `${JSON.stringify(USER_CACHE_SECRET_FIELD)}:${JSON.stringify(secret)}`;
+  if (existing.length === 0) {
+    const end = raw.lastIndexOf("}");
+    return `${raw.slice(0, end)}${members.length > 0 ? "," : ""}${field}${raw.slice(end)}`;
+  }
+  if (existing.length !== 1) return null;
+  const [member] = existing;
+  if (raw.slice(member!.valueStart, member!.valueEnd) !== '""') return null;
+  return `${raw.slice(0, member!.valueStart)}${JSON.stringify(secret)}${raw.slice(member!.valueEnd)}`;
+}
+
+interface Member {
+  readonly key: string;
+  readonly valueStart: number;
+  readonly valueEnd: number;
+}
+
+/** The top-level members of an object body, with each value's text range; null if the text is not an object. */
+function topLevelMembers(raw: string): Member[] | null {
+  const members: Member[] = [];
+  let index = skipWhitespace(raw, 0);
+  if (raw[index] !== "{") return null;
+  index = skipWhitespace(raw, index + 1);
+  if (raw[index] === "}") return members;
+  for (;;) {
+    const keyEnd = stringEnd(raw, index);
+    if (keyEnd === null) return null;
+    let key: unknown;
+    try {
+      key = JSON.parse(raw.slice(index, keyEnd));
+    } catch {
+      return null;
+    }
+    index = skipWhitespace(raw, keyEnd);
+    if (raw[index] !== ":") return null;
+    const valueStart = skipWhitespace(raw, index + 1);
+    const valueEnd = valueEndAt(raw, valueStart);
+    if (valueEnd === null) return null;
+    members.push({ key: key as string, valueStart, valueEnd });
+    index = skipWhitespace(raw, valueEnd);
+    if (raw[index] === ",") {
+      index = skipWhitespace(raw, index + 1);
+      continue;
+    }
+    return raw[index] === "}" ? members : null;
+  }
+}
+
+function skipWhitespace(raw: string, start: number): number {
+  let index = start;
+  while (index < raw.length && (raw[index] === " " || raw[index] === "\t" || raw[index] === "\n" || raw[index] === "\r")) index++;
+  return index;
+}
+
+function stringEnd(raw: string, start: number): number | null {
+  if (raw[start] !== '"') return null;
+  let escaped = false;
+  for (let index = start + 1; index < raw.length; index++) {
+    if (escaped) escaped = false;
+    else if (raw[index] === "\\") escaped = true;
+    else if (raw[index] === '"') return index + 1;
+  }
+  return null;
+}
+
+/** The end of the JSON value starting at `start`: a string, a nested structure, or a scalar running to the next ',' or '}'. */
+function valueEndAt(raw: string, start: number): number | null {
+  if (raw[start] === '"') return stringEnd(raw, start);
+  if (raw[start] === "{" || raw[start] === "[") {
+    let depth = 0;
+    let inString = false;
+    let escaped = false;
+    for (let index = start; index < raw.length; index++) {
+      const c = raw[index];
+      if (inString) {
+        if (escaped) escaped = false;
+        else if (c === "\\") escaped = true;
+        else if (c === '"') inString = false;
+      } else if (c === '"') inString = true;
+      else if (c === "{" || c === "[") depth++;
+      else if (c === "}" || c === "]") {
+        depth--;
+        if (depth === 0) return index + 1;
+      }
+    }
+    return null;
+  }
+  let end = start;
+  while (end < raw.length && raw[end] !== "," && raw[end] !== "}" && !/\s/.test(raw[end]!)) end++;
+  return end > start ? end : null;
+}

@@ -7,6 +7,7 @@
 import type { Verification } from "@tinfoilsh/verifier/v3";
 import { isRealBrowser } from "../env.js";
 import { ConfigurationError } from "./errors.js";
+import { withCacheSecret } from "./internal/cachesecret.js";
 import { Enclave, type EnclaveConfig } from "./internal/enclave.js";
 import { validateBaseURL, validateTLSBaseURL } from "./internal/transport/base-url.js";
 import { ehbpMode, type EHBPOptions } from "./internal/transport/ehbp.js";
@@ -36,6 +37,11 @@ export function openAIURLOf(client: object): string {
   return url;
 }
 
+/** Records where an OpenAI client over `client` sends requests. */
+export function setOpenAIURL(client: object, url: string): void {
+  openAIURLs.set(client, url);
+}
+
 /** `mode`, or the platform's default: pinned connections where the runtime exposes them, sealed bodies in browsers. */
 export function resolveTransportMode(mode: TransportMode | undefined): TransportMode {
   if (mode === undefined) return isRealBrowser() ? "ehbp" : "tls";
@@ -49,12 +55,15 @@ export function modeFor(mode: TransportMode, seams: EnclaveClientSeams): Mode {
 
 /**
  * The fetch chain the enclave and router clients send through, from the
- * inside out: the proxy header, one replay after a key rejection, and origin
- * pinning.
+ * inside out: the proxy header, one replay after a key rejection, the cache
+ * secret, and origin pinning. The cache secret sits above the transport, so
+ * the field it adds is sealed with the rest of the body or sent over the
+ * pinned connection.
  */
-export function attestedFetch(transport: KeyedTransport, host: string, baseURL: string): Fetch {
+export function attestedFetch(transport: KeyedTransport, host: string, baseURL: string, cacheSecret: string = ""): Fetch {
   let chain = withEnclaveURL(transport.fetch, host, baseURL);
   chain = withReplay(chain, isKeyRejection);
+  chain = withCacheSecret(chain, cacheSecret);
   return withOriginRestriction(chain, host, baseURL);
 }
 
@@ -90,7 +99,7 @@ export async function createEnclaveHTTPClient(host: string, repo: string, option
     transport,
     baseURL !== "" ? baseURL : `https://${host}/`,
     baseURL !== "" ? baseURL : `https://${host}/v1/`,
-    attestedFetch(transport, host, baseURL),
+    attestedFetch(transport, host, baseURL, options.userCacheSecret ?? ""),
   );
   await client.ensureVerified(options.signal);
   return client;
@@ -112,7 +121,7 @@ export class EnclaveHTTPClient {
     this.#transport = transport;
     this.#baseURL = baseURL;
     this.fetch = fetchImpl;
-    openAIURLs.set(this, openAIURL);
+    setOpenAIURL(this, openAIURL);
   }
 
   /**
