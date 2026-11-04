@@ -13,12 +13,17 @@ import { ConfigurationError } from "../../src/v3/errors.js";
 import { resetEphemeralUserCacheSecretForTests, resolveUserCacheSecret } from "../../src/v3/internal/cachesecret.js";
 import { loadOrPersistUserCacheSecret } from "../../src/v3/internal/cachesecret-store.js";
 import { PLATFORM } from "../../src/v3/internal/platform.js";
+import { isCertificateError } from "../../src/v3/internal/transport/pin-errors.js";
 import { tlsMode } from "../../src/v3/internal/transport/tls.js";
+import { WS_PLATFORM } from "../../src/v3/internal/transport/ws.js";
+import { checkWebSocketCapability } from "../../src/v3/internal/websocket.js";
 import { createGatewayHTTPClient, GatewayHTTPClient } from "../../src/v3/gateway-client.js";
 import { createEnclaveOpenAIClient, createGatewayOpenAIClient, createTinfoilClient, EnclaveOpenAIClient, TinfoilClient } from "../../src/v3/openai-client.js";
 import type { Fetch } from "../../src/v3/options.js";
 import { RouterHTTPClient, type RouterClientSeams } from "../../src/v3/router-client.js";
 import * as browserEntry from "../../src/v3/index.browser.js";
+import { createRealtimeWebSocket } from "../../src/v3/realtime.js";
+import { createWebSocket, pinnedWebSocketOptions } from "../../src/v3/websocket.js";
 import { createEhbpPeer, fetchOf, paced, type EhbpPeer } from "./helpers/ehbp-peer.js";
 
 const ENCLAVE = "enclave.example";
@@ -82,8 +87,16 @@ afterEach(() => {
 describe("the browser entry", () => {
   it("runs the browser variants of the platform-specific modules", () => {
     expect(PLATFORM).toBe("browser");
+    expect(WS_PLATFORM).toBe("browser");
     expect(() => tlsMode()).toThrow(/not available in browsers/);
     expect(loadOrPersistUserCacheSecret(() => "generated")).toBeNull();
+  });
+
+  it("resolves the WebSocket modules without the runtime's TLS support", () => {
+    // The pin's error classification is all the browser-safe WebSocket module reaches; it runs here as is.
+    expect(isCertificateError({ code: "CERT_HAS_EXPIRED" })).toBe(true);
+    expect(isCertificateError({ code: "ECONNRESET" })).toBe(false);
+    expect(() => checkWebSocketCapability()).toThrow(/browsers don't expose/);
   });
 
   it("exports the same surface as the Node entry", async () => {
@@ -220,5 +233,25 @@ describe("the gateway in a browser", () => {
     const sent = JSON.parse(new TextDecoder().decode(last.body)) as Record<string, unknown>;
     expect(sent.cache_salt).toMatch(/^[A-Za-z0-9_-]{43}$/);
     expect(ai.httpClient().current().map((r) => r.host)).toEqual(["replica.example"]);
+  });
+});
+
+describe("WebSockets in a browser", () => {
+  it("refuses a pinned WebSocket, its ws settings and a realtime session, naming the browser limitation, without any I/O", async () => {
+    const calls = { documents: 0 };
+    const counting: Fetch = async () => {
+      calls.documents++;
+      return new Response(new Uint8Array([1]));
+    };
+    const http = await createEnclaveHTTPClient(ENCLAVE, "tinfoilsh/repo", { verifier: verifier(peer.publicKeyHex) }, { ...seams(), documentFetch: counting });
+    const before = calls.documents;
+    await expect(createWebSocket(http, "/v1/realtime")).rejects.toThrow(/browsers don't expose/);
+    await expect(pinnedWebSocketOptions(http)).rejects.toBeInstanceOf(ConfigurationError);
+    expect(calls.documents).toBe(before);
+    const ai = await createEnclaveOpenAIClient(ENCLAVE, "tinfoilsh/repo", { verifier: verifier(peer.publicKeyHex) }, { bearerToken: "jwt" }, { ...seams(), documentFetch: counting });
+    const beforeRealtime = calls.documents;
+    await expect(createRealtimeWebSocket(ai, { model: "m" })).rejects.toBeInstanceOf(ConfigurationError);
+    expect(calls.documents).toBe(beforeRealtime);
+    expect(typeof browserEntry.createWebSocket).toBe("function");
   });
 });

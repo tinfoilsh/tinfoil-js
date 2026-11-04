@@ -29,6 +29,10 @@ const EXPORTS = [
   "GatewayHTTPClient",
   "GatewayOpenAIClient",
   "fetchCatalog",
+  // websockets
+  "createWebSocket",
+  "pinnedWebSocketOptions",
+  "createRealtimeWebSocket",
   // errors
   "TinfoilError",
   "ConfigurationError",
@@ -76,6 +80,9 @@ type TypeExports = [
   surface.Catalog,
   surface.CatalogEntry,
   surface.ReplicaVerification,
+  surface.WebSocketOptions,
+  surface.PinnedWebSocket,
+  surface.RealtimeOptions,
   surface.OpenAIOptions,
   surface.ErrorCategory,
   surface.SessionRecoveryToken,
@@ -179,6 +186,11 @@ describe("public surface", () => {
     }
     expect(typeof surface.createClient).toBe("function");
     expect(typeof surface.fetchCatalog).toBe("function");
+  });
+
+  it("opens WebSockets through functions that take a client, not through client methods", () => {
+    for (const fn of [surface.createWebSocket, surface.pinnedWebSocketOptions, surface.createRealtimeWebSocket]) expect(typeof fn).toBe("function");
+    expect(methodsOf(surface.EnclaveHTTPClient)).not.toContain("createWebSocket");
   });
 
   it("reports the package version", () => {

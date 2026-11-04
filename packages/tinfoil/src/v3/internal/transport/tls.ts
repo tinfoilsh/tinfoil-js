@@ -13,6 +13,8 @@ import type { Verification } from "@tinfoilsh/verifier/v3";
 import { isBun } from "../../../env.js";
 import { AttestationError, ConfigurationError, messageOf, NetworkError } from "../../errors.js";
 import type { Fetch } from "../../options.js";
+import { CERT_MISMATCH, isCertificateError } from "./pin-errors.js";
+import { identityCheck } from "./pin.js";
 import { PeerLacksKeyError, type BoundFetch, type Mode } from "./transport.js";
 
 /** Settings of the normal certificate check, which runs before the pin and can only reject. */
@@ -20,8 +22,6 @@ export interface TLSOptions {
   /** Certificate authorities to trust instead of the runtime's bundle. */
   readonly ca?: string | Uint8Array;
 }
-
-const CERT_MISMATCH = "enclave certificate does not match the attested key; re-verify the enclave";
 
 /** A mode that pins each connection's leaf certificate to the TLS key the current verification attests. */
 export function tlsMode(options: TLSOptions = {}): Mode {
@@ -38,21 +38,6 @@ export function tlsMode(options: TLSOptions = {}): Mode {
   };
 }
 
-/** Whether a connection error means the peer's certificate failed the normal check or the pin. */
-function isCertificateError(err: unknown): boolean {
-  if (err instanceof PeerLacksKeyError) return true;
-  const code = (err as { code?: unknown })?.code;
-  if (typeof code !== "string") return false;
-  return (
-    code === "ERR_TLS_CERT_ALTNAME_INVALID" ||
-    code === "HOSTNAME_MISMATCH" ||
-    code.startsWith("CERT_") ||
-    code.startsWith("UNABLE_TO_") ||
-    code.startsWith("DEPTH_ZERO_") ||
-    code.startsWith("SELF_SIGNED_")
-  );
-}
-
 /** The error a failed request surfaces as: a certificate failure means the peer lacks the key; anything else is a network error. */
 function classify(err: unknown): Error {
   if (err instanceof PeerLacksKeyError) return err;
@@ -64,23 +49,9 @@ function classify(err: unknown): Error {
 // ---------------------------------------------------------------- Node
 
 async function nodePinnedFetch(key: string, options: TLSOptions): Promise<BoundFetch> {
-  const [https, tls, { X509Certificate, createHash }, { Readable }] = await Promise.all([
-    import("node:https"),
-    import("node:tls"),
-    import("node:crypto"),
-    import("node:stream"),
-  ]);
-  type PeerCertificate = import("node:tls").PeerCertificate;
+  const [https, { Readable }, checkServerIdentity] = await Promise.all([import("node:https"), import("node:stream"), identityCheck(key)]);
   type IncomingMessage = import("node:http").IncomingMessage;
 
-  const checkServerIdentity = (host: string, cert: PeerCertificate): Error | undefined => {
-    const raw = cert?.raw;
-    if (raw === undefined) return new PeerLacksKeyError("the peer presented no certificate");
-    const spki = new X509Certificate(raw).publicKey.export({ type: "spki", format: "der" });
-    const fingerprint = createHash("sha256").update(spki).digest("hex");
-    if (fingerprint !== key) return new PeerLacksKeyError(CERT_MISMATCH);
-    return tls.checkServerIdentity(host, cert);
-  };
   const agent = new https.Agent({ keepAlive: true });
   // An idle pooled connection must not keep the process alive; a reused one is referenced again.
   agent.on("free", (socket: import("node:net").Socket) => socket.unref());
@@ -175,16 +146,7 @@ async function requestBody(body: BodyInit | Request | null | undefined, headers:
 // ---------------------------------------------------------------- Bun
 
 async function bunPinnedFetch(key: string, options: TLSOptions): Promise<BoundFetch> {
-  const [tls, { X509Certificate, createHash }] = await Promise.all([import("node:tls"), import("node:crypto")]);
-  type PeerCertificate = import("node:tls").PeerCertificate;
-  const checkServerIdentity = (host: string, cert: PeerCertificate): Error | undefined => {
-    const raw = cert?.raw;
-    if (raw === undefined) return new PeerLacksKeyError("the peer presented no certificate");
-    const spki = new X509Certificate(raw).publicKey.export({ type: "spki", format: "der" });
-    const fingerprint = createHash("sha256").update(spki).digest("hex");
-    if (fingerprint !== key) return new PeerLacksKeyError(CERT_MISMATCH);
-    return tls.checkServerIdentity(host, cert);
-  };
+  const checkServerIdentity = await identityCheck(key);
   const fetchImpl: Fetch = async (input, init) => {
     const url = new URL(input instanceof Request ? input.url : String(input));
     if (url.protocol !== "https:") throw new ConfigurationError("TLS transport mode requires an HTTPS request");
