@@ -8,7 +8,7 @@
 import type { Verifier } from "@tinfoilsh/verifier/v3";
 import type { Fetch, VerificationCheck } from "../options.js";
 import { Enclave, type EnclaveConfig } from "./enclave.js";
-import { getFollowingRedirects, readBounded } from "./fetch.js";
+import { getFollowingRedirects, isAuthority, readBounded } from "./fetch.js";
 import { KeyedTransport, type Mode } from "./transport/transport.js";
 
 export const DEFAULT_ROUTER_REPO = "tinfoilsh/confidential-model-router";
@@ -33,8 +33,10 @@ export interface DiscoveryConfig {
 
 /**
  * The transport for the first router that verifies, or for the fallback,
- * unverified. A candidate's failed verification moves discovery on; a
- * configuration error stops it. Ends early when `signal` aborts.
+ * unverified. A candidate's failed verification moves discovery on, and so
+ * does a list entry that isn't a host, since the list is untrusted input;
+ * only a policy that can't be used stops discovery. Ends early when `signal`
+ * aborts.
  */
 export async function discoverRouter(config: DiscoveryConfig): Promise<KeyedTransport> {
   const clock = config.clock ?? (() => new Date());
@@ -62,11 +64,13 @@ export async function discoverRouter(config: DiscoveryConfig): Promise<KeyedTran
   }
   for (const router of routers) {
     // The deadline can pass before the budget's timer fires.
-    if (clock().getTime() >= deadline) break;
-    const candidate = new KeyedTransport(await enclaveFor(router), config.mode, config.clock);
+    if (probing.aborted || clock().getTime() >= deadline) break;
+    if (!isAuthority(router)) continue;
     try {
+      const candidate = new KeyedTransport(await enclaveFor(router), config.mode, config.clock);
       // The candidate keeps its verification, so the client doesn't repeat
-      // it, and a router whose keys the mode can't use is skipped.
+      // it, and a router whose keys the mode can't use is skipped. The
+      // budget cancels the attestation fetch in flight.
       await candidate.verifyOnce(probing);
       return candidate;
     } catch {

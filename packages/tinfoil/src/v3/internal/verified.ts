@@ -59,7 +59,7 @@ export class VerifiedEnclave<T = void> {
 
   /** Verifies like {@link reverify} but without the retry, so a caller trying several enclaves moves on quickly. */
   verifyOnce(signal?: AbortSignal): Promise<State<T>> {
-    return this.#verified(signal, true, (e, s) => e.verifyOnce(s));
+    return this.#verified(signal, true, (e, s) => e.verifyOnce(s), signal);
   }
 
   /** The last successful verification without checking it, or undefined before the first. */
@@ -76,14 +76,21 @@ export class VerifiedEnclave<T = void> {
     return !entry.rejected && freshAt(entry.verification, this.#clock());
   }
 
-  async #verified(signal: AbortSignal | undefined, force: boolean, verify: (e: Enclave, signal?: AbortSignal) => Promise<Verification>): Promise<State<T>> {
+  async #verified(
+    signal: AbortSignal | undefined,
+    force: boolean,
+    verify: (e: Enclave, signal?: AbortSignal) => Promise<Verification>,
+    fetchSignal?: AbortSignal,
+  ): Promise<State<T>> {
     for (;;) {
       signal?.throwIfAborted();
       const current = this.#current;
       if (current !== undefined && this.#valid(current) && !force) return current;
       // A caller's cancellation does not abort a refresh other callers need,
-      // so the refresh runs without the signal; the caller stops waiting.
-      const refresh = (this.#refreshing ??= this.#refresh(verify).finally(() => {
+      // so a shared refresh runs without the signal and the caller stops
+      // waiting. A one-shot verification passes `fetchSignal`, so a
+      // discovery probe cancels its fetch when its budget ends.
+      const refresh = (this.#refreshing ??= this.#refresh(verify, fetchSignal).finally(() => {
         this.#refreshing = undefined;
       }));
       await raceWithSignal(refresh, signal);
@@ -94,8 +101,8 @@ export class VerifiedEnclave<T = void> {
   }
 
   /** Verifies the enclave and publishes the result as the current state. */
-  async #refresh(verify: (e: Enclave) => Promise<Verification>): Promise<void> {
-    const verification = await verify(this.#enclave);
+  async #refresh(verify: (e: Enclave, signal?: AbortSignal) => Promise<Verification>, signal?: AbortSignal): Promise<void> {
+    const verification = await verify(this.#enclave, signal);
     const bound = await this.#bind(verification);
     const entry: Entry<T> = { verification, bound, rejected: false };
     // Binding can outlast freshness.
