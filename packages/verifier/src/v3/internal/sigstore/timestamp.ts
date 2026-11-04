@@ -168,7 +168,9 @@ function parseResponse(response: Uint8Array): TimestampResponse {
   const statusInfo = expectSequence(resp[0], "PKIStatusInfo");
   if (statusInfo.length === 0) throw new Error("PKIStatusInfo has no status");
   const status = integer(statusInfo[0]);
-  if (status !== STATUS_GRANTED && status !== STATUS_GRANTED_WITH_MODS) {
+  // Only an unqualified grant is accepted; a grant with modifications is a
+  // different response than the one requested.
+  if (status !== STATUS_GRANTED) {
     throw new Error(`timestamp request was not granted (status ${status})`);
   }
   if (resp.length !== 2) throw new Error("granted timestamp response has no token");

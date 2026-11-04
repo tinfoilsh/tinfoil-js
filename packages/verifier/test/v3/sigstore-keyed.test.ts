@@ -33,7 +33,6 @@ import {
   preAuthEncoding,
   SIGSTORE_TIMESTAMP_POLICY,
   STATUS_GRANTED,
-  STATUS_GRANTED_WITH_MODS,
   timestampInput,
   verifyTimestamp,
 } from "../../src/v3/internal/sigstore/timestamp.js";
@@ -346,9 +345,9 @@ describe("verifyKeyedBundle", () => {
     expect(await verify(root, built.json, keys, built.digest)).toBe(signer.hint);
   });
 
-  it("accepts a DSSE key id equal to the hint", async () => {
+  it("rejects a DSSE key id even when it equals the hint", async () => {
     const built = await build(signer, ecdsaLog, { keyid: signer.hint });
-    expect(await verify(root, built.json, keys, built.digest)).toBe(signer.hint);
+    await expect(verify(root, built.json, keys, built.digest)).rejects.toThrow(/key id must be empty/);
   });
 
   it("accepts eight entries proving leaves of an eight-leaf tree", async () => {
@@ -379,9 +378,9 @@ describe("verifyKeyedBundle", () => {
     await expect(verify(root, renamed, keys, happy.digest)).rejects.toThrow("untrusted approval signing key");
   });
 
-  it("rejects a DSSE key id that disagrees with the hint", async () => {
+  it("rejects a DSSE key id naming another key", async () => {
     const built = await build(signer, ecdsaLog, { keyid: other.hint });
-    await expect(verify(root, built.json, keys, built.digest)).rejects.toThrow("DSSE key id disagrees");
+    await expect(verify(root, built.json, keys, built.digest)).rejects.toThrow(/key id must be empty/);
   });
 
   it("rejects zero and nine entries", async () => {
@@ -658,7 +657,7 @@ describe("verifyTimestamp", () => {
     expect(ts.imprintAlgorithm).toBe("2.16.840.1.101.3.4.2.1");
     expect(toHex(ts.imprint)).toBe(createHash("sha256").update(input).digest("hex"));
     expect(ts.signerSerial).toBe(2n);
-    expect(parseTimestampResponse(withMods(token("granted-p256"))).status).toBe(STATUS_GRANTED_WITH_MODS);
+    expect(() => parseTimestampResponse(withMods(token("granted-p256")))).toThrow(/not granted \(status 1\)/);
   });
 
   it("accepts granted responses from P-256 and P-384 authorities", async () => {
@@ -668,7 +667,10 @@ describe("verifyTimestamp", () => {
     expect(await verifyTimestamp(p384, token("granted-p384"), input)).toEqual(genTime);
     expect(await verifyTimestamp(p384, token("granted-p384-sha384"), input)).toEqual(genTime);
     expect(await verifyTimestamp(both, token("granted-p256"), input)).toEqual(genTime);
-    expect(await verifyTimestamp(p256, withMods(token("granted-p256")), input)).toEqual(genTime);
+  });
+
+  it("rejects a grant with modifications", async () => {
+    await expect(verifyTimestamp(p256, withMods(token("granted-p256")), input)).rejects.toThrow(/not granted/);
   });
 
   it("accepts a production response under the embedded trusted root", async () => {

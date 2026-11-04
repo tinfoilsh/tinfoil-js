@@ -87,7 +87,9 @@ export async function verifyKeyedBundle(root: TrustedRoot, bundle: Bundle, keys:
   if (bundle.dsse.payloadType !== IN_TOTO_PAYLOAD_TYPE) {
     throw new Error(`unsupported DSSE payload type ${JSON.stringify(bundle.dsse.payloadType)}`);
   }
-  if (bundle.dsse.keyId !== "" && bundle.dsse.keyId !== hint) throw new Error("DSSE key id disagrees with the key hint");
+  // The hint identifies the key; a DSSE key id, even one equal to the hint,
+  // never verifies.
+  if (bundle.dsse.keyId !== "") throw new Error("DSSE key id must be empty for a key-signed bundle");
   const pinned = keys.find((k) => k.hint === hint);
   if (pinned === undefined) throw new Error("untrusted approval signing key");
   if (digest.length !== 32) throw new Error("expected artifact digest is not SHA-256");

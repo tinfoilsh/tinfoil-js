@@ -19,6 +19,12 @@ import { ARTIFACT_FORMAT } from "../src/v3/internal/policy/artifact.js";
 import * as quote from "../src/v3/internal/quote/quote.js";
 import { registerHex, type Expected, type Measurement as V3Measurement, type Register } from "../src/v3/measurement.js";
 import { dangerousTestOnlyVerifier, type DangerousTestOnlyRoots } from "../src/v3/verifier.js";
+import { checkTime, newTimePolicy } from "../src/v3/internal/endorsement/time.js";
+import { strictParse } from "../src/v3/internal/json/index.js";
+import { parseBundle } from "../src/v3/internal/sigstore/bundle.js";
+import { pinnedKeys, verifyKeyedBundle } from "../src/v3/internal/sigstore/keyed.js";
+import { verifyTimestamp } from "../src/v3/internal/sigstore/timestamp.js";
+import { embeddedTrustedRoot, parseTrustedRoot } from "../src/v3/internal/sigstore/trusted-root.js";
 
 export const SCHEMA_VERSION = "1";
 export const SDK_NAME = "tinfoil-js";
@@ -39,6 +45,8 @@ export const Stage = {
   AuthenticateProvenance: "v3-authenticate-provenance",
   AssemblePolicy: "v3-assemble-policy",
   AuthenticateQuote: "v3-authenticate-quote",
+  AuthenticateApproval: "v3-authenticate-approval",
+  VerifyTimestamp: "v3-verify-timestamp",
 } as const;
 
 export type RejectionCode =
@@ -59,6 +67,11 @@ export interface Input {
   intel_sgx_root_pem?: string;
   sigstore_trusted_root_json_b64?: string;
   verification_time_unix?: number;
+  bundle_json_b64?: string;
+  signing_keys_pem?: string[];
+  artifact_digest_hex?: string;
+  timestamp_response_b64?: string;
+  timestamp_input_b64?: string;
 }
 
 export interface Measurement {
@@ -73,6 +86,8 @@ export interface AcceptOutputs {
   tls_public_key_fp?: string;
   hpke_public_key?: string;
   channel_binding?: string;
+  signing_key_hint?: string;
+  timestamp?: string;
 }
 
 /** The stdout JSON (schemas/v3/output.schema.json). */
@@ -128,12 +143,17 @@ async function runStage(stage: string, raw: unknown): Promise<Result> {
   const appraisal = in_.verification_time_unix ? new Date(in_.verification_time_unix * 1000) : new Date();
 
   if (in_.schema_version !== SCHEMA_VERSION) return malformed(stage);
+  const roots = rootsOf(in_);
+  if (roots === undefined) return malformed(stage);
+
+  // The approval and timestamp stages take no document.
+  if (stage === Stage.AuthenticateApproval) return authenticateApproval(in_, roots);
+  if (stage === Stage.VerifyTimestamp) return verifyTimestampStage(in_, roots, appraisal);
+
   const doc = decodeBase64Std(in_.document_b64);
   if (doc === undefined) return malformed(stage);
   const nonce = decodeHex(in_.nonce_hex);
   if (nonce === undefined) return malformed(stage);
-  const roots = rootsOf(in_);
-  if (roots === undefined) return malformed(stage);
 
   // TODO(v3): a bad sigstore root should be MALFORMED_INPUT on every stage,
   // which means building the provenance client before dispatch. It's lazy
@@ -204,6 +224,55 @@ async function runStage(stage: string, raw: unknown): Promise<Result> {
     default:
       return { output: { stage, accepted: false }, exitCode: ExitCode.Unsupported };
   }
+}
+
+/** The injected Sigstore root, or the embedded one. */
+async function sigstoreRoot(roots: DangerousTestOnlyRoots) {
+  return roots.sigstore ? parseTrustedRoot(roots.sigstore) : embeddedTrustedRoot();
+}
+
+/**
+ * Verifies a key-signed approval bundle under the pinned keys and checks that
+ * the statement carries the artifact digest; yields the hint of the key that
+ * verified. Undecodable inputs and unparseable keys are malformed.
+ */
+async function authenticateApproval(in_: Input, roots: DangerousTestOnlyRoots): Promise<Result> {
+  const stage = Stage.AuthenticateApproval;
+  const bundleBytes = decodeBase64Std(in_.bundle_json_b64 ?? "");
+  const digest = decodeHex(in_.artifact_digest_hex ?? "");
+  const pems = in_.signing_keys_pem ?? [];
+  if (bundleBytes === undefined || digest === undefined || pems.length === 0) return malformed(stage);
+  let keys;
+  try {
+    keys = await pinnedKeys(pems);
+  } catch (err) {
+    if (err instanceof NotImplementedError) throw err;
+    return malformed(stage);
+  }
+  return layer(stage, "PROVENANCE_REJECTED", async () => {
+    const root = await sigstoreRoot(roots);
+    const bundle = parseBundle(strictParse(bundleBytes));
+    const hint = await verifyKeyedBundle(root, bundle, keys, digest);
+    return accept(stage, { signing_key_hint: hint });
+  });
+}
+
+/**
+ * Verifies an RFC 3161 response over the given bytes against the trusted
+ * root's timestamp authorities, and requires the stated time to lie within
+ * the default window around the appraisal clock. The clock is required.
+ */
+async function verifyTimestampStage(in_: Input, roots: DangerousTestOnlyRoots, appraisal: Date): Promise<Result> {
+  const stage = Stage.VerifyTimestamp;
+  const response = decodeBase64Std(in_.timestamp_response_b64 ?? "");
+  const input = decodeBase64Std(in_.timestamp_input_b64 ?? "");
+  if (response === undefined || input === undefined || !in_.verification_time_unix) return malformed(stage);
+  return layer(stage, "PROVENANCE_REJECTED", async () => {
+    const root = await sigstoreRoot(roots);
+    const at = await verifyTimestamp(root, response, input);
+    checkTime(newTimePolicy(appraisal, 0, 0), at);
+    return accept(stage, { timestamp: at.toISOString().replace(/\.\d{3}Z$/, "Z") });
+  });
 }
 
 /** Runs the whole flow through the verifier; the error's layer names the rejection. */
@@ -328,6 +397,10 @@ const STRING_FIELDS = [
   "ask_pem",
   "intel_sgx_root_pem",
   "sigstore_trusted_root_json_b64",
+  "bundle_json_b64",
+  "artifact_digest_hex",
+  "timestamp_response_b64",
+  "timestamp_input_b64",
 ] as const;
 
 /**
@@ -348,6 +421,14 @@ function decodeInput(raw: unknown): Input | undefined {
     } else {
       return undefined;
     }
+  }
+  const keys = obj.signing_keys_pem;
+  if (keys === undefined || keys === null) {
+    out.signing_keys_pem = [];
+  } else if (Array.isArray(keys) && keys.every((k) => typeof k === "string")) {
+    out.signing_keys_pem = keys;
+  } else {
+    return undefined;
   }
   const t = obj.verification_time_unix;
   if (t === undefined || t === null) {
