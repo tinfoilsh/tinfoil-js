@@ -27,7 +27,6 @@ import {
   memberValueBytes,
   qeIdentity,
   tcbInfo,
-  tcbInfoUrl,
   type TcbInfo,
   type TcbLevel,
 } from "../../src/v3/internal/quote/tdx/pcs.js";
@@ -89,6 +88,11 @@ describe("parseRfc3339", () => {
     expect(parseRfc3339("2023-06-18T08:42:58Z", "t").toISOString()).toBe("2023-06-18T08:42:58.000Z");
     expect(parseRfc3339("2023-06-18T08:42:58.25Z", "t").getUTCMilliseconds()).toBe(250);
     expect(parseRfc3339("2023-06-18T10:42:58+02:00", "t").toISOString()).toBe("2023-06-18T08:42:58.000Z");
+  });
+
+  it("keeps years below 100 as written", () => {
+    expect(parseRfc3339("0050-01-01T00:00:00Z", "t").getUTCFullYear()).toBe(50);
+    expect(() => parseRfc3339("0050-02-30T00:00:00Z", "t")).toThrow(/not a real time/);
   });
 
   it("rejects other layouts, impossible dates and clocks", () => {
@@ -314,6 +318,7 @@ describe.skipIf(withoutVectors)(vectorsTitle("PCS statements and chains"), () =>
     expect(() => tcbInfo(edited((t) => t.slice(1)), SYNTH_FMSPC)).toThrow(/tcbInfo response/);
     expect(() => tcbInfo(edited((t) => t.replace('"tcbInfo"', '"other"')), SYNTH_FMSPC)).toThrow(/has no "tcbInfo" member/);
     expect(() => tcbInfo(edited((t) => t.replace('"version":3', '"version":3.0')), SYNTH_FMSPC)).toThrow(/not an integer/);
+    expect(() => tcbInfo(edited((t) => t.replace('"tcbEvaluationDataNumber":18', '"tcbEvaluationDataNumber":-1')), SYNTH_FMSPC)).toThrow(/into uint64/);
     expect(() => tcbInfo(edited((t) => t.replace('"tcbStatus":"UpToDate"', '"tcbStatus":"Fine"')), SYNTH_FMSPC)).toThrow(/unexpected tcb status "Fine"/);
     expect(() => tcbInfo(edited((t) => t.replace('"issueDate":"2023-06-18T08:42:58Z"', '"issueDate":null')), SYNTH_FMSPC)).toThrow(/states no issueDate/);
     expect(() => tcbInfo(edited((t) => t.replace(/"signature":"[0-9a-f]+"/, '"signature":"0011"')), SYNTH_FMSPC)).toThrow(/signature is 2 bytes/);
@@ -348,30 +353,44 @@ describe("TCB level evaluation", () => {
     expect(() => matchingTcbLevel([level([5], 11, sixteen(3, 0, 5))], body(hex("00030500" + "00".repeat(12))), pck)).toThrow(/no TCB level/);
   });
 
-  it("resolves the TDX module identity by version and ISV SVN", () => {
-    const identities = [
-      { id: "TDX_03", tcbLevels: [{ ...level([], 0, []), isvSvn: 2 }, { ...level([], 0, [], "OutOfDate"), isvSvn: 0 }] },
-      { id: "TDX_04", tcbLevels: [{ ...level([], 0, []), isvSvn: 0 }] },
-    ];
-    expect(matchingTdxModuleLevel(identities, hex("02030000" + "00".repeat(12))).status).toBe("UpToDate");
-    expect(matchingTdxModuleLevel(identities, hex("01030000" + "00".repeat(12))).status).toBe("OutOfDate");
-    expect(() => matchingTdxModuleLevel(identities, hex("00050000" + "00".repeat(12)))).toThrow(/no TDX module identity TDX_05/);
-    expect(() => matchingTdxModuleLevel([{ id: "TDX_03", tcbLevels: [{ ...level([], 0, []), isvSvn: 9 }] }], hex("02030000" + "00".repeat(12)))).toThrow(/ISV SVN 2/);
+  const module = (id: string, levels: TcbLevel[], mrSigner = new Uint8Array(48), attributes = new Uint8Array(8), attributesMask = repeat(0xff, 8)) => ({
+    id,
+    mrSigner,
+    attributes,
+    attributesMask,
+    tcbLevels: levels,
   });
 
-  it("requires both the platform level and the module level to be up to date", () => {
-    const info = (status: string, moduleStatus: string): TcbInfo =>
-      ({
-        tcbLevels: [level(sixteen(5, 5, 2, 2, 3, 1, 0, 3), 11, sixteen(3, 0, 5), status)],
-        tdxModuleIdentities: [{ id: "TDX_03", tcbLevels: [{ ...level([], 0, [], moduleStatus), isvSvn: 0 }] }],
-      }) as unknown as TcbInfo;
-    const tee = body(hex("00030500" + "00".repeat(12)));
-    expect(() => checkTcbStatus(info("UpToDate", "UpToDate"), tee, pck)).not.toThrow();
-    expect(() => checkTcbStatus(info("SWHardeningNeeded", "UpToDate"), tee, pck)).toThrow(/TCB status is SWHardeningNeeded/);
-    expect(() => checkTcbStatus(info("UpToDate", "Revoked"), tee, pck)).toThrow(/TDX module TCB status is Revoked/);
+  it("resolves the TDX module identity by version and ISV SVN", () => {
+    const identities = [
+      module("TDX_03", [{ ...level([], 0, []), isvSvn: 2 }, { ...level([], 0, [], "OutOfDate"), isvSvn: 0 }]),
+      module("TDX_04", [{ ...level([], 0, []), isvSvn: 0 }]),
+    ];
+    expect(matchingTdxModuleLevel(identities, hex("02030000" + "00".repeat(12))).level.status).toBe("UpToDate");
+    expect(matchingTdxModuleLevel(identities, hex("01030000" + "00".repeat(12))).level.status).toBe("OutOfDate");
+    expect(matchingTdxModuleLevel(identities, hex("01040000" + "00".repeat(12))).identity.id).toBe("TDX_04");
+    expect(() => matchingTdxModuleLevel(identities, hex("00050000" + "00".repeat(12)))).toThrow(/no TDX module identity TDX_05/);
+    expect(() => matchingTdxModuleLevel([module("TDX_03", [{ ...level([], 0, []), isvSvn: 9 }])], hex("02030000" + "00".repeat(12)))).toThrow(/ISV SVN 2/);
+  });
+
+  it("requires the platform level, the module identity and the module level to agree with the quote", () => {
+    const tee = { teeTcbSvn: hex("00030500" + "00".repeat(12)), mrSignerSeam: new Uint8Array(48), seamAttributes: new Uint8Array(8) } as Parameters<typeof checkTcbStatus>[1];
+    const info = (status: string, identity = module("TDX_03", [{ ...level([], 0, []), isvSvn: 0 }])): TcbInfo =>
+      ({ tcbLevels: [level(sixteen(5, 5, 2, 2, 3, 1, 0, 3), 11, sixteen(3, 0, 5), status)], tdxModuleIdentities: [identity] }) as unknown as TcbInfo;
+    const moduleLevel = (status: string) => module("TDX_03", [{ ...level([], 0, [], status), isvSvn: 0 }]);
+    expect(() => checkTcbStatus(info("UpToDate"), tee, pck)).not.toThrow();
+    expect(() => checkTcbStatus(info("SWHardeningNeeded"), tee, pck)).toThrow(/TCB status is SWHardeningNeeded/);
+    expect(() => checkTcbStatus(info("UpToDate", moduleLevel("Revoked")), tee, pck)).toThrow(/TDX module TCB status is Revoked/);
+    // The selected identity must describe the module: signer, and attributes under its mask.
+    const flagged = { ...tee, seamAttributes: hex("0000000000000080") };
+    expect(() => checkTcbStatus(info("UpToDate"), flagged, pck)).toThrow(/SEAMATTRIBUTES under the mask are not TDX module identity TDX_03's attributes/);
+    const unmasked = module("TDX_03", [{ ...level([], 0, []), isvSvn: 0 }], new Uint8Array(48), new Uint8Array(8), hex("ffffffffffffff7f"));
+    expect(() => checkTcbStatus(info("UpToDate", unmasked), flagged, pck)).not.toThrow();
+    expect(() => checkTcbStatus(info("UpToDate", module("TDX_03", [{ ...level([], 0, []), isvSvn: 0 }], repeat(1, 48))), tee, pck)).toThrow(/MRSIGNERSEAM is not TDX module identity TDX_03's signer/);
+    expect(() => checkTcbStatus(info("UpToDate", module("TDX_03", [{ ...level([], 0, []), isvSvn: 0 }], new Uint8Array(47))), tee, pck)).toThrow(/of the module's size/);
     // An unversioned module (byte 1 zero) consults no module identity.
-    const unversioned = { ...info("UpToDate", "Revoked"), tcbLevels: [level(sixteen(5, 5, 2, 2, 3, 1, 0, 3), 11, sixteen(0, 0, 5))] } as TcbInfo;
-    expect(() => checkTcbStatus(unversioned, body(hex("00000500" + "00".repeat(12))), pck)).not.toThrow();
+    const unversioned = { ...info("UpToDate", moduleLevel("Revoked")), tcbLevels: [level(sixteen(5, 5, 2, 2, 3, 1, 0, 3), 11, sixteen(0, 0, 5))] } as TcbInfo;
+    expect(() => checkTcbStatus(unversioned, { ...tee, teeTcbSvn: hex("00000500" + "00".repeat(12)) }, pck)).not.toThrow();
   });
 
   it("judges the QE by the first level its ISV SVN meets", () => {

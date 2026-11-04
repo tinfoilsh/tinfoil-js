@@ -13,7 +13,7 @@
  */
 import type { PcsResponse } from "../../../document/collateral/tdx.js";
 import { toHex } from "../../bytes.js";
-import { arr, num, object, str, strArr, uint, int64 } from "../../json/decode.js";
+import { arr, num, object, str, strArr, uint } from "../../json/decode.js";
 import { JsonError, strictParse, type JsonObject, type JsonValue } from "../../json/index.js";
 import { parseRfc3339 } from "../../rfc3339.js";
 import { expectSequence, extension, isContext, parseCertificate, type Certificate, X509Error } from "../../x509/certificate.js";
@@ -186,8 +186,12 @@ export interface TcbLevel {
   readonly status: string;
 }
 
+/** One versioned TDX module the TCB info describes: its signer and attributes under a mask, and its TCB levels by ISV SVN. */
 export interface TdxModuleIdentity {
   readonly id: string;
+  readonly mrSigner: Uint8Array;
+  readonly attributes: Uint8Array;
+  readonly attributesMask: Uint8Array;
   readonly tcbLevels: readonly TcbLevel[];
 }
 
@@ -293,12 +297,13 @@ function decodeTcbInfo(body: Uint8Array): TcbInfo {
       tdxModule: { mrSigner: hexBytes(module, "mrsigner"), attributes: hexBytes(module, "attributes"), attributesMask: hexBytes(module, "attributesMask") },
       tdxModuleIdentities: (arr(o, "tdxModuleIdentities") ?? []).map((v) => {
         const m = object(v, "tdxModuleIdentity");
-        // The identity's own measurement and attributes are decoded for
-        // shape but not compared; only its id and levels select a status.
-        hexBytes(m, "mrsigner");
-        hexBytes(m, "attributes");
-        hexBytes(m, "attributesMask");
-        return { id: str(m, "id"), tcbLevels: tcbLevels(m) };
+        return {
+          id: str(m, "id"),
+          mrSigner: hexBytes(m, "mrsigner"),
+          attributes: hexBytes(m, "attributes"),
+          attributesMask: hexBytes(m, "attributesMask"),
+          tcbLevels: tcbLevels(m),
+        };
       }),
       tcbLevels: tcbLevels(o),
       signed,
@@ -389,9 +394,10 @@ function requiredTime(o: JsonObject, key: string, what: string): Date {
   return parseRfc3339(v, `${what} ${key}`);
 }
 
+/** The evaluation number is required and non-negative: it is a floor that policies compare against. */
 function requiredEvaluationNumber(o: JsonObject, what: string): bigint {
   if (num(o, EVALUATION_NUMBER_QUERY) === undefined) throw new Error(`${what} states no ${EVALUATION_NUMBER_QUERY}`);
-  return int64(o, EVALUATION_NUMBER_QUERY)!;
+  return uint(o, EVALUATION_NUMBER_QUERY, 64)!;
 }
 
 /**
@@ -478,27 +484,47 @@ export function matchingTcbLevel(levels: readonly TcbLevel[], body: TdxQuoteBody
   throw new Error("no TCB level in the TCB info matches the platform");
 }
 
-/** The TDX module identity level for a versioned module: id "TDX_<version>", the first level whose ISV SVN the module's meets. */
-export function matchingTdxModuleLevel(identities: readonly TdxModuleIdentity[], teeTcbSvn: Uint8Array): TcbLevel {
+/**
+ * The TDX module identity for a versioned module and its matching level: the
+ * identity whose id is "TDX_<version>" (the version as two lowercase hex
+ * digits), and its first level whose ISV SVN the module's meets.
+ */
+export function matchingTdxModuleLevel(identities: readonly TdxModuleIdentity[], teeTcbSvn: Uint8Array): { identity: TdxModuleIdentity; level: TcbLevel } {
   const id = TDX_MODULE_ID_PREFIX + toHex(teeTcbSvn.subarray(1, 2));
   const isvSvn = teeTcbSvn[0];
   for (const identity of identities) {
     if (identity.id !== id) continue;
-    for (const level of identity.tcbLevels) if (isvSvn >= level.isvSvn) return level;
+    for (const level of identity.tcbLevels) if (isvSvn >= level.isvSvn) return { identity, level };
     throw new Error(`no TDX module identity TCB level matches the module's ISV SVN ${isvSvn}`);
   }
   throw new Error(`the TCB info names no TDX module identity ${id}`);
 }
 
+function masked(value: Uint8Array, m: Uint8Array): Uint8Array {
+  const out = new Uint8Array(value.length);
+  for (let i = 0; i < value.length; i++) out[i] = value[i] & m[i];
+  return out;
+}
+
 /**
- * The TCB status of the platform: the matching level, and for a versioned
- * TDX module the module's level too, must both be up to date.
+ * The TCB status of the platform: the matching level must be up to date,
+ * and for a versioned TDX module the selected identity must describe the
+ * module (MRSIGNERSEAM and SEAMATTRIBUTES under its mask) and its level
+ * must be up to date too.
  */
 export function checkTcbStatus(info: TcbInfo, body: TdxQuoteBody, pck: PckExtensions): void {
   const level = matchingTcbLevel(info.tcbLevels, body, pck);
   if (body.teeTcbSvn[1] > 0) {
-    const module = matchingTdxModuleLevel(info.tdxModuleIdentities, body.teeTcbSvn);
-    if (module.status !== TCB_STATUS_UP_TO_DATE) throw new Error(`TDX module TCB status is ${module.status}, not ${TCB_STATUS_UP_TO_DATE}`);
+    const { identity, level: moduleLevel } = matchingTdxModuleLevel(info.tdxModuleIdentities, body.teeTcbSvn);
+    if (identity.mrSigner.length !== body.mrSignerSeam.length || identity.attributesMask.length !== body.seamAttributes.length) {
+      throw new Error(`TDX module identity ${identity.id} does not describe a signer and attributes of the module's size`);
+    }
+    if (!identity.mrSigner.every((b, i) => b === body.mrSignerSeam[i])) throw new Error(`MRSIGNERSEAM is not TDX module identity ${identity.id}'s signer`);
+    const attrs = masked(body.seamAttributes, identity.attributesMask);
+    if (identity.attributes.length !== attrs.length || !identity.attributes.every((b, i) => b === attrs[i])) {
+      throw new Error(`SEAMATTRIBUTES under the mask are not TDX module identity ${identity.id}'s attributes`);
+    }
+    if (moduleLevel.status !== TCB_STATUS_UP_TO_DATE) throw new Error(`TDX module TCB status is ${moduleLevel.status}, not ${TCB_STATUS_UP_TO_DATE}`);
   }
   if (level.status !== TCB_STATUS_UP_TO_DATE) throw new Error(`TCB status is ${level.status}, not ${TCB_STATUS_UP_TO_DATE}`);
 }

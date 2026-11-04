@@ -8,6 +8,7 @@ import { sha256, toHex, utf8 } from "../bytes.js";
 import { decodeBase64 } from "../canonical.js";
 import { arr, object, optStruct, str, struct } from "../json/decode.js";
 import { strictParse, type JsonObject, type JsonValue } from "../json/index.js";
+import { parseRfc3339 } from "../rfc3339.js";
 
 export const TRUSTED_ROOT_MEDIA_TYPE = "application/vnd.dev.sigstore.trustedroot+json;version=0.1";
 
@@ -156,18 +157,6 @@ function validity(o: JsonObject): { validFrom: Date; validTo?: Date } {
   return { validFrom, validTo };
 }
 
-const RFC3339 = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/;
-
-/** An RFC 3339 time; the calendar date must exist and the clock fields must be in range. */
 function timestamp(s: string): Date {
-  const m = RFC3339.exec(s);
-  const d = new Date(s);
-  if (m === null || Number.isNaN(d.getTime())) throw new Error(`trusted root time ${JSON.stringify(s)} is not RFC 3339`);
-  const [year, month, day, hour, minute, second] = m.slice(1, 7).map(Number);
-  // Date.UTC rolls an impossible day into the next month; a real date reads back unchanged.
-  const probe = new Date(Date.UTC(year, month - 1, day));
-  if (probe.getUTCFullYear() !== year || probe.getUTCMonth() !== month - 1 || probe.getUTCDate() !== day || hour > 23 || minute > 59 || second > 59) {
-    throw new Error(`trusted root time ${JSON.stringify(s)} is not a real time`);
-  }
-  return d;
+  return parseRfc3339(s, "trusted root time");
 }

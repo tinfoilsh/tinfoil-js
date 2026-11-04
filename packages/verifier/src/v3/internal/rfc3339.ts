@@ -12,8 +12,11 @@ export function parseRfc3339(s: string, what: string): Date {
   const d = new Date(s);
   if (m === null || Number.isNaN(d.getTime())) throw new Error(`${what} ${JSON.stringify(s)} is not RFC 3339`);
   const [year, month, day, hour, minute, second] = m.slice(1, 7).map(Number);
-  // Date.UTC rolls an impossible day into the next month; a real date reads back unchanged.
-  const probe = new Date(Date.UTC(year, month - 1, day));
+  // A Date rolls an impossible day into the next month; a real date reads
+  // back unchanged. The year is set explicitly because the constructor
+  // remaps two-digit years.
+  const probe = new Date(0);
+  probe.setUTCFullYear(year, month - 1, day);
   if (probe.getUTCFullYear() !== year || probe.getUTCMonth() !== month - 1 || probe.getUTCDate() !== day || hour > 23 || minute > 59 || second > 59) {
     throw new Error(`${what} ${JSON.stringify(s)} is not a real time`);
   }
