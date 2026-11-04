@@ -2,8 +2,8 @@
  * Runs the shared tinfoil-conformance v3 fixtures through the adapter.
  *
  * Point TINFOIL_CONFORMANCE_FIXTURES at the suite's vectors/v3 directory (it
- * is searched recursively); the test is skipped when unset or missing. Fixtures whose
- * stage still hits a v3 placeholder report "unsupported" and are skipped.
+ * is searched recursively); the test is skipped when unset or missing. A
+ * fixture whose stage the adapter reports as unsupported is skipped.
  */
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { join, relative } from "node:path";

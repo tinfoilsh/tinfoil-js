@@ -12,7 +12,7 @@
  * mutates no production state.
  */
 import * as document from "../src/v3/document/document.js";
-import { NotImplementedError, UsageError, VerificationError } from "../src/v3/errors.js";
+import { UsageError, VerificationError } from "../src/v3/errors.js";
 import { MULTI_PLATFORM_PREDICATE_TYPE, ProvenanceClient } from "../src/v3/internal/endorsement/provenance.js";
 import { parseReference } from "../src/v3/internal/endorsement/reference.js";
 import { ARTIFACT_FORMAT } from "../src/v3/internal/policy/artifact.js";
@@ -120,16 +120,13 @@ export function capabilities(): Record<string, unknown> {
 
 /**
  * Executes one stage and returns the wire output plus the exit code.
- * Never throws: unexpected errors map to {@link ExitCode.Internal}, and
- * placeholders still awaiting the v3 port map to {@link ExitCode.Unsupported}.
+ * Never throws: unexpected errors map to {@link ExitCode.Internal}; a stage
+ * this adapter does not know maps to {@link ExitCode.Unsupported}.
  */
 export async function run(stage: string, raw: unknown): Promise<Result> {
   try {
     return await runStage(stage, raw);
-  } catch (err) {
-    if (err instanceof NotImplementedError) {
-      return { output: { stage, accepted: false }, exitCode: ExitCode.Unsupported };
-    }
+  } catch {
     return { output: { stage, accepted: false }, exitCode: ExitCode.Internal };
   }
 }
@@ -161,7 +158,6 @@ async function runStage(stage: string, raw: unknown): Promise<Result> {
   try {
     prov = roots.sigstore ? await ProvenanceClient.fromJSON(roots.sigstore) : await ProvenanceClient.default();
   } catch (err) {
-    if (err instanceof NotImplementedError) throw err;
     return malformed(stage);
   }
 
@@ -229,7 +225,6 @@ async function sigstoreRoot(roots: DangerousTestOnlyRoots): Promise<TrustedRoot 
   try {
     return await parseTrustedRoot(roots.sigstore);
   } catch (err) {
-    if (err instanceof NotImplementedError) throw err;
     return undefined;
   }
 }
@@ -250,7 +245,6 @@ async function authenticateApproval(in_: Input, roots: DangerousTestOnlyRoots): 
   try {
     keys = await pinnedKeys(pems);
   } catch (err) {
-    if (err instanceof NotImplementedError) throw err;
     return malformed(stage);
   }
   const root = await sigstoreRoot(roots);
@@ -296,7 +290,6 @@ async function verifyFull(
     const verifier = await dangerousTestOnlyVerifier(roots);
     verified = await verifier.verifyV3At(doc, nonce, repo, appraisal);
   } catch (err) {
-    if (err instanceof NotImplementedError) throw err;
     const mapped = rejectionCode(err);
     if (mapped === undefined) return { output: { stage, accepted: false }, exitCode: ExitCode.Internal };
     return { output: { stage, accepted: false, rejection: { code: mapped.code } }, exitCode: mapped.exitCode };
@@ -340,7 +333,6 @@ async function layer(stage: string, code: RejectionCode, body: () => Promise<Res
   try {
     return await body();
   } catch (err) {
-    if (err instanceof NotImplementedError) throw err;
     return reject(stage, code);
   }
 }
@@ -349,7 +341,6 @@ async function decodeOrUndefined(doc: Uint8Array): Promise<document.Document | u
   try {
     return await document.dangerousTestOnlyDecode(doc);
   } catch (err) {
-    if (err instanceof NotImplementedError) throw err;
     return undefined;
   }
 }
