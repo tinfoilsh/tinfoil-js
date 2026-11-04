@@ -11,3 +11,4 @@ __screenshots__/
 sigstore-browser/
 packages/tinfoil/src/version.ts
 packages/tinfoil/README.md
+tinfoil-conformance/

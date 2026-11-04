@@ -22,6 +22,15 @@ jobs:
         with:
           persist-credentials: false
 
+      # Pinned so a run tests one known set of vectors; bump deliberately.
+      - name: Check out the conformance suite
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          repository: tinfoilsh/tinfoil-conformance
+          ref: def0622ee173a9fb7a2b5a93b44e691a22aff946 # tinfoilsh/tinfoil-conformance#23
+          path: tinfoil-conformance
+          persist-credentials: false
+
       - name: Set up Node.js
         uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
         with:
@@ -45,6 +54,8 @@ jobs:
 
       - name: Run tests
         run: npm test
+        env:
+          TINFOIL_CONFORMANCE_FIXTURES: ${{ github.workspace }}/tinfoil-conformance/vectors/v3
 
       - name: Run integration tests
         run: npm run test:integration
