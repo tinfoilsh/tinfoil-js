@@ -398,7 +398,7 @@ describe("certified config approvals", () => {
       certificate: earlier,
       timestampsFor: async (sig) => [await timestampResponse(foreign, sig, GEN_TIME)],
     });
-    await expect(verifier.verifyCertified(atSkew.config, toJson(built.json), registry.rootDer, policy())).rejects.toThrow(/timestamp/);
+    await expect(verifier.verifyCertified(atSkew.config, toJson(built.json), registry.rootDer, policy())).rejects.toThrow(/no trusted timestamp authority authenticated the response/);
   });
 
   it("rejects multiple and oversized signature timestamps", async () => {
