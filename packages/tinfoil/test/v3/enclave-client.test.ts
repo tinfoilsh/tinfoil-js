@@ -7,6 +7,7 @@
 import { Identity } from "ehbp";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createEnclaveHTTPClient, EnclaveHTTPClient, resolveTransportMode, type EnclaveClientSeams } from "../../src/v3/enclave-client.js";
+import { checkTransportMode, defaultTransportMode, isServerRuntime } from "../../src/v3/internal/platform.js";
 import { AttestationError, ConfigurationError } from "../../src/v3/errors.js";
 import { createEnclaveOpenAIClient, EnclaveOpenAIClient } from "../../src/v3/openai-client.js";
 import type { EnclaveOptions, Fetch } from "../../src/v3/options.js";
@@ -94,6 +95,19 @@ describe("EnclaveHTTPClient.create", () => {
     expect(resolveTransportMode(undefined)).toBe("tls");
     expect(resolveTransportMode("ehbp")).toBe("ehbp");
     expect(() => resolveTransportMode("quic" as never)).toThrow(/unknown transport mode "quic"/);
+  });
+
+  it("treats only a runtime that identifies itself as Node or Bun as a server, and anything else as a browser", () => {
+    expect(isServerRuntime({ process: { versions: { node: "22.0.0" } } })).toBe(true);
+    expect(isServerRuntime({ process: { versions: { bun: "1.2.0" } } })).toBe(true);
+    expect(isServerRuntime({ Bun: {} })).toBe(true);
+    // A worker has neither window nor document, only self; it is a browser all the same.
+    const worker = { self: {} } as unknown as Parameters<typeof isServerRuntime>[0];
+    expect(isServerRuntime(worker)).toBe(false);
+    expect(defaultTransportMode(worker)).toBe("ehbp");
+    expect(() => checkTransportMode("tls", worker)).toThrow(/browsers don't expose/);
+    expect(() => checkTransportMode("ehbp", worker)).not.toThrow();
+    expect(isServerRuntime({ process: { versions: {} } })).toBe(false);
   });
 
   it("checks its options before fetching anything", async () => {
@@ -207,6 +221,23 @@ describe("EnclaveHTTPClient over TLS", () => {
     const again = clone.withOptions({ timeout: 99 });
     expect(again.timeout).toBe(99);
     expect(again.apiKey).toBe("k2");
+  });
+
+  it("lets a clone replace the credential in either form", async () => {
+    const options = { verifier: verifier(() => ({ tls: TEST_PIN })), transportMode: "tls" as const };
+    const seams = { documentFetch: docs.fetch, tls: { ca: TEST_CERT } };
+    const allowed = (client: unknown): boolean | undefined => (client as { _options: { dangerouslyAllowBrowser?: boolean } })._options.dangerouslyAllowBrowser;
+    const withToken = await createEnclaveOpenAIClient(tls.host, "tinfoilsh/repo", options, { bearerToken: "jwt" }, seams);
+    expect(withToken.apiKey).toBe("jwt");
+    expect(allowed(withToken)).toBe(true);
+    const keyed = withToken.withOptions({ apiKey: "k" });
+    expect(keyed.apiKey).toBe("k");
+    expect(allowed(keyed)).toBeUndefined();
+    const withKey = await createEnclaveOpenAIClient(tls.host, "tinfoilsh/repo", options, { apiKey: "k" }, seams);
+    const tokened = withKey.withOptions({ bearerToken: "jwt2" });
+    expect(tokened.apiKey).toBe("jwt2");
+    expect(allowed(tokened)).toBe(true);
+    expect(tokened.withOptions({ bearerToken: "jwt3" }).apiKey).toBe("jwt3");
   });
 });
 

@@ -20,8 +20,8 @@
  * guard and above the sealing transport, so the secret is only ever visible
  * to the verified enclave.
  */
-import { isRealBrowser } from "../../env.js";
 import type { Fetch } from "../options.js";
+import { isServerRuntime, type RuntimeGlobals } from "./platform.js";
 import { shapeOf, type RequestShape } from "./transport/transport.js";
 
 /** The request-body field. A non-empty string scopes the prompt cache to that secret. */
@@ -41,16 +41,22 @@ export function pathEligible(request: RequestShape): boolean {
   return request.method === "POST" && request.hasBody && ELIGIBLE_PATHS.some((p) => request.url.pathname.endsWith(p));
 }
 
+/** The globals the resolution reads: the runtime's identity and, on a server, its environment. */
+type SecretGlobals = RuntimeGlobals & { readonly process?: { readonly env?: Record<string, string | undefined> } };
+
 /**
  * Resolves the client-level secret: a non-empty explicit option wins, then a
  * non-empty environment value, then the persisted (or generated) secret.
- * Never throws; "" means no secret could be provisioned.
+ * The environment and the persisted file exist only on a server runtime,
+ * as the transport default decides it; a page or a worker gets the
+ * in-memory secret. Never throws; "" means no secret could be provisioned.
  */
-export async function resolveUserCacheSecret(explicit: string | undefined): Promise<string> {
+export async function resolveUserCacheSecret(explicit: string | undefined, globals: SecretGlobals = globalThis as SecretGlobals): Promise<string> {
   if (explicit !== undefined && explicit !== "") return explicit;
-  const env = typeof process !== "undefined" ? process.env?.[USER_CACHE_SECRET_ENV] : undefined;
+  const server = isServerRuntime(globals);
+  const env = server ? globals.process?.env?.[USER_CACHE_SECRET_ENV] : undefined;
   if (env !== undefined && env !== "") return env;
-  return loadOrGenerateUserCacheSecret();
+  return loadOrGenerateUserCacheSecret(server);
 }
 
 /** A fresh 256-bit random secret, hex-encoded; "" when no secure randomness is available. */
@@ -72,10 +78,10 @@ export function newUserCacheSecret(): string {
  * was expected (not in browsers, where nothing persists).
  */
 let ephemeral: string | undefined;
-function ephemeralUserCacheSecret(): string {
+function ephemeralUserCacheSecret(server: boolean): string {
   if (ephemeral === undefined) {
     ephemeral = newUserCacheSecret();
-    if (ephemeral !== "" && !isRealBrowser()) {
+    if (ephemeral !== "" && server) {
       console.warn(
         `[tinfoil] could not persist the user cache secret; using an in-memory secret, so prompt-cache continuity resets when this process exits (set ${USER_CACHE_SECRET_ENV} or the userCacheSecret option to pin one)`,
       );
@@ -84,8 +90,8 @@ function ephemeralUserCacheSecret(): string {
   return ephemeral;
 }
 
-async function loadOrGenerateUserCacheSecret(): Promise<string> {
-  if (!isRealBrowser()) {
+async function loadOrGenerateUserCacheSecret(server: boolean): Promise<string> {
+  if (server) {
     try {
       // The store needs a filesystem; the browser build maps it to a stub.
       const { loadOrPersistUserCacheSecret } = await import("./cachesecret-store.js");
@@ -95,7 +101,7 @@ async function loadOrGenerateUserCacheSecret(): Promise<string> {
       // No usable filesystem in this runtime.
     }
   }
-  return ephemeralUserCacheSecret();
+  return ephemeralUserCacheSecret(server);
 }
 
 /** Resets the process-lifetime secret; for tests. */
