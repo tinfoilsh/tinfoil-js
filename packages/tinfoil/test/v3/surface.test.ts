@@ -122,12 +122,10 @@ describe("public surface", () => {
     expect((network.cause as Error).message).toBe("ECONNRESET");
   });
 
-  it("rejects every placeholder with a not-implemented error", async () => {
+  it("rejects every remaining placeholder with a not-implemented error", async () => {
     const pending: Promise<unknown>[] = [
       surface.createClient(),
       surface.TinfoilClient.create(),
-      surface.EnclaveHTTPClient.create("enclave.example", "tinfoilsh/repo"),
-      surface.EnclaveOpenAIClient.create("enclave.example", "tinfoilsh/repo"),
       surface.RouterHTTPClient.create(),
       surface.RouterOpenAIClient.create(),
       surface.GatewayHTTPClient.create(),
@@ -135,5 +133,12 @@ describe("public surface", () => {
       surface.fetchCatalog("gateway.example"),
     ];
     for (const p of pending) await expect(p).rejects.toBeInstanceOf(NotImplementedError);
+  });
+
+  it("checks enclave client options before any network I/O", async () => {
+    await expect(surface.EnclaveHTTPClient.create("", "tinfoilsh/repo")).rejects.toBeInstanceOf(surface.ConfigurationError);
+    await expect(surface.EnclaveOpenAIClient.create("enclave.example", "tinfoilsh/repo", { baseURL: "http://proxy.example/" })).rejects.toBeInstanceOf(
+      surface.ConfigurationError,
+    );
   });
 });
