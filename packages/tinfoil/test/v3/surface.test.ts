@@ -51,7 +51,7 @@ const EXPORTS = [
 
 const ATTESTED_CLIENT_METHODS = ["baseURL", "enclave", "repo", "current", "ensureVerified", "reverify"].sort();
 const GATEWAY_CLIENT_METHODS = ["baseURL", "models", "ensureVerified", "current"].sort();
-const OPENAI_CLIENT_METHODS = ["httpClient"];
+const OPENAI_CLIENT_METHODS = ["httpClient", "withOptions"];
 
 /** The type-only exports, pinned under the test typecheck: a removed or renamed type fails compilation here. */
 type TypeExports = [

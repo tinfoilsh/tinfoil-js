@@ -1,9 +1,12 @@
 /**
  * OpenAI clients over the attested HTTP clients. Each applies the caller's
  * OpenAI options first, then sets `fetch` and `baseURL` so the options can't
- * replace them. Per-request `fetchOptions` are passed through to the attested
- * `fetch` and can't bypass it; only a separately constructed OpenAI client
- * sends requests outside the attested client's protections.
+ * replace them, and keeps both fixed afterwards: the properties can't be
+ * assigned, and a clone made with `withOptions` ignores `fetch` and `baseURL`
+ * in the options it is given and keeps the attested transport. Per-request
+ * `fetchOptions` are passed through to the attested `fetch` and can't bypass
+ * it; only a separately constructed OpenAI client sends requests outside the
+ * attested client's protections.
  */
 import OpenAI, { type ClientOptions } from "openai";
 import { createEnclaveHTTPClient, EnclaveHTTPClient, openAIURLOf, type EnclaveClientSeams } from "./enclave-client.js";
@@ -16,6 +19,20 @@ import { RouterHTTPClient } from "./router-client.js";
 /** The OpenAI options a client takes: everything but the transport it is bound to. */
 export type OpenAIOptions = Omit<ClientOptions, "fetch" | "baseURL">;
 
+/** Fixes `fetch` and `baseURL` on a constructed client, so neither can be reassigned. */
+function attest(client: OpenAI, fetchImpl: ClientOptions["fetch"], baseURL: string): void {
+  Object.defineProperty(client, "fetch", { value: fetchImpl, writable: false, configurable: false, enumerable: true });
+  Object.defineProperty(client, "baseURL", { value: baseURL, writable: false, configurable: false, enumerable: true });
+}
+
+/** The options a clone inherits: the client's, with `options` over them, and never a transport. */
+function inherit(client: OpenAI, options: Partial<ClientOptions>): OpenAIOptions {
+  const merged: Partial<ClientOptions> = { ...(client as unknown as { _options: ClientOptions })._options, ...options };
+  delete merged.fetch;
+  delete merged.baseURL;
+  return merged;
+}
+
 /**
  * An OpenAI client for Tinfoil's recommended route: the discovered router,
  * verified before the client is returned. Its `baseURL` is the URL requests
@@ -27,6 +44,12 @@ export class TinfoilClient extends OpenAI {
   private constructor(httpClient: RouterHTTPClient, options: OpenAIOptions) {
     super({ ...options, fetch: httpClient.fetch, baseURL: notImplemented("TinfoilClient.baseURL") });
     this.#httpClient = httpClient;
+    attest(this, httpClient.fetch, this.baseURL);
+  }
+
+  /** A client with `options` applied over this one's, on the same attested transport. */
+  override withOptions(options: Partial<ClientOptions>): this {
+    return new TinfoilClient(this.#httpClient, inherit(this, options)) as this;
   }
 
   /** A client for the recommended route, verified before it returns. */
@@ -80,6 +103,12 @@ export class EnclaveOpenAIClient extends OpenAI {
     // The transport and base URL come last, so the caller's options can't replace them.
     super({ ...options, fetch: httpClient.fetch, baseURL: openAIURLOf(httpClient) });
     this.#httpClient = httpClient;
+    attest(this, httpClient.fetch, openAIURLOf(httpClient));
+  }
+
+  /** A client with `options` applied over this one's, on the same attested transport. */
+  override withOptions(options: Partial<ClientOptions>): this {
+    return new EnclaveOpenAIClient(TOKEN, this.#httpClient, inherit(this, options)) as this;
   }
 
   /** Creates an enclave client as {@link EnclaveHTTPClient.create} does, and an OpenAI client over it. */
@@ -103,6 +132,12 @@ export class RouterOpenAIClient extends OpenAI {
   private constructor(httpClient: RouterHTTPClient, options: OpenAIOptions) {
     super({ ...options, fetch: httpClient.fetch, baseURL: notImplemented("RouterOpenAIClient.baseURL") });
     this.#httpClient = httpClient;
+    attest(this, httpClient.fetch, this.baseURL);
+  }
+
+  /** A client with `options` applied over this one's, on the same attested transport. */
+  override withOptions(options: Partial<ClientOptions>): this {
+    return new RouterOpenAIClient(this.#httpClient, inherit(this, options)) as this;
   }
 
   /** Creates a router client as {@link RouterHTTPClient.create} does, and an OpenAI client over it. */
@@ -131,6 +166,12 @@ export class GatewayOpenAIClient extends OpenAI {
   private constructor(httpClient: GatewayHTTPClient, options: OpenAIOptions) {
     super({ ...options, fetch: httpClient.fetch, baseURL: httpClient.baseURL() });
     this.#httpClient = httpClient;
+    attest(this, httpClient.fetch, httpClient.baseURL());
+  }
+
+  /** A client with `options` applied over this one's, on the same attested transport. */
+  override withOptions(options: Partial<ClientOptions>): this {
+    return new GatewayOpenAIClient(this.#httpClient, inherit(this, options)) as this;
   }
 
   /** Creates a gateway client as {@link GatewayHTTPClient.create} does, and an OpenAI client over it. */
