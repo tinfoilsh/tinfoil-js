@@ -23,6 +23,9 @@ export const IMAGE_ID_SIZE = 16;
 const SIGNATURE_OFFSET = 0x2a0;
 /** Each of r and s occupies 72 little-endian bytes. */
 const ECDSA_RS_SIZE = 72;
+/** The report versions whose layout is known; anything else rejects. */
+const MIN_REPORT_VERSION = 2;
+const MAX_REPORT_VERSION = 5;
 const REPORT_VERSION_3 = 3;
 /** The first report version that carries LAUNCH_MIT_VECTOR and CURRENT_MIT_VECTOR; earlier versions reserve those bytes. */
 const REPORT_VERSION_5 = 5;
@@ -201,6 +204,9 @@ export function parseReport(bytes: Uint8Array): SevReport {
   const slice = (at: number, len: number): Uint8Array => bytes.slice(at, at + len);
 
   const version = u32(0x00);
+  if (version < MIN_REPORT_VERSION || version > MAX_REPORT_VERSION) {
+    throw new Error(`unsupported SEV-SNP report version ${version} (want ${MIN_REPORT_VERSION} to ${MAX_REPORT_VERSION})`);
+  }
   const policy = u64(0x08);
   parseGuestPolicy(policy);
   const signerInfo = u32(0x48);

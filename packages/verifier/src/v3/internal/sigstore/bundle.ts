@@ -14,6 +14,8 @@ export const MAX_BUNDLE_SIZE = 4 << 20;
 
 export interface TlogEntry {
   readonly logId: string;
+  /** The entry's index in the log as the entry states it; an inclusion promise signs over it. */
+  readonly logIndex: bigint;
   readonly kind: string;
   readonly version: string;
   /** Seconds since the epoch; absent for entries anchored by a timestamp instead. */
@@ -161,8 +163,8 @@ function tlogEntry(o: JsonObject): TlogEntry {
   if (kind === "" || version === "") throw new Error("transparency log entry has no kind and version");
   const canonicalizedBody = decodeBase64("canonicalizedBody", str(o, "canonicalizedBody"));
   if (canonicalizedBody.length === 0) throw new Error("transparency log entry has no body");
-  // The entry's own logIndex is decoded for its range only; the inclusion proof's index is what verification uses.
-  unsigned64(o, "logIndex");
+  // Inclusion proofs use their own index; the entry's index is what an inclusion promise signs over.
+  const logIndex = unsigned64(o, "logIndex") ?? 0n;
   const integratedTime = unsigned64(o, "integratedTime");
 
   const promise = optStruct(o, "inclusionPromise", PROMISE_MEMBERS);
@@ -193,6 +195,7 @@ function tlogEntry(o: JsonObject): TlogEntry {
 
   return {
     logId: toHex(logIdBytes),
+    logIndex,
     kind,
     version,
     ...(integratedTime === undefined || integratedTime === 0n ? {} : { integratedTime }),

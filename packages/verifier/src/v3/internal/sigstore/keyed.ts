@@ -273,7 +273,7 @@ export async function verifyCheckpoint(envelope: string, log: KeyedAuthority, or
     }
     if (signature.length < 5) throw new Error("checkpoint signature line is malformed");
     if (name !== origin || !bytesEqual(signature.subarray(0, 4), hint) || verified) continue;
-    if (!(await verifyNoteSignature(log.publicKey, utf8(text), signature.subarray(4)))) {
+    if (!(await verifyLogSignature(log.publicKey, utf8(text), signature.subarray(4)))) {
       throw new Error("checkpoint signature does not verify under the log key");
     }
     verified = true;
@@ -325,8 +325,8 @@ function rawKey(spki: Uint8Array): Uint8Array {
   return bitString(parts[1]);
 }
 
-/** Verifies a note signature: DER ECDSA over the curve's hash, or a raw Ed25519 signature. */
-async function verifyNoteSignature(key: CryptoKey, data: Uint8Array, signature: Uint8Array): Promise<boolean> {
+/** Verifies a signature under a transparency log's key: DER ECDSA over the curve's hash, or a raw Ed25519 signature. */
+export async function verifyLogSignature(key: CryptoKey, data: Uint8Array, signature: Uint8Array): Promise<boolean> {
   try {
     if (key.algorithm.name === "Ed25519") {
       return await crypto.subtle.verify({ name: "Ed25519" }, key, asBuffer(signature), asBuffer(data));
