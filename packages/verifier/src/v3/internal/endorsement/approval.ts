@@ -1,9 +1,11 @@
 /**
- * Approvals signed with Tinfoil's pinned keys: config endorsements and
- * artifact-freshness statements. Each is a key-signed bundle over an in-toto
- * statement whose predicate carries an RFC 3161 timestamp of the statement's
- * canonical core; the timestamp, not the log, establishes when the approval
- * was made.
+ * Approvals of configs and artifact freshness: each is a bundle over an
+ * in-toto statement whose predicate carries an RFC 3161 timestamp of the
+ * statement's canonical core; that timestamp, not the log, establishes when
+ * the approval was made. A config approval is signed either with a pinned
+ * key or, for a scoped deployment, with a short-lived registry certificate
+ * that assigns the scope and is itself timestamped and rooted in a pinned
+ * registry key.
  */
 import { RUNTIME_REPO, validateRuntimeReference, type RuntimeReference } from "../../document/collateral/runtime.js";
 import { sha256, toHex } from "../bytes.js";
@@ -13,11 +15,13 @@ import { strictParse, type JsonObject, type JsonValue } from "../json/index.js";
 import { configRuntime } from "../runtime/config.js";
 import * as semver from "../semver.js";
 import { parseBundle } from "../sigstore/bundle.js";
+import { signedTimestamp, verifyCertifiedBundle } from "../sigstore/certified.js";
 import { pinnedKeys, verifyKeyedBundle, type PinnedKey } from "../sigstore/keyed.js";
 import { endorsementReference, MAX_STATEMENT_SIZE, MAX_TIMESTAMP_SIZE, timestampInput, verifyTimestamp } from "../sigstore/timestamp.js";
 import type { TrustedRoot } from "../sigstore/trusted-root.js";
 import { PUBLIC_SIGNING_KEY_PEM } from "../../trust/signing-keys.js";
 import { SHA256_DIGEST_RE } from "./reference.js";
+import { CERTIFICATE_CLOCK_SKEW_MS, verifySigningCertificate } from "./scope.js";
 import { checkTime, newTimePolicy, type TimePolicy } from "./time.js";
 
 export const IN_TOTO_STATEMENT_V1 = "https://in-toto.io/Statement/v1";
@@ -265,6 +269,8 @@ export interface ConfigPolicy {
   readonly maxAgeMs: number;
   /** 0 selects the default. */
   readonly futureSkewMs: number;
+  /** The scopes the caller accepts; undefined leaves the scope unpinned, an empty list is invalid. */
+  readonly scopes?: readonly string[];
 }
 
 export interface ConfigVerified {
@@ -275,15 +281,31 @@ export interface ConfigVerified {
   readonly approvalTime: Date;
   /** The runtime the endorsement pins, when it carries one (v2). */
   readonly runtime?: RuntimeReference;
-  /** The registry scope the endorsement names; "" for v1. */
+  /**
+   * The scope the approval was accepted under: the certificate's scope on
+   * the certified path, the public scope for a key-signed approval under the
+   * registry roots, and "" under caller-pinned keys.
+   */
   readonly scope: string;
+  /** When the certificate-signed signature was made; undefined for a key-signed approval. */
+  readonly signatureTime?: Date;
 }
 
-/** Validates the identity, revision and digest pins; an empty pin is unset. */
+/** Validates the identity, revision, digest and scope pins; an empty pin is unset. */
 export function validateConfigPins(policy: ConfigPolicy): void {
   if (policy.identity !== "") validateConfigIdentity(policy.identity);
   if (policy.revision !== "") validateRevision(policy.revision);
   if (policy.digest !== "" && !SHA256_DIGEST_RE.test(policy.digest)) throw new Error("digest pin must be lowercase SHA-256");
+  if (policy.scopes !== undefined) validateScopes(policy.scopes);
+}
+
+/** A non-empty list of canonical scopes without repeats. */
+export function validateScopes(scopes: readonly string[]): void {
+  if (scopes.length === 0) throw new Error("config scopes must not be empty");
+  scopes.forEach((scope, i) => {
+    validateScope(scope);
+    if (scopes.slice(0, i).includes(scope)) throw new Error("duplicate config scope");
+  });
 }
 
 function configTimePolicy(policy: ConfigPolicy): TimePolicy {
@@ -292,24 +314,53 @@ function configTimePolicy(policy: ConfigPolicy): TimePolicy {
 }
 
 export class ConfigVerifier {
-  /** @internal */
+  /** The registry root keys; empty when the verifier trusts caller-pinned keys instead. */
+  readonly #rootKeys: readonly PinnedKey[];
+
+  /**
+   * @internal `keys` sign key-signed approvals. `rootKeys`, when given, are
+   * the registry roots that issue scope certificates; under them a scoped
+   * (v2) approval must be certificate-signed and a key-signed approval is
+   * public.
+   */
   constructor(
     readonly root: TrustedRoot,
     readonly keys: readonly PinnedKey[],
+    rootKeys: readonly PinnedKey[] = [],
   ) {
     if (root.transparencyLogs.length === 0) throw new Error("Rekor trust is required");
     if (keys.length === 0) throw new Error("at least one independently trusted signing key is required");
+    this.#rootKeys = [...rootKeys];
   }
 
   /**
-   * Verifies a config approval: size bounds, the bundle's statement names and
-   * pins the config, SHA-256 of `config` equals the subject and the pin (or,
-   * with no config bytes, the endorsement is a v2 statement that pins the
-   * digest alone), the endorsed runtime equals the config's own pin, the
-   * key-signed bundle verifies, and the predicate's timestamp falls inside
-   * the policy window.
+   * Verifies a key-signed config approval: size bounds, the bundle's
+   * statement names and pins the config, SHA-256 of `config` equals the
+   * subject and the pin (or, with no config bytes, the endorsement is a v2
+   * statement that pins the digest alone), the endorsed runtime equals the
+   * config's own pin, the bundle verifies under a pinned key, and the
+   * predicate's timestamp falls inside the policy window. Under registry
+   * roots a scoped (v2) statement rejects here: it must be certified.
    */
-  async verify(config: Uint8Array | undefined, bundleJson: JsonValue, policy: ConfigPolicy): Promise<ConfigVerified> {
+  verify(config: Uint8Array | undefined, bundleJson: JsonValue, policy: ConfigPolicy): Promise<ConfigVerified> {
+    return this.#verify(config, bundleJson, undefined, policy);
+  }
+
+  /**
+   * Verifies a certificate-signed config approval: the bundle's RFC 3161
+   * timestamp fixes the signing time inside the policy window, the signing
+   * certificate is authenticated at that time under `issuerDer` and the
+   * registry roots, its scope equals the statement's, the bundle verifies
+   * under the certificate, and the inner timestamp does not follow the
+   * signing time by more than the allowed skew.
+   */
+  verifyCertified(config: Uint8Array | undefined, bundleJson: JsonValue, issuerDer: Uint8Array, policy: ConfigPolicy): Promise<ConfigVerified> {
+    if (this.#rootKeys.length === 0) throw new Error("registry root trust is not configured");
+    if (issuerDer.length === 0) throw new Error("certified registry verification requires an issuer certificate");
+    return this.#verify(config, bundleJson, issuerDer, policy);
+  }
+
+  async #verify(config: Uint8Array | undefined, bundleJson: JsonValue, issuerDer: Uint8Array | undefined, policy: ConfigPolicy): Promise<ConfigVerified> {
     if (config !== undefined && (config.length === 0 || config.length > MAX_CONFIG_SIZE)) throw new Error("config size is outside allowed bounds");
     const window = configTimePolicy(policy);
     const bundle = parseBundle(bundleJson);
@@ -333,13 +384,37 @@ export class ConfigVerifier {
       }
     }
     const digest = decodeLowerHex("subject digest", hexDigest, 32);
-    const hint = await verifyKeyedBundle(this.root, bundle, this.keys, digest);
+
+    let scope = "";
+    let hint: string;
+    let signatureTime: Date | undefined;
+    if (issuerDer !== undefined) {
+      if (s.predicateType !== CONFIG_ENDORSEMENT_PREDICATE_TYPE_V2) throw new Error("scoped endorsement requires a v2 statement");
+      signatureTime = await signedTimestamp(this.root, bundle);
+      checkTime(window, signatureTime);
+      if (bundle.certificate === undefined) throw new Error("certified approval bundle must carry a signing certificate");
+      const signing = await verifySigningCertificate(bundle.certificate, issuerDer, this.#rootKeys, signatureTime, validateScope);
+      scope = signing.scope;
+      if (scope !== s.scope) throw new Error("certificate scope does not match signed scope");
+      hint = await verifyCertifiedBundle(this.root, bundle, signing.certificate, digest);
+    } else {
+      if (this.#rootKeys.length !== 0 && s.predicateType === CONFIG_ENDORSEMENT_PREDICATE_TYPE_V2) {
+        throw new Error("v2 registry endorsement requires an issuer certificate");
+      }
+      hint = await verifyKeyedBundle(this.root, bundle, this.keys, digest);
+      if (this.#rootKeys.length !== 0) scope = PUBLIC_SCOPE;
+    }
+    if (policy.scopes !== undefined && !policy.scopes.includes(scope)) throw new Error("config scope is not accepted by the caller");
+
     let approvalTime: Date;
     try {
       approvalTime = await verifyTimestamp(this.root, s.timestamp, configTimestampInput(s));
       checkTime(window, approvalTime);
     } catch (err) {
       throw new Error(`inner timestamp: ${message(err)}`);
+    }
+    if (signatureTime !== undefined && approvalTime.getTime() > signatureTime.getTime() + CERTIFICATE_CLOCK_SKEW_MS) {
+      throw new Error("approval timestamp follows signature timestamp");
     }
     return {
       name: s.subject.name,
@@ -348,7 +423,8 @@ export class ConfigVerifier {
       signingKeyHint: hint,
       approvalTime,
       ...(s.runtime === undefined ? {} : { runtime: s.runtime }),
-      scope: s.scope,
+      scope,
+      ...(signatureTime === undefined ? {} : { signatureTime }),
     };
   }
 }

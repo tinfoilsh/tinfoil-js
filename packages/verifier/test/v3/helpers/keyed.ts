@@ -172,6 +172,12 @@ export interface BuildOptions {
   readonly checkpointSigner?: TestLog;
   /** The origin written in the checkpoint text, when not the log's. */
   readonly checkpointOrigin?: string;
+  /** Sign under this DER certificate instead of a key hint: the material names it and the entry body carries it as the verifier. */
+  readonly certificate?: Uint8Array;
+  /** Carry the body's verifier as a public key even under a certificate. */
+  readonly bodyVerifierKey?: boolean;
+  /** RFC 3161 timestamps to carry, minted over the DSSE signature. */
+  readonly timestampsFor?: (signature: Uint8Array) => Promise<Uint8Array[]>;
 }
 
 export interface Built {
@@ -192,16 +198,17 @@ export async function build(signer: Signer, log: TestLog, opts: BuildOptions = {
   const payload = utf8(JSON.stringify(statement));
   const pae = preAuthEncoding(IN_TOTO_PAYLOAD_TYPE, payload);
   const sig = await signP256(signer.pair.privateKey, opts.signMessage ?? pae);
+  const verifier =
+    opts.certificate !== undefined && !opts.bodyVerifierKey
+      ? { keyDetails: "PKIX_ECDSA_P256_SHA_256", x509Certificate: { rawBytes: b64(opts.certificate) } }
+      : { keyDetails: "PKIX_ECDSA_P256_SHA_256", publicKey: { rawBytes: opts.bodyKey ?? b64(signer.spki) } };
   const canonical = JSON.stringify({
     apiVersion: opts.bodyVersion ?? "0.0.2",
     kind: opts.bodyKind ?? "hashedrekord",
     spec: {
       hashedRekordV002: {
         data: { algorithm: "SHA2_256", digest: opts.bodyDigest ?? b64(await sha256(pae)) },
-        signature: {
-          content: opts.bodySignature ?? b64(sig),
-          verifier: { keyDetails: "PKIX_ECDSA_P256_SHA_256", publicKey: { rawBytes: opts.bodyKey ?? b64(signer.spki) } },
-        },
+        signature: { content: opts.bodySignature ?? b64(sig), verifier },
       },
     },
   });
@@ -228,10 +235,17 @@ export async function build(signer: Signer, log: TestLog, opts: BuildOptions = {
       },
     });
   }
+  const timestamps = opts.timestampsFor === undefined ? [] : await opts.timestampsFor(sig);
+  const material =
+    opts.certificate === undefined ? { publicKey: { hint: signer.hint } } : { certificate: { rawBytes: b64(opts.certificate) } };
   return {
     json: {
       mediaType: BUNDLE_MEDIA_TYPE,
-      verificationMaterial: { publicKey: { hint: signer.hint }, tlogEntries },
+      verificationMaterial: {
+        ...material,
+        tlogEntries,
+        ...(timestamps.length === 0 ? {} : { timestampVerificationData: { rfc3161Timestamps: timestamps.map((t) => ({ signedTimestamp: b64(t) })) } }),
+      },
       dsseEnvelope: {
         payload: b64(payload),
         payloadType: IN_TOTO_PAYLOAD_TYPE,

@@ -97,7 +97,7 @@ export const SIGSTORE_TIMESTAMP_POLICY = "1.3.6.1.4.1.57264.2";
 const ecdsaWithSha256 = (): Uint8Array => seq(oid(OID_ECDSA_WITH_SHA256));
 const sha256AlgId = (): Uint8Array => seq(oid(OID_SHA256), nullValue());
 
-function extension(id: string, critical: boolean, value: Uint8Array): Uint8Array {
+export function extension(id: string, critical: boolean, value: Uint8Array): Uint8Array {
   return seq(oid(id), ...(critical ? [boolTrue()] : []), octetString(value));
 }
 

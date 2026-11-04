@@ -23,7 +23,7 @@ function fields(): { fields: VerificationFields; launch: Uint8Array; rtmr1: Uint
         { id: "hpke", format: KEY_X25519_HPKE_V1_FORMAT, data: "hpke" },
         { id: "tls", format: "https://example.invalid/other", data: "other" },
       ],
-      config: { source: "endorsement", name: "/o/p/r1", digest: "c", reference: "sha256:c", signingKeyHint: "h", approvalTime: AT, scope: "" },
+      config: { source: "endorsement", name: "/o/p/r1", digest: "c", reference: "sha256:c", signingKeyHint: "h", approvalTime: AT, scope: "", signatureTime: AT },
       runtime: { source: "endorsement", repo: "tinfoilsh/cvmimage", tag: "v1.2.3", digest: "r", name: "m", commit: "0".repeat(40), approvalTime: AT },
       freshnessExpiresAt: AT,
       metadata: { verifier: { name: "n", version: "v" }, verifiedAt: AT },
@@ -53,12 +53,14 @@ describe("Verification", () => {
     v.freshnessExpiresAt()!.setFullYear(1999);
     v.metadata().verifiedAt.setFullYear(1999);
     v.config()!.approvalTime!.setFullYear(1999);
+    v.config()!.signatureTime!.setFullYear(1999);
     expect((v.enclaveMeasurement() as SevSnpMeasurement).launch).toEqual(reg(1));
     expect((v.codeMeasurement() as ExpectedTdx).rtmr1).toEqual(reg(2));
     expect(v.cryptoMaterial()[0]!.data).toBe("fp");
     expect(v.freshnessExpiresAt()).toEqual(AT);
     expect(v.metadata().verifiedAt).toEqual(AT);
     expect(v.config()!.approvalTime).toEqual(AT);
+    expect(v.config()!.signatureTime).toEqual(AT);
   });
 
   it("keeps unset expected registers unset", () => {

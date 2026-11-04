@@ -93,7 +93,7 @@ export async function verifyKeyedBundle(root: TrustedRoot, bundle: Bundle, keys:
   const pinned = keys.find((k) => k.hint === hint);
   if (pinned === undefined) throw new Error("untrusted approval signing key");
   if (digest.length !== 32) throw new Error("expected artifact digest is not SHA-256");
-  checkLayout(bundle);
+  checkLayout(bundle, "none");
 
   const spki = await exportP256(pinned.key);
   const signed = preAuthEncoding(bundle.dsse.payloadType, bundle.dsse.payload);
@@ -101,18 +101,7 @@ export async function verifyKeyedBundle(root: TrustedRoot, bundle: Bundle, keys:
     throw new Error("DSSE signature does not verify under the pinned key");
   }
 
-  const expected: ExpectedBody = {
-    digest: toBase64(await sha256(signed)),
-    signature: toBase64(bundle.dsse.signature),
-    rawBytes: toBase64(spki),
-  };
-  for (let i = 0; i < bundle.tlogEntries.length; i++) {
-    try {
-      await verifyEntry(root, bundle.tlogEntries[i], expected);
-    } catch (err) {
-      throw new Error(`transparency log entry ${i}: ${message(err)}`);
-    }
-  }
+  await verifyLogEntries(root, bundle, { digest: toBase64(await sha256(signed)), signature: toBase64(bundle.dsse.signature), verifier: { publicKey: toBase64(spki) } });
 
   if (!statementNamesDigest(bundle.dsse.payload, toHex(digest))) {
     throw new Error("the statement's subjects do not name the artifact digest");
@@ -120,8 +109,14 @@ export async function verifyKeyedBundle(root: TrustedRoot, bundle: Bundle, keys:
   return hint;
 }
 
-/** The entry rules above: a bounded count of hashedrekord 0.0.2 entries with proofs only, no duplicates, and no timestamps. */
-function checkLayout(bundle: Bundle): void {
+/**
+ * The entry rules above: a bounded count of hashedrekord 0.0.2 entries with
+ * proofs only and no duplicates. `timestamps` says whether the bundle must
+ * carry no RFC 3161 timestamp (a key-signed approval, whose time is inside
+ * the statement) or at least one (a certificate-signed approval, whose
+ * signing time the timestamp establishes).
+ */
+export function checkLayout(bundle: Bundle, timestamps: "none" | "required"): void {
   const entries = bundle.tlogEntries;
   if (entries.length === 0 || entries.length > MAX_LOG_RECEIPTS) {
     throw new Error(`approval requires between 1 and ${MAX_LOG_RECEIPTS} transparency log entries, got ${entries.length}`);
@@ -138,16 +133,28 @@ function checkLayout(bundle: Bundle): void {
     if (seen.has(id)) throw new Error(`transparency log entry ${i} duplicates an earlier entry`);
     seen.add(id);
   });
-  if (bundle.rfc3161Timestamps.length !== 0) throw new Error("approval bundle must carry no RFC 3161 timestamps");
+  if (timestamps === "none" && bundle.rfc3161Timestamps.length !== 0) throw new Error("approval bundle must carry no RFC 3161 timestamps");
+  if (timestamps === "required" && bundle.rfc3161Timestamps.length === 0) throw new Error("approval bundle must carry an RFC 3161 timestamp");
 }
 
 // ---------------------------------------------------------------- log entries
 
-/** The base64 values the entry body must carry. */
-interface ExpectedBody {
+/** The base64 values the entry body must carry; the verifier is either the DER public key or the DER signing certificate. */
+export interface ExpectedBody {
   readonly digest: string;
   readonly signature: string;
-  readonly rawBytes: string;
+  readonly verifier: { readonly publicKey: string } | { readonly x509Certificate: string };
+}
+
+/** Verifies every log entry of `bundle` against the record it must carry. */
+export async function verifyLogEntries(root: TrustedRoot, bundle: Bundle, expected: ExpectedBody): Promise<void> {
+  for (let i = 0; i < bundle.tlogEntries.length; i++) {
+    try {
+      await verifyEntry(root, bundle.tlogEntries[i], expected);
+    } catch (err) {
+      throw new Error(`transparency log entry ${i}: ${message(err)}`);
+    }
+  }
 }
 
 const BODY_MEMBERS = ["apiVersion", "kind", "spec"];
@@ -155,8 +162,8 @@ const SPEC_MEMBERS = ["hashedRekordV002"];
 const RECORD_MEMBERS = ["data", "signature"];
 const DATA_MEMBERS = ["algorithm", "digest"];
 const SIGNATURE_MEMBERS = ["content", "verifier"];
-const VERIFIER_MEMBERS = ["publicKey", "keyDetails"];
-const PUBLIC_KEY_MEMBERS = ["rawBytes"];
+const VERIFIER_MEMBERS = ["publicKey", "x509Certificate", "keyDetails"];
+const RAW_BYTES_MEMBERS = ["rawBytes"];
 const HASH_ALGORITHM = "SHA2_256";
 const KEY_DETAILS = "PKIX_ECDSA_P256_SHA_256";
 
@@ -177,8 +184,8 @@ async function verifyEntry(root: TrustedRoot, entry: TlogEntry, expected: Expect
 
 /**
  * The body must be the canonical hashedrekord 0.0.2 record for this
- * envelope and key: SHA2_256 of the signed message, the DSSE signature, and
- * the DER public key with its key details.
+ * envelope and signer: SHA2_256 of the signed message, the DSSE signature,
+ * and the DER public key or signing certificate with its key details.
  */
 function checkBody(body: Uint8Array, expected: ExpectedBody): void {
   let value: JsonValue;
@@ -202,8 +209,16 @@ function checkBody(body: Uint8Array, expected: ExpectedBody): void {
   if (str(signature, "content") !== expected.signature) throw new Error("body signature is not the DSSE signature");
   const verifier = struct(signature, "verifier", VERIFIER_MEMBERS);
   if (str(verifier, "keyDetails") !== KEY_DETAILS) throw new Error("body key details are not ECDSA P-256 with SHA-256");
-  if (str(struct(verifier, "publicKey", PUBLIC_KEY_MEMBERS), "rawBytes") !== expected.rawBytes) {
-    throw new Error("body public key is not the pinned key");
+  if ("publicKey" in expected.verifier) {
+    if (verifier.has("x509Certificate")) throw new Error("body names a certificate, not the pinned key");
+    if (str(struct(verifier, "publicKey", RAW_BYTES_MEMBERS), "rawBytes") !== expected.verifier.publicKey) {
+      throw new Error("body public key is not the pinned key");
+    }
+  } else {
+    if (verifier.has("publicKey")) throw new Error("body names a public key, not the signing certificate");
+    if (str(struct(verifier, "x509Certificate", RAW_BYTES_MEMBERS), "rawBytes") !== expected.verifier.x509Certificate) {
+      throw new Error("body certificate is not the signing certificate");
+    }
   }
   if (!bytesEqual(canonicalize(value), body)) throw new Error("body is not in canonical form");
 }
@@ -398,7 +413,7 @@ function onesCount(n: bigint): number {
  * Whether a subject of the in-toto statement carries `digestHex` as its
  * sha256 digest. Every digest value must be hex.
  */
-function statementNamesDigest(payload: Uint8Array, digestHex: string): boolean {
+export function statementNamesDigest(payload: Uint8Array, digestHex: string): boolean {
   let value: JsonValue;
   try {
     value = strictParse(payload);
@@ -426,7 +441,7 @@ function statementNamesDigest(payload: Uint8Array, digestHex: string): boolean {
 // ---------------------------------------------------------------- keys
 
 /** Imports a DER SubjectPublicKeyInfo as an extractable ECDSA P-256 verification key. */
-async function importP256(spki: Uint8Array): Promise<CryptoKey> {
+export async function importP256(spki: Uint8Array): Promise<CryptoKey> {
   if (!isP256(spki)) throw new Error("approval requires an ECDSA P-256 key");
   try {
     return await crypto.subtle.importKey("spki", asBuffer(spki), P256, true, ["verify"]);
@@ -461,7 +476,7 @@ async function exportP256(key: CryptoKey): Promise<Uint8Array> {
 }
 
 /** Verifies a DER ECDSA signature over SHA-256 of `data`; false for a malformed or bad signature. */
-async function verifyP256(key: CryptoKey, signature: Uint8Array, data: Uint8Array): Promise<boolean> {
+export async function verifyP256(key: CryptoKey, signature: Uint8Array, data: Uint8Array): Promise<boolean> {
   let raw: Uint8Array;
   try {
     raw = ecdsaSignatureToRaw(signature, 32);
@@ -477,7 +492,7 @@ async function verifyP256(key: CryptoKey, signature: Uint8Array, data: Uint8Arra
 const BASE64 = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
 
 /** Standard base64 with padding. */
-function toBase64(b: Uint8Array): string {
+export function toBase64(b: Uint8Array): string {
   let s = "";
   let i = 0;
   for (; i + 2 < b.length; i += 3) {

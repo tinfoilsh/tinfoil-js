@@ -41,8 +41,10 @@ import { pinnedKeys, type PinnedKey } from "../../src/v3/internal/sigstore/keyed
 import { endorsementReference, timestampInput, verifyTimestamp } from "../../src/v3/internal/sigstore/timestamp.js";
 import type { TrustedRoot } from "../../src/v3/internal/sigstore/trusted-root.js";
 import { PUBLIC_SIGNING_KEY_PEM } from "../../src/v3/trust/signing-keys.js";
+import { CERTIFICATE_CLOCK_SKEW_MS } from "../../src/v3/internal/endorsement/scope.js";
 import { b64, build, newLog, newSigner, rootOf, toJson, type Signer, type TestLog } from "./helpers/keyed.js";
-import { authorityJson, newTimestampAuthority, timestampResponse, type TimestampAuthority } from "./helpers/tsa.js";
+import { dnsName, newRegistry, OID_KP_SERVER_AUTH, scopeCertificate, uriName, type Registry, type ScopeCertificateOptions } from "./helpers/registry.js";
+import { authorityJson, extension, name, newTimestampAuthority, seq, timestampResponse, tlv, type TimestampAuthority } from "./helpers/tsa.js";
 
 const CONFIG_DOMAIN = "tinfoil-config-freshness/v1\0";
 const CONFIG_DOMAIN_V2 = "tinfoil-config-freshness/v2\0";
@@ -83,6 +85,13 @@ interface ConfigOptions {
   /** Rewrites the statement after its timestamp was minted. */
   readonly tamper?: (statement: any) => void;
   readonly timestampDomain?: string;
+  /** Sign under this certificate and carry a bundle timestamp over the signature at `signedAt`. */
+  readonly certificate?: Uint8Array;
+  readonly signedAt?: Date;
+  /** Carry no bundle timestamp although a certificate signs. */
+  readonly noSignatureTimestamp?: boolean;
+  /** Name the key, not the certificate, in the log entry body. */
+  readonly bodyVerifierKey?: boolean;
 }
 
 /** A config endorsement bundle whose inner timestamp covers the statement's core. */
@@ -104,7 +113,15 @@ async function configBundle(opts: ConfigOptions = {}): Promise<{ json: unknown; 
   const response = await timestampResponse(tsa, timestampInput(domain, toJson(core)), opts.genTime ?? GEN_TIME);
   const statement = { ...core, predicate: { ...predicate, freshness: { rfc3161Timestamp: b64(response) } } };
   opts.tamper?.(statement);
-  const built = await build(opts.signer ?? signer, log, { statement });
+  const built = await build(opts.signer ?? signer, log, {
+    statement,
+    certificate: opts.certificate,
+    bodyVerifierKey: opts.bodyVerifierKey,
+    timestampsFor:
+      opts.certificate === undefined || opts.noSignatureTimestamp
+        ? undefined
+        : async (sig) => [await timestampResponse(tsa, sig, opts.signedAt ?? GEN_TIME)],
+  });
   return { json: built.json, payload: built.payload, config };
 }
 
@@ -231,7 +248,9 @@ describe("ConfigVerifier", () => {
     const verifier = new ConfigVerifier(root, keys);
     const verified = await verifier.verify(config, toJson(json), policy({ digest: await hex(config) }));
     expect(verified.runtime).toEqual({ repo: "tinfoilsh/cvmimage", tag: "v1.2.3", digest: RUNTIME_DIGEST });
-    expect(verified.scope).toBe(PUBLIC_SCOPE);
+    // Under caller-pinned keys no scope is established, whatever the statement claims.
+    expect(verified.scope).toBe("");
+    expect(verified.signatureTime).toBeUndefined();
     // Without the config bytes, a v2 statement still pins the digest and runtime.
     expect((await verifier.verify(undefined, toJson(json), policy())).digest).toBe(await hex(config));
     // The config's own pin must equal the endorsed runtime.
@@ -286,6 +305,149 @@ describe("ConfigVerifier", () => {
     const { json, config } = await configBundle();
     const untrusting = await rootOf([log], [authorityJson(await newTimestampAuthority())]);
     await expect(new ConfigVerifier(untrusting, keys).verify(config, toJson(json), policy())).rejects.toThrow(/inner timestamp: no trusted timestamp authority/);
+  });
+});
+
+describe("certified config approvals", () => {
+  const PRIVATE_SCOPE = SCOPE_PREFIX + "9c4a7f21e0b836d56a13c8fe42d907ab";
+  let registry: Registry;
+  let rootKeys: PinnedKey[];
+  /** Verifies under the registry: the root key signs plain approvals and issues scope certificates. */
+  let verifier: ConfigVerifier;
+
+  beforeAll(async () => {
+    registry = await newRegistry(GEN_TIME);
+    rootKeys = await pinnedKeys([registry.root.pem]);
+    verifier = new ConfigVerifier(root, rootKeys, rootKeys);
+  });
+
+  /** A scope certificate over the default signer's key, by default for the public scope at GEN_TIME. */
+  const leaf = (opts: Partial<ScopeCertificateOptions> = {}, spki = signer.spki): Promise<Uint8Array> =>
+    scopeCertificate(registry, spki, { scope: PUBLIC_SCOPE, now: GEN_TIME, ...opts });
+
+  it("accepts a certified v2 approval and reports the certificate's scope and the signature time", async () => {
+    const certificate = await leaf();
+    const { json, config, payload } = await configBundle({ v2: true, certificate });
+    const verified = await verifier.verifyCertified(config, toJson(json), registry.rootDer, policy({ scopes: [PUBLIC_SCOPE] }));
+    expect(verified.scope).toBe(PUBLIC_SCOPE);
+    expect(verified.signatureTime).toEqual(GEN_TIME);
+    expect(verified.approvalTime).toEqual(GEN_TIME);
+    expect(verified.signingKeyHint).toBe(signer.hint);
+    expect(verified.reference).toBe(await endorsementReference(payload));
+    expect(verified.runtime).toEqual({ repo: "tinfoilsh/cvmimage", tag: "v1.2.3", digest: RUNTIME_DIGEST });
+    // Digest-only verification works the same way; an unpinned scope accepts any.
+    expect((await verifier.verifyCertified(undefined, toJson(json), registry.rootDer, policy())).scope).toBe(PUBLIC_SCOPE);
+  });
+
+  it("accepts a private scope only when the certificate, the statement and the caller agree", async () => {
+    const certificate = await leaf({ scope: PRIVATE_SCOPE });
+    const { json, config } = await configBundle({ v2: true, scope: PRIVATE_SCOPE, certificate });
+    const verified = await verifier.verifyCertified(config, toJson(json), registry.rootDer, policy({ scopes: [PUBLIC_SCOPE, PRIVATE_SCOPE] }));
+    expect(verified.scope).toBe(PRIVATE_SCOPE);
+    await expect(verifier.verifyCertified(config, toJson(json), registry.rootDer, policy({ scopes: [PUBLIC_SCOPE] }))).rejects.toThrow(
+      /scope is not accepted by the caller/,
+    );
+    // A certificate for another scope than the statement names.
+    const mismatched = await configBundle({ v2: true, scope: PUBLIC_SCOPE, certificate });
+    await expect(verifier.verifyCertified(mismatched.config, toJson(mismatched.json), registry.rootDer, policy())).rejects.toThrow(
+      /certificate scope does not match signed scope/,
+    );
+  });
+
+  it("requires registry trust, an issuer certificate and a v2 statement", async () => {
+    const certificate = await leaf();
+    const { json, config } = await configBundle({ v2: true, certificate });
+    expect(() => new ConfigVerifier(root, keys).verifyCertified(config, toJson(json), registry.rootDer, policy())).toThrow(/registry root trust is not configured/);
+    expect(() => verifier.verifyCertified(config, toJson(json), new Uint8Array(), policy())).toThrow(/requires an issuer certificate/);
+    const v1 = await configBundle({ certificate });
+    await expect(verifier.verifyCertified(v1.config, toJson(v1.json), registry.rootDer, policy())).rejects.toThrow(/scoped endorsement requires a v2 statement/);
+    // Under registry roots a key-signed v2 statement must be certified; a key-signed v1 statement is public.
+    const keyed = await configBundle({ v2: true, signer: registry.root });
+    await expect(verifier.verify(keyed.config, toJson(keyed.json), policy())).rejects.toThrow(/v2 registry endorsement requires an issuer certificate/);
+    const legacy = await configBundle({ signer: registry.root });
+    expect((await verifier.verify(legacy.config, toJson(legacy.json), policy({ scopes: [PUBLIC_SCOPE] }))).scope).toBe(PUBLIC_SCOPE);
+    await expect(verifier.verify(legacy.config, toJson(legacy.json), policy({ scopes: [PRIVATE_SCOPE] }))).rejects.toThrow(/scope is not accepted/);
+  });
+
+  it("validates the scope pins", () => {
+    expect(() => validateConfigPins(policy({ scopes: [] }))).toThrow(/must not be empty/);
+    expect(() => validateConfigPins(policy({ scopes: [PUBLIC_SCOPE, PUBLIC_SCOPE] }))).toThrow(/duplicate/);
+    expect(() => validateConfigPins(policy({ scopes: ["https://example.invalid/scope"] }))).toThrow(/canonical registry scope/);
+    expect(() => validateConfigPins(policy({ scopes: [PRIVATE_SCOPE] }))).not.toThrow();
+  });
+
+  it("fixes the signing time by the bundle timestamp and bounds the inner timestamp by it", async () => {
+    const certificate = await leaf();
+    const stale = await configBundle({ v2: true, certificate, signedAt: new Date(NOW.getTime() - DEFAULT_MAX_AGE_MS - 1000) });
+    await expect(verifier.verifyCertified(stale.config, toJson(stale.json), registry.rootDer, policy())).rejects.toThrow(/outside the accepted window/);
+    const unstamped = await configBundle({ v2: true, certificate, noSignatureTimestamp: true });
+    await expect(verifier.verifyCertified(unstamped.config, toJson(unstamped.json), registry.rootDer, policy())).rejects.toThrow(/no RFC 3161 timestamp/);
+    // The approval's inner timestamp may follow the signature by the allowed skew, not more.
+    // (A leaf valid around the signing times, nine minutes long.)
+    const earlier = await leaf({ notBefore: new Date(GEN_TIME.getTime() - 5 * 60_000), notAfter: new Date(GEN_TIME.getTime() + 4 * 60_000) });
+    const atSkew = await configBundle({ v2: true, certificate: earlier, signedAt: new Date(GEN_TIME.getTime() - CERTIFICATE_CLOCK_SKEW_MS) });
+    expect((await verifier.verifyCertified(atSkew.config, toJson(atSkew.json), registry.rootDer, policy())).signatureTime).toEqual(
+      new Date(GEN_TIME.getTime() - CERTIFICATE_CLOCK_SKEW_MS),
+    );
+    const late = await configBundle({ v2: true, certificate: earlier, signedAt: new Date(GEN_TIME.getTime() - CERTIFICATE_CLOCK_SKEW_MS - 1000) });
+    await expect(verifier.verifyCertified(late.config, toJson(late.json), registry.rootDer, policy())).rejects.toThrow(/approval timestamp follows signature timestamp/);
+    // A timestamp from an authority the root does not list.
+    const foreign = await newTimestampAuthority();
+    const built = await build(signer, log, {
+      statement: JSON.parse(new TextDecoder().decode(atSkew.payload)),
+      certificate: earlier,
+      timestampsFor: async (sig) => [await timestampResponse(foreign, sig, GEN_TIME)],
+    });
+    await expect(verifier.verifyCertified(atSkew.config, toJson(built.json), registry.rootDer, policy())).rejects.toThrow(/no RFC 3161 timestamp/);
+  });
+
+  it("rejects a certificate the registry root did not issue, or one issued to the root key", async () => {
+    const other = await newRegistry(GEN_TIME);
+    const foreign = await scopeCertificate(other, signer.spki, { scope: PUBLIC_SCOPE, now: GEN_TIME });
+    const { json, config } = await configBundle({ v2: true, certificate: foreign });
+    await expect(verifier.verifyCertified(config, toJson(json), other.rootDer, policy())).rejects.toThrow(/untrusted registry root/);
+    await expect(verifier.verifyCertified(config, toJson(json), registry.rootDer, policy())).rejects.toThrow(/verifying config signing certificate/);
+    const rootLeaf = await leaf({}, registry.root.spki);
+    const byRoot = await configBundle({ v2: true, certificate: rootLeaf, signer: registry.root });
+    await expect(verifier.verifyCertified(byRoot.config, toJson(byRoot.json), registry.rootDer, policy())).rejects.toThrow(/registry root cannot serve/);
+  });
+
+  it("rejects a signing certificate outside the profile", async () => {
+    const cases: [string, Partial<ScopeCertificateOptions>, RegExp][] = [
+      ["a CA", { basicConstraints: seq(tlv(0x01, [0xff])) }, /profile/],
+      ["a TLS purpose", { extendedKeyUsage: [OID_KP_SERVER_AUTH] }, /profile/],
+      ["an extra purpose", { extendedKeyUsage: [OID_KP_SERVER_AUTH, "1.3.6.1.5.5.7.3.3"] }, /profile/],
+      ["no purpose", { extendedKeyUsage: "none" }, /profile/],
+      ["key encipherment", { keyUsage: tlv(0x03, [0x05, 0x20]) }, /profile/],
+      ["a long lifetime", { notAfter: new Date(GEN_TIME.getTime() + 3600_000) }, /profile/],
+      ["a subject", { subject: name("customer") }, /profile/],
+      ["an extra DNS identity", { subjectAltNames: [uriName(PUBLIC_SCOPE), dnsName("customer.example")] }, /critical URI SAN/],
+      ["no scope", { subjectAltNames: "none" }, /critical URI SAN/],
+      ["a non-critical SAN", { sanCritical: false }, /critical URI SAN/],
+      ["a duplicate scope", { subjectAltNames: [uriName(PUBLIC_SCOPE), uriName(PUBLIC_SCOPE)] }, /critical URI SAN/],
+      ["a non-canonical scope", { scope: SCOPE_PREFIX + "PUBLIC" }, /canonical registry scope/],
+      ["an unknown critical extension", { extraExtensions: [extension("1.2.3.4", true, tlv(0x04, [0]))] }, /unsupported critical extension/],
+      ["a validity outside the issuer's", { notBefore: new Date(registry.notBefore.getTime() - 1000) }, /profile/],
+    ];
+    for (const [what, opts, want] of cases) {
+      const certificate = await leaf(opts);
+      const { json, config } = await configBundle({ v2: true, scope: opts.scope ?? PUBLIC_SCOPE, certificate });
+      await expect(verifier.verifyCertified(config, toJson(json), registry.rootDer, policy()), what).rejects.toThrow(want);
+    }
+    // Valid at issue, expired by the signing time.
+    const certificate = await leaf();
+    const expired = await configBundle({ v2: true, certificate, signedAt: new Date(GEN_TIME.getTime() + 10 * 60_000) });
+    await expect(verifier.verifyCertified(expired.config, toJson(expired.json), registry.rootDer, policy())).rejects.toThrow(/not valid at/);
+  });
+
+  it("binds the log entry and the signature to the certificate", async () => {
+    const certificate = await leaf();
+    const keyed = await configBundle({ v2: true, certificate, bodyVerifierKey: true });
+    await expect(verifier.verifyCertified(keyed.config, toJson(keyed.json), registry.rootDer, policy())).rejects.toThrow(/names a public key, not the signing certificate/);
+    // A certificate over another key than the one that signed.
+    const otherLeaf = await leaf({}, other.spki);
+    const swapped = await configBundle({ v2: true, certificate: otherLeaf });
+    await expect(verifier.verifyCertified(swapped.config, toJson(swapped.json), registry.rootDer, policy())).rejects.toThrow(/does not verify under the signing certificate/);
   });
 });
 
