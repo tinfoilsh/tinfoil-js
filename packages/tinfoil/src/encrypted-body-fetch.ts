@@ -164,8 +164,12 @@ export function createEncryptedBodyFetch(baseURL: string, hpkePublicKey: string,
         userCacheSecret,
       );
 
+      // A request addressed to the enclave while a proxy is configured goes
+      // to the proxy's origin, with the enclave named in the header; the
+      // transport sends only to the origin it was created for.
+      const routedUrl = targetUrl.origin === baseOrigin ? targetUrl : new URL(`${targetUrl.pathname}${targetUrl.search}${targetUrl.hash}`, baseOrigin);
       const transportInstance = await getOrCreateTransport();
-      return transportInstance.request(targetUrl.toString(), initWithHeader!);
+      return transportInstance.request(routedUrl.toString(), initWithHeader!);
     },
 
     async getSessionRecoveryToken(): Promise<SessionRecoveryToken> {
