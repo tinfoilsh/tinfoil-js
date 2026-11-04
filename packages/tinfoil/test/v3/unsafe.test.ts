@@ -10,14 +10,14 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { ConfigurationError, NetworkError } from "../../src/v3/errors.js";
 import { createUnverifiedClient, type UnverifiedOptions } from "../../src/v3/internal/unsafe-client.js";
 import { UNVERIFIED_WARNING, UnverifiedClient } from "../../src/v3/unsafe.js";
-import { startEhbpServer, type EhbpServer } from "./helpers/ehbp-server.js";
+import { startEhbpServer, type EhbpServer, type Reply } from "./helpers/ehbp-server.js";
 
 let server: EhbpServer;
 let keyConfig: Uint8Array;
-let keyAnswer: "config" | "status-500" | "wrong-type" | "garbage" = "config";
+let keyAnswer: "config" | "status-500" | "wrong-type" | "garbage" | "redirect" | "declared-huge" | "oversized" = "config";
 
 beforeAll(async () => {
-  server = await startEhbpServer((seen) => {
+  server = await startEhbpServer((seen): Reply => {
     if (seen.path === PROTOCOL.KEYS_PATH) {
       switch (keyAnswer) {
         case "status-500":
@@ -26,9 +26,18 @@ beforeAll(async () => {
           return { headers: { "content-type": "text/plain" }, body: keyConfig, plaintext: true };
         case "garbage":
           return { headers: { "content-type": PROTOCOL.KEYS_MEDIA_TYPE }, body: new Uint8Array([1, 2, 3]), plaintext: true };
+        case "redirect":
+          return { status: 307, headers: { location: "https://other.example/.well-known/hpke-keys" }, plaintext: true };
+        case "declared-huge":
+          return { headers: { "content-type": PROTOCOL.KEYS_MEDIA_TYPE, "content-length": String(1 << 20) }, body: keyConfig, plaintext: true };
+        case "oversized":
+          return { headers: { "content-type": PROTOCOL.KEYS_MEDIA_TYPE }, body: new Uint8Array(70 * 1024), plaintext: true };
         default:
           return { headers: { "content-type": PROTOCOL.KEYS_MEDIA_TYPE }, body: keyConfig, plaintext: true };
       }
+    }
+    if (seen.path === "/v1/elsewhere") {
+      return { status: 307, headers: { location: "https://other.example/v1/elsewhere" }, plaintext: true };
     }
     return {
       headers: { "content-type": "application/json" },
@@ -114,14 +123,31 @@ describe("UnverifiedClient", () => {
   });
 
   it("reports a server that doesn't serve a usable key as a network error", async () => {
-    for (const answer of ["status-500", "wrong-type", "garbage"] as const) {
-      keyAnswer = answer;
+    const expected: Record<string, RegExp> = {
+      "status-500": /status 500/,
+      "wrong-type": /content type/,
+      garbage: /fetching the server key/,
+      redirect: /fetching the server key/,
+      "declared-huge": /exceeds 65536 bytes/,
+      oversized: /exceeds 65536 bytes/,
+    };
+    for (const [answer, pattern] of Object.entries(expected)) {
+      keyAnswer = answer as typeof keyAnswer;
       try {
-        await expect(client({ baseURL: `${server.origin}/v1/` })).rejects.toThrow(NetworkError);
+        const attempt = client({ baseURL: `${server.origin}/v1/` });
+        await expect(attempt).rejects.toThrow(NetworkError);
+        await expect(attempt).rejects.toThrow(pattern);
       } finally {
         keyAnswer = "config";
       }
     }
+  });
+
+  it("follows no redirect, so a sealed body never leaves the origin it was addressed to", async () => {
+    const { client: c } = await client({ baseURL: `${server.origin}/v1/` });
+    const attempt = c.fetch("/v1/elsewhere", { method: "POST", body: "secret" });
+    await expect(attempt).rejects.toThrow(NetworkError);
+    expect(server.seen.filter((s) => s.path === "/v1/elsewhere")).toHaveLength(1);
   });
 
   it("is constructed only through its factory", () => {

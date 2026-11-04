@@ -16,7 +16,8 @@
  * holds surfaces as the server's own error.
  */
 import { Identity, PROTOCOL } from "ehbp";
-import { ConfigurationError, messageOf, NetworkError } from "../errors.js";
+import { ConfigurationError, messageOf, NetworkError, TinfoilError } from "../errors.js";
+import { readBounded } from "./fetch.js";
 import { validateBaseURL } from "./transport/base-url.js";
 import { sealedFetchTo } from "./transport/ehbp.js";
 import { ENCLAVE_URL_HEADER } from "./transport/header.js";
@@ -86,25 +87,36 @@ export async function createUnverifiedClient(options: UnverifiedOptions, seams: 
   const sealed = sealedFetchTo(identity, send);
   const baseOrigin = originOf(baseURL);
   const proxied = baseOrigin !== keyOrigin;
-  const fetchImpl: Fetch = (input, init) => {
+  const fetchImpl: Fetch = async (input, init) => {
     const url = input instanceof Request ? requestURL(input) : new URL(input instanceof URL ? input.href : input, baseURL);
     const origin = normalizedOrigin(url);
     if (origin !== baseOrigin) {
-      return Promise.reject(new ConfigurationError(`refusing to send request to ${JSON.stringify(origin)}: client is bound to ${JSON.stringify(baseOrigin)}`));
+      throw new ConfigurationError(`refusing to send request to ${JSON.stringify(origin)}: client is bound to ${JSON.stringify(baseOrigin)}`);
     }
     const headers = new Headers(init?.headers ?? (input instanceof Request ? input.headers : undefined));
     if (proxied) headers.set(ENCLAVE_URL_HEADER, keyOrigin);
     const target = input instanceof Request ? input : url;
-    return sealed.fetch(target, { ...init, headers });
+    // The origin check covers the URL the request is sent to; a redirect
+    // would carry the sealed body wherever it points, so none is followed.
+    try {
+      return await sealed.fetch(target, { ...init, headers, redirect: "error" });
+    } catch (err) {
+      if (err instanceof TinfoilError || init?.signal?.aborted) throw err;
+      throw new NetworkError(messageOf(err), { cause: err });
+    }
   };
   return new UnverifiedClient(TOKEN, baseURL, keyOrigin, fetchImpl);
 }
 
-/** The server's key configuration from `keyOrigin`, taken on trust. */
+/**
+ * The server's key configuration from `keyOrigin`, taken on trust. The
+ * request follows no redirect, and the configuration is bounded by its
+ * declared length and again while it is read.
+ */
 async function fetchUnverifiedKey(keyOrigin: string, send: Fetch, signal: AbortSignal | undefined): Promise<Identity> {
   let response: Response;
   try {
-    response = await send(`${keyOrigin}${PROTOCOL.KEYS_PATH}`, { method: "GET", signal });
+    response = await send(`${keyOrigin}${PROTOCOL.KEYS_PATH}`, { method: "GET", redirect: "error", signal });
   } catch (err) {
     if (signal?.aborted) throw err;
     throw new NetworkError(`fetching the server key: ${messageOf(err)}`, { cause: err });
@@ -118,8 +130,18 @@ async function fetchUnverifiedKey(keyOrigin: string, send: Fetch, signal: AbortS
     await response.body?.cancel().catch(() => {});
     throw new NetworkError(`fetching the server key: content type ${JSON.stringify(contentType)} is not ${PROTOCOL.KEYS_MEDIA_TYPE}`);
   }
-  const bytes = new Uint8Array(await response.arrayBuffer());
-  if (bytes.length > MAX_KEY_CONFIG_BYTES) throw new NetworkError(`fetching the server key: configuration exceeds ${MAX_KEY_CONFIG_BYTES} bytes`);
+  const declared = Number(response.headers.get("content-length") ?? "0");
+  if (declared > MAX_KEY_CONFIG_BYTES) {
+    await response.body?.cancel().catch(() => {});
+    throw new NetworkError(`fetching the server key: configuration exceeds ${MAX_KEY_CONFIG_BYTES} bytes`);
+  }
+  let bytes: Uint8Array;
+  try {
+    bytes = await readBounded(response, MAX_KEY_CONFIG_BYTES, "server key configuration");
+  } catch (err) {
+    if (signal?.aborted) throw err;
+    throw new NetworkError(`fetching the server key: ${messageOf(err)}`, { cause: err });
+  }
   try {
     return await Identity.unmarshalPublicConfig(bytes);
   } catch (err) {
