@@ -19,6 +19,8 @@ import { createEnclaveOpenAIClient, createGatewayOpenAIClient, createTinfoilClie
 import type { Fetch } from "../../src/v3/options.js";
 import { RouterHTTPClient, type RouterClientSeams } from "../../src/v3/router-client.js";
 import * as browserEntry from "../../src/v3/index.browser.js";
+import { createRealtimeWebSocket } from "../../src/v3/realtime.js";
+import { createWebSocket, pinnedWebSocketOptions } from "../../src/v3/websocket.js";
 import { createEhbpPeer, fetchOf, paced, type EhbpPeer } from "./helpers/ehbp-peer.js";
 
 const ENCLAVE = "enclave.example";
@@ -220,5 +222,23 @@ describe("the gateway in a browser", () => {
     const sent = JSON.parse(new TextDecoder().decode(last.body)) as Record<string, unknown>;
     expect(sent.cache_salt).toMatch(/^[A-Za-z0-9_-]{43}$/);
     expect(ai.httpClient().current().map((r) => r.host)).toEqual(["replica.example"]);
+  });
+});
+
+describe("WebSockets in a browser", () => {
+  it("refuses a pinned WebSocket, its ws settings and a realtime session, naming the browser limitation, without any I/O", async () => {
+    const calls = { documents: 0 };
+    const counting: Fetch = async () => {
+      calls.documents++;
+      return new Response(new Uint8Array([1]));
+    };
+    const http = await createEnclaveHTTPClient(ENCLAVE, "tinfoilsh/repo", { verifier: verifier(peer.publicKeyHex) }, { ...seams(), documentFetch: counting });
+    const before = calls.documents;
+    await expect(createWebSocket(http, "/v1/realtime")).rejects.toThrow(/browsers don't expose/);
+    await expect(pinnedWebSocketOptions(http)).rejects.toBeInstanceOf(ConfigurationError);
+    const ai = await createEnclaveOpenAIClient(ENCLAVE, "tinfoilsh/repo", { verifier: verifier(peer.publicKeyHex) }, { bearerToken: "jwt" }, seams());
+    await expect(createRealtimeWebSocket(ai, { model: "m" })).rejects.toBeInstanceOf(ConfigurationError);
+    expect(calls.documents).toBe(before);
+    expect(typeof browserEntry.createWebSocket).toBe("function");
   });
 });
