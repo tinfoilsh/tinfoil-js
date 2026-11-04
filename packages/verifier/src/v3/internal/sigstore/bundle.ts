@@ -5,8 +5,8 @@
  */
 import { toHex } from "../bytes.js";
 import { decodeBase64 } from "../canonical.js";
-import { arr, object, optStruct, str, strArr, struct } from "../json/decode.js";
-import { JsonNumber, serialize, type JsonObject, type JsonValue } from "../json/index.js";
+import { arr, object, optStruct, str, struct } from "../json/decode.js";
+import { JsonNumber, serialize, strictParse, type JsonObject, type JsonValue } from "../json/index.js";
 
 export const BUNDLE_MEDIA_TYPE = "application/vnd.dev.sigstore.bundle.v0.3+json";
 export const IN_TOTO_PAYLOAD_TYPE = "application/vnd.in-toto+json";
@@ -60,10 +60,18 @@ const TIMESTAMP_MEMBERS = ["signedTimestamp"];
 const ENVELOPE_MEMBERS = ["payload", "payloadType", "signatures"];
 const SIGNATURE_MEMBERS = ["sig", "keyid"];
 
+/** Bounds the raw bytes before parsing them, then decodes as {@link parseBundle}. */
+export function parseBundleBytes(bytes: Uint8Array): Bundle {
+  if (bytes.length > MAX_BUNDLE_SIZE) throw new Error(`bundle exceeds ${MAX_BUNDLE_SIZE} bytes`);
+  return parseBundle(strictParse(bytes));
+}
+
 /**
  * Decodes a bundle and enforces the shared rules: version 0.3 media type; a
  * certificate or a key hint but not the legacy certificate-chain layout; a
- * DSSE envelope with exactly one signature.
+ * DSSE envelope with exactly one signature. The size bound here is on the
+ * compact serialization of already-parsed JSON; callers holding the wire
+ * bytes use {@link parseBundleBytes} to bound them before parsing.
  */
 export function parseBundle(json: JsonValue): Bundle {
   if (bundleBytes(json).length > MAX_BUNDLE_SIZE) {
@@ -175,7 +183,10 @@ function tlogEntry(o: JsonObject): TlogEntry {
       logIndex: unsigned64(proof, "logIndex") ?? 0n,
       rootHash,
       treeSize: unsigned64(proof, "treeSize") ?? 0n,
-      hashes: (strArr(proof, "hashes") ?? []).map((h) => decodeBase64("hashes", h)),
+      hashes: (arr(proof, "hashes") ?? []).map((h) => {
+        if (typeof h !== "string") throw new Error("transparency log inclusion proof hash is not a string");
+        return decodeBase64("hashes", h);
+      }),
       checkpoint,
     };
   }

@@ -318,11 +318,12 @@ describe("keyHint and pinnedKeys", () => {
     await expect(keyHint(bytes(0x30, 0x00))).rejects.toThrow("ECDSA P-256");
   });
 
-  it("deduplicates pinned keys by hint and rejects PEM without a public key", async () => {
+  it("pins keys in order, rejecting a repeated key and PEM without a public key", async () => {
     const a = await newSigner();
     const b = await newSigner();
-    const keys = await pinnedKeys([a.pem, b.pem + a.pem]);
+    const keys = await pinnedKeys([a.pem, b.pem]);
     expect(keys.map((k) => k.hint)).toEqual([a.hint, b.hint]);
+    await expect(pinnedKeys([a.pem, b.pem + a.pem])).rejects.toThrow(`duplicate signing key ${a.hint}`);
     await expect(pinnedKeys(["not a pem"])).rejects.toThrow("no PUBLIC KEY block");
     await expect(pinnedKeys(["-----BEGIN PUBLIC KEY-----\nAAAA\n"])).rejects.toThrow("parsing signing key");
     await expect(pinnedKeys([])).rejects.toThrow("at least one signing key");
@@ -676,6 +677,26 @@ describe("verifyTimestamp", () => {
   });
 });
 
+/**
+ * The reason each reject vector must fail for. A vector that rejects for
+ * another reason would pass a bare rejection check while leaving the rule it
+ * exercises untested; a new vector must be added here.
+ */
+const TIMESTAMP_REJECTIONS: Readonly<Record<string, RegExp>> = {
+  "after-window": /authority 0: not valid at/,
+  "before-window": /authority 0: not valid at/,
+  "eku-not-critical": /extended key usage must be critical/,
+  "granted-with-mods": /not granted \(status 1\)/,
+  "imprint-mismatch": /does not match the input/,
+  "no-eku": /has no extended key usage/,
+  "signer-expired": /TSA signer\) is not valid at/,
+  "status-rejected": /not granted \(status 2\)/,
+  "tampered-gentime": /signed attributes do not commit to the TSTInfo/,
+  "trailing-bytes": /trailing bytes after the element/,
+  "unknown-authority": /authority 0: the token's signer is not the authority's signing certificate/,
+  "wrong-policy": /unexpected timestamp policy/,
+};
+
 describe.skipIf(!conformanceAvailable())(vectorsTitle("verifyTimestamp"), () => {
   for (const fixture of timestampFixtures) {
     const { expected } = fixture;
@@ -684,7 +705,9 @@ describe.skipIf(!conformanceAvailable())(vectorsTitle("verifyTimestamp"), () => 
       if (expected.accepted) {
         expect(await verifyTimestamp(c.root, c.response, c.input)).toEqual(new Date(expected.timestamp as string));
       } else {
-        await expect(verifyTimestamp(c.root, c.response, c.input)).rejects.toThrow();
+        const reason = TIMESTAMP_REJECTIONS[fixture.id];
+        expect(reason, `no expected reason for vector ${fixture.id}`).toBeDefined();
+        await expect(verifyTimestamp(c.root, c.response, c.input)).rejects.toThrow(reason);
       }
     });
   }

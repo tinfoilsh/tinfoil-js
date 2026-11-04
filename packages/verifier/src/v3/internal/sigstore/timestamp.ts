@@ -13,6 +13,7 @@ import { canonicalize, type JsonValue } from "../json/index.js";
 import {
   basicConstraints,
   bytesEqual,
+  canSignData,
   expectSequence,
   extension,
   isContext,
@@ -31,9 +32,8 @@ export const SIGSTORE_TIMESTAMP_POLICY = "1.3.6.1.4.1.57264.2";
 export const MAX_TIMESTAMP_SIZE = 64 << 10;
 export const MAX_STATEMENT_SIZE = 128 << 10;
 
-/** PKIStatus values that carry a token. */
+/** The only PKIStatus accepted; grantedWithMods (1) and every other status reject. */
 export const STATUS_GRANTED = 0n;
-export const STATUS_GRANTED_WITH_MODS = 1n;
 
 const OID_SIGNED_DATA = "1.2.840.113549.1.7.2";
 const OID_TST_INFO = "1.2.840.113549.1.9.16.1.4";
@@ -111,10 +111,10 @@ export interface TimestampResponse {
 }
 
 /**
- * Parses a DER TimeStampResp: the status must be granted or granted with
- * modifications, the token a CMS SignedData with one SignerInfo identified by
- * issuer and serial number, carrying content-type and message-digest
- * attributes, and encapsulating a TSTInfo.
+ * Parses a DER TimeStampResp: the status must be an unqualified grant, the
+ * token a CMS SignedData with one SignerInfo identified by issuer and serial
+ * number, carrying content-type and message-digest attributes, and
+ * encapsulating a TSTInfo.
  */
 export function parseTimestampResponse(response: Uint8Array): TimestampResponse {
   if (response.length === 0 || response.length > MAX_TIMESTAMP_SIZE) {
@@ -291,7 +291,9 @@ function parseTstInfo(der: Uint8Array): TstInfo {
   }
   const serialNumber = integer(fields[3]);
   if (!isUniversal(fields[4], TAG.GENERALIZED_TIME)) throw new Error("TSTInfo genTime must be a GeneralizedTime");
-  return { policy, genTime: time(fields[4]), serialNumber, imprintAlgorithm: oid(algorithm[0]), imprint: imprint[1].value };
+  // genTime may state fractional seconds; the authority decides its precision.
+  const genTime = time(fields[4], { fractionalSeconds: true });
+  return { policy, genTime, serialNumber, imprintAlgorithm: oid(algorithm[0]), imprint: imprint[1].value };
 }
 
 /** An AlgorithmIdentifier naming a supported hash, with optional NULL parameters. */
@@ -340,9 +342,9 @@ function explicit(el: DerElement, tag: number, what: string): DerElement {
 
 /**
  * Checks one authority: its window contains genTime, its signing certificate
- * is the token's signer, that certificate is an end entity restricted to
- * timestamping, its chain verifies at genTime, and the signature verifies
- * under its key.
+ * is the token's signer, that certificate is an end entity whose key usage
+ * permits signing and that is restricted to timestamping, its chain verifies
+ * at genTime, and the signature verifies under its key.
  */
 async function verifyUnderAuthority(authority: CertificateAuthority, ts: TimestampResponse): Promise<void> {
   const at = ts.genTime.getTime();
@@ -355,6 +357,7 @@ async function verifyUnderAuthority(authority: CertificateAuthority, ts: Timesta
     throw new Error("the token's signer is not the authority's signing certificate");
   }
   if (basicConstraints(leaf)?.ca === true) throw new Error("the signing certificate is a certificate authority");
+  if (!canSignData(leaf)) throw new Error("the signing certificate's key usage does not permit signing");
   checkTimestampingUsage(chain);
   await verifyChain(chain, [chain[chain.length - 1]], ts.genTime);
   if (!(await verifySignature(ts, leaf.spki))) throw new Error("the timestamp signature does not verify");

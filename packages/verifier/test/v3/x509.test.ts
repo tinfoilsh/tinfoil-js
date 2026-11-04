@@ -16,6 +16,7 @@ import { readFileSync } from "node:fs";
 import { beforeAll, describe, expect, it } from "vitest";
 import {
   basicConstraints,
+  canSignData,
   extension,
   parseCertificate,
   spkiFingerprint,
@@ -29,6 +30,7 @@ import {
   bitString,
   boolean,
   children,
+  CLASS_CONTEXT,
   decode,
   DerError,
   ecdsaSignatureToRaw,
@@ -120,6 +122,15 @@ describe("der.decode", () => {
     expect(Array.from(e.value)).toEqual([5]);
     expect(Array.from(e.raw)).toEqual([2, 1, 5]);
     expect(integer(e)).toBe(5n);
+  });
+
+  it("leaves implicitly tagged primitives to their schema", () => {
+    // [1] IMPLICIT IA5String "a": tag number 1 of the context class, not a BOOLEAN.
+    const e = decode(hex("81 01 61"));
+    expect(e.tagClass).toBe(CLASS_CONTEXT);
+    expect(e.tag).toBe(1);
+    expect(Array.from(e.value)).toEqual([0x61]);
+    expect(() => decode(hex("01 01 61"))).toThrow(/BOOLEAN/);
   });
 
   it("rejects empty input, trailing bytes and truncation", () => {
@@ -256,13 +267,21 @@ describe("der time", () => {
     expect(time(decode(tlv(0x18, ascii("20491231235959Z")))).toISOString()).toBe("2049-12-31T23:59:59.000Z");
   });
 
-  it("rejects a missing 'Z', offsets, fractional seconds and short forms", () => {
+  it("rejects a missing 'Z', offsets, UTCTime fractions and short forms", () => {
     expect(() => decode(utcTime("241231235959"))).toThrow(/'Z'/);
     expect(() => decode(utcTime("241231235959+0000"))).toThrow(/'Z'/);
     expect(() => decode(utcTime("241231235959.000Z"))).toThrow(/'Z'/);
     expect(() => decode(utcTime("2412312359Z"))).toThrow(/'Z'/);
-    expect(() => decode(tlv(0x18, ascii("20241231235959.5Z")))).toThrow(/'Z'/);
     expect(() => decode(tlv(0x18, ascii("241231235959Z")))).toThrow(/'Z'/);
+  });
+
+  it("admits GeneralizedTime fractions only where asked for, and only in DER form", () => {
+    const fraction = decode(tlv(0x18, ascii("20241231235959.5Z")));
+    expect(() => time(fraction)).toThrow(/whole seconds/);
+    expect(time(fraction, { fractionalSeconds: true }).toISOString()).toBe("2024-12-31T23:59:59.500Z");
+    expect(time(decode(tlv(0x18, ascii("20241231235959.123456Z"))), { fractionalSeconds: true }).getUTCMilliseconds()).toBe(123);
+    expect(() => decode(tlv(0x18, ascii("20241231235959.50Z")))).toThrow(/trailing zeros/);
+    expect(() => decode(tlv(0x18, ascii("20241231235959.Z")))).toThrow(/'Z'/);
   });
 
   it("rejects impossible calendar dates", () => {
@@ -509,13 +528,23 @@ describe("verifyCertificateSignature", () => {
     await expect(verifyCertificateSignature(genoaAsk, genoaArk.spki.subarray(0, 50))).resolves.toBe(false);
   });
 
-  it("accepts an RSA key labelled id-RSASSA-PSS", async () => {
-    const spki = new Uint8Array(genoaArk.spki);
-    const pattern = hex("06 09 2a 86 48 86 f7 0d 01 01 01");
-    const at = spki.findIndex((_, i) => pattern.every((b, j) => spki[i + j] === b));
-    expect(at).toBeGreaterThan(0);
-    spki[at + pattern.length - 1] = 0x0a;
-    await expect(verifyCertificateSignature(genoaAsk, spki)).resolves.toBe(true);
+  /** `spki` relabelled id-RSASSA-PSS, with the given algorithm parameters (none by default). */
+  function labelledPss(spki: Uint8Array, ...params: Uint8Array[]): Uint8Array {
+    const [, key] = children(decode(spki));
+    return seq(seq(tlv(0x06, hex("2a 86 48 86 f7 0d 01 01 0a")), ...params), key.raw);
+  }
+
+  it("verifies RSA-PSS under a key labelled id-RSASSA-PSS", async () => {
+    await expect(verifyCertificateSignature(genoaAsk, labelledPss(genoaArk.spki))).resolves.toBe(true);
+  });
+
+  it("refuses a key labelled id-RSASSA-PSS for PKCS#1 v1.5 and when it carries parameters", async () => {
+    const [rsa] = certs(rsaPkcs1Pem);
+    expect(rsa.signatureAlgorithm).toBe("rsa-pkcs1-sha256");
+    await expect(verifyCertificateSignature(rsa, rsa.spki)).resolves.toBe(true);
+    await expect(verifyCertificateSignature(rsa, labelledPss(rsa.spki))).resolves.toBe(false);
+    await expect(verifyCertificateSignature(genoaAsk, labelledPss(genoaArk.spki, tlv(0x05, [])))).resolves.toBe(false);
+    await expect(verifyCertificateSignature(genoaAsk, labelledPss(genoaArk.spki, seq()))).resolves.toBe(false);
   });
 
   it("rejects an ECDSA signature whose DER is not minimal", async () => {
@@ -557,6 +586,25 @@ describe.skipIf(withoutVectors)(vectorsTitle("verifyChain"), () => {
     const chain = certs(set.pck_chain_pem);
     const [root] = certs(set.root_pem);
     await expect(verifyChain(chain, [root], new Date("2025-06-01T00:00:00Z"))).resolves.toBeUndefined();
+  });
+
+  it("rejects a certificate carrying a critical extension it does not understand", async () => {
+    const [vcek, ask, ark] = amdChain(amdReal);
+    const nameConstraints = { oid: "2.5.29.30", critical: true, value: hex("30 00") };
+    const leaf: Certificate = { ...vcek, extensions: [...vcek.extensions, nameConstraints] };
+    await expect(verifyChain([leaf, ask, ark], [ark], realAt)).rejects.toThrow(/unsupported critical extension 2\.5\.29\.30/);
+    const relaxed: Certificate = { ...vcek, extensions: [...vcek.extensions, { ...nameConstraints, critical: false }] };
+    await expect(verifyChain([relaxed, ask, ark], [ark], realAt)).resolves.toBeUndefined();
+  });
+
+  it("reads whether a key usage permits signing", () => {
+    const keyUsageExt = (bits: string) => ({ oid: "2.5.29.15", critical: true, value: hex(bits) });
+    const withUsage = (bits: string): Certificate => ({ ...genoaAsk, extensions: [keyUsageExt(bits)] });
+    expect(canSignData({ ...genoaAsk, extensions: [] })).toBe(true);
+    expect(canSignData(withUsage("03 02 07 80"))).toBe(true); // digitalSignature
+    expect(canSignData(withUsage("03 02 06 40"))).toBe(true); // nonRepudiation
+    expect(canSignData(withUsage("03 02 05 20"))).toBe(false); // keyEncipherment only
+    expect(canSignData(withUsage("03 02 01 06"))).toBe(false); // keyCertSign, cRLSign
   });
 
   it("rejects a chain that does not end in one of the roots", async () => {
@@ -699,6 +747,23 @@ describe("parseRevocationList", () => {
     expect(ok.nextUpdate.toISOString()).toBe("2025-01-01T00:00:00.000Z");
     expect(() => parseRevocationList(build(utcTime("230101000000Z")))).toThrow(/after nextUpdate/);
     expect(() => parseRevocationList(build(utcTime("250101000000Z"), int(1)))).toThrow(/unexpected field/);
+  });
+
+  it("rejects critical CRL and entry extensions, which it does not process", () => {
+    const alg = seq(tlv(0x06, hex("2a 86 48 ce 3d 04 03 02")));
+    const build = (...after: Uint8Array[]): Uint8Array =>
+      seq(seq(int(1), alg, seq(), utcTime("240101000000Z"), utcTime("250101000000Z"), ...after), alg, tlv(0x03, [0, ...seq(int(1), int(1))]));
+    const ext = (oid: string, critical: boolean): Uint8Array =>
+      seq(tlv(0x06, hex(oid)), ...(critical ? [tlv(0x01, [0xff])] : []), tlv(0x04, int(5)));
+    const crlExtensions = (...exts: Uint8Array[]): Uint8Array => tlv(0xa0, seq(...exts));
+    const entry = (...exts: Uint8Array[]): Uint8Array => seq(seq(int(7), utcTime("240601000000Z"), ...(exts.length ? [seq(...exts)] : [])));
+    // A delta CRL indicator (2.5.29.27) is critical by definition; a CRL number (2.5.29.20) is not.
+    expect(() => parseRevocationList(build(crlExtensions(ext("55 1d 1b", true))))).toThrow(/unsupported critical CRL extension 2\.5\.29\.27/);
+    expect(parseRevocationList(build(crlExtensions(ext("55 1d 14", false)))).revokedSerials).toEqual([]);
+    // A certificate issuer (2.5.29.29) on an entry is critical; a reason code (2.5.29.21) is not.
+    expect(() => parseRevocationList(build(entry(ext("55 1d 1d", true))))).toThrow(/unsupported critical CRL entry extension 2\.5\.29\.29/);
+    expect(parseRevocationList(build(entry(ext("55 1d 15", false)))).revokedSerials).toEqual([7n]);
+    expect(() => parseRevocationList(build(crlExtensions(ext("55 1d 14", false), ext("55 1d 14", false))))).toThrow(/duplicate extension/);
   });
 });
 

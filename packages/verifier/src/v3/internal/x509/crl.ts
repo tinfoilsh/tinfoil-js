@@ -1,10 +1,17 @@
-/** X.509 certificate revocation lists. */
+/**
+ * X.509 certificate revocation lists. A list is read as a complete
+ * revocation set: no CRL or entry extension is processed, so any critical
+ * one (a delta CRL indicator, an issuing distribution point, a certificate
+ * issuer on an entry) rejects rather than silently changing what the serial
+ * list means.
+ */
 import {
   bytesEqual,
   canSignRevocationLists,
   expectSequence,
   isContext,
   isUniversal,
+  parseExtensionList,
   signatureAlgorithm,
   verifySignatureWith,
   withContext,
@@ -30,6 +37,12 @@ function isTime(e: DerElement): boolean {
   return isUniversal(e, TAG.UTC_TIME) || isUniversal(e, TAG.GENERALIZED_TIME);
 }
 
+/** Rejects any critical extension: none is processed, so none may be honoured. */
+function rejectCritical(list: DerElement, what: string): void {
+  const critical = parseExtensionList(list).find((e) => e.critical);
+  if (critical !== undefined) throw new X509Error(`unsupported critical ${what} ${critical.oid}`);
+}
+
 function parseRevokedSerials(list: DerElement): bigint[] {
   const out: bigint[] = [];
   for (const entry of expectSequence(list, "revokedCertificates")) {
@@ -37,7 +50,7 @@ function parseRevokedSerials(list: DerElement): bigint[] {
     if (parts.length < 2 || parts.length > 3) throw new X509Error("revoked certificate entry must hold a serial, a date and optional extensions");
     out.push(integer(parts[0]));
     time(parts[1]);
-    if (parts.length === 3) expectSequence(parts[2], "CRL entry extensions");
+    if (parts.length === 3) rejectCritical(parts[2], "CRL entry extension");
   }
   return out;
 }
@@ -73,7 +86,7 @@ export function parseRevocationList(der: Uint8Array): RevocationList {
       if (version !== 1n) throw new X509Error("CRL extensions require version 2");
       const inner = children(tbs[j]);
       if (inner.length !== 1) throw new X509Error("CRL extensions must wrap one SEQUENCE");
-      expectSequence(inner[0], "CRL extensions");
+      rejectCritical(inner[0], "CRL extension");
       j++;
     }
     if (j !== tbs.length) throw new X509Error("unexpected field in TBSCertList");

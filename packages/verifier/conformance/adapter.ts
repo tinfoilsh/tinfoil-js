@@ -20,11 +20,10 @@ import * as quote from "../src/v3/internal/quote/quote.js";
 import { registerHex, type Expected, type Measurement as V3Measurement, type Register } from "../src/v3/measurement.js";
 import { dangerousTestOnlyVerifier, type DangerousTestOnlyRoots } from "../src/v3/verifier.js";
 import { checkTime, newTimePolicy } from "../src/v3/internal/endorsement/time.js";
-import { strictParse } from "../src/v3/internal/json/index.js";
-import { parseBundle } from "../src/v3/internal/sigstore/bundle.js";
+import { parseBundleBytes } from "../src/v3/internal/sigstore/bundle.js";
 import { pinnedKeys, verifyKeyedBundle } from "../src/v3/internal/sigstore/keyed.js";
 import { verifyTimestamp } from "../src/v3/internal/sigstore/timestamp.js";
-import { embeddedTrustedRoot, parseTrustedRoot } from "../src/v3/internal/sigstore/trusted-root.js";
+import { embeddedTrustedRoot, parseTrustedRoot, type TrustedRoot } from "../src/v3/internal/sigstore/trusted-root.js";
 
 export const SCHEMA_VERSION = "1";
 export const SDK_NAME = "tinfoil-js";
@@ -226,15 +225,26 @@ async function runStage(stage: string, raw: unknown): Promise<Result> {
   }
 }
 
-/** The injected Sigstore root, or the embedded one. */
-async function sigstoreRoot(roots: DangerousTestOnlyRoots) {
-  return roots.sigstore ? parseTrustedRoot(roots.sigstore) : embeddedTrustedRoot();
+/**
+ * The injected Sigstore root, or the embedded one; undefined when the
+ * injected document is not a trusted root, which the block stages report as
+ * malformed input rather than as a verification failure.
+ */
+async function sigstoreRoot(roots: DangerousTestOnlyRoots): Promise<TrustedRoot | undefined> {
+  if (!roots.sigstore) return embeddedTrustedRoot();
+  try {
+    return await parseTrustedRoot(roots.sigstore);
+  } catch (err) {
+    if (err instanceof NotImplementedError) throw err;
+    return undefined;
+  }
 }
 
 /**
  * Verifies a key-signed approval bundle under the pinned keys and checks that
  * the statement carries the artifact digest; yields the hint of the key that
- * verified. Undecodable inputs and unparseable keys are malformed.
+ * verified. Undecodable inputs, unparseable or repeated keys and an
+ * unparseable trust root are malformed.
  */
 async function authenticateApproval(in_: Input, roots: DangerousTestOnlyRoots): Promise<Result> {
   const stage = Stage.AuthenticateApproval;
@@ -249,9 +259,10 @@ async function authenticateApproval(in_: Input, roots: DangerousTestOnlyRoots): 
     if (err instanceof NotImplementedError) throw err;
     return malformed(stage);
   }
+  const root = await sigstoreRoot(roots);
+  if (root === undefined) return malformed(stage);
   return layer(stage, "PROVENANCE_REJECTED", async () => {
-    const root = await sigstoreRoot(roots);
-    const bundle = parseBundle(strictParse(bundleBytes));
+    const bundle = parseBundleBytes(bundleBytes);
     const hint = await verifyKeyedBundle(root, bundle, keys, digest);
     return accept(stage, { signing_key_hint: hint });
   });
@@ -260,15 +271,17 @@ async function authenticateApproval(in_: Input, roots: DangerousTestOnlyRoots): 
 /**
  * Verifies an RFC 3161 response over the given bytes against the trusted
  * root's timestamp authorities, and requires the stated time to lie within
- * the default window around the appraisal clock. The clock is required.
+ * the default window around the appraisal clock. The clock is required, and
+ * an unparseable trust root is malformed.
  */
 async function verifyTimestampStage(in_: Input, roots: DangerousTestOnlyRoots, appraisal: Date): Promise<Result> {
   const stage = Stage.VerifyTimestamp;
   const response = decodeBase64Std(in_.timestamp_response_b64 ?? "");
   const input = decodeBase64Std(in_.timestamp_input_b64 ?? "");
   if (response === undefined || input === undefined || !in_.verification_time_unix) return malformed(stage);
+  const root = await sigstoreRoot(roots);
+  if (root === undefined) return malformed(stage);
   return layer(stage, "PROVENANCE_REJECTED", async () => {
-    const root = await sigstoreRoot(roots);
     const at = await verifyTimestamp(root, response, input);
     checkTime(newTimePolicy(appraisal, 0, 0), at);
     return accept(stage, { timestamp: at.toISOString().replace(/\.\d{3}Z$/, "Z") });

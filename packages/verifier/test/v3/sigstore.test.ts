@@ -13,7 +13,14 @@
 import { beforeAll, describe, expect, it } from "vitest";
 import { sha256, toHex, utf8 } from "../../src/v3/internal/bytes.js";
 import { strictParse, type JsonValue } from "../../src/v3/internal/json/index.js";
-import { BUNDLE_MEDIA_TYPE, bundleBytes, IN_TOTO_PAYLOAD_TYPE, MAX_BUNDLE_SIZE, parseBundle } from "../../src/v3/internal/sigstore/bundle.js";
+import {
+  BUNDLE_MEDIA_TYPE,
+  bundleBytes,
+  IN_TOTO_PAYLOAD_TYPE,
+  MAX_BUNDLE_SIZE,
+  parseBundle,
+  parseBundleBytes,
+} from "../../src/v3/internal/sigstore/bundle.js";
 import {
   GITHUB_OIDC_ISSUER,
   RUNNER_ENVIRONMENT_GITHUB_HOSTED,
@@ -214,6 +221,8 @@ describe("trusted root", () => {
       ["an unsupported hash algorithm", (r) => (r.ctlogs[0].hashAlgorithm = "SHA2_384"), /hash algorithm/],
       ["a validity window without a start", (r) => delete r.certificateAuthorities[0].validFor.start, /no start/],
       ["a validity window that is not RFC 3339", (r) => (r.certificateAuthorities[0].validFor.start = "yesterday"), /not RFC 3339/],
+      ["a validity window on an impossible day", (r) => (r.certificateAuthorities[0].validFor.start = "2025-02-30T00:00:00Z"), /not a real time/],
+      ["a validity window with an impossible clock", (r) => (r.certificateAuthorities[0].validFor.start = "2025-02-01T24:00:00Z"), /not a real time|not RFC 3339/],
       ["a validity window ending before it starts", (r) => (r.ctlogs[0].publicKey.validFor.end = "2000-01-01T00:00:00Z"), /ends before it starts/],
       ["an empty certificate chain", (r) => (r.certificateAuthorities[0].certChain.certificates = []), /empty certificate chain/],
       ["a certificate that is not base64", (r) => (r.certificateAuthorities[0].certChain.certificates[0].rawBytes = "*"), /illegal base64/],
@@ -233,6 +242,11 @@ describe("bundle", () => {
   it("rejects a bundle over the size limit", () => {
     const huge = new Map<string, JsonValue>([["mediaType", "x".repeat(MAX_BUNDLE_SIZE)]]);
     expect(() => parseBundle(huge)).toThrow(/exceeds/);
+  });
+
+  it("bounds wire bytes before parsing them", () => {
+    expect(() => parseBundleBytes(new Uint8Array(MAX_BUNDLE_SIZE + 1))).toThrow(/exceeds/);
+    expect(() => parseBundleBytes(utf8("null"))).toThrow(/bundle is null/);
   });
 
   describe.skipIf(withoutVectors)(vectorsTitle("decoding"), () => {
@@ -269,6 +283,13 @@ describe("bundle", () => {
         checkpoint: wire.inclusionProof.checkpoint.envelope,
       });
       expect(b.json).toBeInstanceOf(Map);
+    });
+
+    it("rejects a null inclusion proof hash", () => {
+      const wire = realCode.data.sigstore_bundle as Record<string, any>;
+      expect(() => parseBundle(mutated(wire, (w) => (w.verificationMaterial.tlogEntries[0].inclusionProof.hashes[0] = null)))).toThrow(
+        /hash is not a string/,
+      );
     });
 
     it("decodes a production bundle whose timestamp data is an empty record", () => {
@@ -550,6 +571,13 @@ describe("workflowIdentityPattern", () => {
   it("builds the documented pattern", () => {
     // `source` re-escapes '/' on some engines; compare without that.
     const source = workflowIdentityPattern("o/r", "w", "ref").source.replace(/\\\//g, "/");
-    expect(source).toBe("^https://github\\.com/o/r/\\.github/workflows/w@ref$");
+    expect(source).toBe("^https://github\\.com/o/r/\\.github/workflows/(?:w)@(?:ref)$");
+  });
+
+  it("keeps an alternation inside a fragment within the anchors", () => {
+    const pattern = workflowIdentityPattern("o/r", "w", "refs/tags/v1|refs/heads/main");
+    expect(pattern.test("https://github.com/o/r/.github/workflows/w@refs/heads/main")).toBe(true);
+    expect(pattern.test("https://github.com/x/y/.github/workflows/w@refs/heads/main")).toBe(false);
+    expect(workflowIdentityPattern("o/r", "w", "ref|.*").test("https://github.com/x/y/.github/workflows/w@ref")).toBe(false);
   });
 });

@@ -46,7 +46,7 @@ export async function keyHint(key: Uint8Array | CryptoKey): Promise<string> {
   return toBase64(await sha256(await exportP256(imported)));
 }
 
-/** Imports PEM-encoded P-256 public keys as pinned keys, deduplicated by hint. */
+/** Imports PEM-encoded P-256 public keys as pinned keys; a key that repeats rejects. */
 export async function pinnedKeys(pems: readonly string[]): Promise<PinnedKey[]> {
   const out: PinnedKey[] = [];
   const seen = new Set<string>();
@@ -61,7 +61,7 @@ export async function pinnedKeys(pems: readonly string[]): Promise<PinnedKey[]> 
     for (const spki of blocks) {
       const key = await importP256(spki);
       const hint = await keyHint(key);
-      if (seen.has(hint)) continue;
+      if (seen.has(hint)) throw new Error(`duplicate signing key ${hint}`);
       seen.add(hint);
       out.push({ hint, key });
     }
@@ -72,7 +72,7 @@ export async function pinnedKeys(pems: readonly string[]): Promise<PinnedKey[]> 
 
 /**
  * Verifies a key-signed DSSE bundle: the layout above, the key hint naming
- * one of `keys` (and the DSSE key id, if set, equal to it), every log entry's
+ * one of `keys` with an empty DSSE key id, every log entry's
  * body consistent with the envelope and its inclusion proof and checkpoint
  * valid for a log in `root`, and the DSSE signature over the payload. Returns
  * the hint of the key that verified.

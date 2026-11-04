@@ -78,8 +78,22 @@ const OID_P256 = "1.2.840.10045.3.1.7";
 const OID_P384 = "1.3.132.0.34";
 
 /** KeyUsage bit positions (bit 0 is the most significant bit of the first byte). */
+const KEY_USAGE_DIGITAL_SIGNATURE = 0;
+const KEY_USAGE_NON_REPUDIATION = 1;
 const KEY_USAGE_KEY_CERT_SIGN = 5;
 const KEY_USAGE_CRL_SIGN = 6;
+
+/**
+ * The critical extensions chain verification understands. Any other critical
+ * extension states a constraint this verifier cannot honour, so the
+ * certificate rejects.
+ */
+const UNDERSTOOD_CRITICAL_EXTENSIONS: ReadonlySet<string> = new Set([
+  OID_BASIC_CONSTRAINTS,
+  OID_KEY_USAGE,
+  "2.5.29.37", // extended key usage: checked by the consumers that constrain it
+  "2.5.29.17", // subject alternative name
+]);
 
 // ---------------------------------------------------------------- DER tree helpers
 
@@ -209,9 +223,14 @@ function commonName(name: DerElement): string | undefined {
 function parseExtensions(wrapper: DerElement): Extension[] {
   const inner = children(wrapper);
   if (inner.length !== 1) throw new X509Error("extensions must wrap one SEQUENCE");
+  return parseExtensionList(inner[0]);
+}
+
+/** Parses a SEQUENCE OF Extension: OID, optional critical flag (an explicit FALSE is not DER), OCTET STRING value; no duplicates. */
+export function parseExtensionList(list: DerElement): Extension[] {
   const out: Extension[] = [];
   const seen = new Set<string>();
-  for (const ext of expectSequence(inner[0], "extensions")) {
+  for (const ext of expectSequence(list, "extensions")) {
     const parts = expectSequence(ext, "extension");
     if (parts.length < 2 || parts.length > 3) throw new X509Error("extension must hold an OID, optional critical flag and value");
     const id = oid(parts[0]);
@@ -295,12 +314,15 @@ export function parseCertificate(der: Uint8Array): Certificate {
 
 // ---------------------------------------------------------------- signature verification
 
-type PublicKeyKind = { kind: "ec"; curve: "P-256" | "P-384" } | { kind: "rsa"; spki: Uint8Array };
+type PublicKeyKind = { kind: "ec"; curve: "P-256" | "P-384" } | { kind: "rsa"; spki: Uint8Array; pssOnly: boolean };
 
 /**
- * Classifies an SPKI by its algorithm. An RSA key labelled id-RSASSA-PSS is
- * relabelled rsaEncryption: the two carry the same RSAPublicKey, and WebCrypto
- * (Node and the browsers) accepts only the rsaEncryption label for import.
+ * Classifies an SPKI by its algorithm. An RSA key labelled id-RSASSA-PSS
+ * carries the same RSAPublicKey as one labelled rsaEncryption, which is the
+ * only label WebCrypto (Node and the browsers) imports; the key is relabelled
+ * for import and marked `pssOnly`, so it verifies RSA-PSS signatures only.
+ * Parameters on the PSS label would further constrain the key and are not
+ * supported.
  */
 function classifyKey(spki: Uint8Array): PublicKeyKind {
   const parts = expectSequence(decode(spki), "SubjectPublicKeyInfo");
@@ -318,12 +340,13 @@ function classifyKey(spki: Uint8Array): PublicKeyKind {
     }
     case OID_RSA_ENCRYPTION:
       if (alg[1] !== undefined && !isUniversal(alg[1], TAG.NULL)) throw new X509Error("RSA key parameters must be NULL");
-      return { kind: "rsa", spki };
+      return { kind: "rsa", spki, pssOnly: false };
     case OID_RSA_PSS: {
+      if (alg[1] !== undefined) throw new X509Error("RSA-PSS key parameters are not supported");
       const algId = concat(new Uint8Array([0x06, 0x09, 0x2a, 0x86, 0x48, 0x86, 0xf7, 0x0d, 0x01, 0x01, 0x01]), new Uint8Array([0x05, 0x00]));
       const algSeq = concat(new Uint8Array([0x30]), encodeLength(algId.length), algId);
       const body = concat(algSeq, parts[1].raw);
-      return { kind: "rsa", spki: concat(new Uint8Array([0x30]), encodeLength(body.length), body) };
+      return { kind: "rsa", spki: concat(new Uint8Array([0x30]), encodeLength(body.length), body), pssOnly: true };
     }
     default:
       throw new X509Error(`unsupported public key algorithm ${id}`);
@@ -376,7 +399,7 @@ export async function verifySignatureWith(
         return await crypto.subtle.verify({ name: "RSA-PSS", saltLength: 48 }, k, asBuffer(signature), asBuffer(data));
       }
       case "rsa-pkcs1-sha256": {
-        if (key.kind !== "rsa") return false;
+        if (key.kind !== "rsa" || key.pssOnly) return false;
         const k = await crypto.subtle.importKey("spki", asBuffer(key.spki), { name: "RSASSA-PKCS1-v1_5", hash: "SHA-256" }, false, [
           "verify",
         ]);
@@ -460,6 +483,17 @@ export function canSignRevocationLists(cert: Certificate): boolean {
   return usage === undefined || usage[KEY_USAGE_CRL_SIGN] === true;
 }
 
+/** Whether `cert` may sign data: digitalSignature or nonRepudiation when keyUsage is present. */
+export function canSignData(cert: Certificate): boolean {
+  const usage = keyUsage(cert);
+  return usage === undefined || usage[KEY_USAGE_DIGITAL_SIGNATURE] === true || usage[KEY_USAGE_NON_REPUDIATION] === true;
+}
+
+/** The OID of a critical extension chain verification does not understand, if any. */
+export function unsupportedCriticalExtension(cert: Certificate): string | undefined {
+  return cert.extensions.find((e) => e.critical && !UNDERSTOOD_CRITICAL_EXTENSIONS.has(e.oid))?.oid;
+}
+
 export function validAt(cert: Certificate, at: Date): boolean {
   const t = at.getTime();
   return cert.notBefore.getTime() <= t && t <= cert.notAfter.getTime();
@@ -472,8 +506,9 @@ function describe(cert: Certificate, index: number): string {
 /**
  * Verifies a chain leaf → … → root: each signature with the next
  * certificate's key, issuer/subject names matching byte for byte, every
- * certificate valid at `at`, and every issuing certificate (intermediates and
- * the root) asserting basicConstraints cA. The root must be one of `roots`.
+ * certificate valid at `at` and free of critical extensions this verifier
+ * does not understand, and every issuing certificate (intermediates and the
+ * root) asserting basicConstraints cA. The root must be one of `roots`.
  */
 export async function verifyChain(chain: readonly Certificate[], roots: readonly Certificate[], at: Date): Promise<void> {
   if (chain.length === 0) throw new X509Error("certificate chain is empty");
@@ -483,6 +518,8 @@ export async function verifyChain(chain: readonly Certificate[], roots: readonly
   for (let i = 0; i < chain.length; i++) {
     const cert = chain[i];
     if (!validAt(cert, at)) throw new X509Error(`${describe(cert, i)} is not valid at ${at.toISOString()}`);
+    const unsupported = unsupportedCriticalExtension(cert);
+    if (unsupported !== undefined) throw new X509Error(`${describe(cert, i)} carries unsupported critical extension ${unsupported}`);
     if (i === 0) continue;
     // Every certificate above the leaf issues the one below it.
     if (!canIssueCertificates(cert)) throw new X509Error(`${describe(cert, i)} is not a certificate authority`);

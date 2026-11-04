@@ -22,10 +22,12 @@ jobs:
         with:
           persist-credentials: false
 
+      # Pinned so a run tests one known set of vectors; bump deliberately.
       - name: Check out the conformance suite
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           repository: tinfoilsh/tinfoil-conformance
+          ref: def0622ee173a9fb7a2b5a93b44e691a22aff946 # tinfoilsh/tinfoil-conformance#23
           path: tinfoil-conformance
           persist-credentials: false
 

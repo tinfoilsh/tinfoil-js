@@ -99,11 +99,12 @@ export async function verifyCertificateBundle(
 /**
  * Builds the anchored SAN pattern `^https://github\.com/<repo>/\.github/workflows/<workflow>@<ref>$`.
  * `repo` is a literal and is escaped; `workflowPattern` and `refPattern` are
- * regular-expression fragments and are inserted as written.
+ * regular-expression fragments, each grouped so that an alternation inside
+ * one cannot escape the anchors around it.
  */
 export function workflowIdentityPattern(repo: string, workflowPattern: string, refPattern: string): RegExp {
   const literal = repo.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  return new RegExp(`^https://github\\.com/${literal}/\\.github/workflows/${workflowPattern}@${refPattern}$`);
+  return new RegExp(`^https://github\\.com/${literal}/\\.github/workflows/(?:${workflowPattern})@(?:${refPattern})$`);
 }
 
 const SHA256_HEX = /^[0-9a-fA-F]{64}$/;

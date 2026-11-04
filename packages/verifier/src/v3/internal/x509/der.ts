@@ -127,7 +127,9 @@ function checkOid(value: Uint8Array): void {
 }
 
 const UTC_TIME_RE = /^(\d{2})(\d{2})(\d{2})(\d{2})(\d{2})(\d{2})Z$/;
-const GENERALIZED_TIME_RE = /^(\d{4})(\d{2})(\d{2})(\d{2})(\d{2})(\d{2})Z$/;
+// GeneralizedTime may carry fractional seconds; DER requires the fraction to
+// omit trailing zeros, so a fraction is never empty and never ends in '0'.
+const GENERALIZED_TIME_RE = /^(\d{4})(\d{2})(\d{2})(\d{2})(\d{2})(\d{2})(?:\.(\d+))?Z$/;
 
 function ascii(value: Uint8Array): string {
   let s = "";
@@ -138,15 +140,25 @@ function ascii(value: Uint8Array): string {
   return s;
 }
 
-/** Parses a time value, requiring whole seconds, the 'Z' suffix and a real calendar date. */
-function parseTime(tag: number, value: Uint8Array): Date {
+/**
+ * Parses a time value: the 'Z' suffix, a real calendar date, and whole
+ * seconds unless `fractionalSeconds` admits a DER fraction on a
+ * GeneralizedTime (kept to millisecond precision).
+ */
+function parseTime(tag: number, value: Uint8Array, fractionalSeconds: boolean): Date {
   const text = ascii(value);
   const m = tag === TAG.UTC_TIME ? UTC_TIME_RE.exec(text) : GENERALIZED_TIME_RE.exec(text);
-  if (!m) throw new DerError("time must be whole seconds in UTC with a 'Z' suffix");
+  if (!m) throw new DerError("time must be UTC with a 'Z' suffix");
+  const fraction = m[7];
+  if (fraction !== undefined) {
+    if (!fractionalSeconds) throw new DerError("time must be whole seconds");
+    if (fraction.endsWith("0")) throw new DerError("fractional seconds must omit trailing zeros");
+  }
   let year = Number(m[1]);
   if (tag === TAG.UTC_TIME) year += year >= 50 ? 1900 : 2000;
   const [month, day, hour, minute, second] = [m[2], m[3], m[4], m[5], m[6]].map(Number);
-  const ms = Date.UTC(year, month - 1, day, hour, minute, second);
+  const millis = fraction === undefined ? 0 : Number(`${fraction}00`.slice(0, 3));
+  const ms = Date.UTC(year, month - 1, day, hour, minute, second, millis);
   const d = new Date(ms);
   // Date.UTC rolls over out-of-range fields; a valid date reads back unchanged.
   if (
@@ -162,7 +174,13 @@ function parseTime(tag: number, value: Uint8Array): Date {
   return d;
 }
 
+/**
+ * Content checks for universal primitives. A primitive of another class is an
+ * implicitly tagged value whose underlying type only its schema knows, so it
+ * is left to the consumer.
+ */
 function checkPrimitive(h: Header, value: Uint8Array): void {
+  if (h.tagClass !== CLASS_UNIVERSAL) return;
   switch (h.tag) {
     case TAG.BOOLEAN:
       checkBoolean(value);
@@ -182,7 +200,7 @@ function checkPrimitive(h: Header, value: Uint8Array): void {
       break;
     case TAG.UTC_TIME:
     case TAG.GENERALIZED_TIME:
-      parseTime(h.tag, value);
+      parseTime(h.tag, value, true);
       break;
     default:
       break;
@@ -287,12 +305,15 @@ export function oid(e: DerElement): string {
   return [...lead, ...arcs.slice(1)].join(".");
 }
 
-/** A UTCTime or GeneralizedTime; both require the 'Z' suffix. */
-export function time(e: DerElement): Date {
+/**
+ * A UTCTime or GeneralizedTime; both require the 'Z' suffix. Whole seconds
+ * only, unless `fractionalSeconds` admits a GeneralizedTime fraction.
+ */
+export function time(e: DerElement, options: { fractionalSeconds?: boolean } = {}): Date {
   if (e.tagClass !== CLASS_UNIVERSAL || e.constructed || (e.tag !== TAG.UTC_TIME && e.tag !== TAG.GENERALIZED_TIME)) {
     throw new DerError("expected UTCTime or GeneralizedTime");
   }
-  return parseTime(e.tag, e.value);
+  return parseTime(e.tag, e.value, options.fractionalSeconds === true);
 }
 
 /** A BIT STRING's bytes; the unused-bits count must be 0. */

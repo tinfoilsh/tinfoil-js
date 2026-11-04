@@ -25,9 +25,14 @@ export const CONFORMANCE_ENV = "TINFOIL_CONFORMANCE_FIXTURES";
 const PACKAGE_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
 const DEFAULT_DIR = resolve(PACKAGE_ROOT, "../../../tinfoil-conformance/vectors/v3");
 
+/** The directory the variable names (which must exist: a wrong path fails loudly rather than skipping every vector suite), else the default when present. */
 function resolveDir(): string | undefined {
   const env = process.env[CONFORMANCE_ENV];
-  if (env !== undefined && env !== "") return resolve(env);
+  if (env !== undefined && env !== "") {
+    const dir = resolve(env);
+    if (!existsSync(dir)) throw new Error(`${CONFORMANCE_ENV}=${env} names no directory`);
+    return dir;
+  }
   return existsSync(DEFAULT_DIR) ? DEFAULT_DIR : undefined;
 }
 
