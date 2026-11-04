@@ -32,6 +32,11 @@ const EXPORTS = [
   "ConfigurationError",
   "NetworkError",
   "AttestationError",
+  // session recovery
+  "sessionRecoveryToken",
+  "serializeSessionRecoveryToken",
+  "deserializeSessionRecoveryToken",
+  "decryptResponseWithToken",
   // version
   "SDK_VERSION",
   // OpenAI helpers and errors
@@ -71,6 +76,7 @@ type TypeExports = [
   surface.ReplicaVerification,
   surface.OpenAIOptions,
   surface.ErrorCategory,
+  surface.SessionRecoveryToken,
   surface.Uploadable,
 ];
 const typeExports: TypeExports | undefined = undefined;
