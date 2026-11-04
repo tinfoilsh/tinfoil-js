@@ -32,6 +32,7 @@ import {
 } from "../../src/v3/internal/quote/tdx/pcs.js";
 import { parseRfc3339 } from "../../src/v3/internal/rfc3339.js";
 import { parseCertificate } from "../../src/v3/internal/x509/certificate.js";
+import { pemBlocks } from "../../src/v3/internal/x509/der.js";
 import {
   conformanceAvailable,
   decodeDocument,
@@ -477,6 +478,15 @@ describe.skipIf(withoutVectors)(vectorsTitle("authenticateTdx"), () => {
     await expect(authenticate(happyQuote, without(/pckcrl/))).rejects.toThrow(/no captured response for the PCK CRL/);
     await expect(authenticate(happyQuote, without(/IntelSGXRootCA/))).rejects.toThrow(/no captured response for the root CA CRL/);
     await expect(authenticate(happyQuote, [])).rejects.toThrow(/no captured response/);
+  });
+
+  it("looks the root CA CRL up by the trusted root's own distribution point", async () => {
+    const [root] = pemBlocks(new TextDecoder().decode(rootOf(happy)), "CERTIFICATE").map(parseCertificate);
+    const [uri] = crlDistributionPointUris(root);
+    expect(uri).toMatch(/IntelSGXRootCA/);
+    // A capture under any other URL does not stand in for it, whatever the collateral's issuer chains point at.
+    const moved = happyResponses.map((r) => (r.url === uri ? { ...r, url: uri.replace("IntelSGXRootCA", "Elsewhere") } : r));
+    await expect(authenticate(happyQuote, moved)).rejects.toThrow(new RegExp(`no captured response for the root CA CRL \\(${uri.replace(/[.?+]/g, "\\$&")}\\)`));
   });
 
   it("rejects a tampered quote body, signature, QE report signature or key binding", async () => {

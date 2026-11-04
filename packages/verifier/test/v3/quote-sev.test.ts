@@ -134,6 +134,17 @@ describe("sev report", () => {
     expect(() => productLine(parseReport(r))).toThrow(/no CPUID product identity \(report version 2, want 3\+\)/);
   });
 
+  it("rejects a report version outside 2 to 5", () => {
+    for (const version of [0, 1, 6, 0xffffffff]) {
+      const r = blankReport();
+      new DataView(r.buffer).setUint32(0x00, version, true);
+      expect(() => parseReport(r)).toThrow(new RegExp(`unsupported SEV-SNP report version ${version} \\(want 2 to 5\\)`));
+    }
+    const v5 = blankReport();
+    new DataView(v5.buffer).setUint32(0x00, 5, true);
+    expect(parseReport(v5).version).toBe(5);
+  });
+
   it("requires guest policy bit 17 and clear bits 63:26", () => {
     expect(() => parseGuestPolicy(0n)).toThrow(/bit 17 is reserved and must be 1/);
     expect(() => parseGuestPolicy((1n << 17n) | (1n << 26n))).toThrow(/63:26 are reserved/);
