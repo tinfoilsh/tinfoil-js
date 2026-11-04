@@ -26,15 +26,19 @@ export interface RequestShape {
   readonly url: URL;
   readonly method: string;
   readonly headers: Headers;
+  /** Whether the call carries a body: in its init, or in a Request input when the init gives none. */
+  readonly hasBody: boolean;
 }
 
 /** The shape of the request a fetch call describes. */
 export function shapeOf(input: string | URL | Request, init?: RequestInit): RequestShape {
   const request = input instanceof Request ? input : undefined;
+  const hasBody = init?.body !== undefined ? init.body !== null : request !== undefined && request.body !== null;
   return {
     url: requestURL(input),
     method: (init?.method ?? request?.method ?? "GET").toUpperCase(),
     headers: new Headers(init?.headers ?? request?.headers),
+    hasBody,
   };
 }
 
