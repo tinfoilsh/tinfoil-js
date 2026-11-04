@@ -95,23 +95,39 @@ export interface RouterOptions {
   readonly signal?: AbortSignal;
 }
 
-/** Pins a model to `tinfoilsh/name[@tag][@sha256:digest]`. */
+/**
+ * Pins a model to `tinfoilsh/name[@tag][@sha256:digest]`.
+ *
+ * @experimental The gateway route is new; this API may change without a major version.
+ */
 export interface ModelPin {
   readonly repo: string;
   /** The pin's policy: undefined inherits {@link GatewayOptions.verifier}. */
   readonly verifier?: Verifier;
 }
 
-/** One model's untrusted repository and replica hosts from a gateway catalog. */
+/**
+ * One model's untrusted repository and replica hosts from a gateway catalog.
+ *
+ * @experimental The gateway route is new; this API may change without a major version.
+ */
 export interface CatalogEntry {
   readonly repo: string;
   readonly hosts: readonly string[];
 }
 
-/** Model name → untrusted repository and replica entry. */
+/**
+ * Model name → untrusted repository and replica entry.
+ *
+ * @experimental The gateway route is new; this API may change without a major version.
+ */
 export type Catalog = ReadonlyMap<string, CatalogEntry>;
 
-/** A gateway replica's last successful verification. */
+/**
+ * A gateway replica's last successful verification.
+ *
+ * @experimental The gateway route is new; this API may change without a major version.
+ */
 export interface ReplicaVerification {
   readonly host: string;
   readonly models: readonly string[];
@@ -120,7 +136,11 @@ export interface ReplicaVerification {
   readonly verification: Verification;
 }
 
-/** Configures a {@link GatewayHTTPClient}. */
+/**
+ * Configures a {@link GatewayHTTPClient}.
+ *
+ * @experimental The gateway route is new; this API may change without a major version.
+ */
 export interface GatewayOptions {
   /** Pins models to repositories. With `pinnedModelsOnly`, only pinned models are served, which requires at least one pin. */
   readonly modelPins?: ReadonlyMap<string, ModelPin>;

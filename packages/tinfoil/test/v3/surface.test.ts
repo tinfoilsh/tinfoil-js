@@ -95,7 +95,31 @@ function countingFetch(): { fetch: Fetch; calls: number } {
   return counter;
 }
 
+/** The exports whose API may change without a major version; each must say so in its doc comment. */
+const EXPERIMENTAL_EXPORTS: Record<string, string[]> = {
+  "src/v3/gateway-client.ts": ["GatewayHTTPClient", "fetchCatalog"],
+  "src/v3/openai-client.ts": ["GatewayOpenAIClient"],
+  "src/v3/options.ts": ["GatewayOptions", "ModelPin", "CatalogEntry", "Catalog", "ReplicaVerification"],
+};
+
+/** The doc comment that ends right before the export of `name` in `source`, or undefined when there is none. */
+function docCommentOf(source: string, name: string): string | undefined {
+  const declaration = new RegExp(`\\n(?:/\\*\\*[\\s\\S]*?\\*/\\n)?export (?:async )?(?:class|function|interface|type|const) ${name}\\b`);
+  const match = declaration.exec(source);
+  return match?.[0].includes("/**") ? match[0] : undefined;
+}
+
 describe("public surface", () => {
+  it("documents the experimental exports as such", () => {
+    for (const [file, names] of Object.entries(EXPERIMENTAL_EXPORTS)) {
+      const source = readFileSync(new URL(`../../${file}`, import.meta.url), "utf8");
+      for (const name of names) {
+        expect(docCommentOf(source, name), `${name} in ${file}`).toMatch(/@experimental/);
+      }
+    }
+    expect(Object.values(EXPERIMENTAL_EXPORTS).flat().filter((n) => n in surface).sort()).toEqual(["GatewayHTTPClient", "GatewayOpenAIClient", "fetchCatalog"]);
+  });
+
   it("exports exactly the specified names from both entries", () => {
     expect(Object.keys(surface).sort()).toEqual(EXPORTS);
     expect(Object.keys(browser).sort()).toEqual(EXPORTS);

@@ -7,6 +7,8 @@
  * engine: the secret never leaves the client. The engine gets a salt
  * derived from it, and the gateway gets a cache-prefix key over the first
  * turn, which keeps a conversation on the same replica.
+ *
+ * @experimental The gateway route is new; this API may change without a major version.
  */
 import { ConfigurationError } from "../../errors.js";
 import { appendMember, firstArrayElement, objectMembers, pathEligible, removeMember, USER_CACHE_SECRET_FIELD } from "../cachesecret.js";
@@ -34,6 +36,8 @@ export interface Prepared {
  * its `model` field and, on a prefix-caching endpoint, its cache scope
  * applied; a multipart upload with the model header set from its `model`
  * part. Other requests pass through. Reading a body makes it replayable.
+ *
+ * @experimental The gateway route is new; this API may change without a major version.
  */
 export async function prepare(shape: RequestShape, headers: Headers, body: PreparedBody, secret: string): Promise<Prepared> {
   const replayable = !(body instanceof ReadableStream);
@@ -68,6 +72,8 @@ export async function prepare(shape: RequestShape, headers: Headers, body: Prepa
  * else the client's, becomes a `cache_salt` member, replacing the secret
  * member, and the prompt's first turn becomes the cache-prefix header. With
  * no secret, the body passes unchanged.
+ *
+ * @experimental The gateway route is new; this API may change without a major version.
  */
 export async function scopeCache(headers: Headers, text: string, clientSecret: string): Promise<string> {
   const members = objectMembers(text);
@@ -118,7 +124,11 @@ function promptHead(text: string, members: readonly { key: string; valueStart: n
   return undefined;
 }
 
-/** The credential of a Bearer authorization, whose scheme is case-insensitive, and "" for any other scheme. */
+/**
+ * The credential of a Bearer authorization, whose scheme is case-insensitive, and "" for any other scheme.
+ *
+ * @experimental The gateway route is new; this API may change without a major version.
+ */
 export function bearerCredential(authorization: string): string {
   const trimmed = authorization.trim();
   const space = trimmed.indexOf(" ");
@@ -160,7 +170,11 @@ async function prepareMultipart(headers: Headers, body: BodyInit, boundary: stri
   return { headers, body: bytes, replayable: true };
 }
 
-/** The value of the one non-empty `model` field in a multipart body; a {@link ConfigurationError} otherwise. */
+/**
+ * The value of the one non-empty `model` field in a multipart body; a {@link ConfigurationError} otherwise.
+ *
+ * @experimental The gateway route is new; this API may change without a major version.
+ */
 export function multipartModel(bytes: Uint8Array, boundary: string): string {
   // Field values are UTF-8; file parts are skipped by their disposition.
   const text = new TextDecoder("latin1").decode(bytes);

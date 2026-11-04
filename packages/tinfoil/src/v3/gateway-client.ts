@@ -4,8 +4,7 @@
  * transport: the gateway sees the method, URL and headers, and protocol
  * upgrades are refused.
  *
- * Experimental: the gateway route is new, and this API may change or be
- * removed in a later release.
+ * @experimental The gateway route is new; this API may change without a major version.
  */
 import type { Verification } from "@tinfoilsh/verifier/v3";
 import type { EnclaveClientSeams } from "./enclave-client.js";
@@ -17,9 +16,18 @@ import { GatewayTransport } from "./internal/gateway/transport.js";
 import { withOriginRestriction } from "./internal/transport/origin.js";
 import type { Catalog, Fetch, GatewayOptions, ReplicaVerification } from "./options.js";
 
+/**
+ * Tinfoil's gateway, used when no `url` option is given.
+ *
+ * @experimental The gateway route is new; this API may change without a major version.
+ */
 export const DEFAULT_GATEWAY_URL = "https://inference-gateway.tinfoil.sh/v1/";
 
-/** Seams for tests: the enclave client's, the catalog fetch, and the secret resolution. */
+/**
+ * Seams for tests: the enclave client's, the catalog fetch, and the secret resolution.
+ *
+ * @experimental The gateway route is new; this API may change without a major version.
+ */
 export interface GatewayClientSeams extends Omit<EnclaveClientSeams, "tls"> {
   readonly catalogFetch?: Fetch;
   readonly resolveSecret?: (explicit: string | undefined) => Promise<string>;
@@ -28,7 +36,11 @@ export interface GatewayClientSeams extends Omit<EnclaveClientSeams, "tls"> {
 /** Marks construction by this module's factory; the constructor refuses anything else. */
 const TOKEN = Symbol("GatewayHTTPClient");
 
-/** The factory with its test seams; {@link GatewayHTTPClient.create} is this without them. */
+/**
+ * The factory with its test seams; {@link GatewayHTTPClient.create} is this without them.
+ *
+ * @experimental The gateway route is new; this API may change without a major version.
+ */
 export async function createGatewayHTTPClient(options: GatewayOptions, seams: GatewayClientSeams): Promise<GatewayHTTPClient> {
   const baseURL = options.url === undefined || options.url === "" ? DEFAULT_GATEWAY_URL : options.url;
   let base: URL;
@@ -60,6 +72,12 @@ export async function createGatewayHTTPClient(options: GatewayOptions, seams: Ga
   return client;
 }
 
+/**
+ * The HTTP client for Tinfoil inference through the gateway; see the module
+ * header for what it protects.
+ *
+ * @experimental The gateway route is new; this API may change without a major version.
+ */
 export class GatewayHTTPClient {
   /** As {@link EnclaveHTTPClient.fetch}. */
   readonly fetch: Fetch;
@@ -112,6 +130,8 @@ export class GatewayHTTPClient {
  * Reads the catalog of the gateway at `host`, keeping only models with
  * replicas of a bare `tinfoilsh/` repository, without a tag or digest. The
  * catalog is untrusted: replicas are verified when they are used.
+ *
+ * @experimental The gateway route is new; this API may change without a major version.
  */
 export function fetchCatalog(host: string, signal?: AbortSignal): Promise<Catalog> {
   return fetchCatalogWith(host, (input, init) => fetch(input, init), signal);

@@ -2,20 +2,30 @@
  * Which repository a model's replicas are verified against, and under which
  * policy: a pin the caller set, or the untrusted catalog's repository under
  * the default policy. Pinned-only mode serves nothing else.
+ *
+ * @experimental The gateway route is new; this API may change without a major version.
  */
 import { parseReference, Verifier } from "@tinfoilsh/verifier/v3";
 import { AttestationError, ConfigurationError, messageOf } from "../../errors.js";
 import type { Catalog, ModelPin } from "../../options.js";
 import { TRUSTED_REPO_OWNER, trusted } from "./catalog.js";
 
-/** A replica to verify: its host, the reference it is verified against, and the model whose pin set the reference, if any. */
+/**
+ * A replica to verify: its host, the reference it is verified against, and the model whose pin set the reference, if any.
+ *
+ * @experimental The gateway route is new; this API may change without a major version.
+ */
 export interface Replica {
   readonly host: string;
   readonly ref: string;
   readonly model: string;
 }
 
-/** The key under which a replica's transport is kept. */
+/**
+ * The key under which a replica's transport is kept.
+ *
+ * @experimental The gateway route is new; this API may change without a major version.
+ */
 export function replicaKey(r: Replica): string {
   return `${r.host}\0${r.ref}\0${r.model}`;
 }
@@ -25,6 +35,7 @@ interface ResolvedPin {
   readonly verifier: Verifier;
 }
 
+/** @experimental The gateway route is new; this API may change without a major version. */
 export class GatewayPolicy {
   readonly #pins: ReadonlyMap<string, ResolvedPin>;
   readonly #pinnedOnly: boolean;

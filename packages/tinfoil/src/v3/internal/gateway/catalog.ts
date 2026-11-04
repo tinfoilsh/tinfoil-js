@@ -3,6 +3,8 @@
  * which replica hosts. It is untrusted; replicas are verified when used.
  * A client fetches it on first use and refreshes it on use every ten
  * seconds, which is how often the gateway reloads its own configuration.
+ *
+ * @experimental The gateway route is new; this API may change without a major version.
  */
 import { parseReference } from "@tinfoilsh/verifier/v3";
 import { messageOf, NetworkError, TinfoilError } from "../../errors.js";
@@ -20,6 +22,8 @@ export const TRUSTED_REPO_OWNER = "tinfoilsh/";
  * models with replicas of a bare `tinfoilsh/` repository, without a tag or
  * digest. Anything but a 200 response, or a body over the size cap or not
  * a JSON object of entries, is a {@link NetworkError}.
+ *
+ * @experimental The gateway route is new; this API may change without a major version.
  */
 export async function fetchCatalogWith(host: string, fetchImpl: Fetch, signal?: AbortSignal): Promise<Catalog> {
   const url = `https://${host}${CATALOG_PATH}`;
@@ -44,7 +48,11 @@ export async function fetchCatalogWith(host: string, fetchImpl: Fetch, signal?: 
   return parseCatalog(body);
 }
 
-/** Decodes a catalog's JSON, keeping the trusted entries; a malformed document is a {@link NetworkError}. */
+/**
+ * Decodes a catalog's JSON, keeping the trusted entries; a malformed document is a {@link NetworkError}.
+ *
+ * @experimental The gateway route is new; this API may change without a major version.
+ */
 export function parseCatalog(body: Uint8Array): Catalog {
   let decoded: unknown;
   try {
@@ -73,7 +81,11 @@ function catalogEntry(value: unknown): CatalogEntry | undefined {
   return { repo: (repo as string | undefined) ?? "", hosts: Object.freeze([...((hosts as string[] | undefined) ?? [])]) };
 }
 
-/** Whether an entry names a bare repository of the trusted owner and at least one replica. */
+/**
+ * Whether an entry names a bare repository of the trusted owner and at least one replica.
+ *
+ * @experimental The gateway route is new; this API may change without a major version.
+ */
 export function trusted(entry: CatalogEntry | undefined): entry is CatalogEntry {
   if (entry === undefined) return false;
   try {
@@ -90,6 +102,8 @@ export function trusted(entry: CatalogEntry | undefined): entry is CatalogEntry 
  * callers wait for it and a failure is retried on the next use. After that,
  * callers never wait: the stale catalog is returned while a refresh runs,
  * and a failed refresh keeps it for another interval.
+ *
+ * @experimental The gateway route is new; this API may change without a major version.
  */
 export class CatalogCache {
   readonly #fetch: (signal?: AbortSignal) => Promise<Catalog>;

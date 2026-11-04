@@ -7,6 +7,8 @@
  * replica across requests, and a gateway that routes a request elsewhere
  * answers 412 naming the replica it chose, which the request follows after
  * verifying it.
+ *
+ * @experimental The gateway route is new; this API may change without a major version.
  */
 import type { Verification } from "@tinfoilsh/verifier/v3";
 import { ConfigurationError, messageOf, NetworkError, TinfoilError } from "../../errors.js";
@@ -24,6 +26,7 @@ export const SEAL_HEADER = "X-Tinfoil-Seal";
 export const MAX_SEAL_REDIRECTS = 3;
 export const MAX_REROUTED = 1024;
 
+/** @experimental The gateway route is new; this API may change without a major version. */
 export interface GatewayTransportConfig {
   /** Where requests are sent, and the gateway host that attestation is fetched through. */
   readonly baseURL: string;
@@ -50,6 +53,7 @@ interface ReplicaTransport {
   readonly models: Set<string>;
 }
 
+/** @experimental The gateway route is new; this API may change without a major version. */
 export class GatewayTransport {
   readonly #config: GatewayTransportConfig;
   readonly #catalog: (signal?: AbortSignal) => Promise<Catalog>;
@@ -204,12 +208,20 @@ export class GatewayTransport {
   }
 }
 
-/** What a replica's requests go through around `keyed`, from the inside out: the proxy header, then one replay after a key rejection. */
+/**
+ * What a replica's requests go through around `keyed`, from the inside out: the proxy header, then one replay after a key rejection.
+ *
+ * @experimental The gateway route is new; this API may change without a major version.
+ */
 export function replicaChain(keyed: Fetch, host: string, baseURL: string): Fetch {
   return withReplay(withEnclaveURL(keyed, host, baseURL), isKeyRejection);
 }
 
-/** Orders hosts by rendezvous score for a cache prefix, with `first` moved to the front, or randomly without a prefix. */
+/**
+ * Orders hosts by rendezvous score for a cache prefix, with `first` moved to the front, or randomly without a prefix.
+ *
+ * @experimental The gateway route is new; this API may change without a major version.
+ */
 export async function rank(hosts: readonly string[], prefix: string, first: string | undefined): Promise<string[]> {
   const ranked = [...hosts];
   if (prefix === "") {

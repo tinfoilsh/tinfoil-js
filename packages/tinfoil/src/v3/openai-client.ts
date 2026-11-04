@@ -194,7 +194,11 @@ export class RouterOpenAIClient extends OpenAI {
   }
 }
 
-/** The gateway OpenAI factory with its test seams; {@link GatewayOpenAIClient.create} is this without them. */
+/**
+ * The gateway OpenAI factory with its test seams; {@link GatewayOpenAIClient.create} is this without them.
+ *
+ * @experimental The gateway route is new; this API may change without a major version.
+ */
 export async function createGatewayOpenAIClient(options: GatewayOptions, openaiOptions: OpenAIOptions, seams: GatewayClientSeams): Promise<GatewayOpenAIClient> {
   const httpClient = await createGatewayHTTPClient(options, seams);
   return new GatewayOpenAIClient(TOKEN, httpClient, openaiOptions);
@@ -204,8 +208,7 @@ export async function createGatewayOpenAIClient(options: GatewayOptions, openaiO
  * An OpenAI client whose requests go through a {@link GatewayHTTPClient}, to
  * the gateway's URL.
  *
- * Experimental: the gateway route is new, and this API may change or be
- * removed in a later release.
+ * @experimental The gateway route is new; this API may change without a major version.
  */
 export class GatewayOpenAIClient extends OpenAI {
   readonly #httpClient: GatewayHTTPClient;
