@@ -9,11 +9,11 @@
  */
 import type { Verification } from "@tinfoilsh/verifier/v3";
 import { notImplemented } from "./internal/not-implemented.js";
-import type { Catalog, GatewayOptions, ReplicaVerification } from "./options.js";
+import type { Catalog, Fetch, GatewayOptions, ReplicaVerification } from "./options.js";
 
 export class GatewayHTTPClient {
   /** As {@link EnclaveHTTPClient.fetch}. */
-  readonly fetch: typeof fetch;
+  readonly fetch: Fetch;
 
   private constructor() {
     this.fetch = (): Promise<Response> => notImplemented("GatewayHTTPClient.fetch");

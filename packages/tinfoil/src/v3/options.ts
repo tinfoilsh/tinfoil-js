@@ -6,6 +6,12 @@
 import type { Verification, Verifier } from "@tinfoilsh/verifier/v3";
 
 /**
+ * A client's `fetch`: the standard signature, bound to the client's attested
+ * transport, so it can be handed to any library that takes a `fetch`.
+ */
+export type Fetch = (input: string | URL | Request, init?: RequestInit) => Promise<Response>;
+
+/**
  * How a client protects its traffic to an enclave.
  *
  * - `"tls"` pins each connection to the attested TLS key. It protects the

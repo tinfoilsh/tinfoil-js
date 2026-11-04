@@ -6,11 +6,11 @@
  */
 import type { Verification } from "@tinfoilsh/verifier/v3";
 import { notImplemented } from "./internal/not-implemented.js";
-import type { RouterOptions } from "./options.js";
+import type { Fetch, RouterOptions } from "./options.js";
 
 export class RouterHTTPClient {
   /** As {@link EnclaveHTTPClient.fetch}. */
-  readonly fetch: typeof fetch;
+  readonly fetch: Fetch;
 
   private constructor() {
     this.fetch = (): Promise<Response> => notImplemented("RouterHTTPClient.fetch");

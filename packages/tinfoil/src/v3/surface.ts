@@ -9,6 +9,7 @@ export { GatewayHTTPClient, fetchCatalog } from "./gateway-client.js";
 export { TinfoilClient, createClient, EnclaveOpenAIClient, RouterOpenAIClient, GatewayOpenAIClient, type OpenAIOptions } from "./openai-client.js";
 export { TinfoilError, ConfigurationError, NetworkError, AttestationError, type ErrorCategory } from "./errors.js";
 export type {
+  Fetch,
   TransportMode,
   VerificationCheck,
   EnclaveOptions,

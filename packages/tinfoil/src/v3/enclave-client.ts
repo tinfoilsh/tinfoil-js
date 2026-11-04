@@ -6,7 +6,7 @@
  */
 import type { Verification } from "@tinfoilsh/verifier/v3";
 import { notImplemented } from "./internal/not-implemented.js";
-import type { EnclaveOptions } from "./options.js";
+import type { EnclaveOptions, Fetch } from "./options.js";
 
 export class EnclaveHTTPClient {
   /**
@@ -14,7 +14,7 @@ export class EnclaveHTTPClient {
    * passed as a `fetch` implementation. A request to another origin is a
    * {@link ConfigurationError}.
    */
-  readonly fetch: typeof fetch;
+  readonly fetch: Fetch;
 
   private constructor() {
     this.fetch = (): Promise<Response> => notImplemented("EnclaveHTTPClient.fetch");

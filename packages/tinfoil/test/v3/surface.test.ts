@@ -55,6 +55,7 @@ const OPENAI_CLIENT_METHODS = ["httpClient"];
 
 /** The type-only exports, pinned under the test typecheck: a removed or renamed type fails compilation here. */
 type TypeExports = [
+  surface.Fetch,
   surface.TransportMode,
   surface.VerificationCheck,
   surface.EnclaveOptions,
