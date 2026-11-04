@@ -1,8 +1,9 @@
 /**
  * OpenAI clients over the attested HTTP clients. Each applies the caller's
  * OpenAI options first, then sets `fetch` and `baseURL` so the options can't
- * replace them; a per-request `fetch` option still bypasses the attested
- * client and its protections.
+ * replace them. Per-request `fetchOptions` are passed through to the attested
+ * `fetch` and can't bypass it; only a separately constructed OpenAI client
+ * sends requests outside the attested client's protections.
  */
 import OpenAI, { type ClientOptions } from "openai";
 import { EnclaveHTTPClient } from "./enclave-client.js";

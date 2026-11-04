@@ -3,10 +3,11 @@
   "compilerOptions": {
     "noEmit": true,
     "lib": ["ES2021", "DOM"],
+    "types": ["node", "bun"],
     "declaration": false,
     "declarationMap": false,
     "sourceMap": false
   },
-  "include": ["src/v3/**/*", "src/version.ts", "test/v3/**/*.test.ts"],
+  "include": ["src/v3/**/*", "src/version.ts", "test/v3/**/*"],
   "exclude": ["node_modules", "dist"]
 }
