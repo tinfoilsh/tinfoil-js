@@ -560,7 +560,6 @@ describe("GatewayTransport", () => {
   });
 
   it("returns the caller's own abort when it gives up during a reroute", async () => {
-    const order = await rank(HOSTS, "", undefined);
     const controller = new AbortController();
     const g = gateway((seal) => {
       controller.abort(new Error("gave up mid-reroute"));
@@ -570,7 +569,6 @@ describe("GatewayTransport", () => {
     const pending = t.fetch("https://gateway.example/v1/chat/completions", { method: "POST", body: '{"model":"test-model"}', headers: { "content-type": "application/json" }, signal: controller.signal });
     await expect(pending).rejects.toThrow(/gave up mid-reroute/);
     await expect(pending).rejects.not.toBeInstanceOf(ConfigurationError);
-    void order;
   });
 
   it("honours a Request's own signal before verifying and while sending", async () => {

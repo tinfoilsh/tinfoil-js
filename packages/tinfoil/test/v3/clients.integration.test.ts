@@ -21,14 +21,19 @@ const MODEL = "gpt-oss-120b";
 const GATEWAY_HOST = "inference-gateway.tinfoil.sh";
 const apiKey = process.env.TINFOIL_API_KEY ?? "";
 
-/** Completes one chat through `ai`, checking the reply's shape. */
+/**
+ * Completes one chat through `ai`, checking the reply's shape. A reasoning
+ * model may put its whole answer in a reasoning field and finish with empty
+ * content, so a finished reply must carry text in either.
+ */
 export async function completeChat(ai: OpenAI, model = MODEL): Promise<void> {
   const reply = await ai.chat.completions.create({ model, messages: [{ role: "user", content: "Say the single word: pong" }], max_tokens: 512 });
   expect(reply.choices.length).toBeGreaterThan(0);
   const choice = reply.choices[0]!;
   expect(choice.message.role).toBe("assistant");
   expect(["stop", "length"]).toContain(choice.finish_reason);
-  if (choice.finish_reason === "stop") expect(choice.message.content).toBeTruthy();
+  const message = choice.message as { content?: string | null; reasoning?: string | null; reasoning_content?: string | null };
+  if (choice.finish_reason === "stop") expect(message.content || message.reasoning || message.reasoning_content).toBeTruthy();
 }
 
 /** Streams one chat through `ai`, checking that chunks arrive before the final one and that it is terminal. */
