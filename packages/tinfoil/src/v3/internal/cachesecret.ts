@@ -255,6 +255,11 @@ export function appendMember(raw: string, members: readonly Member[], key: strin
   return `${raw.slice(0, end)}${members.length > 0 ? "," : ""}${JSON.stringify(key)}:${valueJSON}${raw.slice(end)}`;
 }
 
+/** `raw` with `member`'s value replaced by `valueJSON`. */
+export function replaceMember(raw: string, member: Member, valueJSON: string): string {
+  return `${raw.slice(0, member.valueStart)}${valueJSON}${raw.slice(member.valueEnd)}`;
+}
+
 /** `raw` without `member`, and without the comma that separated it. */
 export function removeMember(raw: string, members: readonly Member[], member: Member): string {
   const index = members.indexOf(member);

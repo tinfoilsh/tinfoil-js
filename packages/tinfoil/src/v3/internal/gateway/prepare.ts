@@ -11,13 +11,14 @@
  * @experimental The gateway route is new; this API may change without a major version.
  */
 import { ConfigurationError } from "../../errors.js";
-import { appendMember, firstArrayElement, objectMembers, pathEligible, removeMember, USER_CACHE_SECRET_FIELD } from "../cachesecret.js";
+import { appendMember, firstArrayElement, objectMembers, pathEligible, removeMember, replaceMember, USER_CACHE_SECRET_FIELD } from "../cachesecret.js";
 import type { RequestShape } from "../transport/transport.js";
 
 export const MODEL_HEADER = "X-Tinfoil-Model";
 export const CACHE_PREFIX_HEADER = "X-Tinfoil-Cache-Prefix";
 export const CACHE_SALT_FIELD = "cache_salt";
-export const MAX_MULTIPART_BODY_BYTES = 64 << 20;
+/** The most of a JSON body or a multipart upload that is read to route it. */
+export const MAX_BODY_BYTES = 64 << 20;
 const CACHE_SALT_DOMAIN_TAG = "tinfoil/client-cache-salt/v2";
 const CACHE_ROUTE_DOMAIN_TAG = "tinfoil/client-cache-route/v2";
 
@@ -35,21 +36,27 @@ export interface Prepared {
  * The headers and body to send: a JSON body with the model header set from
  * its `model` field and, on a prefix-caching endpoint, its cache scope
  * applied; a multipart upload with the model header set from its `model`
- * part. Other requests pass through. Reading a body makes it replayable.
+ * part. A request that already names its model and needs no cache scope
+ * passes through unread, as does any other request. Reading a body makes
+ * it replayable; a body over `limit` bytes is refused.
  *
  * @experimental The gateway route is new; this API may change without a major version.
  */
-export async function prepare(shape: RequestShape, headers: Headers, body: PreparedBody, secret: string): Promise<Prepared> {
-  const replayable = !(body instanceof ReadableStream);
-  if (shape.method !== "POST" || body === undefined || body === null) return { headers, body, replayable };
+export async function prepare(shape: RequestShape, headers: Headers, body: PreparedBody, secret: string, limit = MAX_BODY_BYTES): Promise<Prepared> {
+  const passthrough: Prepared = { headers, body, replayable: !(body instanceof ReadableStream) };
+  if (shape.method !== "POST" || body === undefined || body === null) return passthrough;
   const mediaType = mediaTypeOf(headers.get("content-type") ?? "");
-  if (mediaType.type === "multipart/form-data") {
+  const explicitModel = headers.get(MODEL_HEADER) !== null;
+  // A form body is multipart whatever the header says; fetch sets the header from it.
+  if (body instanceof FormData || mediaType.type === "multipart/form-data") {
     // Explicit routing keeps uploads streaming.
-    if (headers.get(MODEL_HEADER) !== null) return { headers, body, replayable };
-    return prepareMultipart(headers, body, mediaType.params.get("boundary") ?? "");
+    if (explicitModel) return passthrough;
+    return prepareMultipart(headers, body, mediaType.params.get("boundary") ?? "", limit);
   }
-  if (mediaType.type !== "application/json") return { headers, body, replayable };
-  const bytes = await readAll(body);
+  if (mediaType.type !== "application/json") return passthrough;
+  const scoped = pathEligible(shape);
+  if (explicitModel && !scoped) return passthrough;
+  const bytes = await readAll(body, limit, "JSON body");
   let text: string | undefined;
   try {
     text = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
@@ -58,27 +65,34 @@ export async function prepare(shape: RequestShape, headers: Headers, body: Prepa
   }
   const members = objectMembers(text);
   if (members === null) return { headers, body: bytes, replayable: true };
-  if (headers.get(MODEL_HEADER) === null) {
-    const model = members.find((m) => m.key === "model");
+  if (!explicitModel) {
+    const models = members.filter((m) => m.key === "model");
+    if (models.length > 1) throw new ConfigurationError("JSON body names a model more than once");
+    const model = models[0];
     const value = model === undefined ? undefined : (JSON.parse(text.slice(model.valueStart, model.valueEnd)) as unknown);
     if (typeof value === "string" && value !== "") headers.set(MODEL_HEADER, value);
   }
-  if (pathEligible(shape)) text = await scopeCache(headers, text, secret);
+  if (scoped) text = await scopeCache(headers, text, secret);
   return { headers, body: text, replayable: true };
 }
 
 /**
  * Applies the cache scope to a JSON-object body: the per-request secret, or
  * else the client's, becomes a `cache_salt` member, replacing the secret
- * member, and the prompt's first turn becomes the cache-prefix header. With
- * no secret, the body passes unchanged.
+ * member and any `cache_salt` the caller wrote, and the prompt's first turn
+ * becomes the cache-prefix header. With no secret, the body passes
+ * unchanged. A body carrying either member more than once is refused, so
+ * no copy of the secret can slip past the replacement.
  *
  * @experimental The gateway route is new; this API may change without a major version.
  */
 export async function scopeCache(headers: Headers, text: string, clientSecret: string): Promise<string> {
   const members = objectMembers(text);
   if (members === null) return text;
-  const secretMember = members.find((m) => m.key === USER_CACHE_SECRET_FIELD);
+  const secretMembers = members.filter((m) => m.key === USER_CACHE_SECRET_FIELD);
+  if (secretMembers.length > 1) throw new ConfigurationError(`JSON body carries ${USER_CACHE_SECRET_FIELD} more than once`);
+  if (members.filter((m) => m.key === CACHE_SALT_FIELD).length > 1) throw new ConfigurationError(`JSON body carries ${CACHE_SALT_FIELD} more than once`);
+  const secretMember = secretMembers[0];
   let secret = "";
   if (secretMember !== undefined) {
     const value = JSON.parse(text.slice(secretMember.valueStart, secretMember.valueEnd)) as unknown;
@@ -100,7 +114,9 @@ export async function scopeCache(headers: Headers, text: string, clientSecret: s
     out = removeMember(out, members, secretMember);
     remaining = objectMembers(out) ?? [];
   }
-  return appendMember(out, remaining, CACHE_SALT_FIELD, JSON.stringify(base64url(salt)));
+  const saltJSON = JSON.stringify(base64url(salt));
+  const existing = remaining.find((m) => m.key === CACHE_SALT_FIELD);
+  return existing === undefined ? appendMember(out, remaining, CACHE_SALT_FIELD, saltJSON) : replaceMember(out, existing, saltJSON);
 }
 
 /** The first element of a conversation, which later turns share: the instructions, or the first message, input or prompt item. */
@@ -155,7 +171,7 @@ function base64url(bytes: Uint8Array): string {
 }
 
 /** A multipart upload's model header from its `model` part, which must be exactly one non-empty field. */
-async function prepareMultipart(headers: Headers, body: BodyInit, boundary: string): Promise<Prepared> {
+async function prepareMultipart(headers: Headers, body: BodyInit, boundary: string, limit: number): Promise<Prepared> {
   if (body instanceof FormData) {
     const values = body.getAll("model");
     if (values.length !== 1 || typeof values[0] !== "string" || values[0].trim() === "") {
@@ -165,37 +181,54 @@ async function prepareMultipart(headers: Headers, body: BodyInit, boundary: stri
     return { headers, body, replayable: true };
   }
   if (boundary === "") throw new ConfigurationError("multipart upload is missing its boundary");
-  const bytes = await readAll(body, MAX_MULTIPART_BODY_BYTES);
+  const bytes = await readAll(body, limit, "multipart upload");
   headers.set(MODEL_HEADER, multipartModel(bytes, boundary));
   return { headers, body: bytes, replayable: true };
 }
 
+const CR = 13;
+const LF = 10;
+const DASH = 45;
+
 /**
- * The value of the one non-empty `model` field in a multipart body; a {@link ConfigurationError} otherwise.
+ * The value of the one non-empty `model` field in a multipart body; a
+ * {@link ConfigurationError} otherwise. Delimiters count only at the start
+ * of the body or after a line break, so a boundary string inside a field's
+ * value doesn't split it, and only the model field's bytes are decoded.
  *
  * @experimental The gateway route is new; this API may change without a major version.
  */
 export function multipartModel(bytes: Uint8Array, boundary: string): string {
-  // Field values are UTF-8; file parts are skipped by their disposition.
-  const text = new TextDecoder("latin1").decode(bytes);
-  const parts = text.split(`--${boundary}`);
+  const delimiter = new TextEncoder().encode(`--${boundary}`);
   const models: string[] = [];
   let fileNamedModel = false;
-  for (const part of parts.slice(1)) {
-    if (part.startsWith("--")) break;
-    const headersEnd = part.indexOf("\r\n\r\n");
+  let at = nextDelimiter(bytes, delimiter, 0);
+  if (at < 0) throw new ConfigurationError("invalid multipart upload: no boundary delimiter");
+  for (;;) {
+    const after = at + delimiter.length;
+    if (bytes[after] === DASH && bytes[after + 1] === DASH) break;
+    if (bytes[after] !== CR || bytes[after + 1] !== LF) throw new ConfigurationError("invalid multipart upload: malformed boundary delimiter");
+    const partStart = after + 2;
+    const next = nextDelimiter(bytes, delimiter, partStart);
+    if (next < 0) throw new ConfigurationError("invalid multipart upload: unterminated part");
+    // The line break before the next delimiter belongs to the delimiter, not the value.
+    const partEnd = next - 2;
+    const headersEnd = indexOf(bytes, [CR, LF, CR, LF], partStart, partEnd);
     if (headersEnd < 0) throw new ConfigurationError("invalid multipart upload: part without headers");
-    const partHeaders = part.slice(0, headersEnd);
-    const disposition = /^content-disposition:\s*(.*)$/im.exec(partHeaders)?.[1] ?? "";
+    const partHeaders = String.fromCharCode(...bytes.subarray(partStart, headersEnd));
+    const disposition = /^content-disposition:[ \t]*(.*)$/im.exec(partHeaders)?.[1] ?? "";
     const name = /;\s*name="([^"]*)"/i.exec(disposition)?.[1];
-    if (name !== "model") continue;
-    if (/;\s*filename=/i.test(disposition)) {
-      fileNamedModel = true;
-      continue;
+    if (name === "model") {
+      if (/;\s*filename=/i.test(disposition)) fileNamedModel = true;
+      else {
+        try {
+          models.push(new TextDecoder("utf-8", { fatal: true }).decode(bytes.subarray(headersEnd + 4, partEnd)));
+        } catch {
+          throw new ConfigurationError("invalid multipart upload: model field is not UTF-8");
+        }
+      }
     }
-    let value = part.slice(headersEnd + 4);
-    if (value.endsWith("\r\n")) value = value.slice(0, -2);
-    models.push(new TextDecoder().decode(Uint8Array.from(value, (c) => c.charCodeAt(0))));
+    at = next;
   }
   if (models.length !== 1 || models[0]!.trim() === "" || fileNamedModel) {
     throw new ConfigurationError("multipart upload must contain exactly one non-empty model field");
@@ -203,9 +236,33 @@ export function multipartModel(bytes: Uint8Array, boundary: string): string {
   return models[0]!;
 }
 
-/** The body's bytes, within `limit`. */
-async function readAll(body: BodyInit, limit = Number.POSITIVE_INFINITY): Promise<Uint8Array<ArrayBuffer>> {
-  if (typeof body === "string") return new TextEncoder().encode(body) as Uint8Array<ArrayBuffer>;
+/** The index of the next delimiter at a valid position: the start of the body, or right after a CRLF. */
+function nextDelimiter(bytes: Uint8Array, delimiter: Uint8Array, from: number): number {
+  let index = from;
+  for (;;) {
+    index = indexOf(bytes, delimiter, index, bytes.length);
+    if (index < 0) return -1;
+    if (index === 0 || (index >= 2 && bytes[index - 2] === CR && bytes[index - 1] === LF)) return index;
+    index += 1;
+  }
+}
+
+/** The index of `needle` in `bytes` within [from, end), or -1. */
+function indexOf(bytes: Uint8Array, needle: ArrayLike<number>, from: number, end: number): number {
+  outer: for (let i = from; i + needle.length <= end; i++) {
+    for (let j = 0; j < needle.length; j++) if (bytes[i + j] !== needle[j]) continue outer;
+    return i;
+  }
+  return -1;
+}
+
+/** The body's bytes, within `limit`; a larger body is a {@link ConfigurationError} naming `what`. */
+async function readAll(body: BodyInit, limit: number, what: string): Promise<Uint8Array<ArrayBuffer>> {
+  if (typeof body === "string") {
+    const encoded = new TextEncoder().encode(body) as Uint8Array<ArrayBuffer>;
+    if (encoded.length > limit) throw new ConfigurationError(`reading ${what}: body exceeds ${limit} bytes`);
+    return encoded;
+  }
   const response = new Response(body);
   const reader = response.body?.getReader();
   if (reader === undefined) return new Uint8Array();
@@ -217,7 +274,7 @@ async function readAll(body: BodyInit, limit = Number.POSITIVE_INFINITY): Promis
     total += value.length;
     if (total > limit) {
       await reader.cancel();
-      throw new ConfigurationError(`reading multipart upload: body exceeds ${limit} bytes`);
+      throw new ConfigurationError(`reading ${what}: body exceeds ${limit} bytes`);
     }
     chunks.push(value);
   }
