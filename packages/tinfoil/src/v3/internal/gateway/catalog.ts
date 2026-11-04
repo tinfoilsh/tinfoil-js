@@ -9,7 +9,7 @@
 import { parseReference } from "@tinfoilsh/verifier/v3";
 import { messageOf, NetworkError, TinfoilError } from "../../errors.js";
 import type { Catalog, CatalogEntry, Fetch } from "../../options.js";
-import { getFollowingRedirects, readBounded } from "../fetch.js";
+import { getFollowingRedirects, isAuthority, readBounded } from "../fetch.js";
 
 export const CATALOG_PATH = "/catalog";
 export const CATALOG_FETCH_TIMEOUT_MS = 10_000;
@@ -35,7 +35,7 @@ export async function fetchCatalogWith(host: string, fetchImpl: Fetch, signal?: 
     throw new NetworkError(`fetching gateway catalog: ${messageOf(err)}`, { cause: err });
   }
   if (response.status !== 200) {
-    await response.body?.cancel();
+    await response.body?.cancel().catch(() => {});
     throw new NetworkError(`fetching gateway catalog: ${response.status} ${response.statusText}`);
   }
   let body: Uint8Array;
@@ -64,6 +64,8 @@ export function parseCatalog(body: Uint8Array): Catalog {
   if (decoded === null) return catalog;
   if (typeof decoded !== "object" || Array.isArray(decoded)) throw new NetworkError("decoding gateway catalog: not a JSON object");
   for (const [model, value] of Object.entries(decoded as Record<string, unknown>)) {
+    // A model can't be requested by an empty name.
+    if (model === "") continue;
     const entry = catalogEntry(value);
     if (entry === undefined) throw new NetworkError(`decoding gateway catalog: model ${JSON.stringify(model)} has a malformed entry`);
     if (trusted(entry)) catalog.set(model, entry);
@@ -78,7 +80,8 @@ function catalogEntry(value: unknown): CatalogEntry | undefined {
   const { repo, hosts } = value as { repo?: unknown; hosts?: unknown };
   if (repo !== undefined && repo !== null && typeof repo !== "string") return undefined;
   if (hosts !== undefined && hosts !== null && !(Array.isArray(hosts) && hosts.every((h) => typeof h === "string"))) return undefined;
-  return { repo: (repo as string | undefined) ?? "", hosts: Object.freeze([...((hosts as string[] | undefined) ?? [])]) };
+  // Only a host with an optional port can be a replica to verify; anything else is dropped.
+  return { repo: (repo as string | undefined) ?? "", hosts: Object.freeze(((hosts as string[] | undefined) ?? []).filter(isAuthority)) };
 }
 
 /**
@@ -119,6 +122,8 @@ export class CatalogCache {
   }
 
   get(signal?: AbortSignal): Promise<Catalog> {
+    // A caller that has already given up starts nothing.
+    if (signal?.aborted) return Promise.reject(signal.reason as Error);
     if (this.#catalog !== undefined) {
       if (this.#clock().getTime() >= this.#refreshAt) {
         // Moving the next refresh ahead now, not when the fetch finishes,

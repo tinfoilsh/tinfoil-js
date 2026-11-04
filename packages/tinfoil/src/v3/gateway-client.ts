@@ -50,6 +50,8 @@ export async function createGatewayHTTPClient(options: GatewayOptions, seams: Ga
     throw new ConfigurationError(`gateway base URL must be an absolute HTTPS URL: ${JSON.stringify(baseURL)}`);
   }
   if (base.protocol !== "https:" || base.host === "") throw new ConfigurationError(`gateway base URL must be an absolute HTTPS URL: ${JSON.stringify(baseURL)}`);
+  // Credentials in the URL would go out in plaintext to the gateway with every request.
+  if (base.username !== "" || base.password !== "") throw new ConfigurationError("gateway base URL must not carry a username or password");
   const policy = await GatewayPolicy.create(options.modelPins, options.pinnedModelsOnly ?? false, options.verifier);
   const secret = await (seams.resolveSecret ?? resolveUserCacheSecret)(options.userCacheSecret);
   const transport = new GatewayTransport({
