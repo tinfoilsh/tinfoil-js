@@ -42,9 +42,10 @@ export interface WebSocketOptions {
   readonly headers?: Readonly<Record<string, string>>;
   /**
    * Settings for the `ws` client on Node, such as `perMessageDeflate` or
-   * `maxPayload`. Settings that would change which peer is connected to or
-   * how its certificate is checked are ignored. Bun's WebSocket takes no
-   * such settings, so they are ignored there.
+   * `maxPayload`. Settings that would change which peer is connected to, how
+   * its certificate is checked, or the handshake's `headers` and `protocol`
+   * are ignored; the handshake's headers come from the top-level `headers`.
+   * Bun's WebSocket takes no such settings, so they are ignored there.
    */
   readonly wsOptions?: Readonly<Record<string, unknown>>;
   /** Aborts the verification the call performs before connecting. */
@@ -80,7 +81,10 @@ export interface PinnedWebSocket {
   addEventListener(type: "message", listener: (event: { readonly data: unknown }) => void, options?: { once?: boolean }): void;
   addEventListener(type: "error", listener: (event: { readonly error?: unknown; readonly message?: string }) => void, options?: { once?: boolean }): void;
   addEventListener(type: "close", listener: (event: { readonly code: number; readonly reason: string }) => void, options?: { once?: boolean }): void;
-  removeEventListener(type: "open" | "message" | "error" | "close", listener: (event: never) => void): void;
+  removeEventListener(type: "open", listener: (event: unknown) => void): void;
+  removeEventListener(type: "message", listener: (event: { readonly data: unknown }) => void): void;
+  removeEventListener(type: "error", listener: (event: { readonly error?: unknown; readonly message?: string }) => void): void;
+  removeEventListener(type: "close", listener: (event: { readonly code: number; readonly reason: string }) => void): void;
 }
 
 /** Configures an {@link EnclaveHTTPClient}. */
