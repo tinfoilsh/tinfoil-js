@@ -11,10 +11,13 @@ import { GatewayHTTPClient } from "./gateway-client.js";
 import { ConfigurationError } from "./errors.js";
 import { notImplemented } from "./internal/not-implemented.js";
 import type { EnclaveOptions, GatewayOptions, RouterOptions } from "./options.js";
-import { RouterHTTPClient } from "./router-client.js";
+import { createRouterHTTPClient, RouterHTTPClient, type RouterClientSeams } from "./router-client.js";
 
 /** The OpenAI options a client takes: everything but the transport it is bound to. */
 export type OpenAIOptions = Omit<ClientOptions, "fetch" | "baseURL">;
+
+/** Marks construction by this module's factories; the constructors refuse anything else. */
+const TOKEN = Symbol("OpenAIClient");
 
 /**
  * An OpenAI client for Tinfoil's recommended route: the discovered router,
@@ -24,15 +27,16 @@ export type OpenAIOptions = Omit<ClientOptions, "fetch" | "baseURL">;
 export class TinfoilClient extends OpenAI {
   readonly #httpClient: RouterHTTPClient;
 
-  private constructor(httpClient: RouterHTTPClient, options: OpenAIOptions) {
-    super({ ...options, fetch: httpClient.fetch, baseURL: notImplemented("TinfoilClient.baseURL") });
+  /** @internal Only {@link create} constructs a client; anything else is refused. */
+  constructor(token: symbol, httpClient: RouterHTTPClient, options: OpenAIOptions) {
+    if (token !== TOKEN) throw new ConfigurationError("TinfoilClient is created with createClient");
+    super({ ...options, fetch: httpClient.fetch, baseURL: openAIURLOf(httpClient) });
     this.#httpClient = httpClient;
   }
 
   /** A client for the recommended route, verified before it returns. */
-  static async create(options?: OpenAIOptions): Promise<TinfoilClient> {
-    void options;
-    return notImplemented("TinfoilClient.create");
+  static create(options?: OpenAIOptions): Promise<TinfoilClient> {
+    return createTinfoilClient(options ?? {}, {});
   }
 
   /**
@@ -47,6 +51,15 @@ export class TinfoilClient extends OpenAI {
   }
 }
 
+/**
+ * The recommended-route factory with its test seams; {@link createClient} is
+ * this with the default router options and no seams.
+ */
+export async function createTinfoilClient(openaiOptions: OpenAIOptions, seams: RouterClientSeams, routerOptions: RouterOptions = {}): Promise<TinfoilClient> {
+  const httpClient = await createRouterHTTPClient(routerOptions, seams);
+  return new TinfoilClient(TOKEN, httpClient, openaiOptions);
+}
+
 /** A client for Tinfoil's recommended route, verified before it returns. */
 export function createClient(options?: OpenAIOptions): Promise<TinfoilClient> {
   return TinfoilClient.create(options);
@@ -56,9 +69,6 @@ export function createClient(options?: OpenAIOptions): Promise<TinfoilClient> {
  * An OpenAI client whose requests go through an {@link EnclaveHTTPClient},
  * to the `baseURL` option or, when that is unset, the enclave's `/v1/` API.
  */
-/** Marks construction by this module's factories; the constructors refuse anything else. */
-const TOKEN = Symbol("OpenAIClient");
-
 /** The enclave OpenAI factory with its test seams; {@link EnclaveOpenAIClient.create} is this without them. */
 export async function createEnclaveOpenAIClient(
   host: string,
@@ -97,19 +107,25 @@ export class EnclaveOpenAIClient extends OpenAI {
  * An OpenAI client whose requests go through a {@link RouterHTTPClient}, to
  * the `baseURL` option or, when that is unset, the router's `/v1/` API.
  */
+/** The router OpenAI factory with its test seams; {@link RouterOpenAIClient.create} is this without them. */
+export async function createRouterOpenAIClient(options: RouterOptions, openaiOptions: OpenAIOptions, seams: RouterClientSeams): Promise<RouterOpenAIClient> {
+  const httpClient = await createRouterHTTPClient(options, seams);
+  return new RouterOpenAIClient(TOKEN, httpClient, openaiOptions);
+}
+
 export class RouterOpenAIClient extends OpenAI {
   readonly #httpClient: RouterHTTPClient;
 
-  private constructor(httpClient: RouterHTTPClient, options: OpenAIOptions) {
-    super({ ...options, fetch: httpClient.fetch, baseURL: notImplemented("RouterOpenAIClient.baseURL") });
+  /** @internal Only {@link create} constructs a client; anything else is refused. */
+  constructor(token: symbol, httpClient: RouterHTTPClient, options: OpenAIOptions) {
+    if (token !== TOKEN) throw new ConfigurationError("RouterOpenAIClient is created with RouterOpenAIClient.create");
+    super({ ...options, fetch: httpClient.fetch, baseURL: openAIURLOf(httpClient) });
     this.#httpClient = httpClient;
   }
 
   /** Creates a router client as {@link RouterHTTPClient.create} does, and an OpenAI client over it. */
-  static async create(options?: RouterOptions, openaiOptions?: OpenAIOptions): Promise<RouterOpenAIClient> {
-    void options;
-    void openaiOptions;
-    return notImplemented("RouterOpenAIClient.create");
+  static create(options?: RouterOptions, openaiOptions?: OpenAIOptions): Promise<RouterOpenAIClient> {
+    return createRouterOpenAIClient(options ?? {}, openaiOptions ?? {}, {});
   }
 
   /** The router client requests go through. */

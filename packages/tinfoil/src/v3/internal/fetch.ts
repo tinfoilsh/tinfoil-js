@@ -47,15 +47,16 @@ export async function fetchDocument(host: string, relay: string | undefined, non
       await response.body?.cancel();
       throw new Error(`HTTP GET ${target}: ${response.status} ${response.statusText}`);
     }
-    return await readBounded(response, MAX_ATTESTATION_BYTES);
+    return await readBounded(response, MAX_ATTESTATION_BYTES, "attestation document");
   } catch (err) {
     if (err instanceof TinfoilError) throw err;
     throw new NetworkError(messageOf(err), { cause: err });
   }
 }
 
-async function getFollowingRedirects(url: string, fetchImpl: Fetch, signal: AbortSignal | undefined): Promise<Response> {
-  const timeout = AbortSignal.timeout(ATTESTATION_FETCH_TIMEOUT_MS);
+/** GET `url` with the SDK headers, following at most ten HTTPS redirects, within `timeoutMs` or until `signal` aborts. */
+export async function getFollowingRedirects(url: string, fetchImpl: Fetch, signal: AbortSignal | undefined, timeoutMs: number = ATTESTATION_FETCH_TIMEOUT_MS): Promise<Response> {
+  const timeout = AbortSignal.timeout(timeoutMs);
   const combined = signal === undefined ? timeout : AbortSignal.any([signal, timeout]);
   let target = url;
   for (let hops = 0; ; hops++) {
@@ -80,7 +81,7 @@ async function getFollowingRedirects(url: string, fetchImpl: Fetch, signal: Abor
 }
 
 /** Reads the body, stopping as soon as it exceeds `limit` bytes. */
-async function readBounded(response: Response, limit: number): Promise<Uint8Array> {
+export async function readBounded(response: Response, limit: number, what: string): Promise<Uint8Array> {
   if (response.body === null) return new Uint8Array();
   const reader = response.body.getReader();
   const chunks: Uint8Array[] = [];
@@ -91,7 +92,7 @@ async function readBounded(response: Response, limit: number): Promise<Uint8Arra
     total += value.length;
     if (total > limit) {
       await reader.cancel();
-      throw new Error(`attestation document exceeds ${limit} bytes`);
+      throw new Error(`${what} exceeds ${limit} bytes`);
     }
     chunks.push(value);
   }

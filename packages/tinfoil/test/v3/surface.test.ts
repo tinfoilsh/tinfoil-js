@@ -124,10 +124,6 @@ describe("public surface", () => {
 
   it("rejects every remaining placeholder with a not-implemented error", async () => {
     const pending: Promise<unknown>[] = [
-      surface.createClient(),
-      surface.TinfoilClient.create(),
-      surface.RouterHTTPClient.create(),
-      surface.RouterOpenAIClient.create(),
       surface.GatewayHTTPClient.create(),
       surface.GatewayOpenAIClient.create(),
       surface.fetchCatalog("gateway.example"),
@@ -140,5 +136,12 @@ describe("public surface", () => {
     await expect(surface.EnclaveOpenAIClient.create("enclave.example", "tinfoilsh/repo", { baseURL: "http://proxy.example/" })).rejects.toBeInstanceOf(
       surface.ConfigurationError,
     );
+  });
+
+  it("checks router client options before any network I/O", async () => {
+    await expect(surface.RouterHTTPClient.create({ transportMode: "tls", baseURL: "https://proxy.example/" })).rejects.toBeInstanceOf(
+      surface.ConfigurationError,
+    );
+    await expect(surface.RouterOpenAIClient.create({ baseURL: "http://proxy.example/" })).rejects.toBeInstanceOf(surface.ConfigurationError);
   });
 });
