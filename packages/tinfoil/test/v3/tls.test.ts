@@ -14,7 +14,7 @@ import { AttestationError, ConfigurationError } from "../../src/v3/errors.js";
 import { Enclave } from "../../src/v3/internal/enclave.js";
 import { withReplay } from "../../src/v3/internal/transport/replay.js";
 import { tlsMode } from "../../src/v3/internal/transport/tls.js";
-import { isKeyRejection, KeyedTransport, KeyRejectionError, PeerLacksKeyError, type BoundFetch } from "../../src/v3/internal/transport/transport.js";
+import { isKeyRejection, KeyedTransport, KeyRejectionError, PeerLacksKeyError, shapeOf, type BoundFetch } from "../../src/v3/internal/transport/transport.js";
 import { KEY_SPKI_FP_SHA256_V1_FORMAT, type Verification, type Verifier } from "../../../verifier/src/v3/index.js";
 
 const cert = readFileSync(new URL("../fixtures/ws-test-cert.pem", import.meta.url));
@@ -88,8 +88,8 @@ describe("tlsMode", () => {
   const mode = tlsMode({ ca: cert });
 
   it("refuses plaintext before any network I/O and requires a TLS key to bind", async () => {
-    expect(() => mode.validateRequest(new URL("http://localhost/"))).toThrow(ConfigurationError);
-    expect(() => mode.validateRequest(new URL("https://localhost/"))).not.toThrow();
+    expect(() => mode.validateRequest(shapeOf("http://localhost/"))).toThrow(ConfigurationError);
+    expect(() => mode.validateRequest(shapeOf("https://localhost/"))).not.toThrow();
     await expect(mode.bind({ ...verification(PIN), tlsPublicKeyFP: () => undefined } as Verification)).rejects.toThrow(/endorses no "tls" key/);
     const bound = await mode.bind(verification(PIN));
     await expect(bound.fetch("http://localhost/")).rejects.toThrow(ConfigurationError);
