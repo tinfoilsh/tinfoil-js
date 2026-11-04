@@ -17,7 +17,7 @@ import { Enclave, type EnclaveConfig } from "../enclave.js";
 import { checkEHBP, ehbpMode, type EHBPOptions } from "../transport/ehbp.js";
 import { withEnclaveURL } from "../transport/header.js";
 import { withReplay } from "../transport/replay.js";
-import { isKeyRejection, KeyedTransport, shapeOf } from "../transport/transport.js";
+import { isKeyRejection, KeyedTransport, optionsOf, shapeOf } from "../transport/transport.js";
 import { CatalogCache, fetchCatalogWith } from "./catalog.js";
 import { GatewayPolicy, replicaKey, type Replica } from "./policy.js";
 import { CACHE_PREFIX_HEADER, MODEL_HEADER, prepare } from "./prepare.js";
@@ -125,7 +125,7 @@ export class GatewayTransport {
     // A Request carries a signal of its own; the init's takes precedence, as fetch has it.
     const signal = init?.signal ?? request?.signal;
     const original = init?.body !== undefined ? init.body : request?.body;
-    const prepared = await prepare(shape, shape.headers, original, this.#config.secret);
+    const prepared = await prepare(shape, shape.headers, original, this.#config.secret, undefined, signal);
     const model = prepared.headers.get(MODEL_HEADER) ?? "";
     const catalog = await this.#catalog(signal);
     const { hosts, replica } = this.#config.policy.resolve(model, catalog);
@@ -147,7 +147,9 @@ export class GatewayTransport {
       const headers = new Headers(prepared.headers);
       headers.set(SEAL_HEADER, host);
       rt.models.add(model);
-      const response = await rt.fetch(url, { ...init, method: shape.method, headers, body: prepared.body, signal });
+      // A Request input's other options travel with the rebuilt request.
+      const forwarded: RequestInit = { ...(request === undefined ? {} : optionsOf(request)), ...init, method: shape.method, headers, body: prepared.body, signal };
+      const response = await rt.fetch(url, forwarded);
       const routed = response.headers.get(SEAL_HEADER) ?? "";
       if (response.status !== 412 || routed === "" || routed === host || !prepared.replayable) return response;
       await response.body?.cancel();
@@ -158,6 +160,8 @@ export class GatewayTransport {
       try {
         rt = await this.#verified({ ...replica, host }, signal);
       } catch (err) {
+        // A caller that gave up during the reroute gets its own reason back.
+        if (signal?.aborted) throw err;
         throw rewrap(err, `following gateway route to enclave ${routed}: ${messageOf(err)}`);
       }
       this.#remember(prefix, routed);

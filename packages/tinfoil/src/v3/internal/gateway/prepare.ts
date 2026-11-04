@@ -42,7 +42,7 @@ export interface Prepared {
  *
  * @experimental The gateway route is new; this API may change without a major version.
  */
-export async function prepare(shape: RequestShape, headers: Headers, body: PreparedBody, secret: string, limit = MAX_BODY_BYTES): Promise<Prepared> {
+export async function prepare(shape: RequestShape, headers: Headers, body: PreparedBody, secret: string, limit = MAX_BODY_BYTES, signal?: AbortSignal): Promise<Prepared> {
   const passthrough: Prepared = { headers, body, replayable: !(body instanceof ReadableStream) };
   if (shape.method !== "POST" || body === undefined || body === null) return passthrough;
   const mediaType = mediaTypeOf(headers.get("content-type") ?? "");
@@ -51,12 +51,12 @@ export async function prepare(shape: RequestShape, headers: Headers, body: Prepa
   if (body instanceof FormData || mediaType.type === "multipart/form-data") {
     // Explicit routing keeps uploads streaming.
     if (explicitModel) return passthrough;
-    return prepareMultipart(headers, body, mediaType.params.get("boundary") ?? "", limit);
+    return prepareMultipart(headers, body, mediaType.params.get("boundary") ?? "", limit, signal);
   }
   if (mediaType.type !== "application/json") return passthrough;
   const scoped = pathEligible(shape);
   if (explicitModel && !scoped) return passthrough;
-  const bytes = await readAll(body, limit, "JSON body");
+  const bytes = await readAll(body, limit, "JSON body", signal);
   let text: string | undefined;
   try {
     text = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
@@ -171,7 +171,7 @@ function base64url(bytes: Uint8Array): string {
 }
 
 /** A multipart upload's model header from its `model` part, which must be exactly one non-empty field. */
-async function prepareMultipart(headers: Headers, body: BodyInit, boundary: string, limit: number): Promise<Prepared> {
+async function prepareMultipart(headers: Headers, body: BodyInit, boundary: string, limit: number, signal?: AbortSignal): Promise<Prepared> {
   if (body instanceof FormData) {
     const values = body.getAll("model");
     if (values.length !== 1 || typeof values[0] !== "string" || values[0].trim() === "") {
@@ -181,7 +181,7 @@ async function prepareMultipart(headers: Headers, body: BodyInit, boundary: stri
     return { headers, body, replayable: true };
   }
   if (boundary === "") throw new ConfigurationError("multipart upload is missing its boundary");
-  const bytes = await readAll(body, limit, "multipart upload");
+  const bytes = await readAll(body, limit, "multipart upload", signal);
   headers.set(MODEL_HEADER, multipartModel(bytes, boundary));
   return { headers, body: bytes, replayable: true };
 }
@@ -215,7 +215,7 @@ export function multipartModel(bytes: Uint8Array, boundary: string): string {
     const partEnd = next - 2;
     const headersEnd = indexOf(bytes, [CR, LF, CR, LF], partStart, partEnd);
     if (headersEnd < 0) throw new ConfigurationError("invalid multipart upload: part without headers");
-    const partHeaders = String.fromCharCode(...bytes.subarray(partStart, headersEnd));
+    const partHeaders = new TextDecoder("iso-8859-1").decode(bytes.subarray(partStart, headersEnd));
     const disposition = /^content-disposition:[ \t]*(.*)$/im.exec(partHeaders)?.[1] ?? "";
     const name = /;\s*name="([^"]*)"/i.exec(disposition)?.[1];
     if (name === "model") {
@@ -256,8 +256,12 @@ function indexOf(bytes: Uint8Array, needle: ArrayLike<number>, from: number, end
   return -1;
 }
 
-/** The body's bytes, within `limit`; a larger body is a {@link ConfigurationError} naming `what`. */
-async function readAll(body: BodyInit, limit: number, what: string): Promise<Uint8Array<ArrayBuffer>> {
+/**
+ * The body's bytes, within `limit`; a larger body is a {@link ConfigurationError}
+ * naming `what`. An abort of `signal` stops the read and rejects with its reason.
+ */
+async function readAll(body: BodyInit, limit: number, what: string, signal?: AbortSignal): Promise<Uint8Array<ArrayBuffer>> {
+  signal?.throwIfAborted();
   if (typeof body === "string") {
     const encoded = new TextEncoder().encode(body) as Uint8Array<ArrayBuffer>;
     if (encoded.length > limit) throw new ConfigurationError(`reading ${what}: body exceeds ${limit} bytes`);
@@ -268,15 +272,23 @@ async function readAll(body: BodyInit, limit: number, what: string): Promise<Uin
   if (reader === undefined) return new Uint8Array();
   const chunks: Uint8Array[] = [];
   let total = 0;
-  for (;;) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    total += value.length;
-    if (total > limit) {
-      await reader.cancel();
-      throw new ConfigurationError(`reading ${what}: body exceeds ${limit} bytes`);
+  const abort = (): void => void reader.cancel(signal?.reason).catch(() => {});
+  signal?.addEventListener("abort", abort, { once: true });
+  try {
+    for (;;) {
+      const next = await Promise.race([reader.read(), abortedWith(signal)]);
+      signal?.throwIfAborted();
+      const { done, value } = next;
+      if (done) break;
+      total += value.length;
+      if (total > limit) {
+        await reader.cancel();
+        throw new ConfigurationError(`reading ${what}: body exceeds ${limit} bytes`);
+      }
+      chunks.push(value);
     }
-    chunks.push(value);
+  } finally {
+    signal?.removeEventListener("abort", abort);
   }
   const out = new Uint8Array(new ArrayBuffer(total));
   let at = 0;
@@ -285,6 +297,15 @@ async function readAll(body: BodyInit, limit: number, what: string): Promise<Uin
     at += chunk.length;
   }
   return out;
+}
+
+/** A promise that rejects with the signal's reason when it aborts, and never settles without a signal. */
+function abortedWith(signal: AbortSignal | undefined): Promise<never> {
+  return new Promise((_, reject) => {
+    if (signal === undefined) return;
+    if (signal.aborted) reject(signal.reason as Error);
+    else signal.addEventListener("abort", () => reject(signal.reason as Error), { once: true });
+  });
 }
 
 /** A media type and its parameters, lower-cased, from a Content-Type value. */
