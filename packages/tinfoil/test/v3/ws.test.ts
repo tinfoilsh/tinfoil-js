@@ -13,6 +13,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { WebSocket as WsWebSocket, WebSocketServer } from "ws";
 import { createEnclaveHTTPClient, type EnclaveHTTPClient } from "../../src/v3/enclave-client.js";
 import { AttestationError, ConfigurationError } from "../../src/v3/errors.js";
+import { PeerLacksKeyError } from "../../src/v3/internal/transport/transport.js";
 import { isCertificateError } from "../../src/v3/internal/transport/pin-errors.js";
 import { allowedWsOptions } from "../../src/v3/internal/transport/ws.js";
 import { checkWebSocketCapability, webSocketURL } from "../../src/v3/internal/websocket.js";
@@ -127,6 +128,7 @@ describe("webSocketURL", () => {
   });
 
   it("recognises the pin's rejection and the runtime's certificate errors, and nothing else", () => {
+    expect(isCertificateError(new PeerLacksKeyError("x"))).toBe(true);
     expect(isCertificateError(new AttestationError("x"))).toBe(false);
     expect(isCertificateError(Object.assign(new Error("x"), { code: "CERT_HAS_EXPIRED" }))).toBe(true);
     expect(isCertificateError(Object.assign(new Error("x"), { code: "ERR_TLS_CERT_ALTNAME_INVALID" }))).toBe(true);
