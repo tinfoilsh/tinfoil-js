@@ -42,20 +42,3 @@ export class VerificationError extends VerifyError {
     this.layer = layer;
   }
 }
-
-/**
- * Thrown by placeholder functions during the v3 port. The conformance adapter
- * maps it to "unsupported" so the suite skips instead of failing.
- * TODO(v3): delete once every placeholder is implemented.
- */
-export class NotImplementedError extends Error {
-  constructor(what: string) {
-    super(`not implemented: ${what}`);
-    this.name = "NotImplementedError";
-  }
-}
-
-/** Placeholder body for a function not yet ported. TODO(v3): delete with NotImplementedError. */
-export function notImplemented(what: string): never {
-  throw new NotImplementedError(what);
-}

@@ -1,16 +1,21 @@
 /**
- * CPU quotes: authenticating the hardware signature chain to the vendor
- * root, then assembling and validating the expected state from reference
- * values.
+ * CPU quotes, in three phases: authenticate the hardware signature chain to
+ * the vendor root from document-carried collateral alone; assemble the
+ * complete expected state from reference values, caller pins and the
+ * document's bound REPORT_DATA; validate the quote against it in one
+ * comparison.
  */
 import { SEV_SNP_REPORT_V1_FORMAT, TDX_QUOTE_V1_FORMAT, type CpuEndorsements, type CpuEvidence, type Document } from "../../document/document.js";
-import { notImplemented } from "../../errors.js";
 import { cloneMeasurement, type Expected, type Measurement } from "../../measurement.js";
 import { PLATFORM_SEV_SNP, PLATFORM_TDX, type Artifact, type Platform, type Policy } from "../policy/artifact.js";
-import type { ConfigReferenceValues } from "./config.js";
-import type { LegacyReferenceValues } from "./legacy.js";
-import { authenticateSev, type SevExpectations, type SevQuote } from "./sev/authenticate.js";
-import { authenticateTdx, type TdxExpectations, type TdxQuote } from "./tdx/authenticate.js";
+import { bytesEqual } from "../x509/certificate.js";
+import { resolveConfig, type ConfigReferenceValues } from "./config.js";
+import { resolveLegacy, type LegacyReferenceValues } from "./legacy.js";
+import { applyPins, complete, resolvePolicy } from "./resolve.js";
+import { assembleSev, authenticateSev, validateSev, type SevExpectations, type SevQuote } from "./sev/authenticate.js";
+import { assembleTdx, authenticateTdx, validateTdx, type TdxExpectations, type TdxQuote } from "./tdx/authenticate.js";
+
+export { applyPins, complete, resolvePolicy };
 
 /** Vendor trust anchors that replace the embedded production roots. Test-only. */
 export interface VendorRoots {
@@ -56,7 +61,7 @@ export interface ResolvedValues {
   readonly configId: Uint8Array;
 }
 
-/** The fully resolved expected state, ready to validate. */
+/** The fully resolved expected state, ready to validate. It captures the quote it was assembled for. */
 export interface AssembledPolicy {
   readonly codeMeasurement: Expected;
   readonly policyName: string;
@@ -123,27 +128,75 @@ export async function authenticate(evidence: CpuEvidence, endorsements: CpuEndor
  * (filling open registers; conflicting with a fixed one, or pinning the
  * other platform, rejects), requires every register to be set, and builds
  * the platform's expectations with the document's bound REPORT_DATA.
+ *
+ * `doc` must come from `document.parse`, so its expected REPORT_DATA was
+ * recomputed from the caller's nonce, and `q` must be the quote
+ * authenticated from that document's own CPU evidence: a quote is never
+ * appraised against another document's challenge.
  */
 export async function assemble(doc: Document, refs: ReferenceValues, pins: Expected | undefined, q: Authenticated): Promise<AssembledPolicy> {
-  return notImplemented("quote.assemble");
+  return assembleWith(refs, pins, reportDataOf(doc, q), q);
 }
 
-/** Validates the authenticated quote against the assembled expectations. */
+function reportDataOf(doc: Document, q: Authenticated): Uint8Array {
+  // The first check requires a document bound to the caller's challenge;
+  // the second requires the quote to be this document's own CPU evidence.
+  // The verifier never fails either, so failing one is a caller bug, and the
+  // document is rejected.
+  const reportData = doc.expectedReportData();
+  if (reportData === undefined) throw new Error("a document checked by document.parse is required");
+  const evidence = doc.cpuEvidence();
+  if (evidence.format !== q.evidence.format || !bytesEqual(evidence.report, q.evidence.report)) {
+    throw new Error("authenticated quote is not this document's CPU evidence");
+  }
+  return reportData;
+}
+
+/** `assemble` against an explicit REPORT_DATA. */
+export async function assembleWith(refs: ReferenceValues, pins: Expected | undefined, reportData: Uint8Array, q: Authenticated): Promise<AssembledPolicy> {
+  const resolved = refs.kind === "legacy" ? resolveLegacy(refs, q, pins) : resolveConfig(refs, q, pins);
+  const expected = complete(resolved.expected);
+  const assembled = {
+    codeMeasurement: resolved.code,
+    policyName: resolved.policyName,
+    platformMeasurementName: resolved.platformMeasurementName,
+    quote: q,
+  };
+  switch (expected.platform) {
+    case PLATFORM_SEV_SNP: {
+      if (q.platform !== PLATFORM_SEV_SNP || q.sev === undefined) {
+        throw new Error(`expected an SEV-SNP measurement for a ${q.platform} quote`);
+      }
+      const policy = resolved.policy.sevSnp;
+      if (policy === undefined) throw new Error("resolved policy has no sev_snp block");
+      return { ...assembled, sev: assembleSev(policy, q.sev, expected.launch, reportData, resolved.hostData) };
+    }
+    case PLATFORM_TDX: {
+      if (q.platform !== PLATFORM_TDX || q.tdx === undefined) {
+        throw new Error(`expected a TDX measurement for a ${q.platform} quote`);
+      }
+      const policy = resolved.policy.tdx;
+      if (policy === undefined) throw new Error("resolved policy has no tdx block");
+      return { ...assembled, tdx: assembleTdx(policy, q.tdx, expected, reportData, resolved.configId) };
+    }
+  }
+}
+
+/** Validates the authenticated quote against the assembled expectations in one comparison. */
 export async function validate(p: AssembledPolicy): Promise<void> {
-  return notImplemented("quote.validate");
+  switch (p.quote.platform) {
+    case PLATFORM_SEV_SNP:
+      if (p.sev === undefined || p.quote.sev === undefined) throw new Error("assembled policy has no SEV-SNP expectations");
+      validateSev(p.sev, p.quote.sev);
+      return;
+    case PLATFORM_TDX:
+      if (p.tdx === undefined || p.quote.tdx === undefined) throw new Error("assembled policy has no TDX expectations");
+      validateTdx(p.tdx, p.quote.tdx);
+      return;
+    default:
+      throw new Error(`unsupported platform ${JSON.stringify(p.quote.platform)}`);
+  }
 }
 
-/** Looks up the machine's policy in the endorsements artifact for the quote's platform and identity. */
-export function resolvePolicy(endorsements: Artifact, q: Authenticated): { policy: Policy; policyName: string } {
-  return notImplemented("quote.resolvePolicy");
-}
-
-/** Fills registers the reference leaves open from `pins`; a pin that conflicts with a fixed register, or targets the other platform, rejects. */
-export function applyPins(code: Expected, platform: Platform, pins: Expected | undefined): Expected {
-  return notImplemented("quote.applyPins");
-}
-
-/** Every register must be set; returns them as a measurement. */
-export function complete(e: Expected): Measurement {
-  return notImplemented("quote.complete");
-}
+/** Re-exported for callers that build reference values. */
+export type { Artifact };
