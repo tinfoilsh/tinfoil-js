@@ -87,9 +87,9 @@ function loggedAt(entries: readonly { readonly integratedTime?: bigint; readonly
   return new Date(Number(first.integratedTime) * 1000);
 }
 
-/** `loggedAt` must exist, lie no more than five minutes after `now`, and no more than `maxAgeMs` before it; `now` and `maxAgeMs` must be finite. */
+/** `loggedAt` must exist, lie no more than five minutes after `now`, and no more than `maxAgeMs` before it; `now` must be finite and `maxAgeMs` finite and non-negative. */
 export function validateFreshnessTime(loggedAt: Date | undefined, now: Date, maxAgeMs: number): Date {
-  if (!Number.isFinite(now.getTime()) || !Number.isFinite(maxAgeMs)) throw new Error("freshness clock or maximum age is invalid");
+  if (!Number.isFinite(now.getTime()) || !Number.isFinite(maxAgeMs) || maxAgeMs < 0) throw new Error("freshness clock or maximum age is invalid");
   if (loggedAt === undefined || !Number.isFinite(loggedAt.getTime())) {
     throw new Error("freshness witness has no verified transparency-log timestamp");
   }

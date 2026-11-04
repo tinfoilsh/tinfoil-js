@@ -284,6 +284,7 @@ describe("freshness statement checks", () => {
     expect(() => validateFreshnessTime(undefined, now, MAX_FRESHNESS_AGE_MS)).toThrow(/no verified transparency-log timestamp/);
     expect(() => validateFreshnessTime(now, new Date(NaN), MAX_FRESHNESS_AGE_MS)).toThrow(/clock or maximum age is invalid/);
     expect(() => validateFreshnessTime(now, now, Infinity)).toThrow(/clock or maximum age is invalid/);
+    expect(() => validateFreshnessTime(now, now, -1)).toThrow(/clock or maximum age is invalid/);
     expect(() => validateFreshnessTime(new Date(NaN), now, MAX_FRESHNESS_AGE_MS)).toThrow(/no verified transparency-log timestamp/);
   });
 
