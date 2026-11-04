@@ -12,15 +12,16 @@ import { validateBaseURL, validateTLSBaseURL } from "./internal/transport/base-u
 import { ehbpMode, type EHBPOptions } from "./internal/transport/ehbp.js";
 import { withEnclaveURL } from "./internal/transport/header.js";
 import { withOriginRestriction } from "./internal/transport/origin.js";
-import { checkTransportMode, defaultTransportMode } from "./internal/platform.js";
+import { checkTransportMode, defaultTransportMode, type RuntimeGlobals } from "./internal/platform.js";
 import { withReplay } from "./internal/transport/replay.js";
 import { tlsMode, type TLSOptions } from "./internal/transport/tls.js";
 import { isKeyRejection, KeyedTransport, type Mode } from "./internal/transport/transport.js";
 import type { EnclaveOptions, Fetch, TransportMode } from "./options.js";
 
-/** Seams for tests: the fetch that retrieves attestation documents, the clock, and the modes' settings. */
+/** Seams for tests: the fetch that retrieves attestation documents, the clock, the modes' settings, and the globals the runtime is identified by. */
 export interface EnclaveClientSeams {
   readonly documentFetch?: Fetch;
+  readonly globals?: RuntimeGlobals;
   readonly clock?: () => Date;
   readonly nonce?: () => Uint8Array;
   readonly sleep?: EnclaveConfig["sleep"];
@@ -47,10 +48,10 @@ export function setOpenAIURL(client: object, url: string): void {
  * exposes them, sealed bodies in browsers. A mode the platform can't provide
  * is a {@link ConfigurationError}.
  */
-export function resolveTransportMode(mode: TransportMode | undefined): TransportMode {
-  if (mode === undefined) return defaultTransportMode();
+export function resolveTransportMode(mode: TransportMode | undefined, globals?: RuntimeGlobals): TransportMode {
+  if (mode === undefined) return defaultTransportMode(globals);
   if (mode !== "tls" && mode !== "ehbp") throw new ConfigurationError(`unknown transport mode ${JSON.stringify(mode)}`);
-  checkTransportMode(mode);
+  checkTransportMode(mode, globals);
   return mode;
 }
 
@@ -73,9 +74,9 @@ export function attestedFetch(transport: KeyedTransport, host: string, baseURL: 
 }
 
 /** The option checks that need no network I/O, so a misconfigured client fails before anything is fetched. */
-export function checkEnclaveOptions(host: string, options: EnclaveOptions): { mode: TransportMode; baseURL: string } {
+export function checkEnclaveOptions(host: string, options: EnclaveOptions, globals?: RuntimeGlobals): { mode: TransportMode; baseURL: string } {
   if (host === "") throw new ConfigurationError("enclave host is required");
-  const mode = resolveTransportMode(options.transportMode);
+  const mode = resolveTransportMode(options.transportMode, globals);
   const baseURL = options.baseURL ?? "";
   if (baseURL !== "") validateBaseURL(baseURL);
   if (mode === "tls") validateTLSBaseURL(baseURL, host);
@@ -87,7 +88,7 @@ const TOKEN = Symbol("EnclaveHTTPClient");
 
 /** The factory with its test seams; {@link EnclaveHTTPClient.create} is this without them. */
 export async function createEnclaveHTTPClient(host: string, repo: string, options: EnclaveOptions, seams: EnclaveClientSeams): Promise<EnclaveHTTPClient> {
-  const { mode, baseURL } = checkEnclaveOptions(host, options);
+  const { mode, baseURL } = checkEnclaveOptions(host, options, seams.globals);
   const enclave = await Enclave.create({
     host,
     repo,
