@@ -13,7 +13,10 @@ import { ConfigurationError } from "../../src/v3/errors.js";
 import { resetEphemeralUserCacheSecretForTests, resolveUserCacheSecret } from "../../src/v3/internal/cachesecret.js";
 import { loadOrPersistUserCacheSecret } from "../../src/v3/internal/cachesecret-store.js";
 import { PLATFORM } from "../../src/v3/internal/platform.js";
+import { isCertificateError } from "../../src/v3/internal/transport/pin-errors.js";
 import { tlsMode } from "../../src/v3/internal/transport/tls.js";
+import { WS_PLATFORM } from "../../src/v3/internal/transport/ws.js";
+import { checkWebSocketCapability } from "../../src/v3/internal/websocket.js";
 import { createGatewayHTTPClient, GatewayHTTPClient } from "../../src/v3/gateway-client.js";
 import { createEnclaveOpenAIClient, createGatewayOpenAIClient, createTinfoilClient, EnclaveOpenAIClient, TinfoilClient } from "../../src/v3/openai-client.js";
 import type { Fetch } from "../../src/v3/options.js";
@@ -84,8 +87,16 @@ afterEach(() => {
 describe("the browser entry", () => {
   it("runs the browser variants of the platform-specific modules", () => {
     expect(PLATFORM).toBe("browser");
+    expect(WS_PLATFORM).toBe("browser");
     expect(() => tlsMode()).toThrow(/not available in browsers/);
     expect(loadOrPersistUserCacheSecret(() => "generated")).toBeNull();
+  });
+
+  it("resolves the WebSocket modules without the runtime's TLS support", () => {
+    // The pin's error classification is all the browser-safe WebSocket module reaches; it runs here as is.
+    expect(isCertificateError({ code: "CERT_HAS_EXPIRED" })).toBe(true);
+    expect(isCertificateError({ code: "ECONNRESET" })).toBe(false);
+    expect(() => checkWebSocketCapability()).toThrow(/browsers don't expose/);
   });
 
   it("exports the same surface as the Node entry", async () => {

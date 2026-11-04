@@ -12,7 +12,7 @@ import { AttestationError, ConfigurationError } from "../errors.js";
 import type { PinnedWebSocket, WebSocketOptions } from "../options.js";
 import { isServerRuntime, type RuntimeGlobals } from "./platform.js";
 import { normalizedOrigin } from "./transport/origin.js";
-import { isCertificateError } from "./transport/pin.js";
+import { isCertificateError } from "./transport/pin-errors.js";
 import type { TLSOptions } from "./transport/tls.js";
 import type { KeyedTransport } from "./transport/transport.js";
 

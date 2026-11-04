@@ -8,6 +8,9 @@ import { ConfigurationError } from "../../errors.js";
 import type { PinnedWebSocket, WebSocketOptions } from "../../options.js";
 import type { TLSOptions } from "./tls.js";
 
+/** Which build this module belongs to; the browser build's bundling is checked against it. */
+export const WS_PLATFORM: "node" | "browser" = "browser";
+
 export const WEBSOCKETS_UNAVAILABLE_IN_BROWSERS = "a verified WebSocket pins the server certificate, which browsers don't expose to scripts, so it can't be opened from a browser";
 
 export function allowedWsOptions(wsOptions: Readonly<Record<string, unknown>> | undefined): Record<string, unknown> {

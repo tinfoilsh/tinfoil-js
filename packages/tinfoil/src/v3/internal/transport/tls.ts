@@ -13,7 +13,8 @@ import type { Verification } from "@tinfoilsh/verifier/v3";
 import { isBun } from "../../../env.js";
 import { AttestationError, ConfigurationError, messageOf, NetworkError } from "../../errors.js";
 import type { Fetch } from "../../options.js";
-import { CERT_MISMATCH, identityCheck, isCertificateError } from "./pin.js";
+import { CERT_MISMATCH, isCertificateError } from "./pin-errors.js";
+import { identityCheck } from "./pin.js";
 import { PeerLacksKeyError, type BoundFetch, type Mode } from "./transport.js";
 
 /** Settings of the normal certificate check, which runs before the pin and can only reject. */

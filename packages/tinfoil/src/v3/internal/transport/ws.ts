@@ -17,6 +17,9 @@ import { identityCheck, type IdentityCheck } from "./pin.js";
 import type { TLSOptions } from "./tls.js";
 import { PeerLacksKeyError } from "./transport.js";
 
+/** Which build this module belongs to; the browser build's bundling is checked against it. */
+export const WS_PLATFORM: "node" | "browser" = "node";
+
 /** The `ws` settings that would change which peer is connected to, or how its certificate is checked; a caller's values are dropped. */
 const RESERVED_WS_OPTIONS = ["agent", "createConnection", "followRedirects", "session", "socket", "servername", "pskCallback", "checkServerIdentity", "rejectUnauthorized", "ca", "headers", "protocol"] as const;
 
