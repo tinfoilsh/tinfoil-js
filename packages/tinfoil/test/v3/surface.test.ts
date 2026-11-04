@@ -10,7 +10,8 @@ import { describe, expect, it } from "vitest";
 import * as browser from "../../src/v3/index.browser.js";
 import * as surface from "../../src/v3/index.js";
 import { createEnclaveHTTPClient } from "../../src/v3/enclave-client.js";
-import { createEnclaveOpenAIClient } from "../../src/v3/openai-client.js";
+import { createEnclaveOpenAIClient, createRouterOpenAIClient } from "../../src/v3/openai-client.js";
+import { createRouterHTTPClient } from "../../src/v3/router-client.js";
 import type { Fetch } from "../../src/v3/options.js";
 import { NotImplementedError } from "../../src/v3/internal/not-implemented.js";
 
@@ -156,9 +157,10 @@ describe("public surface", () => {
   });
 
   it("checks router client options before any network I/O", async () => {
-    await expect(surface.RouterHTTPClient.create({ transportMode: "tls", baseURL: "https://proxy.example/" })).rejects.toBeInstanceOf(
-      surface.ConfigurationError,
-    );
-    await expect(surface.RouterOpenAIClient.create({ baseURL: "http://proxy.example/" })).rejects.toBeInstanceOf(surface.ConfigurationError);
+    const fetches = countingFetch();
+    const seams = { routersFetch: fetches.fetch, documentFetch: fetches.fetch };
+    await expect(createRouterHTTPClient({ transportMode: "tls", baseURL: "https://proxy.example/" }, seams)).rejects.toBeInstanceOf(surface.ConfigurationError);
+    await expect(createRouterOpenAIClient({ baseURL: "http://proxy.example/" }, {}, seams)).rejects.toBeInstanceOf(surface.ConfigurationError);
+    expect(fetches.calls).toBe(0);
   });
 });

@@ -37,6 +37,9 @@ function inherit(client: OpenAI, options: Partial<ClientOptions>): OpenAIOptions
   return merged;
 }
 
+/** Marks construction by this module's factories; the constructors refuse anything else. */
+const TOKEN = Symbol("OpenAIClient");
+
 /**
  * An OpenAI client for Tinfoil's recommended route: the discovered router,
  * verified before the client is returned. Its `baseURL` is the URL requests
