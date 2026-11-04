@@ -5,9 +5,8 @@
  * endorsed key, and report the facts. Test tooling: Node APIs are fine here.
  */
 import { connect } from "node:tls";
-import { NONCE_SIZE, randomNonce, Verifier, type Verification } from "../src/v3/index.js";
+import { certPubkeyFP, NONCE_SIZE, randomNonce, Verifier, type Verification } from "../src/v3/index.js";
 import { VERIFIER_NAME, VERIFIER_VERSION } from "../src/version.js";
-import { certPubkeyFP } from "../src/v3/index.js";
 import { ExitCode, expectedOf, measurementOf, rejectionCode, type Output, type Result } from "./adapter.js";
 
 export const STAGE_LIVE = "live-verify";
@@ -27,10 +26,11 @@ export interface LiveRequest {
   readonly repo: string;
 }
 
+/** Decodes the request; a missing or empty field, or a host that is not a bare authority, is malformed input. */
 export function decodeLiveRequest(raw: unknown): LiveRequest | undefined {
   if (typeof raw !== "object" || raw === null || Array.isArray(raw)) return undefined;
   const o = raw as Record<string, unknown>;
-  if (typeof o.host !== "string" || typeof o.repo !== "string" || o.host === "" || o.repo === "") return undefined;
+  if (typeof o.host !== "string" || typeof o.repo !== "string" || o.repo === "" || !isAuthority(o.host)) return undefined;
   return { host: o.host, repo: o.repo };
 }
 
@@ -84,7 +84,8 @@ function reject(code: "ENVELOPE_REJECTED" | "POLICY_REJECTED"): Result {
 /**
  * GET https://<host>/.well-known/tinfoil-attestation?nonce=<hex>, following
  * at most ten HTTPS redirects, with the SDK headers, a 30 s timeout and a
- * 32 MiB cap. A 429 is retried a few times with back-off.
+ * 32 MiB cap enforced while the body streams. A 429 is retried a few times
+ * with back-off.
  */
 export async function fetchDocument(host: string, nonce: Uint8Array, log: (line: string) => void): Promise<Uint8Array> {
   if (nonce.length !== NONCE_SIZE) throw new Error(`nonce must be ${NONCE_SIZE} bytes`);
@@ -99,11 +100,37 @@ export async function fetchDocument(host: string, nonce: Uint8Array, log: (line:
       await new Promise((resolve) => setTimeout(resolve, RETRY_DELAYS_MS[attempt]));
       continue;
     }
-    if (response.status > 299) throw new Error(`HTTP GET ${start}: ${response.status} ${response.statusText}`);
-    const body = new Uint8Array(await response.arrayBuffer());
-    if (body.length > MAX_ATTESTATION_BYTES) throw new Error(`attestation document exceeds ${MAX_ATTESTATION_BYTES} bytes`);
-    return body;
+    if (response.status > 299) {
+      await response.body?.cancel();
+      throw new Error(`HTTP GET ${start}: ${response.status} ${response.statusText}`);
+    }
+    return readBounded(response, MAX_ATTESTATION_BYTES);
   }
+}
+
+/** Reads the body, stopping as soon as it exceeds `limit` bytes. */
+async function readBounded(response: Response, limit: number): Promise<Uint8Array> {
+  if (response.body === null) return new Uint8Array();
+  const reader = response.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    total += value.length;
+    if (total > limit) {
+      await reader.cancel();
+      throw new Error(`attestation document exceeds ${limit} bytes`);
+    }
+    chunks.push(value);
+  }
+  const out = new Uint8Array(total);
+  let offset = 0;
+  for (const chunk of chunks) {
+    out.set(chunk, offset);
+    offset += chunk.length;
+  }
+  return out;
 }
 
 async function getFollowingRedirects(url: string): Promise<Response> {
@@ -126,23 +153,40 @@ async function getFollowingRedirects(url: string): Promise<Response> {
   }
 }
 
-/** Whether `s` is exactly the host (with optional port) of an HTTPS URL. */
-function isAuthority(s: string): boolean {
+/** The host name (IPv6 without brackets) and port an authority names. */
+function endpointOf(authority: string): { hostname: string; port: number } | undefined {
+  let u: URL;
   try {
-    const u = new URL(`https://${s}`);
-    return u.host === s && u.pathname === "/" && u.username === "" && u.password === "" && u.search === "" && u.hash === "";
+    u = new URL(`https://${authority}`);
   } catch {
-    return false;
+    return undefined;
   }
+  // A URL drops the default port, so rebuild the authority to compare it with what was given.
+  const port = u.port === "" ? 443 : Number(u.port);
+  const rebuilt = u.port === "" ? (authority.endsWith(":443") ? `${u.hostname}:443` : u.hostname) : `${u.hostname}:${u.port}`;
+  if (rebuilt !== authority || u.pathname !== "/" || u.username !== "" || u.password !== "" || u.search !== "" || u.hash !== "") {
+    return undefined;
+  }
+  const hostname = u.hostname.startsWith("[") && u.hostname.endsWith("]") ? u.hostname.slice(1, -1) : u.hostname;
+  return { hostname, port };
 }
 
-/** The SPKI SHA-256 fingerprint of the leaf certificate `host` presents on a fresh TLS connection. */
+/** Whether `s` is exactly the host (with optional port) of an HTTPS URL. */
+export function isAuthority(s: string): boolean {
+  return endpointOf(s) !== undefined;
+}
+
+/**
+ * The SPKI SHA-256 fingerprint of the leaf certificate `host` presents on a
+ * fresh TLS connection. The connection is validated against the system's
+ * certificate authorities like any other, and the fingerprint is compared on
+ * top of that.
+ */
 export function tlsSpkiFingerprint(host: string): Promise<string> {
-  const u = new URL(`https://${host}`);
-  const port = u.port === "" ? 443 : Number(u.port);
-  const serverName = u.hostname;
+  const endpoint = endpointOf(host);
+  if (endpoint === undefined) return Promise.reject(new Error(`invalid host ${JSON.stringify(host)}`));
   return new Promise((resolve, reject) => {
-    const socket = connect({ host: serverName, port, servername: serverName, rejectUnauthorized: false, timeout: 10_000 }, () => {
+    const socket = connect({ host: endpoint.hostname, port: endpoint.port, servername: endpoint.hostname, rejectUnauthorized: true, timeout: 10_000 }, () => {
       const peer = socket.getPeerCertificate();
       socket.end();
       if (peer === undefined || peer.raw === undefined) {
