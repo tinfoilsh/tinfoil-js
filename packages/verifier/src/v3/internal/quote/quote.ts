@@ -139,8 +139,10 @@ export async function assemble(doc: Document, refs: ReferenceValues, pins: Expec
 }
 
 function reportDataOf(doc: Document, q: Authenticated): Uint8Array {
-  // Both checks bind the quote to the caller's challenge. The verifier never
-  // fails them, so failing one is a caller bug, and the document is rejected.
+  // The first check requires a document bound to the caller's challenge;
+  // the second requires the quote to be this document's own CPU evidence.
+  // The verifier never fails either, so failing one is a caller bug, and the
+  // document is rejected.
   const reportData = doc.expectedReportData();
   if (reportData === undefined) throw new Error("a document checked by document.parse is required");
   const evidence = doc.cpuEvidence();

@@ -120,8 +120,9 @@ export function capabilities(): Record<string, unknown> {
 
 /**
  * Executes one stage and returns the wire output plus the exit code.
- * Never throws: unexpected errors map to {@link ExitCode.Internal}; a stage
- * this adapter does not know maps to {@link ExitCode.Unsupported}.
+ * Never throws: unexpected errors map to {@link ExitCode.Internal}; given
+ * well-formed input, a stage this adapter does not know maps to
+ * {@link ExitCode.Unsupported} (malformed input is reported as such first).
  */
 export async function run(stage: string, raw: unknown): Promise<Result> {
   try {

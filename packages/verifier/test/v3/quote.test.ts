@@ -6,6 +6,8 @@
  */
 import { beforeAll, describe, expect, it } from "vitest";
 import { parse as parseDocument, type Document } from "../../src/v3/document/document.js";
+import { sha256 } from "../../src/v3/internal/bytes.js";
+import { decodeManifest } from "../../src/v3/internal/runtime/manifest.js";
 import { parse as parseArtifact, type Artifact } from "../../src/v3/internal/policy/artifact.js";
 import type { Shape } from "../../src/v3/internal/policy/shape.js";
 import { resolveConfig } from "../../src/v3/internal/quote/config.js";
@@ -229,20 +231,31 @@ describe.skipIf(withoutVectors)(vectorsTitle("assembly for a TDX code release"),
       policies: { [name]: { ...policy, tdx: { ...policy.tdx, platform_measurements: undefined } } },
     });
     if (m.q.measurement.platform !== "tdx") throw new Error("TDX material expected");
-    const mm = m.q.measurement;
-    const runtime = {
-      formatVersion: 1n,
-      snpLaunch: { measurement: "11".repeat(48) },
-      tdxLaunch: { mrtd: registerHex(mm.mrtd), rtmr0: registerHex(mm.rtmr0), rtmr1: registerHex(mm.rtmr1), rtmr2: registerHex(mm.rtmr2), rtmr3: registerHex(mm.rtmr3) },
-    };
-    const hash = m.q.tdx!.quote.body.mrConfigId.subarray(0, 32);
-    const refs = { kind: "config" as const, endorsements: v2, runtime, hash };
+    // The runtime comes from a manifest parsed on its own and the hash from
+    // config bytes of its own, so neither can be read off the quote.
+    const zero = "00".repeat(48);
+    const manifest = decodeManifest(
+      utf8(
+        JSON.stringify({
+          version: "v1.2.3",
+          igvm: { format_version: 1, snp_launch: { measurement: "11".repeat(48) }, tdx_launch: { mrtd: "ab".repeat(48), rtmr0: zero, rtmr1: zero, rtmr2: zero, rtmr3: zero } },
+        }),
+      ),
+    );
+    const hash = await sha256(utf8("name: app\n"));
+    const refs = { kind: "config" as const, endorsements: v2, runtime: manifest.measurements!, hash };
     const r = resolveConfig(refs, m.q, undefined);
+    expect(r.code).toEqual({ platform: "tdx", mrtd: reg(0xab), rtmr0: reg(0), rtmr1: reg(0), rtmr2: reg(0), rtmr3: reg(0) });
+    expect(r.expected).toEqual(r.code);
     expect(r.configId.subarray(0, 32)).toEqual(hash);
     expect(r.configId.subarray(32)).toEqual(new Uint8Array(16));
-    expect(r.code).toEqual(mm);
+    expect(r.hostData).toEqual(new Uint8Array(32));
     expect(() => resolveConfig({ ...refs, endorsements: m.artifact }, m.q, undefined)).toThrow(/cannot be combined with platform_measurements/);
     const p = await assembleWith(refs, undefined, m.q.tdx!.quote.body.reportData, m.q);
     expect(p.tdx?.mrConfigId).toEqual(r.configId);
+    expect(p.codeMeasurement).toEqual(r.code);
+    // The golden quote measured a different runtime and config, so the
+    // assembled expectations reject it.
+    await expect(validate(p)).rejects.toThrow(/MR_TD|MR_CONFIG_ID/);
   });
 });
