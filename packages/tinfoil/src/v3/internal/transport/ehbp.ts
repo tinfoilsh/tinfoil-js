@@ -12,6 +12,7 @@ import type { Verification } from "@tinfoilsh/verifier/v3";
 import { Identity, PROTOCOL, type RequestContext } from "ehbp";
 import { AttestationError, ConfigurationError, messageOf, NetworkError } from "../../errors.js";
 import type { Fetch } from "../../options.js";
+import { isLoopback } from "./base-url.js";
 import { PeerLacksKeyError, shapeOf, type BoundFetch, type Mode, type RequestShape } from "./transport.js";
 
 /** How the sealed requests are sent; undefined selects the runtime's fetch. */
@@ -28,12 +29,25 @@ const RESERVED_HEADERS = ["content-length", "transfer-encoding", "host", PROTOCO
 const MAX_PROBLEM_BYTES = 64 * 1024;
 
 /**
- * Rejects a request whose traffic continues outside the bodies EHBP seals:
- * a protocol upgrade, such as a WebSocket, or a CONNECT tunnel. Sending one
- * would look protected while nothing after the handshake is.
+ * Rejects, before any verification or network I/O, a request the mode
+ * can't protect: one whose traffic continues outside the bodies EHBP seals
+ * (a protocol upgrade, such as a WebSocket, or a CONNECT tunnel, which
+ * would look protected while nothing after the handshake is); one whose
+ * method, URL and headers, which EHBP leaves in plaintext, would travel
+ * off the machine unencrypted (plain HTTP to anything but a loopback
+ * host); a body on a GET or HEAD; and a header the protocol owns.
  */
 export function checkEHBP(request: RequestShape): void {
   if (request.method === "CONNECT" || request.headers.has("upgrade")) throw new ConfigurationError(TUNNEL);
+  if (request.url.protocol !== "https:" && !(request.url.protocol === "http:" && isLoopback(request.url.hostname))) {
+    throw new ConfigurationError("EHBP transport mode requires an HTTPS request, or HTTP only to localhost or a loopback IP address");
+  }
+  if ((request.method === "GET" || request.method === "HEAD") && request.hasBody) {
+    throw new ConfigurationError(`request with ${request.method} method cannot have a body`);
+  }
+  for (const name of RESERVED_HEADERS) {
+    if (request.headers.has(name)) throw new ConfigurationError(`reserved request header cannot be set by callers: ${name}`);
+  }
 }
 
 /** A mode that seals bodies to the HPKE key the current verification attests and sends them with `options.fetch`. */
@@ -63,15 +77,8 @@ export function ehbpMode(options: EHBPOptions = {}): Mode {
  * a key-configuration problem, reported as the peer lacking the key.
  */
 async function sealedFetch(identity: Identity, send: Fetch, input: string | URL | Request, init?: RequestInit): Promise<Response> {
-  const shape = shapeOf(input, init);
-  checkEHBP(shape);
-  const hasInitBody = init?.body !== undefined && init?.body !== null;
-  if ((shape.method === "GET" || shape.method === "HEAD") && hasInitBody) {
-    throw new ConfigurationError(`request with ${shape.method} method cannot have a body`);
-  }
-  for (const name of RESERVED_HEADERS) {
-    if (shape.headers.has(name)) throw new ConfigurationError(`reserved request header cannot be set by callers: ${name}`);
-  }
+  // The transport validates this too, but the bound fetch can be used alone.
+  checkEHBP(shapeOf(input, init));
   // A stream body needs the half-duplex marker to become a Request; it is harmless otherwise.
   const request = new Request(input, { ...init, duplex: "half" } as RequestInit);
 

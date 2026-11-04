@@ -68,7 +68,18 @@ describe("checkEHBP", () => {
     expect(() => checkEHBP(shapeOf("https://x.example/", { method: "CONNECT" }))).toThrow(ConfigurationError);
     expect(() => checkEHBP(shapeOf("https://x.example/", { headers: { Upgrade: "websocket" } }))).toThrow(/can't protect a protocol upgrade/);
     expect(() => checkEHBP(shapeOf("https://x.example/", { method: "POST", body: "x" }))).not.toThrow();
-    expect(() => checkEHBP(shapeOf("http://x.example/"))).not.toThrow();
+    expect(() => checkEHBP(shapeOf("https://x.example/"))).not.toThrow();
+  });
+
+  it("refuses plaintext off the machine, bodies on GET or HEAD, and the protocol's headers, before any verification", () => {
+    expect(() => checkEHBP(shapeOf("http://x.example/"))).toThrow(/requires an HTTPS request, or HTTP only to localhost/);
+    expect(() => checkEHBP(shapeOf("http://10.0.0.1/"))).toThrow(ConfigurationError);
+    expect(() => checkEHBP(shapeOf("http://localhost:8080/"))).not.toThrow();
+    expect(() => checkEHBP(shapeOf("http://127.0.0.1:8080/"))).not.toThrow();
+    expect(() => checkEHBP(shapeOf("https://x.example/", { method: "GET", body: "x" }))).toThrow(/request with GET method cannot have a body/);
+    expect(() => checkEHBP(shapeOf(new Request("https://x.example/", { method: "HEAD" })))).not.toThrow();
+    expect(() => checkEHBP(shapeOf("https://x.example/", { method: "POST", body: "x", headers: { "Ehbp-Encapsulated-Key": "00" } }))).toThrow(/reserved request header/);
+    expect(() => checkEHBP(shapeOf("https://x.example/", { method: "POST", body: "x", headers: { "content-length": "1" } }))).toThrow(/reserved request header/);
   });
 });
 
@@ -122,12 +133,14 @@ describe("ehbpMode", () => {
     expect(sseEnded).toBe(true);
   });
 
-  it("seals a streaming request body frame by frame, sending it in full before the response", async () => {
+  it("seals a streaming request body frame by frame, and the response starts only after the body is sent in full", async () => {
     const bound = await mode.bind(verification(server.publicKeyHex));
     let pulled = 0;
+    let closedAt = 0;
     const body = new ReadableStream<Uint8Array>({
       pull(controller) {
         if (pulled === 3) {
+          closedAt = performance.now();
           controller.close();
           return;
         }
@@ -135,9 +148,17 @@ describe("ehbpMode", () => {
         controller.enqueue(new Uint8Array(70 * 1024).fill(pulled));
       },
     });
+    const before = server.seen.length;
     const res = await bound.fetch(`${server.origin}/echo`, { method: "POST", body, headers: { "content-type": "application/octet-stream" } });
-    expect((await res.json()).length).toBe(3 * 70 * 1024);
+    const respondedAt = performance.now();
+    // The body was pulled to its end before any response arrived, and the
+    // server saw the whole body before it answered.
     expect(pulled).toBe(3);
+    expect(closedAt).toBeGreaterThan(0);
+    expect(respondedAt).toBeGreaterThanOrEqual(closedAt);
+    expect(server.seen.length).toBe(before + 1);
+    expect(server.seen[before]!.body.length).toBe(3 * 70 * 1024);
+    expect((await res.json()).length).toBe(3 * 70 * 1024);
   });
 
   it("reports a peer that no longer holds the key, and the transport replays after re-verification", async () => {
