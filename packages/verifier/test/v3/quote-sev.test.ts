@@ -13,7 +13,6 @@
 import { readFileSync } from "node:fs";
 import { beforeAll, describe, expect, it } from "vitest";
 import { dangerousTestOnlyDecode } from "../../src/v3/document/document.js";
-import { NotImplementedError } from "../../src/v3/errors.js";
 import { toHex } from "../../src/v3/internal/bytes.js";
 import { decodeHex, parse as parseArtifact, policyFor } from "../../src/v3/internal/policy/artifact.js";
 import type { SevSnpPolicy } from "../../src/v3/internal/policy/sev.js";
@@ -427,7 +426,8 @@ describe.skipIf(withoutVectors)(vectorsTitle("authenticateSev"), () => {
     await expect(authenticate({ ...ev, format: "https://tinfoil.sh/format/other/v1" }, doc.cpuEndorsements(), realAt)).rejects.toThrow(
       /unsupported cpu_evidence format/,
     );
-    await expect(authenticate({ ...ev, format: "https://tinfoil.sh/format/tdx-quote/v1" }, {}, realAt)).rejects.toThrow(NotImplementedError);
+    // The TDX arm takes its own collateral; without it the SEV report never reaches the TDX parser.
+    await expect(authenticate({ ...ev, format: "https://tinfoil.sh/format/tdx-quote/v1" }, {}, realAt)).rejects.toThrow(/no intel-pcs endorsement collateral/);
   });
 });
 
