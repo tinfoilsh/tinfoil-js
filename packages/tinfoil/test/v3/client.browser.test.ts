@@ -247,9 +247,11 @@ describe("WebSockets in a browser", () => {
     const before = calls.documents;
     await expect(createWebSocket(http, "/v1/realtime")).rejects.toThrow(/browsers don't expose/);
     await expect(pinnedWebSocketOptions(http)).rejects.toBeInstanceOf(ConfigurationError);
-    const ai = await createEnclaveOpenAIClient(ENCLAVE, "tinfoilsh/repo", { verifier: verifier(peer.publicKeyHex) }, { bearerToken: "jwt" }, seams());
-    await expect(createRealtimeWebSocket(ai, { model: "m" })).rejects.toBeInstanceOf(ConfigurationError);
     expect(calls.documents).toBe(before);
+    const ai = await createEnclaveOpenAIClient(ENCLAVE, "tinfoilsh/repo", { verifier: verifier(peer.publicKeyHex) }, { bearerToken: "jwt" }, { ...seams(), documentFetch: counting });
+    const beforeRealtime = calls.documents;
+    await expect(createRealtimeWebSocket(ai, { model: "m" })).rejects.toBeInstanceOf(ConfigurationError);
+    expect(calls.documents).toBe(beforeRealtime);
     expect(typeof browserEntry.createWebSocket).toBe("function");
   });
 });
