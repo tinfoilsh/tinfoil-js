@@ -18,6 +18,7 @@ import { parseReference } from "../src/v3/internal/endorsement/reference.js";
 import { ARTIFACT_FORMAT } from "../src/v3/internal/policy/artifact.js";
 import * as quote from "../src/v3/internal/quote/quote.js";
 import { registerHex, type Expected, type Measurement as V3Measurement, type Register } from "../src/v3/measurement.js";
+import { Verifier } from "../src/v3/index.js";
 import { dangerousTestOnlyVerifier, type DangerousTestOnlyRoots } from "../src/v3/verifier.js";
 import { checkTime, newTimePolicy } from "../src/v3/internal/endorsement/time.js";
 import { parseBundleBytes } from "../src/v3/internal/sigstore/bundle.js";
@@ -111,8 +112,7 @@ export function capabilities(): Record<string, unknown> {
       stages_supported: Object.values(Stage),
       synthetic_roots: { amd: true, intel: true, sigstore: true },
       freshness_enforced: true,
-      // TODO(v3): live-verify lane.
-      live_verify: false,
+      live_verify: true,
       channel_binding: "tls-spki",
     },
   };
@@ -288,7 +288,10 @@ async function verifyFull(
   const stage = Stage.Verify;
   let verified;
   try {
-    const verifier = await dangerousTestOnlyVerifier(roots);
+    // A fixture that injects no anchors runs the production entry exactly;
+    // injected anchors go through the test-only seam of the same verifier.
+    const injected = roots.amd !== undefined || roots.intel !== undefined || roots.sigstore !== undefined;
+    const verifier = injected ? await dangerousTestOnlyVerifier(roots) : await Verifier.create();
     verified = await verifier.verifyV3At(doc, nonce, repo, appraisal);
   } catch (err) {
     const mapped = rejectionCode(err);

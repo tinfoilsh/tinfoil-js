@@ -13,6 +13,7 @@
     "test:browser:integration": "npm run test:browser:integration -ws --if-present",
     "test:all": "npm run test && npm run test:integration && npm run test:browser && npm run test:browser:integration",
     "check:es2020": "npm run check:es2020 -ws --if-present",
+    "check:types": "npm run check:types -ws --if-present",
     "clean": "npm run clean -ws --if-present",
     "sync": "syncpack fix",
     "postinstall": "syncpack fix",

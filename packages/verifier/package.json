@@ -11,11 +11,17 @@
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js",
       "default": "./dist/index.js"
+    },
+    "./v3": {
+      "types": "./dist/v3/index.d.ts",
+      "import": "./dist/v3/index.js",
+      "default": "./dist/v3/index.js"
     }
   },
   "scripts": {
     "build": "tsc",
     "build:conformance": "tsc -p conformance/tsconfig.json",
+    "check:types": "tsc -p tsconfig.test.json",
     "test": "vitest run",
     "test:conformance": "npm run build:conformance && TINFOIL_CONFORMANCE_FIXTURES=${TINFOIL_CONFORMANCE_FIXTURES:-../../../tinfoil-conformance/vectors/v3} vitest run test/conformance.test.ts",
     "test:integration": "RUN_TINFOIL_INTEGRATION=true npm test",

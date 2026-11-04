@@ -6,12 +6,13 @@
  *
  *   tinfoil-conformance <stage>        Input JSON on stdin → Output JSON on stdout
  *   tinfoil-conformance capabilities   capabilities JSON on stdout
- *   tinfoil-conformance live-verify    (not yet supported)
+ *   tinfoil-conformance live-verify    {"host","repo"} on stdin → Output JSON on stdout
  *   tinfoil-conformance capture        (not yet supported)
  *
  * The exit code is the verdict (see ExitCode in adapter.ts).
  */
 import { capabilities, ExitCode, run, type Output } from "./adapter.js";
+import { decodeLiveRequest, liveVerify, STAGE_LIVE } from "./live.js";
 
 async function readStdin(): Promise<string> {
   const chunks: Buffer[] = [];
@@ -35,8 +36,8 @@ async function main(argv: string[]): Promise<number> {
     return ExitCode.Accepted;
   }
 
-  // TODO(v3): integration lane (live-verify) and fixture capture.
-  if (cmd === "live-verify" || cmd === "capture") {
+  // TODO(v3): fixture capture.
+  if (cmd === "capture") {
     writeJSON({ stage: cmd, accepted: false } satisfies Output);
     return ExitCode.Unsupported;
   }
@@ -48,6 +49,17 @@ async function main(argv: string[]): Promise<number> {
   } catch {
     writeJSON({ stage: cmd, accepted: false, rejection: { code: "MALFORMED_INPUT" } } satisfies Output);
     return ExitCode.Malformed;
+  }
+
+  if (cmd === STAGE_LIVE) {
+    const req = decodeLiveRequest(raw);
+    if (req === undefined) {
+      writeJSON({ stage: cmd, accepted: false, rejection: { code: "MALFORMED_INPUT" } } satisfies Output);
+      return ExitCode.Malformed;
+    }
+    const { output, exitCode } = await liveVerify(req, (line) => process.stderr.write(line + "\n"));
+    writeJSON(output);
+    return exitCode;
   }
 
   const { output, exitCode } = await run(cmd, raw);
