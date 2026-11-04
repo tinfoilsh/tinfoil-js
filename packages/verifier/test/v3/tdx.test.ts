@@ -45,9 +45,9 @@ import {
 } from "./helpers/conformance.js";
 
 const withoutVectors = !conformanceAvailable();
-const hex = (s: string): Uint8Array => new Uint8Array(Buffer.from(s.replace(/\s+/g, ""), "hex"));
+const hex = (s: string): Uint8Array<ArrayBuffer> => new Uint8Array(Buffer.from(s.replace(/\s+/g, ""), "hex"));
 const utf8 = (s: string): Uint8Array => new TextEncoder().encode(s);
-const repeat = (byte: number, n: number): Uint8Array => new Uint8Array(n).fill(byte);
+const repeat = (byte: number, n: number): Uint8Array<ArrayBuffer> => new Uint8Array(n).fill(byte);
 
 const INTEL_QE_VENDOR_ID = "939a7233f79c4ca9940a0db3957f0607";
 const SYNTH_PPID = "55".repeat(16);

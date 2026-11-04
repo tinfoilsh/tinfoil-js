@@ -49,6 +49,9 @@ jobs:
       - name: Check ES2020 compatibility
         run: npm run check:es2020
 
+      - name: Check types
+        run: npm run check:types
+
       - name: Lint
         run: npm run lint
 
