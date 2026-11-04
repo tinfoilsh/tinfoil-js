@@ -10,7 +10,7 @@ import { beforeAll, describe, expect, it } from "vitest";
 import { AttestationError, ConfigurationError, NetworkError } from "../../src/v3/errors.js";
 import { CATALOG_REFRESH_INTERVAL_MS, CatalogCache, fetchCatalogWith, MAX_CATALOG_BYTES, parseCatalog } from "../../src/v3/internal/gateway/catalog.js";
 import { GatewayPolicy } from "../../src/v3/internal/gateway/policy.js";
-import { bearerCredential, CACHE_PREFIX_HEADER, MODEL_HEADER, multipartModel, prepare, scopeCache } from "../../src/v3/internal/gateway/prepare.js";
+import { bearerCredential, CACHE_PREFIX_HEADER, MAX_BODY_BYTES, MODEL_HEADER, multipartModel, prepare, scopeCache } from "../../src/v3/internal/gateway/prepare.js";
 import { GatewayTransport, MAX_SEAL_REDIRECTS, rank, SEAL_HEADER, type GatewayTransportConfig } from "../../src/v3/internal/gateway/transport.js";
 import { shapeOf } from "../../src/v3/internal/transport/transport.js";
 import type { Catalog, Fetch } from "../../src/v3/options.js";
@@ -87,6 +87,9 @@ describe("catalog", () => {
       };
     const catalog = await fetchCatalogWith("gateway.example", serve(200, '{"m":{"repo":"tinfoilsh/m","hosts":["a.example"]}}'));
     expect(calls).toEqual(["https://gateway.example/catalog"]);
+    await expect(fetchCatalogWith("gateway.example/path", serve(200, "{}"))).rejects.toBeInstanceOf(ConfigurationError);
+    await expect(fetchCatalogWith("", serve(200, "{}"))).rejects.toBeInstanceOf(ConfigurationError);
+    expect(calls).toHaveLength(1);
     expect([...catalog.keys()]).toEqual(["m"]);
     await expect(fetchCatalogWith("gateway.example", serve(503, "down"))).rejects.toBeInstanceOf(NetworkError);
     await expect(fetchCatalogWith("gateway.example", serve(201, "{}"))).rejects.toBeInstanceOf(NetworkError);
@@ -290,6 +293,23 @@ describe("prepare", () => {
     await expect(prepare(shapeOf(url, { method: "POST", body: form }), new Headers({ "content-type": "multipart/form-data; boundary=b" }), form, "s", 64)).rejects.toThrow(/multipart upload: body exceeds 64 bytes/);
     const small = '{"model":"m"}';
     expect((await prepare(shapeOf(url, { method: "POST", body: small }), json(), small, "", 64)).headers.get(MODEL_HEADER)).toBe("m");
+  });
+
+  it("stops reading an upload when the request is aborted and rejects with the reason", async () => {
+    const controller = new AbortController();
+    let cancelled: unknown;
+    const stalled = new ReadableStream<Uint8Array>({
+      start: (c) => c.enqueue(new TextEncoder().encode('{"model":')),
+      cancel: (reason) => void (cancelled = reason),
+    });
+    const pending = prepare(shapeOf(url, { method: "POST", body: stalled }), new Headers({ "content-type": "application/json" }), stalled, "s", MAX_BODY_BYTES, controller.signal);
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    controller.abort(new Error("upload abandoned"));
+    await expect(pending).rejects.toThrow(/upload abandoned/);
+    expect(cancelled).toBeInstanceOf(Error);
+    const gone = new AbortController();
+    gone.abort(new Error("already gone"));
+    await expect(prepare(shapeOf(url, { method: "POST", body: "{}" }), new Headers({ "content-type": "application/json" }), '{"model":"m"}', "s", MAX_BODY_BYTES, gone.signal)).rejects.toThrow(/already gone/);
   });
 
   it("passes a request that names its model and needs no cache scope through unread", async () => {
@@ -519,6 +539,37 @@ describe("GatewayTransport", () => {
     expect(res.status).toBe(200);
     expect(verifications).toBe(2);
     expect(g.seen.map((s) => s.enclave)).toEqual(["https://only.example", "https://only.example"]);
+  });
+
+  it("forwards a Request's other options with the rebuilt request", async () => {
+    const seen: RequestInit[] = [];
+    const g = gateway();
+    const recording: Fetch = async (input, init) => {
+      seen.push(init ?? {});
+      return g.fetch(input, init);
+    };
+    const t = transport({ policy: await GatewayPolicy.create(undefined, false, perHost()), gatewayFetch: recording });
+    const request = new Request("https://gateway.example/v1/chat/completions", { method: "POST", body: '{"model":"test-model"}', headers: { "content-type": "application/json" }, credentials: "include", redirect: "manual", cache: "no-store", referrerPolicy: "no-referrer" });
+    expect((await t.fetch(request)).status).toBe(200);
+    const rebuilt = new Request("https://gateway.example/v1/chat/completions", seen[0]);
+    expect([rebuilt.credentials, rebuilt.redirect, rebuilt.cache, rebuilt.referrerPolicy]).toEqual(["include", "manual", "no-store", "no-referrer"]);
+    // A keep-alive request can't carry the sealed body stream, so the sealing refuses it rather than dropping the option.
+    const keepalive = new Request("https://gateway.example/v1/chat/completions", { method: "POST", body: '{"model":"test-model"}', headers: { "content-type": "application/json" }, keepalive: true });
+    await expect(t.fetch(keepalive)).rejects.toThrow(/keepalive/);
+  });
+
+  it("returns the caller's own abort when it gives up during a reroute", async () => {
+    const order = await rank(HOSTS, "", undefined);
+    const controller = new AbortController();
+    const g = gateway((seal) => {
+      controller.abort(new Error("gave up mid-reroute"));
+      return HOSTS.find((h) => h !== seal);
+    });
+    const t = transport({ policy: await GatewayPolicy.create(undefined, false, perHost()), gatewayFetch: g.fetch });
+    const pending = t.fetch("https://gateway.example/v1/chat/completions", { method: "POST", body: '{"model":"test-model"}', headers: { "content-type": "application/json" }, signal: controller.signal });
+    await expect(pending).rejects.toThrow(/gave up mid-reroute/);
+    await expect(pending).rejects.not.toBeInstanceOf(ConfigurationError);
+    void order;
   });
 
   it("honours a Request's own signal before verifying and while sending", async () => {
