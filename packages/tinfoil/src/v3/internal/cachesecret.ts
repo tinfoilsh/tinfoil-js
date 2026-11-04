@@ -123,7 +123,9 @@ export function withCacheSecret(next: Fetch, secret: string): Fetch {
     }
     const headers = new Headers(init?.headers ?? (input instanceof Request ? input.headers : undefined));
     headers.delete("content-length");
-    return next(input, { ...init, body: injected, headers });
+    // The body keeps its kind, so the content type fetch infers from it
+    // (text for a string, the blob's own type, none for bytes) is unchanged.
+    return next(input, { ...init, body: body.rebuild(injected), headers });
   };
 }
 
@@ -133,7 +135,11 @@ interface Body {
   readonly text: string | undefined;
   /** Whether reading consumed the caller's body, so it must be forwarded as `bytes`. */
   readonly consumed: boolean;
+  /** `text` as a body of the caller's kind. */
+  readonly rebuild: (text: string) => BodyInit;
 }
+
+const asBytes = (text: string): Uint8Array<ArrayBuffer> => new TextEncoder().encode(text) as Uint8Array<ArrayBuffer>;
 
 /**
  * The request body's bytes, read without consuming the caller's body where
@@ -144,17 +150,20 @@ async function readBody(input: string | URL | Request, init: RequestInit | undef
   const source = init?.body;
   let bytes: Uint8Array<ArrayBuffer>;
   let consumed = false;
+  let rebuild: Body["rebuild"] = asBytes;
   if (source === undefined || source === null) {
     if (!(input instanceof Request) || input.body === null) return undefined;
     bytes = new Uint8Array(await input.clone().arrayBuffer());
   } else if (typeof source === "string") {
-    return { bytes: new TextEncoder().encode(source), text: source, consumed: false };
+    return { bytes: asBytes(source), text: source, consumed: false, rebuild: (text) => text };
   } else if (source instanceof ArrayBuffer) {
     bytes = new Uint8Array(source.slice(0));
   } else if (ArrayBuffer.isView(source)) {
     bytes = new Uint8Array(source.buffer.slice(source.byteOffset, source.byteOffset + source.byteLength));
   } else if (typeof Blob !== "undefined" && source instanceof Blob) {
     bytes = new Uint8Array(await source.arrayBuffer());
+    const type = source.type;
+    rebuild = (text) => new Blob([text], { type });
   } else if (typeof ReadableStream !== "undefined" && source instanceof ReadableStream) {
     bytes = new Uint8Array(await new Response(source).arrayBuffer());
     consumed = true;
@@ -167,7 +176,7 @@ async function readBody(input: string | URL | Request, init: RequestInit | undef
   } catch {
     text = undefined;
   }
-  return { bytes, text, consumed };
+  return { bytes, text, consumed, rebuild };
 }
 
 /**

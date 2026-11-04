@@ -93,8 +93,10 @@ describe("withCacheSecret", () => {
     expect(last().headers.get("content-type")).toBe("application/json");
     await send(url, { method: "POST", body: new TextEncoder().encode(body) });
     expect(last().body).toBe(want);
-    await send(url, { method: "POST", body: new Blob([body]) });
+    expect(last().headers.get("content-type")).toBeNull();
+    await send(url, { method: "POST", body: new Blob([body], { type: "application/json" }) });
     expect(last().body).toBe(want);
+    expect(last().headers.get("content-type")).toBe("application/json");
     await send(url, { method: "POST", body: new Response(body).body, duplex: "half" } as RequestInit);
     expect(last().body).toBe(want);
     const request = new Request(url, { method: "POST", body, headers: { authorization: "Bearer k" } });
@@ -128,17 +130,22 @@ describe("withCacheSecret", () => {
 
 describe("resolveUserCacheSecret", () => {
   let home: string;
-  const saved = { home: process.env.HOME, secret: process.env[USER_CACHE_SECRET_ENV] };
+  // The home directory is redirected under both names, so the tests never touch the real one.
+  const saved = { HOME: process.env.HOME, USERPROFILE: process.env.USERPROFILE, secret: process.env[USER_CACHE_SECRET_ENV] };
 
   beforeEach(() => {
     home = mkdtempSync(join(tmpdir(), "tinfoil-secret-"));
     process.env.HOME = home;
+    process.env.USERPROFILE = home;
     delete process.env[USER_CACHE_SECRET_ENV];
     resetEphemeralUserCacheSecretForTests();
   });
 
   afterEach(() => {
-    process.env.HOME = saved.home;
+    for (const name of ["HOME", "USERPROFILE"] as const) {
+      if (saved[name] === undefined) delete process.env[name];
+      else process.env[name] = saved[name];
+    }
     if (saved.secret === undefined) delete process.env[USER_CACHE_SECRET_ENV];
     else process.env[USER_CACHE_SECRET_ENV] = saved.secret;
     rmSync(home, { recursive: true, force: true });
@@ -171,7 +178,8 @@ describe("resolveUserCacheSecret", () => {
     expect(await resolveUserCacheSecret(undefined)).toBe("shared-secret");
   });
 
-  it("falls back to one in-memory secret per process, with a warning, when the file is unusable", async () => {
+  // Creating a symbolic link needs a privilege on Windows that CI runners lack.
+  it.skipIf(process.platform === "win32")("falls back to one in-memory secret per process, with a warning, when the file is unusable", async () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     mkdirSync(join(home, ".tinfoil"), { mode: 0o700 });
     writeFileSync(join(home, "elsewhere"), "planted");
