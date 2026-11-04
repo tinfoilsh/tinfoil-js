@@ -161,8 +161,8 @@ describe("KeyedTransport", () => {
   function fakeMode(peerKey: () => string, closed: string[]): Mode {
     return {
       name: "tls",
-      validateRequest(url) {
-        if (url.protocol !== "https:") throw new ConfigurationError("needs https");
+      validateRequest(request) {
+        if (request.url.protocol !== "https:") throw new ConfigurationError("needs https");
       },
       bind(v) {
         const key = v.tlsPublicKeyFP()!;
