@@ -44,11 +44,18 @@ function attest(client: OpenAI, fetchImpl: ClientOptions["fetch"], baseURL: stri
   givenOptions.set(client, { ...options });
 }
 
-/** The options a clone is created with: the client's own, with `options` over them, and never a transport. */
-function inherit(client: OpenAI, options: Partial<ClientOptions>): OpenAIOptions {
-  const merged: Partial<ClientOptions> = { ...givenOptions.get(client), ...options };
+/**
+ * The options a clone is created with: the client's own, with `options` over
+ * them, and never a transport. A credential given to the clone replaces the
+ * inherited one whichever form it takes: `apiKey` clears an inherited
+ * `bearerToken`, and `bearerToken` clears an inherited `apiKey`.
+ */
+function inherit(client: OpenAI, options: Partial<OpenAIOptions> & Partial<ClientOptions>): OpenAIOptions {
+  const merged: Partial<ClientOptions> & { bearerToken?: string } = { ...givenOptions.get(client), ...options };
   delete merged.fetch;
   delete merged.baseURL;
+  if ("apiKey" in options && !("bearerToken" in options)) delete merged.bearerToken;
+  if ("bearerToken" in options && !("apiKey" in options)) delete merged.apiKey;
   return merged;
 }
 
@@ -72,7 +79,7 @@ export class TinfoilClient extends OpenAI {
   }
 
   /** A client with `options` applied over this one's, on the same attested transport. */
-  override withOptions(options: Partial<ClientOptions>): this {
+  override withOptions(options: Partial<ClientOptions> & Partial<OpenAIOptions>): this {
     return new TinfoilClient(TOKEN, this.#httpClient, inherit(this, options)) as this;
   }
 
@@ -136,7 +143,7 @@ export class EnclaveOpenAIClient extends OpenAI {
   }
 
   /** A client with `options` applied over this one's, on the same attested transport. */
-  override withOptions(options: Partial<ClientOptions>): this {
+  override withOptions(options: Partial<ClientOptions> & Partial<OpenAIOptions>): this {
     return new EnclaveOpenAIClient(TOKEN, this.#httpClient, inherit(this, options)) as this;
   }
 
@@ -173,7 +180,7 @@ export class RouterOpenAIClient extends OpenAI {
   }
 
   /** A client with `options` applied over this one's, on the same attested transport. */
-  override withOptions(options: Partial<ClientOptions>): this {
+  override withOptions(options: Partial<ClientOptions> & Partial<OpenAIOptions>): this {
     return new RouterOpenAIClient(TOKEN, this.#httpClient, inherit(this, options)) as this;
   }
 
@@ -205,7 +212,7 @@ export class GatewayOpenAIClient extends OpenAI {
   }
 
   /** A client with `options` applied over this one's, on the same attested transport. */
-  override withOptions(options: Partial<ClientOptions>): this {
+  override withOptions(options: Partial<ClientOptions> & Partial<OpenAIOptions>): this {
     return new GatewayOpenAIClient(this.#httpClient, inherit(this, options)) as this;
   }
 
