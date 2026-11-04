@@ -399,7 +399,7 @@ describe.skipIf(withoutVectors)(vectorsTitle("verifyCertificateBundle"), () => {
     expect(v.identity.sourceRepositoryIdentifier).toBe("");
     expect(v.identity.sourceRepositoryOwnerIdentifier).toBe("");
     expect(v.payload).toEqual(decode((goldenCode.data.sigstore_bundle as Record<string, any>).dsseEnvelope.payload));
-    expect(v.earliestLogTime).toEqual(new Date("2025-01-01T00:00:01Z"));
+    expect(v.verifiedLogTime).toEqual(new Date("2025-01-01T00:00:01Z"));
   });
 
   it("verifies the platform bundle under the platform identity only", async () => {
@@ -454,6 +454,18 @@ describe.skipIf(withoutVectors)(vectorsTitle("verifyCertificateBundle"), () => {
     await rejects(verifyCertificateBundle(await goldenRoot, bundle, codeIdentity(golden.repo), goldenCode.data.digest!), /no signing certificate/);
   });
 
+  it("rejects a bundle whose signing time is only the bundle's own claim", async () => {
+    // Without the first entry's inclusion promise, the integration time is
+    // unsigned: the inclusion proof covers the entry body only, so the
+    // bundle could state any time inside the certificate's window.
+    const bundle = parseBundle(
+      mutated(goldenCode.data.sigstore_bundle, (w) => {
+        delete w.verificationMaterial.tlogEntries[0].inclusionPromise;
+      }),
+    );
+    await rejects(verifyCertificateBundle(await goldenRoot, bundle, codeIdentity(golden.repo), goldenCode.data.digest!), /no verified observer timestamp/);
+  });
+
   it("rejects a payload altered after signing", async () => {
     const bundle = parseBundle(
       mutated(goldenCode.data.sigstore_bundle, (w) => {
@@ -477,7 +489,7 @@ describe.skipIf(withoutVectors)(vectorsTitle("verifyCertificateBundle"), () => {
     expect(v.identity.sourceRepositoryIdentifier).toMatch(/^[0-9]+$/);
     expect(v.identity.sourceRepositoryOwnerIdentifier).toMatch(/^[0-9]+$/);
     const wire = realCode.data.sigstore_bundle as Record<string, any>;
-    expect(v.earliestLogTime).toEqual(new Date(Number(wire.verificationMaterial.tlogEntries[0].integratedTime) * 1000));
+    expect(v.verifiedLogTime).toEqual(new Date(Number(wire.verificationMaterial.tlogEntries[0].integratedTime) * 1000));
   });
 
   it("binds a production platform bundle to its own repository", async () => {
