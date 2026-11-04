@@ -7,7 +7,7 @@
  *
  * DER is built by hand here; the verifier's own decoder is what checks it.
  */
-import { concat, sha256, utf8 } from "../../../src/v3/internal/bytes.js";
+import { sha256, utf8 } from "../../../src/v3/internal/bytes.js";
 import { b64, derSignature, P256 } from "./keyed.js";
 
 // ---------------------------------------------------------------- DER encoding
@@ -240,7 +240,8 @@ export async function timestampResponse(tsa: TimestampAuthority, input: Uint8Arr
     integer(3),
     set(sha256AlgId()),
     seq(oid(OID_TST_INFO), explicit(0, octetString(info))),
-    implicitConstructed(0, concat(tsa.leafDer)),
+    // certificates [0] IMPLICIT CertificateSet: a SET OF Certificate under the implicit tag.
+    implicitConstructed(0, set(tsa.leafDer)),
     set(signerInfo),
   );
   const token = seq(oid(OID_SIGNED_DATA), explicit(0, signedData));

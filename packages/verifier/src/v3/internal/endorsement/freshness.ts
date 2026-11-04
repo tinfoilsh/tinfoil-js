@@ -52,7 +52,8 @@ export async function authenticateFreshness(
   now: Date,
   maxAgeMs: number,
 ): Promise<Date> {
-  if (!(maxAgeMs >= 0)) throw new Error("freshness maximum age must not be negative");
+  if (!Number.isFinite(maxAgeMs) || maxAgeMs < 0) throw new Error("freshness maximum age must be a finite, non-negative number");
+  if (!Number.isFinite(now.getTime())) throw new Error("freshness clock is invalid");
   validateAuthenticatedArtifact(expected);
   let verified;
   try {
@@ -86,8 +87,9 @@ function loggedAt(entries: readonly { readonly integratedTime?: bigint; readonly
   return new Date(Number(first.integratedTime) * 1000);
 }
 
-/** `loggedAt` must exist, lie no more than five minutes after `now`, and no more than `maxAgeMs` before it. */
+/** `loggedAt` must exist, lie no more than five minutes after `now`, and no more than `maxAgeMs` before it; `now` and `maxAgeMs` must be finite. */
 export function validateFreshnessTime(loggedAt: Date | undefined, now: Date, maxAgeMs: number): Date {
+  if (!Number.isFinite(now.getTime()) || !Number.isFinite(maxAgeMs)) throw new Error("freshness clock or maximum age is invalid");
   if (loggedAt === undefined || !Number.isFinite(loggedAt.getTime())) {
     throw new Error("freshness witness has no verified transparency-log timestamp");
   }

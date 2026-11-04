@@ -221,6 +221,10 @@ describe("verifyKeyedBundle", () => {
     await expect(verify(root, json, keys, happy.digest)).rejects.toThrow("no RFC 3161 timestamps");
   });
 
+  it("cannot mint a bundle with no log entries", async () => {
+    await expect(build(signer, ecdsaLog, { entries: 0 })).rejects.toThrow(/at least one log entry/);
+  });
+
   it("rejects duplicate entries", async () => {
     const json = mutated(happy.json, (b) => b.verificationMaterial.tlogEntries.push(b.verificationMaterial.tlogEntries[0]));
     await expect(verify(root, json, keys, happy.digest)).rejects.toThrow("duplicates");

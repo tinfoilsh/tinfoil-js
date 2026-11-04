@@ -51,6 +51,10 @@ import {
 } from "./helpers/conformance.js";
 
 const withoutVectors = !conformanceAvailable();
+// Read at collection time only when the checkout is present, so the suites skip instead of failing without it.
+const PROVENANCE_VECTORS = withoutVectors ? [] : loadFixtures("provenance");
+const POLICY_VECTORS = withoutVectors ? [] : loadFixtures("policy");
+const FRESHNESS_VECTORS = withoutVectors ? [] : loadFixtures("freshness");
 
 // ---------------------------------------------------------------- references
 
@@ -130,7 +134,7 @@ async function authenticateCodeOf(fixture: ConformanceFixture): Promise<Code> {
 }
 
 describe.skipIf(withoutVectors)(vectorsTitle("ProvenanceClient.authenticateCode"), () => {
-  for (const fixture of loadFixtures("provenance")) {
+  for (const fixture of PROVENANCE_VECTORS) {
     const { expected } = fixture;
     it(`${fixture.id}: ${expected.accepted ? "accepts" : "rejects"}`, async () => {
       if (!expected.accepted) {
@@ -174,7 +178,7 @@ describe.skipIf(withoutVectors)(vectorsTitle("ProvenanceClient.authenticatePlatf
     return (await clientOf(fixture)).authenticatePlatformEndorsements(ref.bundle, ref.repo, ref.tag, ref.digest, format);
   };
 
-  for (const fixture of loadFixtures("policy")) {
+  for (const fixture of POLICY_VECTORS) {
     const { expected } = fixture;
     it(`${fixture.id}: ${expected.accepted ? "accepts" : "rejects"}`, async () => {
       if (!expected.accepted) {
@@ -228,7 +232,7 @@ describe.skipIf(withoutVectors)(vectorsTitle("authenticateFreshness"), () => {
     return authenticateFreshness(await clientOf(fixture), doc.freshness("code-freshness").bundle, code, clockOf(fixture), maxAgeMs);
   };
 
-  for (const fixture of loadFixtures("freshness")) {
+  for (const fixture of FRESHNESS_VECTORS) {
     const verdict = CODE_WITNESS[fixture.id];
     it(`${fixture.id}: code witness ${verdict === "accept" ? "verifies" : "rejects"}`, async () => {
       expect(verdict, `no expected verdict for vector ${fixture.id}`).toBeDefined();
@@ -247,7 +251,11 @@ describe.skipIf(withoutVectors)(vectorsTitle("authenticateFreshness"), () => {
     const age = clockOf(fixture).getTime() - at.getTime();
     expect(age).toBeLessThanOrEqual(MAX_FRESHNESS_AGE_MS);
     await expect(witness(fixture, Math.max(1, age - 1000))).rejects.toThrow(/stale/);
-    await expect(witness(fixture, -1)).rejects.toThrow(/must not be negative/);
+    await expect(witness(fixture, -1)).rejects.toThrow(/finite, non-negative/);
+    await expect(witness(fixture, Infinity)).rejects.toThrow(/finite, non-negative/);
+    const doc = await documentOf(fixture);
+    const code = await authenticateCodeOf(fixture);
+    await expect(authenticateFreshness(await clientOf(fixture), doc.freshness("code-freshness").bundle, code, new Date(NaN), 0)).rejects.toThrow(/clock is invalid/);
   });
 
   it("verifies the golden document's code witness", async () => {
@@ -274,6 +282,8 @@ describe("freshness statement checks", () => {
     expect(() => validateFreshnessTime(new Date(now.getTime() - MAX_FRESHNESS_AGE_MS - 1), now, MAX_FRESHNESS_AGE_MS)).toThrow(/stale/);
     expect(() => validateFreshnessTime(new Date(now.getTime() + MAX_FRESHNESS_FUTURE_SKEW_MS + 1), now, MAX_FRESHNESS_AGE_MS)).toThrow(/future/);
     expect(() => validateFreshnessTime(undefined, now, MAX_FRESHNESS_AGE_MS)).toThrow(/no verified transparency-log timestamp/);
+    expect(() => validateFreshnessTime(now, new Date(NaN), MAX_FRESHNESS_AGE_MS)).toThrow(/clock or maximum age is invalid/);
+    expect(() => validateFreshnessTime(now, now, Infinity)).toThrow(/clock or maximum age is invalid/);
     expect(() => validateFreshnessTime(new Date(NaN), now, MAX_FRESHNESS_AGE_MS)).toThrow(/no verified transparency-log timestamp/);
   });
 

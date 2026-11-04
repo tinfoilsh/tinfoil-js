@@ -207,6 +207,7 @@ export async function build(signer: Signer, log: TestLog, opts: BuildOptions = {
   });
   const body = utf8(opts.bodyText === undefined ? canonical : opts.bodyText(canonical));
   const count = opts.entries ?? 1;
+  if (!Number.isInteger(count) || count < 1) throw new Error("a bundle needs at least one log entry; omit the entry instead to test an empty log");
   const leaves = Array.from({ length: count }, () => body);
   const root = await treeRoot(leaves);
   const text = `${opts.checkpointOrigin ?? log.origin}\n${count}\n${b64(root)}\n`;

@@ -47,6 +47,8 @@ export async function authenticateRuntime(client: ProvenanceClient, material: Ru
   if (str(statement, "_type") !== IN_TOTO_STATEMENT_V1 || str(statement, "predicateType") !== SLSA_PROVENANCE_V1) {
     throw new Error("runtime provenance must use SLSA v1");
   }
+  // A SLSA v1 predicate is an object; a statement that types one but carries none is not provenance.
+  if (!(statement.get("predicate") instanceof Map)) throw new Error("runtime provenance predicate is not an object");
   const authenticated = authenticatedArtifact(verified, expected.repo, releaseTag, expected.digest, "runtime");
   return { ...authenticated, subjectName: subject, manifest };
 }
