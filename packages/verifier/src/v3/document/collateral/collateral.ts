@@ -22,6 +22,8 @@ export const SIGSTORE_PLATFORM_V1_FORMAT = "https://tinfoil.sh/collateral/sigsto
 export const SIGSTORE_FRESHNESS_V1_FORMAT = "https://tinfoil.sh/collateral/sigstore-freshness/v1";
 export const ARTIFACT_FRESHNESS_V1_FORMAT = "https://tinfoil.sh/collateral/artifact-freshness/v1";
 export const CONFIG_ENDORSEMENT_V1_FORMAT = "https://tinfoil.sh/collateral/config-endorsement/v1";
+/** A config endorsement that may carry a registry issuer certificate and omit the config bytes. */
+export const CONFIG_ENDORSEMENT_V2_FORMAT = "https://tinfoil.sh/collateral/config-endorsement/v2";
 export const CONFIG_V1_FORMAT = "https://tinfoil.sh/collateral/config/v1";
 
 export const ROLE_ENDORSEMENT = "endorsement";
@@ -94,6 +96,8 @@ export function decodeEntries(v: JsonValue | undefined): Entry[] {
  * shape-checked and dropped. An endorsement entry serves the CPU only when its
  * subjects include "cpu".
  */
+const CONFIG_FORMATS: readonly string[] = [CONFIG_ENDORSEMENT_V1_FORMAT, CONFIG_ENDORSEMENT_V2_FORMAT, CONFIG_V1_FORMAT];
+
 export function decode(entries: readonly Entry[]): CollateralSet {
   validate(entries);
   const cpu: { amdVcek?: AmdVcek; amdCrl?: AmdCrl; intelPcs?: IntelPcs } = {};
@@ -109,12 +113,8 @@ export function decode(entries: readonly Entry[]): CollateralSet {
     const forCpu = entry.subjects?.includes(SUBJECT_CPU) ?? false;
     if (entry.id === PLATFORM_ID || entry.format === SIGSTORE_PLATFORM_V1_FORMAT) platformCount++;
 
-    if (entry.id === CONFIG_ID || entry.format === CONFIG_ENDORSEMENT_V1_FORMAT || entry.format === CONFIG_V1_FORMAT) {
-      if (
-        entry.id !== CONFIG_ID ||
-        (entry.format !== CONFIG_ENDORSEMENT_V1_FORMAT && entry.format !== CONFIG_V1_FORMAT) ||
-        entry.role !== ROLE_REFERENCE_VALUES
-      ) {
+    if (entry.id === CONFIG_ID || CONFIG_FORMATS.includes(entry.format)) {
+      if (entry.id !== CONFIG_ID || !CONFIG_FORMATS.includes(entry.format) || entry.role !== ROLE_REFERENCE_VALUES) {
         throw new Error(`conflicting collateral entry for "${CONFIG_ID}"`);
       }
       config = decodeConfigEndorsement(entry);

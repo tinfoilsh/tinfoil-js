@@ -164,7 +164,12 @@ export class Document {
   configEndorsement(): ConfigEndorsement {
     const c = this.#d.collateral.config;
     if (c === undefined) throw new NotFoundError(`document carries no "${CONFIG_ID}" reference-values entry`);
-    return { reference: c.reference, config: c.config.slice(), bundle: cloneOpt(c.bundle) };
+    return {
+      reference: c.reference,
+      ...(c.config === undefined ? {} : { config: c.config.slice() }),
+      bundle: cloneOpt(c.bundle),
+      ...(c.issuer === undefined ? {} : { issuer: c.issuer.slice() }),
+    };
   }
 
   /** The decoded, unauthenticated runtime approval (v3 collateral). Throws NotFoundError when absent. */
