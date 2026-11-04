@@ -9,6 +9,9 @@ import OpenAI from "openai";
 import { describe, expect, it } from "vitest";
 import * as browser from "../../src/v3/index.browser.js";
 import * as surface from "../../src/v3/index.js";
+import { createEnclaveHTTPClient } from "../../src/v3/enclave-client.js";
+import { createEnclaveOpenAIClient } from "../../src/v3/openai-client.js";
+import type { Fetch } from "../../src/v3/options.js";
 import { NotImplementedError } from "../../src/v3/internal/not-implemented.js";
 
 /** Every runtime export, sorted. Type-only exports are checked by compiling this file. */
@@ -79,6 +82,18 @@ const methodsOf = (cls: { prototype: object }): string[] =>
 
 const staticsOf = (cls: object): string[] => Object.getOwnPropertyNames(cls).filter((n) => !["length", "name", "prototype"].includes(n));
 
+/** A fetch seam that counts the requests made through it. */
+function countingFetch(): { fetch: Fetch; calls: number } {
+  const counter = {
+    calls: 0,
+    fetch: (async () => {
+      counter.calls++;
+      return new Response(new Uint8Array([1]));
+    }) as Fetch,
+  };
+  return counter;
+}
+
 describe("public surface", () => {
   it("exports exactly the specified names from both entries", () => {
     expect(Object.keys(surface).sort()).toEqual(EXPORTS);
@@ -136,9 +151,11 @@ describe("public surface", () => {
   });
 
   it("checks enclave client options before any network I/O", async () => {
-    await expect(surface.EnclaveHTTPClient.create("", "tinfoilsh/repo")).rejects.toBeInstanceOf(surface.ConfigurationError);
-    await expect(surface.EnclaveOpenAIClient.create("enclave.example", "tinfoilsh/repo", { baseURL: "http://proxy.example/" })).rejects.toBeInstanceOf(
+    const fetches = countingFetch();
+    await expect(createEnclaveHTTPClient("", "tinfoilsh/repo", {}, { documentFetch: fetches.fetch })).rejects.toBeInstanceOf(surface.ConfigurationError);
+    await expect(createEnclaveOpenAIClient("enclave.example", "tinfoilsh/repo", { baseURL: "http://proxy.example/" }, {}, { documentFetch: fetches.fetch })).rejects.toBeInstanceOf(
       surface.ConfigurationError,
     );
+    expect(fetches.calls).toBe(0);
   });
 });
