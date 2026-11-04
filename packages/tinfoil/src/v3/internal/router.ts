@@ -69,8 +69,9 @@ export async function discoverRouter(config: DiscoveryConfig): Promise<KeyedTran
     try {
       const candidate = new KeyedTransport(await enclaveFor(router), config.mode, config.clock);
       // The candidate keeps its verification, so the client doesn't repeat
-      // it, and a router whose keys the mode can't use is skipped. The
-      // budget cancels the attestation fetch in flight.
+      // it, and a router whose keys the mode can't use is skipped. When the
+      // budget ends, discovery stops waiting; the fetch runs out on its own
+      // timeout.
       await candidate.verifyOnce(probing);
       return candidate;
     } catch {

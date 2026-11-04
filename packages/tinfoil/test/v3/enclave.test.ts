@@ -321,6 +321,20 @@ describe.skipIf(!conformanceAvailable())(vectorsTitle("Enclave"), () => {
       expect((await patient).verification.tlsPublicKeyFP()).toBe(golden.expected.tls);
       expect(urls).toHaveLength(1);
     });
+
+    it("lets a one-shot probe give up without aborting the verification a concurrent caller joined", async () => {
+      const { fetch, urls, release } = gated(golden.document);
+      const cache = new VerifiedEnclave(await Enclave.create(config({ fetch })), noBinding, () => golden.at);
+      const budget = new AbortController();
+      const probe = cache.verifyOnce(budget.signal);
+      const request = cache.ensureVerified();
+      budget.abort(new Error("budget spent"));
+      await expect(probe).rejects.toThrow(/budget spent/);
+      release();
+      expect((await request).verification.tlsPublicKeyFP()).toBe(golden.expected.tls);
+      expect(cache.current()).toBeDefined();
+      expect(urls).toHaveLength(1);
+    });
   });
 });
 
