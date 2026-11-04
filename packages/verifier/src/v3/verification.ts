@@ -16,8 +16,14 @@ export interface ConfigVerification {
   readonly signingKeyHint: string;
   /** Undefined when the config was not approved by a timestamped endorsement. */
   readonly approvalTime?: Date;
-  /** The registry scope the endorsement was accepted under; "" when none applies. */
+  /**
+   * The registry scope the endorsement was accepted under: the one its
+   * certificate assigns, the public scope for a key-signed registry
+   * approval, "" when none applies.
+   */
   readonly scope: string;
+  /** When a certificate-signed approval's signature was made; undefined otherwise. */
+  readonly signatureTime?: Date;
 }
 
 /** A verified release artifact: the runtime or the platform endorsements. */
@@ -67,7 +73,7 @@ export class Verification {
       codeMeasurement: cloneExpected(fields.codeMeasurement),
       enclaveMeasurement: cloneMeasurement(fields.enclaveMeasurement),
       cryptoMaterial: fields.cryptoMaterial.map((i) => ({ ...i })),
-      config: fields.config && { ...fields.config, approvalTime: copyDate(fields.config.approvalTime) },
+      config: fields.config && copyConfig(fields.config),
       runtime: fields.runtime && { ...fields.runtime, approvalTime: copyDate(fields.runtime.approvalTime) },
       platform: fields.platform && { ...fields.platform, approvalTime: copyDate(fields.platform.approvalTime) },
       freshnessExpiresAt: copyDate(fields.freshnessExpiresAt),
@@ -103,7 +109,7 @@ export class Verification {
   /** The verified config, for a config-based document. */
   config(): ConfigVerification | undefined {
     const c = this.#fields.config;
-    return c && { ...c, approvalTime: copyDate(c.approvalTime) };
+    return c && copyConfig(c);
   }
 
   /** The verified runtime release, for a config-based document. */
@@ -152,6 +158,14 @@ export class Verification {
 /** The data of the first item with the given id and format, or undefined. */
 export function cryptoMaterialData(items: readonly CryptoMaterialItem[], id: string, format: string): string | undefined {
   return items.find((i) => i.id === id && i.format === format)?.data;
+}
+
+function copyConfig(c: ConfigVerification): ConfigVerification {
+  return {
+    ...c,
+    ...(c.approvalTime === undefined ? {} : { approvalTime: copyDate(c.approvalTime) }),
+    ...(c.signatureTime === undefined ? {} : { signatureTime: copyDate(c.signatureTime) }),
+  };
 }
 
 function copyDate(d: Date | undefined): Date | undefined {

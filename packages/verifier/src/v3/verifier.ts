@@ -29,7 +29,10 @@ import {
   PLATFORM_ARTIFACT_NAME,
   PUBLIC_SCOPE,
   publicSigningKeys,
+  validateConfigPins,
+  validateScopes,
   type ArtifactKind,
+  type ConfigPolicy,
 } from "./internal/endorsement/approval.js";
 import { authenticateFreshness, MAX_FRESHNESS_AGE_MS } from "./internal/endorsement/freshness.js";
 import { ProvenanceClient } from "./internal/endorsement/provenance.js";
@@ -65,6 +68,13 @@ export interface VerifierOptions {
   readonly freshnessSigningKeys?: readonly string[];
   /** Authorizes an unsigned config; throwing rejects the document at the provenance layer. */
   readonly configAuthorizer?: (endorsement: ConfigEndorsement) => void | Promise<void>;
+  /**
+   * The registry scopes a config approval may be accepted under, replacing
+   * public-only trust: an approval certified for another scope rejects. Needs
+   * registry trust, so it conflicts with config signing keys, an embedded
+   * config and a config authorizer. Must be non-empty without repeats.
+   */
+  readonly configScopes?: readonly string[];
   readonly embeddedReferences?: EmbeddedReferences;
 }
 
@@ -96,6 +106,7 @@ interface Policy {
   readonly pinnedRegisters?: Expected;
   readonly freshnessMaxAgeMs: number;
   readonly configAuthorizer?: (endorsement: ConfigEndorsement) => void | Promise<void>;
+  readonly configScopes?: readonly string[];
   readonly configKeysPinned: boolean;
   readonly freshnessKeysPinned: boolean;
 }
@@ -109,6 +120,19 @@ interface References {
   readonly freshnessExpiresAt?: Date;
 }
 
+/** Only this module holds the token the constructor requires, so a verifier comes from {@link Verifier.create}. */
+const BUILT_HERE: unique symbol = Symbol("verifier");
+type BuiltHere = typeof BUILT_HERE;
+
+/** The parts a built verifier is made of. */
+interface Parts {
+  readonly policy: Policy;
+  readonly prov: ProvenanceClient;
+  readonly configVerifier: ConfigVerifier;
+  readonly freshnessVerifier: FreshnessVerifier;
+  readonly roots: quote.VendorRoots;
+}
+
 /** Appraises v3 attestation documents against a fixed policy. Immutable once built. */
 export class Verifier {
   readonly #policy: Policy;
@@ -117,12 +141,14 @@ export class Verifier {
   readonly #freshnessVerifier: FreshnessVerifier;
   readonly #roots: quote.VendorRoots;
 
-  private constructor(policy: Policy, prov: ProvenanceClient, configVerifier: ConfigVerifier, freshnessVerifier: FreshnessVerifier, roots: quote.VendorRoots) {
-    this.#policy = policy;
-    this.#prov = prov;
-    this.#configVerifier = configVerifier;
-    this.#freshnessVerifier = freshnessVerifier;
-    this.#roots = roots;
+  /** @internal Not callable from outside this module: use {@link Verifier.create}. */
+  constructor(token: BuiltHere, parts: Parts) {
+    if (token !== BUILT_HERE) throw new UsageError("verifier must be built with Verifier.create");
+    this.#policy = parts.policy;
+    this.#prov = parts.prov;
+    this.#configVerifier = parts.configVerifier;
+    this.#freshnessVerifier = parts.freshnessVerifier;
+    this.#roots = parts.roots;
   }
 
   /**
@@ -131,50 +157,7 @@ export class Verifier {
    * Throws UsageError for invalid options.
    */
   static async create(options: VerifierOptions = {}): Promise<Verifier> {
-    return Verifier.build(options, {});
-  }
-
-  /** @internal */
-  static async build(options: VerifierOptions, roots: DangerousTestOnlyRoots): Promise<Verifier> {
-    try {
-      return await Verifier.#build(options, roots);
-    } catch (err) {
-      if (err instanceof UsageError) throw err;
-      throw new UsageError(message(err), { cause: err });
-    }
-  }
-
-  static async #build(options: VerifierOptions, roots: DangerousTestOnlyRoots): Promise<Verifier> {
-    const prov = roots.sigstore ? await ProvenanceClient.fromJSON(roots.sigstore) : await ProvenanceClient.default();
-    const pinnedRegisters = options.pinnedRegisters === undefined ? undefined : validPins(options.pinnedRegisters);
-    const freshnessMaxAgeMs = freshnessBound(options.freshnessMaxAgeMs);
-    const configKeys = options.configSigningKeys === undefined ? undefined : await keysOf("config signing keys", options.configSigningKeys);
-    const freshnessKeys = options.freshnessSigningKeys === undefined ? undefined : await keysOf("freshness signing keys", options.freshnessSigningKeys);
-    if (options.configAuthorizer !== undefined && typeof options.configAuthorizer !== "function") {
-      throw new UsageError("config authorizer must be a function");
-    }
-    const embedded = options.embeddedReferences === undefined ? {} : await embeddedOf(options.embeddedReferences);
-    if (embedded.configReference !== undefined && configKeys !== undefined) {
-      throw new UsageError("embedded config and config signing keys select conflicting trust sources");
-    }
-    if (options.configAuthorizer !== undefined && (embedded.configReference !== undefined || configKeys !== undefined)) {
-      throw new UsageError("config authorizer conflicts with embedded config or config signing keys");
-    }
-    if (embedded.runtime !== undefined && embedded.platform !== undefined && freshnessKeys !== undefined) {
-      throw new UsageError("freshness signing keys have no endorsed artifact to verify");
-    }
-    const publicKeys = await publicSigningKeys();
-    const configVerifier = new ConfigVerifier(prov.root, configKeys ?? publicKeys);
-    const freshnessVerifier = new FreshnessVerifier(prov.root, freshnessKeys ?? publicKeys);
-    const policy: Policy = {
-      embedded,
-      pinnedRegisters,
-      freshnessMaxAgeMs,
-      configAuthorizer: options.configAuthorizer,
-      configKeysPinned: configKeys !== undefined,
-      freshnessKeysPinned: freshnessKeys !== undefined,
-    };
-    return new Verifier(policy, prov, configVerifier, freshnessVerifier, { amd: roots.amd, intel: roots.intel });
+    return build(options, {});
   }
 
   /** The freshness window in milliseconds. */
@@ -264,7 +247,8 @@ export class Verifier {
       e.platform !== undefined ||
       this.#policy.configKeysPinned ||
       this.#policy.freshnessKeysPinned ||
-      this.#policy.configAuthorizer !== undefined
+      this.#policy.configAuthorizer !== undefined ||
+      this.#policy.configScopes !== undefined
     );
   }
 
@@ -304,16 +288,22 @@ export class Verifier {
 
   // ---------------------------------------------------------------- config-pinned runtimes (collateral v3)
 
-  /** The config pins `repo` imposes, as a config policy without a clock. */
+  /**
+   * The config pins `repo` imposes, as a config policy without a clock. The
+   * accepted scopes are the caller's, or the public scope alone under the
+   * registry roots; caller-pinned keys leave the scope unpinned.
+   */
   #referencePins(ref: string): ConfigPins {
-    const pins: ConfigPins = { identity: "", revision: "", digest: "" };
+    let scopes = this.#policy.configScopes;
+    if (scopes === undefined && !this.#policy.configKeysPinned) scopes = [PUBLIC_SCOPE];
+    const pins: ConfigPins = { identity: "", revision: "", digest: "", scopes };
     if (this.#policy.configAuthorizer !== undefined && ref !== "") {
       throw new UsageError("config authorizer cannot authenticate repository or revision pins; enforce them in caller policy");
     }
     let pinned = pins;
     if (ref !== "") {
       const parsed = usage(() => parseReference(ref));
-      pinned = { identity: "/" + parsed.repo, revision: parsed.tag, digest: parsed.digest };
+      pinned = { ...pins, identity: "/" + parsed.repo, revision: parsed.tag, digest: parsed.digest };
     }
     const embedded = this.#policy.embedded.configReference;
     if (embedded !== undefined) {
@@ -333,6 +323,10 @@ export class Verifier {
 
   async #configReferences(doc: Document, repo: string, now: Date): Promise<References> {
     const pins = this.#referencePins(repo);
+    // Config identities and revisions are stricter than the repository
+    // references legacy collateral accepts, so only config collateral checks
+    // them; a pin that can never match is the caller's mistake.
+    if (pins.identity !== "") usage(() => validateConfigPins({ ...pins, now, maxAgeMs: 0, futureSkewMs: 0 }));
     const { expected, config } = await this.#resolveConfig(doc, pins, now);
     const digest = decodeLowerHex("config digest", config.digest, 32);
     const { manifest, artifact } = await this.#resolveRuntime(doc, expected, now);
@@ -359,38 +353,45 @@ export class Verifier {
     const material = doc.configEndorsement();
     const authorizer = this.#policy.configAuthorizer;
     if (authorizer !== undefined) {
-      if (material.config.length === 0 || material.config.length > MAX_CONFIG_SIZE) throw new Error("config size is outside allowed bounds");
+      const config = material.config ?? new Uint8Array();
+      if (config.length === 0 || config.length > MAX_CONFIG_SIZE) throw new Error("config size is outside allowed bounds");
       try {
-        await authorizer({ reference: material.reference, config: material.config.slice(), bundle: material.bundle });
+        await authorizer({ ...material, config: config.slice(), ...(material.issuer === undefined ? {} : { issuer: material.issuer.slice() }) });
       } catch (err) {
         throw new VerificationError("provenance", `authorizing config: ${message(err)}`, { cause: err });
       }
-      const digest = toHex(await sha256(material.config));
-      return { expected: configRuntime(material.config), config: { source: "policy", name: "", digest, reference: "", signingKeyHint: "", scope: "" } };
+      const digest = toHex(await sha256(config));
+      return { expected: configRuntime(config), config: { source: "policy", name: "", digest, reference: "", signingKeyHint: "", scope: "" } };
     }
     if (material.bundle === undefined) throw new Error("unsigned config requires a config authorizer");
+    const policy: ConfigPolicy = {
+      identity: pins.identity,
+      revision: pins.revision,
+      digest: pins.digest,
+      now,
+      maxAgeMs: this.#policy.freshnessMaxAgeMs,
+      futureSkewMs: 0,
+      ...(pins.scopes === undefined ? {} : { scopes: pins.scopes }),
+    };
     let approved;
     try {
-      approved = await this.#configVerifier.verify(material.config, material.bundle, {
-        identity: pins.identity,
-        revision: pins.revision,
-        digest: pins.digest,
-        now,
-        maxAgeMs: this.#policy.freshnessMaxAgeMs,
-        futureSkewMs: 0,
-      });
+      // An issuer certificate selects the certified path under the registry
+      // roots; caller-pinned keys ignore it and verify the key-signed bundle.
+      approved =
+        material.issuer !== undefined && !this.#policy.configKeysPinned
+          ? await this.#configVerifier.verifyCertified(material.config, material.bundle, material.issuer, policy)
+          : await this.#configVerifier.verify(material.config, material.bundle, policy);
     } catch (err) {
       throw new Error(`verifying config approval: ${message(err)}`);
     }
-    // Under Tinfoil's registry keys a scoped (v2) endorsement is accepted only
-    // through a registry certificate, which this verifier does not support.
-    let scope = "";
-    if (!this.#policy.configKeysPinned) {
-      if (approved.scope !== "") throw new Error("verifying config approval: v2 registry endorsement requires an issuer certificate");
-      scope = PUBLIC_SCOPE;
-    }
     if (material.reference !== approved.reference) throw new Error("config endorsement reference does not match the verified approval");
-    const expected = approved.runtime ?? configRuntime(material.config);
+    let expected: RuntimeReference;
+    if (approved.runtime !== undefined) {
+      expected = approved.runtime;
+    } else {
+      if (material.config === undefined) throw new Error("config endorsement without config bytes must pin a runtime");
+      expected = configRuntime(material.config);
+    }
     return {
       expected,
       config: {
@@ -400,7 +401,8 @@ export class Verifier {
         reference: approved.reference,
         signingKeyHint: approved.signingKeyHint,
         approvalTime: approved.approvalTime,
-        scope,
+        scope: approved.scope,
+        ...(approved.signatureTime === undefined ? {} : { signatureTime: approved.signatureTime }),
       },
     };
   }
@@ -455,13 +457,75 @@ export class Verifier {
 
 /** Builds a verifier that trusts the injected roots instead of the embedded ones. */
 export function dangerousTestOnlyVerifier(roots: DangerousTestOnlyRoots, options: VerifierOptions = {}): Promise<Verifier> {
-  return Verifier.build(options, roots);
+  return build(options, roots);
+}
+
+/** Validates every option, resolves the trust material and assembles the verifier. */
+async function assemble(options: VerifierOptions, roots: DangerousTestOnlyRoots): Promise<Verifier> {
+  const prov = roots.sigstore ? await ProvenanceClient.fromJSON(roots.sigstore) : await ProvenanceClient.default();
+  const pinnedRegisters = options.pinnedRegisters === undefined ? undefined : validPins(options.pinnedRegisters);
+  const freshnessMaxAgeMs = freshnessBound(options.freshnessMaxAgeMs);
+  const configKeys = options.configSigningKeys === undefined ? undefined : await keysOf("config signing keys", options.configSigningKeys);
+  const freshnessKeys = options.freshnessSigningKeys === undefined ? undefined : await keysOf("freshness signing keys", options.freshnessSigningKeys);
+  if (options.configAuthorizer !== undefined && typeof options.configAuthorizer !== "function") {
+    throw new UsageError("config authorizer must be a function");
+  }
+  const embedded = options.embeddedReferences === undefined ? {} : await embeddedOf(options.embeddedReferences);
+  if (embedded.configReference !== undefined && configKeys !== undefined) {
+    throw new UsageError("embedded config and config signing keys select conflicting trust sources");
+  }
+  if (options.configAuthorizer !== undefined && (embedded.configReference !== undefined || configKeys !== undefined)) {
+    throw new UsageError("config authorizer conflicts with embedded config or config signing keys");
+  }
+  const configScopes = options.configScopes === undefined ? undefined : usage(() => scopesOf(options.configScopes!));
+  if (configScopes !== undefined && (embedded.configReference !== undefined || options.configAuthorizer !== undefined)) {
+    throw new UsageError("config authority pins require endorsement verification");
+  }
+  if (configScopes !== undefined && configKeys !== undefined) {
+    throw new UsageError("config scope policy requires Tinfoil registry root verification");
+  }
+  if (embedded.runtime !== undefined && embedded.platform !== undefined && freshnessKeys !== undefined) {
+    throw new UsageError("freshness signing keys have no endorsed artifact to verify");
+  }
+  const publicKeys = await publicSigningKeys();
+  // Without caller-pinned config keys, the public keys are the registry
+  // roots as well: they issue the scope certificates of certified approvals.
+  const configVerifier = configKeys === undefined ? new ConfigVerifier(prov.root, publicKeys, publicKeys) : new ConfigVerifier(prov.root, configKeys);
+  const freshnessVerifier = new FreshnessVerifier(prov.root, freshnessKeys ?? publicKeys);
+  const policy: Policy = {
+    embedded,
+    pinnedRegisters,
+    freshnessMaxAgeMs,
+    configAuthorizer: options.configAuthorizer,
+    configScopes,
+    configKeysPinned: configKeys !== undefined,
+    freshnessKeysPinned: freshnessKeys !== undefined,
+  };
+  return new Verifier(BUILT_HERE, { policy, prov, configVerifier, freshnessVerifier, roots: { amd: roots.amd, intel: roots.intel } });
+}
+
+/** Validates the options and assembles the verifier; any failure is a UsageError. */
+async function build(options: VerifierOptions, roots: DangerousTestOnlyRoots): Promise<Verifier> {
+  try {
+    return await assemble(options, roots);
+  } catch (err) {
+    if (err instanceof UsageError) throw err;
+    throw new UsageError(message(err), { cause: err });
+  }
 }
 
 interface ConfigPins {
   readonly identity: string;
   readonly revision: string;
   readonly digest: string;
+  readonly scopes?: readonly string[];
+}
+
+/** Validates and copies the caller's scope list. */
+function scopesOf(scopes: readonly string[]): readonly string[] {
+  if (!Array.isArray(scopes) || scopes.some((s) => typeof s !== "string")) throw new Error("config scopes must be a list of strings");
+  validateScopes(scopes);
+  return [...scopes];
 }
 
 /** Runs one pipeline step; an error that is not already classified is attributed to `layer`. */
