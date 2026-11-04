@@ -27,6 +27,8 @@ const EXPORTS = [
   "GatewayHTTPClient",
   "GatewayOpenAIClient",
   "fetchCatalog",
+  // the AI SDK provider
+  "createTinfoilAI",
   // errors
   "TinfoilError",
   "ConfigurationError",
@@ -70,6 +72,9 @@ type TypeExports = [
   surface.CatalogEntry,
   surface.ReplicaVerification,
   surface.OpenAIOptions,
+  surface.CreateTinfoilAIOptions,
+  surface.TinfoilAIProvider,
+  surface.TinfoilAIEnclave,
   surface.ErrorCategory,
   surface.Uploadable,
 ];

@@ -7,7 +7,7 @@ import * as surface from "../../src/v3/index.js";
 
 describe("v3 client surface under Bun", () => {
   it("exposes the clients, the errors and the version", () => {
-    for (const name of ["createClient", "EnclaveHTTPClient", "RouterHTTPClient", "GatewayHTTPClient", "TinfoilError", "SDK_VERSION"]) {
+    for (const name of ["createClient", "EnclaveHTTPClient", "RouterHTTPClient", "GatewayHTTPClient", "createTinfoilAI", "TinfoilError", "SDK_VERSION"]) {
       expect(name in surface).toBe(true);
     }
     expect(new surface.ConfigurationError("x")).toBeInstanceOf(surface.TinfoilError);
