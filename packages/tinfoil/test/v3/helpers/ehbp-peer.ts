@@ -93,7 +93,8 @@ export function fetchOf(peer: EhbpPeer): (input: string | URL | Request, init?: 
     const headers: Record<string, string> = {};
     request.headers.forEach((value, name) => (headers[name] = value));
     const raw = new Uint8Array(await request.arrayBuffer());
-    const produced = await peer.respond(request.method, new URL(request.url).pathname, headers, raw, headers[PROTOCOL.ENCAPSULATED_KEY_HEADER.toLowerCase()]);
+    const url = new URL(request.url);
+    const produced = await peer.respond(request.method, url.pathname + url.search, headers, raw, headers[PROTOCOL.ENCAPSULATED_KEY_HEADER.toLowerCase()]);
     const iterator = produced.chunks[Symbol.asyncIterator]();
     const stream = new ReadableStream<Uint8Array>({
       async pull(controller) {
