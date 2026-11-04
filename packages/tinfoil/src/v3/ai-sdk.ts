@@ -10,6 +10,7 @@
 import { createOpenAICompatible, type OpenAICompatibleProvider } from "@ai-sdk/openai-compatible";
 import { createEnclaveHTTPClient, EnclaveHTTPClient, openAIURLOf, type EnclaveClientSeams } from "./enclave-client.js";
 import { ConfigurationError } from "./errors.js";
+import { isServerRuntime, type RuntimeGlobals } from "./internal/platform.js";
 import type { EnclaveOptions, RouterOptions } from "./options.js";
 import { createRouterHTTPClient, RouterHTTPClient, type RouterClientSeams } from "./router-client.js";
 
@@ -46,22 +47,30 @@ export interface TinfoilAIProvider extends OpenAICompatibleProvider {
   httpClient(): EnclaveHTTPClient | RouterHTTPClient;
 }
 
-/** Seams for tests: the attested clients' own. */
-export type TinfoilAISeams = RouterClientSeams & EnclaveClientSeams;
+/** Seams for tests: the attested clients' own, and the globals the runtime is identified by. */
+export type TinfoilAISeams = RouterClientSeams & EnclaveClientSeams & { readonly globals?: RuntimeGlobals };
 
-/** The one credential the options carry, or a {@link ConfigurationError} when there is none or more than one. */
-function credentialOf(options: CreateTinfoilAIOptions): string {
+/**
+ * The one credential the options carry, or a {@link ConfigurationError} when
+ * there is none or more than one. A long-lived API key is refused where the
+ * runtime isn't a server, as the OpenAI clients refuse it: a page or a worker
+ * holds a `bearerToken` instead.
+ */
+function credentialOf(options: CreateTinfoilAIOptions, globals: RuntimeGlobals | undefined): string {
   const apiKey = options.apiKey ?? "";
   const bearerToken = options.bearerToken ?? "";
   if (apiKey !== "" && bearerToken !== "") throw new ConfigurationError("give either apiKey or bearerToken, not both");
   if (apiKey === "" && bearerToken === "") throw new ConfigurationError("a credential is required: apiKey on a server, or bearerToken in a browser");
+  if (apiKey !== "" && !isServerRuntime(globals)) {
+    throw new ConfigurationError("an apiKey is a long-lived credential that belongs on a server; in a browser, give a bearerToken such as a short-lived token from the application's own sign-in");
+  }
   return apiKey !== "" ? apiKey : bearerToken;
 }
 
 /** The factory with its test seams; {@link createTinfoilAI} is this without them. */
 export async function createTinfoilAIProvider(options: CreateTinfoilAIOptions, seams: TinfoilAISeams): Promise<TinfoilAIProvider> {
   // The credential is checked first, so a provider without one fails before any network I/O.
-  const credential = credentialOf(options);
+  const credential = credentialOf(options, seams.globals);
   const clientOptions = {
     transportMode: options.transportMode,
     baseURL: options.baseURL,

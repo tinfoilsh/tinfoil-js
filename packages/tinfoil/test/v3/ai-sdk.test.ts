@@ -12,6 +12,7 @@ import { z } from "zod";
 import { createTinfoilAI, createTinfoilAIProvider, type CreateTinfoilAIOptions, type TinfoilAISeams } from "../../src/v3/ai-sdk.js";
 import { EnclaveHTTPClient } from "../../src/v3/enclave-client.js";
 import { ConfigurationError } from "../../src/v3/errors.js";
+import type { RuntimeGlobals } from "../../src/v3/internal/platform.js";
 import type { Fetch } from "../../src/v3/options.js";
 import { RouterHTTPClient } from "../../src/v3/router-client.js";
 import { KEY_SPKI_FP_SHA256_V1_FORMAT, KEY_X25519_HPKE_V1_FORMAT, UsageError, type Verification, type Verifier } from "../../../verifier/src/v3/index.js";
@@ -123,6 +124,19 @@ describe("createTinfoilAI's option checks", () => {
     }
     expect(s.documentFetches).toBe(0);
     expect(tls.seen).toHaveLength(0);
+  });
+
+  it("refuses an API key where the runtime isn't a server, such as a worker, before fetching anything", async () => {
+    const worker = { self: {} } as unknown as RuntimeGlobals;
+    const s = seams([tls.host]);
+    const failure = createTinfoilAIProvider({ apiKey: "long-lived", verifier: verifier({ tls: TEST_PIN }) }, { ...s, globals: worker });
+    await expect(failure).rejects.toBeInstanceOf(ConfigurationError);
+    await expect(failure).rejects.toThrow(/bearerToken/);
+    expect(s.documentFetches).toBe(0);
+    // A bearer token is accepted there; the server runtime accepts either.
+    const node = { process: { versions: { node: "22.0.0" } } } as RuntimeGlobals;
+    await expect(createTinfoilAIProvider({ bearerToken: "t", transportMode: "tls", verifier: verifier({ tls: TEST_PIN }) }, { ...s, globals: worker })).resolves.toBeDefined();
+    await expect(createTinfoilAIProvider({ apiKey: "k", transportMode: "tls", verifier: verifier({ tls: TEST_PIN }) }, { ...s, globals: node })).resolves.toBeDefined();
   });
 
   it("is reachable from the public surface with the same checks", async () => {

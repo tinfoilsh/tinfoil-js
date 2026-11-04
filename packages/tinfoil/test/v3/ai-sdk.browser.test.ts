@@ -70,6 +70,12 @@ describe("createTinfoilAI in a browser", () => {
     await expect(browserEntry.createTinfoilAI({ bearerToken: "t", transportMode: "tls" })).rejects.toBeInstanceOf(ConfigurationError);
   });
 
+  it("refuses a long-lived API key in a page and names the bearer token as the credential", async () => {
+    const failure = browserEntry.createTinfoilAI({ apiKey: "long-lived" });
+    await expect(failure).rejects.toBeInstanceOf(ConfigurationError);
+    await expect(failure).rejects.toThrow(/bearerToken/);
+  });
+
   it("generates text through sealed requests carrying the bearer token", async () => {
     const { text } = await generateText({ model: tinfoil(MODEL), prompt: "Say pong", maxRetries: 0 });
     expect(text).toBe("sealed");
