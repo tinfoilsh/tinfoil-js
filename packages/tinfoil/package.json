@@ -41,6 +41,11 @@
       "types": "./dist/v3/ai-sdk.d.ts",
       "import": "./dist/v3/ai-sdk.js",
       "default": "./dist/v3/ai-sdk.js"
+    },
+    "./v3/unsafe": {
+      "types": "./dist/v3/unsafe.d.ts",
+      "import": "./dist/v3/unsafe.js",
+      "default": "./dist/v3/unsafe.js"
     }
   },
   "scripts": {

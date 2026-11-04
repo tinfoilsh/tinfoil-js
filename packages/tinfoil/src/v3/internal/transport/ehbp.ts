@@ -73,9 +73,14 @@ export function ehbpMode(options: EHBPOptions = {}): Mode {
       } catch (err) {
         throw new AttestationError(`failed to parse HPKE public key: ${messageOf(err)}`, { cause: err });
       }
-      return { fetch: (input, init) => sealedFetch(identity, send, input, init) };
+      return sealedFetchTo(identity, send);
     },
   };
+}
+
+/** A fetch that seals bodies to `identity` and sends them with `send`; it holds no connections, so there is nothing to close. */
+export function sealedFetchTo(identity: Identity, send: Fetch): BoundFetch {
+  return { fetch: (input, init) => sealedFetch(identity, send, input, init) };
 }
 
 /**
