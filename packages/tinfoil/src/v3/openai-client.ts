@@ -19,15 +19,19 @@ import { RouterHTTPClient } from "./router-client.js";
 /** The OpenAI options a client takes: everything but the transport it is bound to. */
 export type OpenAIOptions = Omit<ClientOptions, "fetch" | "baseURL">;
 
-/** Fixes `fetch` and `baseURL` on a constructed client, so neither can be reassigned. */
-function attest(client: OpenAI, fetchImpl: ClientOptions["fetch"], baseURL: string): void {
+/** The options each client was created with, which its clones inherit. */
+const givenOptions = new WeakMap<OpenAI, OpenAIOptions>();
+
+/** Fixes `fetch` and `baseURL` on a constructed client, so neither can be reassigned, and keeps the options it was given for its clones. */
+function attest(client: OpenAI, fetchImpl: ClientOptions["fetch"], baseURL: string, options: OpenAIOptions): void {
   Object.defineProperty(client, "fetch", { value: fetchImpl, writable: false, configurable: false, enumerable: true });
   Object.defineProperty(client, "baseURL", { value: baseURL, writable: false, configurable: false, enumerable: true });
+  givenOptions.set(client, { ...options });
 }
 
-/** The options a clone inherits: the client's, with `options` over them, and never a transport. */
+/** The options a clone is created with: the client's own, with `options` over them, and never a transport. */
 function inherit(client: OpenAI, options: Partial<ClientOptions>): OpenAIOptions {
-  const merged: Partial<ClientOptions> = { ...(client as unknown as { _options: ClientOptions })._options, ...options };
+  const merged: Partial<ClientOptions> = { ...givenOptions.get(client), ...options };
   delete merged.fetch;
   delete merged.baseURL;
   return merged;
@@ -44,7 +48,7 @@ export class TinfoilClient extends OpenAI {
   private constructor(httpClient: RouterHTTPClient, options: OpenAIOptions) {
     super({ ...options, fetch: httpClient.fetch, baseURL: notImplemented("TinfoilClient.baseURL") });
     this.#httpClient = httpClient;
-    attest(this, httpClient.fetch, this.baseURL);
+    attest(this, httpClient.fetch, this.baseURL, options);
   }
 
   /** A client with `options` applied over this one's, on the same attested transport. */
@@ -103,7 +107,7 @@ export class EnclaveOpenAIClient extends OpenAI {
     // The transport and base URL come last, so the caller's options can't replace them.
     super({ ...options, fetch: httpClient.fetch, baseURL: openAIURLOf(httpClient) });
     this.#httpClient = httpClient;
-    attest(this, httpClient.fetch, openAIURLOf(httpClient));
+    attest(this, httpClient.fetch, openAIURLOf(httpClient), options);
   }
 
   /** A client with `options` applied over this one's, on the same attested transport. */
@@ -132,7 +136,7 @@ export class RouterOpenAIClient extends OpenAI {
   private constructor(httpClient: RouterHTTPClient, options: OpenAIOptions) {
     super({ ...options, fetch: httpClient.fetch, baseURL: notImplemented("RouterOpenAIClient.baseURL") });
     this.#httpClient = httpClient;
-    attest(this, httpClient.fetch, this.baseURL);
+    attest(this, httpClient.fetch, this.baseURL, options);
   }
 
   /** A client with `options` applied over this one's, on the same attested transport. */
@@ -166,7 +170,7 @@ export class GatewayOpenAIClient extends OpenAI {
   private constructor(httpClient: GatewayHTTPClient, options: OpenAIOptions) {
     super({ ...options, fetch: httpClient.fetch, baseURL: httpClient.baseURL() });
     this.#httpClient = httpClient;
-    attest(this, httpClient.fetch, httpClient.baseURL());
+    attest(this, httpClient.fetch, httpClient.baseURL(), options);
   }
 
   /** A client with `options` applied over this one's, on the same attested transport. */
