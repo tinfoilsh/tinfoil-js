@@ -127,7 +127,9 @@ export async function authenticateTdx(evidence: TdxEvidence, now: Date, opts?: T
   const info = tcbInfo(collateral, toHex(pck.fmspc));
   const qe = qeIdentity(collateral);
   const crl = pckCrl(collateral, PCK_CA_PLATFORM);
-  const rootCrlBody = rootCrl(collateral, crlDistributionPointUris(qe.root));
+  // The root CA CRL is the one the trusted root itself names, not one a
+  // not-yet-verified issuer chain points at.
+  const rootCrlBody = rootCrl(collateral, crlDistributionPointUris(root));
   const rootList = parseList(rootCrlBody, "root CA CRL");
   const pckList = parseList(crl.body, "PCK CRL");
 

@@ -22,6 +22,7 @@ import {
   parseFreshnessStatement,
   validateFreshnessTime,
   validateWitness,
+  witnessLogTime,
 } from "../../src/v3/internal/endorsement/freshness.js";
 import {
   FRESHNESS_WITNESS_IDENTITY,
@@ -35,7 +36,8 @@ import {
 } from "../../src/v3/internal/endorsement/provenance.js";
 import { parseReference, validateAuthenticatedArtifact, type AuthenticatedArtifact } from "../../src/v3/internal/endorsement/reference.js";
 import { authenticateRuntime, runtimeIdentity, runtimeSubjectName } from "../../src/v3/internal/endorsement/runtime.js";
-import { strictParse } from "../../src/v3/internal/json/index.js";
+import { strictParse, type JsonValue } from "../../src/v3/internal/json/index.js";
+import { parseBundle, type TlogEntry } from "../../src/v3/internal/sigstore/bundle.js";
 import { registerHex } from "../../src/v3/measurement.js";
 import { ARTIFACT_FORMAT, ARTIFACT_FORMAT_V2 } from "../../src/v3/internal/policy/artifact.js";
 import {
@@ -260,6 +262,66 @@ describe.skipIf(withoutVectors)(vectorsTitle("authenticateFreshness"), () => {
 
   it("verifies the golden document's code witness", async () => {
     await expect(witness(loadFixture("golden/golden-happy.json"))).resolves.toBeInstanceOf(Date);
+  });
+
+  /** The code witness bundle of a vector as plain JSON, for mutation. */
+  const witnessWire = (fixture: ConformanceFixture): Record<string, any> => {
+    const doc = JSON.parse(new TextDecoder().decode(inputBytes(fixture, "document_b64"))) as { collateral: { id: string; data: Record<string, any> }[] };
+    const entry = doc.collateral.find((c) => c.id === "code-freshness");
+    if (entry === undefined) throw new Error(`${fixture.id} has no code-freshness collateral`);
+    return structuredClone(entry.data.sigstore_bundle) as Record<string, any>;
+  };
+  const toJson = (value: unknown): JsonValue => strictParse(utf8(JSON.stringify(value)));
+
+  it("rejects a witness whose first log entry carries no inclusion promise", async () => {
+    const fixture = loadFixture("freshness/fr1-nonce-fresh.json");
+    const wire = witnessWire(fixture);
+    delete wire.verificationMaterial.tlogEntries[0].inclusionPromise;
+    const code = await authenticateCodeOf(fixture);
+    // Bundle verification already demands a verified observer timestamp; the witness time check behind it would reject the same way.
+    await expect(authenticateFreshness(await clientOf(fixture), toJson(wire), code, clockOf(fixture), 0)).rejects.toThrow(
+      /no verified observer timestamp/,
+    );
+  });
+
+  describe("witnessLogTime", () => {
+    let root: Awaited<ReturnType<typeof clientOf>>["root"];
+    let entry: TlogEntry;
+    beforeAll(async () => {
+      const fixture = loadFixture("freshness/fr1-nonce-fresh.json");
+      root = (await clientOf(fixture)).root;
+      entry = parseBundle(toJson(witnessWire(fixture))).tlogEntries[0]!;
+      expect(entry.inclusionPromise).toBeDefined();
+    });
+
+    it("returns the promised integration time of the vector's witness", async () => {
+      await expect(witnessLogTime(root, [entry])).resolves.toEqual(new Date(Number(entry.integratedTime) * 1000));
+    });
+
+    it("is undefined without a promise or an integration time", async () => {
+      await expect(witnessLogTime(root, [])).resolves.toBeUndefined();
+      await expect(witnessLogTime(root, [{ ...entry, inclusionPromise: undefined }])).resolves.toBeUndefined();
+      await expect(witnessLogTime(root, [{ ...entry, integratedTime: undefined }])).resolves.toBeUndefined();
+    });
+
+    it("rejects a promise that does not verify under the log key", async () => {
+      const tampered = new Uint8Array(entry.inclusionPromise!);
+      tampered[tampered.length - 1] ^= 0x01;
+      await expect(witnessLogTime(root, [{ ...entry, inclusionPromise: tampered }])).rejects.toThrow(/inclusion promise does not verify/);
+      // The promise signs over the integration time, the index and the body, so none can change.
+      await expect(witnessLogTime(root, [{ ...entry, integratedTime: entry.integratedTime! + 1n }])).rejects.toThrow(/does not verify/);
+      await expect(witnessLogTime(root, [{ ...entry, logIndex: entry.logIndex + 1n }])).rejects.toThrow(/does not verify/);
+      const body = new Uint8Array(entry.canonicalizedBody);
+      body[0] ^= 0x01;
+      await expect(witnessLogTime(root, [{ ...entry, canonicalizedBody: body }])).rejects.toThrow(/does not verify/);
+    });
+
+    it("rejects a log the trusted root does not list and a time outside the log key's validity", async () => {
+      await expect(witnessLogTime(root, [{ ...entry, logId: "00".repeat(32) }])).rejects.toThrow(/does not list/);
+      const log = root.transparencyLogs.find((l) => l.logId === entry.logId)!;
+      const before = BigInt(Math.floor(log.validFrom.getTime() / 1000)) - 1n;
+      await expect(witnessLogTime(root, [{ ...entry, integratedTime: before }])).rejects.toThrow(/outside the log key's validity/);
+    });
   });
 });
 
