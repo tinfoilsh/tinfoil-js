@@ -7,7 +7,7 @@
  * @experimental The gateway route is new; this API may change without a major version.
  */
 import { parseReference } from "@tinfoilsh/verifier/v3";
-import { messageOf, NetworkError, TinfoilError } from "../../errors.js";
+import { ConfigurationError, messageOf, NetworkError, TinfoilError } from "../../errors.js";
 import type { Catalog, CatalogEntry, Fetch } from "../../options.js";
 import { getFollowingRedirects, isAuthority, readBounded } from "../fetch.js";
 
@@ -26,6 +26,7 @@ export const TRUSTED_REPO_OWNER = "tinfoilsh/";
  * @experimental The gateway route is new; this API may change without a major version.
  */
 export async function fetchCatalogWith(host: string, fetchImpl: Fetch, signal?: AbortSignal): Promise<Catalog> {
+  if (!isAuthority(host)) throw new ConfigurationError(`invalid gateway host ${JSON.stringify(host)}: want a host with an optional port`);
   const url = `https://${host}${CATALOG_PATH}`;
   let response: Response;
   try {
