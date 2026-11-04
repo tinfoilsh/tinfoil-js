@@ -28,6 +28,14 @@ const RESERVED_HEADERS = ["content-length", "transfer-encoding", "host", PROTOCO
 
 const MAX_PROBLEM_BYTES = 64 * 1024;
 
+/** The exchange each opened response came from, for session recovery; held only as long as the response is. */
+const recoveryContexts = new WeakMap<Response, RequestContext>();
+
+/** The exchange context `response` was opened with, when it came from a sealed exchange. */
+export function recoveryContextOf(response: Response): RequestContext | undefined {
+  return recoveryContexts.get(response);
+}
+
 /**
  * Rejects, before any verification or network I/O, a request the mode
  * can't protect: one whose traffic continues outside the bodies EHBP seals
@@ -101,7 +109,9 @@ async function sealedFetch(identity: Identity, send: Fetch, input: string | URL 
   await rejectKeyMismatch(response);
   if (response.headers.has(PROTOCOL.RESPONSE_NONCE_HEADER)) {
     try {
-      return await identity.decryptResponseWithContext(response, sealed.context);
+      const opened = await identity.decryptResponseWithContext(response, sealed.context);
+      recoveryContexts.set(opened, sealed.context);
+      return opened;
     } catch (err) {
       await response.body?.cancel().catch(() => {});
       throw new NetworkError(`failed to open the response: ${messageOf(err)}`, { cause: err });
