@@ -10,11 +10,17 @@
  * and at least one SCT verifies against a CT log valid at its time; at least
  * one log entry, no more than 32, none duplicated; an inclusion proof on
  * every entry (Merkle path and signed checkpoint) and the inclusion promise
- * of the first, when present, under the log's key; every entry anchored in
- * time, either by an integration time the certificate was valid at or by an
- * RFC 3161 timestamp; exactly one DSSE signature, verified over the
- * pre-authentication encoding under the certificate key; every entry of
- * kind "dsse" with a body consistent with the envelope.
+ * of the first, when present, under the log's key; the certificate valid at
+ * every entry's integration time and at every RFC 3161 timestamp, each of
+ * which verifies under a timestamp authority of the root; exactly one DSSE
+ * signature, verified over the pre-authentication encoding under the
+ * certificate key; every entry of kind "dsse" with a body consistent with the
+ * envelope.
+ *
+ * What the library does not enforce: that some verified time anchors the
+ * signature. A bare integration time is unsigned (the inclusion proof covers
+ * the entry body only), so this module requires the first entry's inclusion
+ * promise, which signs its integration time, or an RFC 3161 timestamp.
  */
 import { SigstoreVerifier, type SigstoreBundle, type TrustedRoot as LibraryTrustedRoot, type VerificationPolicy, type X509Certificate } from "@freedomofpress/sigstore-browser";
 import { map, object, str } from "../json/decode.js";
@@ -41,16 +47,17 @@ export interface SigningIdentity {
 export interface VerifiedBundle {
   readonly identity: SigningIdentity;
   readonly payload: Uint8Array;
-  /** The earliest transparency-log integration time, when an entry carries one. */
+  /** The first log entry's integration time, present only when its inclusion promise verified. */
   readonly earliestLogTime?: Date;
 }
 
 /**
  * Verifies a certificate-signed DSSE bundle against `root`: the certificate
- * chain, at least one SCT, at least one log entry with inclusion proven, at
- * least one observer timestamp, the DSSE signature, that no two SCTs come from
- * the same log, that the SAN matches `sanPattern`, the issuer is GitHub and
- * the runner is GitHub-hosted, and that the statement's subject carries
+ * chain, at least one SCT, at least one log entry with inclusion proven, a
+ * verified observer timestamp (the first entry's inclusion promise or an
+ * RFC 3161 timestamp), the DSSE signature, that no two SCTs come from the
+ * same log, that the SAN matches `sanPattern`, the issuer is GitHub and the
+ * runner is GitHub-hosted, and that the statement's subject carries
  * `digestHex` (as subject 0, or as the subject named `subjectName`).
  */
 export async function verifyCertificateBundle(
@@ -81,18 +88,21 @@ export async function verifyCertificateBundle(
   const identity = policy.identity;
   if (identity === undefined) throw new Error("verifying bundle: the signing certificate was not checked");
 
+  // The signature must be anchored by a time the library verified: the first
+  // entry's promise (a signature over its integration time) or an RFC 3161
+  // timestamp. A bare integration time is the bundle's own claim.
+  const first = bundle.tlogEntries[0];
+  const promised = first !== undefined && first.inclusionPromise !== undefined && first.integratedTime !== undefined;
+  if (!promised && bundle.rfc3161Timestamps.length === 0) {
+    throw new Error("verifying bundle: no verified observer timestamp (no inclusion promise on the first log entry and no RFC 3161 timestamp)");
+  }
+
   enforceSubject(statementSubjects(bundle.dsse.payload), digestHex, subjectName ?? "");
 
-  let earliest: bigint | undefined;
-  for (const entry of bundle.tlogEntries) {
-    if (entry.integratedTime !== undefined && (earliest === undefined || entry.integratedTime < earliest)) {
-      earliest = entry.integratedTime;
-    }
-  }
   return {
     identity,
     payload: bundle.dsse.payload,
-    ...(earliest === undefined ? {} : { earliestLogTime: new Date(Number(earliest) * 1000) }),
+    ...(promised ? { earliestLogTime: new Date(Number(first.integratedTime) * 1000) } : {}),
   };
 }
 

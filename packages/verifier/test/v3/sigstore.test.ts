@@ -454,6 +454,18 @@ describe.skipIf(withoutVectors)(vectorsTitle("verifyCertificateBundle"), () => {
     await rejects(verifyCertificateBundle(await goldenRoot, bundle, codeIdentity(golden.repo), goldenCode.data.digest!), /no signing certificate/);
   });
 
+  it("rejects a bundle whose signing time is only the bundle's own claim", async () => {
+    // Without the first entry's inclusion promise, the integration time is
+    // unsigned: the inclusion proof covers the entry body only, so the
+    // bundle could state any time inside the certificate's window.
+    const bundle = parseBundle(
+      mutated(goldenCode.data.sigstore_bundle, (w) => {
+        delete w.verificationMaterial.tlogEntries[0].inclusionPromise;
+      }),
+    );
+    await rejects(verifyCertificateBundle(await goldenRoot, bundle, codeIdentity(golden.repo), goldenCode.data.digest!), /no verified observer timestamp/);
+  });
+
   it("rejects a payload altered after signing", async () => {
     const bundle = parseBundle(
       mutated(goldenCode.data.sigstore_bundle, (w) => {
