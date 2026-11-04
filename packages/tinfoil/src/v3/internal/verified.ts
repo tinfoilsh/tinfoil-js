@@ -24,6 +24,7 @@ interface Entry<T> extends State<T> {
 export class VerifiedEnclave<T = void> {
   readonly #enclave: Enclave;
   readonly #bind: (v: Verification) => T | Promise<T>;
+  readonly #release: (bound: T) => void;
   readonly #clock: () => Date;
   #current: Entry<T> | undefined;
   /** The refresh in flight, shared by every caller that needs one. */
@@ -31,12 +32,15 @@ export class VerifiedEnclave<T = void> {
 
   /**
    * `bind` makes what the transport ties to a verification's keys; a cache
-   * that only caches verifications binds `() => undefined`.
+   * that only caches verifications binds `() => undefined`. `release` is
+   * called with a binding once its state is replaced or found expired, so
+   * connections tied to retired keys are closed.
    */
-  constructor(enclave: Enclave, bind: (v: Verification) => T | Promise<T>, clock: () => Date = () => new Date()) {
+  constructor(enclave: Enclave, bind: (v: Verification) => T | Promise<T>, clock: () => Date = () => new Date(), release: (bound: T) => void = () => {}) {
     this.#enclave = enclave;
     this.#bind = bind;
     this.#clock = clock;
+    this.#release = release;
   }
 
   enclave(): Enclave {
@@ -95,7 +99,12 @@ export class VerifiedEnclave<T = void> {
     const bound = await this.#bind(verification);
     const entry: Entry<T> = { verification, bound, rejected: false };
     // Binding can outlast freshness.
-    if (!this.#valid(entry)) throw new AttestationError(FRESHNESS_EXPIRED);
+    if (!this.#valid(entry)) {
+      this.#release(bound);
+      throw new AttestationError(FRESHNESS_EXPIRED);
+    }
+    // What the replaced state holds is tied to its keys.
+    if (this.#current !== undefined) this.#release(this.#current.bound);
     this.#current = entry;
   }
 }
