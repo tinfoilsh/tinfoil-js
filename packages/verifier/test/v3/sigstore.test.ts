@@ -399,7 +399,7 @@ describe.skipIf(withoutVectors)(vectorsTitle("verifyCertificateBundle"), () => {
     expect(v.identity.sourceRepositoryIdentifier).toBe("");
     expect(v.identity.sourceRepositoryOwnerIdentifier).toBe("");
     expect(v.payload).toEqual(decode((goldenCode.data.sigstore_bundle as Record<string, any>).dsseEnvelope.payload));
-    expect(v.earliestLogTime).toEqual(new Date("2025-01-01T00:00:01Z"));
+    expect(v.verifiedLogTime).toEqual(new Date("2025-01-01T00:00:01Z"));
   });
 
   it("verifies the platform bundle under the platform identity only", async () => {
@@ -489,7 +489,7 @@ describe.skipIf(withoutVectors)(vectorsTitle("verifyCertificateBundle"), () => {
     expect(v.identity.sourceRepositoryIdentifier).toMatch(/^[0-9]+$/);
     expect(v.identity.sourceRepositoryOwnerIdentifier).toMatch(/^[0-9]+$/);
     const wire = realCode.data.sigstore_bundle as Record<string, any>;
-    expect(v.earliestLogTime).toEqual(new Date(Number(wire.verificationMaterial.tlogEntries[0].integratedTime) * 1000));
+    expect(v.verifiedLogTime).toEqual(new Date(Number(wire.verificationMaterial.tlogEntries[0].integratedTime) * 1000));
   });
 
   it("binds a production platform bundle to its own repository", async () => {

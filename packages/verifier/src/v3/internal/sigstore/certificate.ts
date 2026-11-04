@@ -48,7 +48,7 @@ export interface VerifiedBundle {
   readonly identity: SigningIdentity;
   readonly payload: Uint8Array;
   /** The first log entry's integration time, present only when its inclusion promise verified. */
-  readonly earliestLogTime?: Date;
+  readonly verifiedLogTime?: Date;
 }
 
 /**
@@ -102,7 +102,7 @@ export async function verifyCertificateBundle(
   return {
     identity,
     payload: bundle.dsse.payload,
-    ...(promised ? { earliestLogTime: new Date(Number(first.integratedTime) * 1000) } : {}),
+    ...(promised ? { verifiedLogTime: new Date(Number(first.integratedTime) * 1000) } : {}),
   };
 }
 
