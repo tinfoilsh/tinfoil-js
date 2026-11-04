@@ -38,7 +38,7 @@ import {
 } from "../../src/v3/internal/endorsement/approval.js";
 import { DEFAULT_FUTURE_SKEW_MS, DEFAULT_MAX_AGE_MS } from "../../src/v3/internal/endorsement/time.js";
 import { pinnedKeys, type PinnedKey } from "../../src/v3/internal/sigstore/keyed.js";
-import { endorsementReference, timestampInput, verifyTimestamp } from "../../src/v3/internal/sigstore/timestamp.js";
+import { endorsementReference, MAX_TIMESTAMP_SIZE, timestampInput, verifyTimestamp } from "../../src/v3/internal/sigstore/timestamp.js";
 import type { TrustedRoot } from "../../src/v3/internal/sigstore/trusted-root.js";
 import { PUBLIC_SIGNING_KEY_PEM } from "../../src/v3/trust/signing-keys.js";
 import { CERTIFICATE_CLOCK_SKEW_MS } from "../../src/v3/internal/endorsement/scope.js";
@@ -381,7 +381,7 @@ describe("certified config approvals", () => {
     const stale = await configBundle({ v2: true, certificate, signedAt: new Date(NOW.getTime() - DEFAULT_MAX_AGE_MS - 1000) });
     await expect(verifier.verifyCertified(stale.config, toJson(stale.json), registry.rootDer, policy())).rejects.toThrow(/outside the accepted window/);
     const unstamped = await configBundle({ v2: true, certificate, noSignatureTimestamp: true });
-    await expect(verifier.verifyCertified(unstamped.config, toJson(unstamped.json), registry.rootDer, policy())).rejects.toThrow(/no RFC 3161 timestamp/);
+    await expect(verifier.verifyCertified(unstamped.config, toJson(unstamped.json), registry.rootDer, policy())).rejects.toThrow(/one bounded signature timestamp/);
     // The approval's inner timestamp may follow the signature by the allowed skew, not more.
     // (A leaf valid around the signing times, nine minutes long.)
     const earlier = await leaf({ notBefore: new Date(GEN_TIME.getTime() - 5 * 60_000), notAfter: new Date(GEN_TIME.getTime() + 4 * 60_000) });
@@ -398,7 +398,18 @@ describe("certified config approvals", () => {
       certificate: earlier,
       timestampsFor: async (sig) => [await timestampResponse(foreign, sig, GEN_TIME)],
     });
-    await expect(verifier.verifyCertified(atSkew.config, toJson(built.json), registry.rootDer, policy())).rejects.toThrow(/no RFC 3161 timestamp/);
+    await expect(verifier.verifyCertified(atSkew.config, toJson(built.json), registry.rootDer, policy())).rejects.toThrow(/timestamp/);
+  });
+
+  it("rejects multiple and oversized signature timestamps", async () => {
+    const certificate = await leaf();
+    const { json, config } = await configBundle({ v2: true, certificate });
+    const bundle = json as any;
+    const timestamps = bundle.verificationMaterial.timestampVerificationData.rfc3161Timestamps;
+    timestamps.push(structuredClone(timestamps[0]));
+    await expect(verifier.verifyCertified(config, toJson(bundle), registry.rootDer, policy())).rejects.toThrow(/one bounded signature timestamp/);
+    timestamps.splice(0, timestamps.length, { signedTimestamp: b64(new Uint8Array(MAX_TIMESTAMP_SIZE + 1)) });
+    await expect(verifier.verifyCertified(config, toJson(bundle), registry.rootDer, policy())).rejects.toThrow(/one bounded signature timestamp/);
   });
 
   it("rejects a certificate the registry root did not issue, or one issued to the root key", async () => {
