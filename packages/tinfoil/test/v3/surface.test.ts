@@ -10,10 +10,10 @@ import { describe, expect, it } from "vitest";
 import * as browser from "../../src/v3/index.browser.js";
 import * as surface from "../../src/v3/index.js";
 import { createEnclaveHTTPClient } from "../../src/v3/enclave-client.js";
-import { createEnclaveOpenAIClient, createRouterOpenAIClient } from "../../src/v3/openai-client.js";
+import { createGatewayHTTPClient } from "../../src/v3/gateway-client.js";
+import { createEnclaveOpenAIClient, createGatewayOpenAIClient, createRouterOpenAIClient } from "../../src/v3/openai-client.js";
 import { createRouterHTTPClient } from "../../src/v3/router-client.js";
 import type { Fetch } from "../../src/v3/options.js";
-import { NotImplementedError } from "../../src/v3/internal/not-implemented.js";
 
 /** Every runtime export, sorted. Type-only exports are checked by compiling this file. */
 const EXPORTS = [
@@ -138,21 +138,20 @@ describe("public surface", () => {
     expect((network.cause as Error).message).toBe("ECONNRESET");
   });
 
-  it("rejects every remaining placeholder with a not-implemented error", async () => {
-    const pending: Promise<unknown>[] = [
-      surface.GatewayHTTPClient.create(),
-      surface.GatewayOpenAIClient.create(),
-      surface.fetchCatalog("gateway.example"),
-    ];
-    for (const p of pending) await expect(p).rejects.toBeInstanceOf(NotImplementedError);
-  });
-
   it("checks enclave client options before any network I/O", async () => {
     const fetches = countingFetch();
     await expect(createEnclaveHTTPClient("", "tinfoilsh/repo", {}, { documentFetch: fetches.fetch })).rejects.toBeInstanceOf(surface.ConfigurationError);
     await expect(createEnclaveOpenAIClient("enclave.example", "tinfoilsh/repo", { baseURL: "http://proxy.example/" }, {}, { documentFetch: fetches.fetch })).rejects.toBeInstanceOf(
       surface.ConfigurationError,
     );
+    expect(fetches.calls).toBe(0);
+  });
+
+  it("checks gateway client options before any network I/O", async () => {
+    const fetches = countingFetch();
+    const seams = { catalogFetch: fetches.fetch, documentFetch: fetches.fetch };
+    await expect(createGatewayHTTPClient({ url: "http://gateway.example/v1/" }, seams)).rejects.toBeInstanceOf(surface.ConfigurationError);
+    await expect(createGatewayOpenAIClient({ pinnedModelsOnly: true }, {}, seams)).rejects.toBeInstanceOf(surface.ConfigurationError);
     expect(fetches.calls).toBe(0);
   });
 

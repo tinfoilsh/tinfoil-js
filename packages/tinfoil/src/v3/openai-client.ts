@@ -10,9 +10,8 @@
  */
 import OpenAI, { type ClientOptions } from "openai";
 import { createEnclaveHTTPClient, EnclaveHTTPClient, openAIURLOf, type EnclaveClientSeams } from "./enclave-client.js";
-import { GatewayHTTPClient } from "./gateway-client.js";
 import { ConfigurationError } from "./errors.js";
-import { notImplemented } from "./internal/not-implemented.js";
+import { createGatewayHTTPClient, GatewayHTTPClient, type GatewayClientSeams } from "./gateway-client.js";
 import type { EnclaveOptions, GatewayOptions, RouterOptions } from "./options.js";
 import { createRouterHTTPClient, RouterHTTPClient, type RouterClientSeams } from "./router-client.js";
 
@@ -195,6 +194,12 @@ export class RouterOpenAIClient extends OpenAI {
   }
 }
 
+/** The gateway OpenAI factory with its test seams; {@link GatewayOpenAIClient.create} is this without them. */
+export async function createGatewayOpenAIClient(options: GatewayOptions, openaiOptions: OpenAIOptions, seams: GatewayClientSeams): Promise<GatewayOpenAIClient> {
+  const httpClient = await createGatewayHTTPClient(options, seams);
+  return new GatewayOpenAIClient(TOKEN, httpClient, openaiOptions);
+}
+
 /**
  * An OpenAI client whose requests go through a {@link GatewayHTTPClient}, to
  * the gateway's URL.
@@ -205,7 +210,9 @@ export class RouterOpenAIClient extends OpenAI {
 export class GatewayOpenAIClient extends OpenAI {
   readonly #httpClient: GatewayHTTPClient;
 
-  private constructor(httpClient: GatewayHTTPClient, options: OpenAIOptions) {
+  /** @internal Only {@link create} constructs a client; anything else is refused. */
+  constructor(token: symbol, httpClient: GatewayHTTPClient, options: OpenAIOptions) {
+    if (token !== TOKEN) throw new ConfigurationError("GatewayOpenAIClient is created with GatewayOpenAIClient.create");
     super({ ...openAIClientOptions(options), fetch: httpClient.fetch, baseURL: httpClient.baseURL() });
     this.#httpClient = httpClient;
     attest(this, httpClient.fetch, httpClient.baseURL(), options);
@@ -213,14 +220,12 @@ export class GatewayOpenAIClient extends OpenAI {
 
   /** A client with `options` applied over this one's, on the same attested transport. */
   override withOptions(options: Partial<ClientOptions> & Partial<OpenAIOptions>): this {
-    return new GatewayOpenAIClient(this.#httpClient, inherit(this, options)) as this;
+    return new GatewayOpenAIClient(TOKEN, this.#httpClient, inherit(this, options)) as this;
   }
 
   /** Creates a gateway client as {@link GatewayHTTPClient.create} does, and an OpenAI client over it. */
-  static async create(options?: GatewayOptions, openaiOptions?: OpenAIOptions): Promise<GatewayOpenAIClient> {
-    void options;
-    void openaiOptions;
-    return notImplemented("GatewayOpenAIClient.create");
+  static create(options?: GatewayOptions, openaiOptions?: OpenAIOptions): Promise<GatewayOpenAIClient> {
+    return createGatewayOpenAIClient(options ?? {}, openaiOptions ?? {}, {});
   }
 
   /** The gateway client requests go through. */
