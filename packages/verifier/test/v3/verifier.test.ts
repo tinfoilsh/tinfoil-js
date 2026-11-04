@@ -228,6 +228,16 @@ describe("Verifier.create options", () => {
     await expect(Verifier.create({ configScopes: [privateScope], embeddedReferences: { config } })).rejects.toThrow(/require endorsement verification/);
   });
 
+  it("requires config collateral once scopes are pinned", async () => {
+    if (withoutVectors) return;
+    const fixture = loadFixture("golden/golden-happy.json");
+    const scoped = await dangerousTestOnlyVerifier(rootsOf(fixture), { configScopes: ["https://registry.tinfoil.sh/scopes/public"] });
+    const err = await scoped.verifyV3At(inputBytes(fixture, "document_b64"), hex(fixture.input.nonce_hex ?? ""), repoOf(fixture), clockOf(fixture)).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(VerificationError);
+    expect((err as VerificationError).layer).toBe("provenance");
+    expect((err as Error).message).toMatch(/configured trust requires/);
+  });
+
   it("rejects conflicting trust sources", async () => {
     const config = { bytes: utf8(`cvm-version: v1.2.3@sha256:${"a".repeat(64)}\n`) };
     const pem = "-----BEGIN PUBLIC KEY-----\nMFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAE" + "A".repeat(84) + "\n-----END PUBLIC KEY-----\n";

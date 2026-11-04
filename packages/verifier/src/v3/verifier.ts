@@ -247,7 +247,8 @@ export class Verifier {
       e.platform !== undefined ||
       this.#policy.configKeysPinned ||
       this.#policy.freshnessKeysPinned ||
-      this.#policy.configAuthorizer !== undefined
+      this.#policy.configAuthorizer !== undefined ||
+      this.#policy.configScopes !== undefined
     );
   }
 

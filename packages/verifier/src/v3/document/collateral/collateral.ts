@@ -90,14 +90,15 @@ export function decodeEntries(v: JsonValue | undefined): Entry[] {
   });
 }
 
+/** The formats a config entry may carry. */
+const CONFIG_FORMATS: readonly string[] = [CONFIG_ENDORSEMENT_V1_FORMAT, CONFIG_ENDORSEMENT_V2_FORMAT, CONFIG_V1_FORMAT];
+
 /**
  * Validates every entry's shape, decodes known role+format pairs, and
  * enforces reserved ids. An entry with no decoder for its role and format is
  * shape-checked and dropped. An endorsement entry serves the CPU only when its
  * subjects include "cpu".
  */
-const CONFIG_FORMATS: readonly string[] = [CONFIG_ENDORSEMENT_V1_FORMAT, CONFIG_ENDORSEMENT_V2_FORMAT, CONFIG_V1_FORMAT];
-
 export function decode(entries: readonly Entry[]): CollateralSet {
   validate(entries);
   const cpu: { amdVcek?: AmdVcek; amdCrl?: AmdCrl; intelPcs?: IntelPcs } = {};
