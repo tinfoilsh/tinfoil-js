@@ -9,6 +9,9 @@ import OpenAI from "openai";
 import { describe, expect, it } from "vitest";
 import * as browser from "../../src/v3/index.browser.js";
 import * as surface from "../../src/v3/index.js";
+import { createEnclaveHTTPClient } from "../../src/v3/enclave-client.js";
+import { createEnclaveOpenAIClient } from "../../src/v3/openai-client.js";
+import type { Fetch } from "../../src/v3/options.js";
 import { NotImplementedError } from "../../src/v3/internal/not-implemented.js";
 
 /** Every runtime export, sorted. Type-only exports are checked by compiling this file. */
@@ -51,7 +54,7 @@ const EXPORTS = [
 
 const ATTESTED_CLIENT_METHODS = ["baseURL", "enclave", "repo", "current", "ensureVerified", "reverify"].sort();
 const GATEWAY_CLIENT_METHODS = ["baseURL", "models", "ensureVerified", "current"].sort();
-const OPENAI_CLIENT_METHODS = ["httpClient"];
+const OPENAI_CLIENT_METHODS = ["httpClient", "withOptions"];
 
 /** The type-only exports, pinned under the test typecheck: a removed or renamed type fails compilation here. */
 type TypeExports = [
@@ -78,6 +81,18 @@ const methodsOf = (cls: { prototype: object }): string[] =>
     .sort();
 
 const staticsOf = (cls: object): string[] => Object.getOwnPropertyNames(cls).filter((n) => !["length", "name", "prototype"].includes(n));
+
+/** A fetch seam that counts the requests made through it. */
+function countingFetch(): { fetch: Fetch; calls: number } {
+  const counter = {
+    calls: 0,
+    fetch: (async () => {
+      counter.calls++;
+      return new Response(new Uint8Array([1]));
+    }) as Fetch,
+  };
+  return counter;
+}
 
 describe("public surface", () => {
   it("exports exactly the specified names from both entries", () => {
@@ -122,12 +137,10 @@ describe("public surface", () => {
     expect((network.cause as Error).message).toBe("ECONNRESET");
   });
 
-  it("rejects every placeholder with a not-implemented error", async () => {
+  it("rejects every remaining placeholder with a not-implemented error", async () => {
     const pending: Promise<unknown>[] = [
       surface.createClient(),
       surface.TinfoilClient.create(),
-      surface.EnclaveHTTPClient.create("enclave.example", "tinfoilsh/repo"),
-      surface.EnclaveOpenAIClient.create("enclave.example", "tinfoilsh/repo"),
       surface.RouterHTTPClient.create(),
       surface.RouterOpenAIClient.create(),
       surface.GatewayHTTPClient.create(),
@@ -135,5 +148,14 @@ describe("public surface", () => {
       surface.fetchCatalog("gateway.example"),
     ];
     for (const p of pending) await expect(p).rejects.toBeInstanceOf(NotImplementedError);
+  });
+
+  it("checks enclave client options before any network I/O", async () => {
+    const fetches = countingFetch();
+    await expect(createEnclaveHTTPClient("", "tinfoilsh/repo", {}, { documentFetch: fetches.fetch })).rejects.toBeInstanceOf(surface.ConfigurationError);
+    await expect(createEnclaveOpenAIClient("enclave.example", "tinfoilsh/repo", { baseURL: "http://proxy.example/" }, {}, { documentFetch: fetches.fetch })).rejects.toBeInstanceOf(
+      surface.ConfigurationError,
+    );
+    expect(fetches.calls).toBe(0);
   });
 });
