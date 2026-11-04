@@ -14,7 +14,8 @@ import { resetEphemeralUserCacheSecretForTests, resolveUserCacheSecret } from ".
 import { loadOrPersistUserCacheSecret } from "../../src/v3/internal/cachesecret-store.js";
 import { PLATFORM } from "../../src/v3/internal/platform.js";
 import { tlsMode } from "../../src/v3/internal/transport/tls.js";
-import { createEnclaveOpenAIClient, createTinfoilClient, EnclaveOpenAIClient, TinfoilClient } from "../../src/v3/openai-client.js";
+import { createGatewayHTTPClient, GatewayHTTPClient } from "../../src/v3/gateway-client.js";
+import { createEnclaveOpenAIClient, createGatewayOpenAIClient, createTinfoilClient, EnclaveOpenAIClient, TinfoilClient } from "../../src/v3/openai-client.js";
 import type { Fetch } from "../../src/v3/options.js";
 import { RouterHTTPClient, type RouterClientSeams } from "../../src/v3/router-client.js";
 import * as browserEntry from "../../src/v3/index.browser.js";
@@ -63,6 +64,9 @@ beforeAll(async () => {
     if (seen.path === "/sse") {
       sseEnded = false;
       return { headers: { "content-type": "text/event-stream" }, body: paced(["data: a\n\n", "data: b\n\n", "data: c\n\n"], 80, () => (sseEnded = true)) };
+    }
+    if (seen.path === "/catalog") {
+      return { headers: { "content-type": "application/json" }, body: JSON.stringify({ "test-model": { repo: "tinfoilsh/test", hosts: ["replica.example"] } }) };
     }
     if (seen.path.endsWith("/chat/completions")) {
       return { headers: { "content-type": "application/json" }, body: JSON.stringify(completion(seen.sealed ? "sealed" : "plain")) };
@@ -178,5 +182,24 @@ describe("OpenAI clients in a browser", () => {
     const body = JSON.parse(new TextDecoder().decode(peer.seen[peer.seen.length - 1]!.body));
     expect(body.user_cache_secret).toBe(await resolveUserCacheSecret(undefined));
     expect(body.model).toBe("test");
+  });
+});
+
+describe("the gateway in a browser", () => {
+  it("fetches the catalog, verifies a replica through the gateway, and seals a completion to it", async () => {
+    const peerFetch = fetchOf(peer);
+    const gatewaySeams = { ...seams(), catalogFetch: peerFetch, documentFetch: peerFetch };
+    const http = await createGatewayHTTPClient({ verifier: verifier(peer.publicKeyHex), url: "https://gateway.example/v1/" }, gatewaySeams);
+    expect(http).toBeInstanceOf(GatewayHTTPClient);
+    expect(await http.models()).toEqual(["test-model"]);
+    const ai = await createGatewayOpenAIClient({ verifier: verifier(peer.publicKeyHex), url: "https://gateway.example/v1/" }, { bearerToken: "jwt" }, gatewaySeams);
+    const reply = await ai.chat.completions.create({ model: "test-model", messages: [{ role: "user", content: "hi" }] });
+    expect(reply.choices[0]!.message.content).toBe("sealed");
+    const last = peer.seen[peer.seen.length - 1]!;
+    expect(last.headers["x-tinfoil-enclave-url"]).toBe("https://replica.example");
+    expect(last.headers["x-tinfoil-model"]).toBe("test-model");
+    const sent = JSON.parse(new TextDecoder().decode(last.body)) as Record<string, unknown>;
+    expect(sent.cache_salt).toMatch(/^[A-Za-z0-9_-]{43}$/);
+    expect(ai.httpClient().current().map((r) => r.host)).toEqual(["replica.example"]);
   });
 });

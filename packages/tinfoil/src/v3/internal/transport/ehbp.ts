@@ -88,11 +88,12 @@ async function sealedFetch(identity: Identity, send: Fetch, input: string | URL 
   } catch (err) {
     throw new NetworkError(`failed to seal the request: ${messageOf(err)}`, { cause: err });
   }
-  if (sealed.context === null) return send(sealed.request);
+  // Sealing builds a new Request, so the caller's signal is carried alongside it.
+  if (sealed.context === null) return send(sealed.request, { signal: request.signal });
 
   let response: Response;
   try {
-    response = await send(sealed.request);
+    response = await send(sealed.request, { signal: request.signal });
   } finally {
     // The response headers mean the upload finished; what the sealing spooled is done.
     await sealed.cleanup?.().catch(() => {});
