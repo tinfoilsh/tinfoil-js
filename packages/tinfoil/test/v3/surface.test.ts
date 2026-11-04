@@ -7,6 +7,7 @@
 import { readFileSync } from "node:fs";
 import OpenAI from "openai";
 import { describe, expect, it } from "vitest";
+import * as aiSdk from "../../src/v3/ai-sdk.js";
 import * as browser from "../../src/v3/index.browser.js";
 import * as surface from "../../src/v3/index.js";
 import { createEnclaveHTTPClient } from "../../src/v3/enclave-client.js";
@@ -27,8 +28,6 @@ const EXPORTS = [
   "GatewayHTTPClient",
   "GatewayOpenAIClient",
   "fetchCatalog",
-  // the AI SDK provider
-  "createTinfoilAI",
   // errors
   "TinfoilError",
   "ConfigurationError",
@@ -72,9 +71,6 @@ type TypeExports = [
   surface.CatalogEntry,
   surface.ReplicaVerification,
   surface.OpenAIOptions,
-  surface.CreateTinfoilAIOptions,
-  surface.TinfoilAIProvider,
-  surface.TinfoilAIEnclave,
   surface.ErrorCategory,
   surface.Uploadable,
 ];
@@ -113,6 +109,26 @@ function docCommentOf(source: string, name: string): string | undefined {
   const match = declaration.exec(source);
   return match?.[0].includes("/**") ? match[0] : undefined;
 }
+
+/** The `tinfoil/v3/ai-sdk` entry: the AI SDK provider alone, so the AI SDK stays out of bundles that don't use it. */
+const AI_SDK_EXPORTS = ["createTinfoil"];
+type AiSdkTypeExports = [aiSdk.TinfoilProvider, aiSdk.TinfoilProviderOptions, aiSdk.TinfoilProviderEnclave];
+const aiSdkTypeExports: AiSdkTypeExports | undefined = undefined;
+void aiSdkTypeExports;
+
+describe("the AI SDK entry", () => {
+  it("exports exactly the provider factory, and the main entries don't", () => {
+    expect(Object.keys(aiSdk).sort()).toEqual(AI_SDK_EXPORTS);
+    expect(typeof aiSdk.createTinfoil).toBe("function");
+    expect("createTinfoil" in surface).toBe(false);
+    expect("createTinfoil" in browser).toBe(false);
+  });
+
+  it("is a published subpath of the package", () => {
+    const pkg = JSON.parse(readFileSync(new URL("../../package.json", import.meta.url), "utf8")) as { exports: Record<string, Record<string, string>> };
+    expect(pkg.exports["./v3/ai-sdk"]).toEqual({ types: "./dist/v3/ai-sdk.d.ts", import: "./dist/v3/ai-sdk.js", default: "./dist/v3/ai-sdk.js" });
+  });
+});
 
 describe("public surface", () => {
   it("documents the experimental exports as such", () => {

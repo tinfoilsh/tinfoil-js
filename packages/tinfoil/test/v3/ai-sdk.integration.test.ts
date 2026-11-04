@@ -6,19 +6,19 @@
  */
 import { generateText, streamText } from "ai";
 import { describe, expect, it } from "vitest";
-import { createTinfoilAI, type TinfoilAIProvider } from "../../src/v3/ai-sdk.js";
+import { createTinfoil, type TinfoilProvider } from "../../src/v3/internal/ai-sdk.js";
 
 const RUN_INTEGRATION = process.env.RUN_TINFOIL_INTEGRATION === "true";
 const MODEL = "gpt-oss-120b";
 const apiKey = process.env.TINFOIL_API_KEY ?? "";
 
-describe("createTinfoilAI against the live router", () => {
-  let tinfoil: TinfoilAIProvider;
+describe("createTinfoil against the live router", () => {
+  let tinfoil: TinfoilProvider;
 
   it.skipIf(!RUN_INTEGRATION || apiKey === "")(
     "verifies the router, generates and streams text, aborts, and honours a system message",
     async () => {
-      tinfoil = await createTinfoilAI({ apiKey });
+      tinfoil = await createTinfoil({ apiKey });
       expect(tinfoil.httpClient().current()?.tlsPublicKeyFP()).toMatch(/^[0-9a-f]{64}$/);
 
       const generated = await generateText({ model: tinfoil(MODEL), prompt: "Say the single word: pong", maxOutputTokens: 512 });

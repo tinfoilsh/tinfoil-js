@@ -9,7 +9,7 @@
 import { generateObject, generateText, NoObjectGeneratedError, Output, streamText, tool } from "ai";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { z } from "zod";
-import { createTinfoilAI, createTinfoilAIProvider, type CreateTinfoilAIOptions, type TinfoilAISeams } from "../../src/v3/ai-sdk.js";
+import { createTinfoil, createTinfoilProvider, type TinfoilProviderOptions, type TinfoilProviderSeams } from "../../src/v3/internal/ai-sdk.js";
 import { EnclaveHTTPClient } from "../../src/v3/enclave-client.js";
 import { ConfigurationError } from "../../src/v3/errors.js";
 import type { RuntimeGlobals } from "../../src/v3/internal/platform.js";
@@ -49,7 +49,7 @@ function verifier(keys: { tls?: string; hpke?: string }): Verifier {
 }
 
 /** Seams that discover `routers`, count document fetches, and resolve the cache secret without touching the environment. */
-function seams(routers: string[]): TinfoilAISeams & { documentFetches: number } {
+function seams(routers: string[]): TinfoilProviderSeams & { documentFetches: number } {
   const state = { documentFetches: 0 };
   const documentFetch: Fetch = async () => {
     state.documentFetches++;
@@ -106,10 +106,10 @@ afterAll(async () => {
   await Promise.all([tls.close(), ehbp.close()]);
 });
 
-describe("createTinfoilAI's option checks", () => {
+describe("createTinfoil's option checks", () => {
   it("requires exactly one credential and checks the client's options before fetching anything", async () => {
     const s = seams([tls.host]);
-    const cases: [CreateTinfoilAIOptions, RegExp][] = [
+    const cases: [TinfoilProviderOptions, RegExp][] = [
       [{}, /credential is required/],
       [{ apiKey: "" }, /credential is required/],
       [{ apiKey: "k", bearerToken: "t" }, /not both/],
@@ -118,7 +118,7 @@ describe("createTinfoilAI's option checks", () => {
       [{ apiKey: "k", transportMode: "quic" as never, verifier: verifier({ tls: TEST_PIN }) }, /unknown transport mode/],
     ];
     for (const [options, message] of cases) {
-      const failure = createTinfoilAIProvider(options, s);
+      const failure = createTinfoilProvider(options, s);
       await expect(failure, JSON.stringify(options)).rejects.toBeInstanceOf(ConfigurationError);
       await expect(failure).rejects.toThrow(message);
     }
@@ -129,28 +129,28 @@ describe("createTinfoilAI's option checks", () => {
   it("refuses an API key where the runtime isn't a server, such as a worker, before fetching anything", async () => {
     const worker = { self: {} } as unknown as RuntimeGlobals;
     const s = seams([tls.host]);
-    const failure = createTinfoilAIProvider({ apiKey: "long-lived", verifier: verifier({ tls: TEST_PIN }) }, { ...s, globals: worker });
+    const failure = createTinfoilProvider({ apiKey: "long-lived", verifier: verifier({ tls: TEST_PIN }) }, { ...s, globals: worker });
     await expect(failure).rejects.toBeInstanceOf(ConfigurationError);
     await expect(failure).rejects.toThrow(/bearerToken/);
     expect(s.documentFetches).toBe(0);
     // A bearer token is accepted there; the server runtime accepts either.
     const node = { process: { versions: { node: "22.0.0" } } } as RuntimeGlobals;
-    await expect(createTinfoilAIProvider({ bearerToken: "t", transportMode: "tls", verifier: verifier({ tls: TEST_PIN }) }, { ...s, globals: worker })).resolves.toBeDefined();
-    await expect(createTinfoilAIProvider({ apiKey: "k", transportMode: "tls", verifier: verifier({ tls: TEST_PIN }) }, { ...s, globals: node })).resolves.toBeDefined();
+    await expect(createTinfoilProvider({ bearerToken: "t", transportMode: "tls", verifier: verifier({ tls: TEST_PIN }) }, { ...s, globals: worker })).resolves.toBeDefined();
+    await expect(createTinfoilProvider({ apiKey: "k", transportMode: "tls", verifier: verifier({ tls: TEST_PIN }) }, { ...s, globals: node })).resolves.toBeDefined();
   });
 
   it("is reachable from the public surface with the same checks", async () => {
-    await expect(createTinfoilAI({})).rejects.toBeInstanceOf(ConfigurationError);
+    await expect(createTinfoil({})).rejects.toBeInstanceOf(ConfigurationError);
   });
 });
 
 describe("the provider over the discovered router", () => {
   let s: ReturnType<typeof seams>;
-  let tinfoil: Awaited<ReturnType<typeof createTinfoilAIProvider>>;
+  let tinfoil: Awaited<ReturnType<typeof createTinfoilProvider>>;
 
   beforeAll(async () => {
     s = seams([tls.host]);
-    tinfoil = await createTinfoilAIProvider({ apiKey: "secret-key", transportMode: "tls", verifier: verifier({ tls: TEST_PIN }), headers: { "x-app": "demo" } }, s);
+    tinfoil = await createTinfoilProvider({ apiKey: "secret-key", transportMode: "tls", verifier: verifier({ tls: TEST_PIN }), headers: { "x-app": "demo" } }, s);
   });
 
   it("is bound to the verified router and exposes it", () => {
@@ -236,7 +236,7 @@ describe("the provider over the discovered router", () => {
 describe("the provider over one enclave", () => {
   it("seals bodies to the enclave's key through a proxy and exposes the enclave client", async () => {
     const s = seams([]);
-    const tinfoil = await createTinfoilAIProvider(
+    const tinfoil = await createTinfoilProvider(
       { bearerToken: "short-lived", enclave: { host: "enclave.example", repo: "tinfoilsh/repo" }, transportMode: "ehbp", baseURL: `${ehbp.origin}/`, verifier: verifier({ tls: "ab".repeat(32), hpke: ehbp.publicKeyHex }) },
       s,
     );

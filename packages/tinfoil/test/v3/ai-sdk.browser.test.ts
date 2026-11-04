@@ -6,7 +6,8 @@
 import { KEY_SPKI_FP_SHA256_V1_FORMAT, KEY_X25519_HPKE_V1_FORMAT, UsageError, type Verification, type Verifier } from "@tinfoilsh/verifier/v3";
 import { generateText, streamText } from "ai";
 import { beforeAll, describe, expect, it } from "vitest";
-import { createTinfoilAIProvider, type TinfoilAIProvider } from "../../src/v3/ai-sdk.js";
+import { createTinfoil } from "../../src/v3/ai-sdk.js";
+import { createTinfoilProvider, type TinfoilProvider } from "../../src/v3/internal/ai-sdk.js";
 import { ConfigurationError } from "../../src/v3/errors.js";
 import type { Fetch } from "../../src/v3/options.js";
 import * as browserEntry from "../../src/v3/index.browser.js";
@@ -54,24 +55,25 @@ beforeAll(async () => {
   });
 });
 
-describe("createTinfoilAI in a browser", () => {
-  let tinfoil: TinfoilAIProvider;
+describe("createTinfoil in a browser", () => {
+  let tinfoil: TinfoilProvider;
 
   beforeAll(async () => {
     const documentFetch: Fetch = async () => new Response(new Uint8Array([1]));
-    tinfoil = await createTinfoilAIProvider(
+    tinfoil = await createTinfoilProvider(
       { bearerToken: "short-lived", enclave: { host: ENCLAVE, repo: "tinfoilsh/repo" }, verifier: verifier(peer.publicKeyHex) },
       { documentFetch, sleep: async () => {}, ehbp: { fetch: fetchOf(peer) } },
     );
   });
 
-  it("is exported by the browser entry and refuses the TLS transport", async () => {
-    expect(typeof browserEntry.createTinfoilAI).toBe("function");
-    await expect(browserEntry.createTinfoilAI({ bearerToken: "t", transportMode: "tls" })).rejects.toBeInstanceOf(ConfigurationError);
+  it("lives on its own entry, not the main one, and refuses the TLS transport", async () => {
+    expect(typeof createTinfoil).toBe("function");
+    expect("createTinfoil" in browserEntry).toBe(false);
+    await expect(createTinfoil({ bearerToken: "t", transportMode: "tls" })).rejects.toBeInstanceOf(ConfigurationError);
   });
 
   it("refuses a long-lived API key in a page and names the bearer token as the credential", async () => {
-    const failure = browserEntry.createTinfoilAI({ apiKey: "long-lived" });
+    const failure = createTinfoil({ apiKey: "long-lived" });
     await expect(failure).rejects.toBeInstanceOf(ConfigurationError);
     await expect(failure).rejects.toThrow(/bearerToken/);
   });

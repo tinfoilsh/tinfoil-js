@@ -7,7 +7,6 @@ export { EnclaveHTTPClient } from "./enclave-client.js";
 export { RouterHTTPClient } from "./router-client.js";
 export { GatewayHTTPClient, fetchCatalog } from "./gateway-client.js";
 export { TinfoilClient, createClient, EnclaveOpenAIClient, RouterOpenAIClient, GatewayOpenAIClient, type OpenAIOptions } from "./openai-client.js";
-export { createTinfoilAI, type CreateTinfoilAIOptions, type TinfoilAIProvider, type TinfoilAIEnclave } from "./ai-sdk.js";
 export { TinfoilError, ConfigurationError, NetworkError, AttestationError, type ErrorCategory } from "./errors.js";
 export type {
   Fetch,

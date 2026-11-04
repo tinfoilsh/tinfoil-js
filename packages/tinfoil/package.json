@@ -36,6 +36,11 @@
       "browser": "./dist/v3/index.browser.js",
       "import": "./dist/v3/index.js",
       "default": "./dist/v3/index.js"
+    },
+    "./v3/ai-sdk": {
+      "types": "./dist/v3/ai-sdk.d.ts",
+      "import": "./dist/v3/ai-sdk.js",
+      "default": "./dist/v3/ai-sdk.js"
     }
   },
   "scripts": {
