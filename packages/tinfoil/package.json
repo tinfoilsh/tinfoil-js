@@ -15,6 +15,7 @@
     "./dist/user-cache-secret-store.js": "./dist/user-cache-secret-store.browser.js",
     "./dist/v3/index.js": "./dist/v3/index.browser.js",
     "./dist/v3/internal/cachesecret-store.js": "./dist/v3/internal/cachesecret-store.browser.js",
+    "./dist/v3/internal/platform.js": "./dist/v3/internal/platform.browser.js",
     "./dist/v3/internal/transport/tls.js": "./dist/v3/internal/transport/tls.browser.js"
   },
   "exports": {

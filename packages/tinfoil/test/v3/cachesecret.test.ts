@@ -3,7 +3,7 @@
  * byte preserved, the bodies and requests left untouched, and resolution
  * from the option, the environment, and the persisted file.
  */
-import { lstatSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
+import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -189,6 +189,18 @@ describe("resolveUserCacheSecret", () => {
     expect(await resolveUserCacheSecret(undefined)).toBe(first);
     expect(warn).toHaveBeenCalledTimes(1);
     expect(lstatSync(join(home, ".tinfoil", "user_cache_secret")).isSymbolicLink()).toBe(true);
+  });
+
+  it("keeps the secret in memory, without a warning, where the runtime isn't a server, such as a worker", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    process.env[USER_CACHE_SECRET_ENV] = "from-env";
+    const worker = { self: {}, process: { env: process.env } } as unknown as Parameters<typeof resolveUserCacheSecret>[1];
+    const first = await resolveUserCacheSecret(undefined, worker);
+    expect(first).toMatch(/^[0-9a-f]{64}$/);
+    expect(first).not.toBe("from-env");
+    expect(await resolveUserCacheSecret(undefined, worker)).toBe(first);
+    expect(existsSync(join(home, ".tinfoil"))).toBe(false);
+    expect(warn).not.toHaveBeenCalled();
   });
 
   it("falls back when the directory can't be created", async () => {

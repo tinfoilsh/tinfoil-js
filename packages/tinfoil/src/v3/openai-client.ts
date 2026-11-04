@@ -17,7 +17,22 @@ import type { EnclaveOptions, GatewayOptions, RouterOptions } from "./options.js
 import { createRouterHTTPClient, RouterHTTPClient, type RouterClientSeams } from "./router-client.js";
 
 /** The OpenAI options a client takes: everything but the transport it is bound to. */
-export type OpenAIOptions = Omit<ClientOptions, "fetch" | "baseURL">;
+export type OpenAIOptions = Omit<ClientOptions, "fetch" | "baseURL"> & {
+  /**
+   * A credential a browser page may hold, such as a short-lived token from
+   * the application's own sign-in: sent as the API key, and allows browser
+   * use without `dangerouslyAllowBrowser`. A long-lived API key belongs in
+   * `apiKey` on a server, never in a page.
+   */
+  readonly bearerToken?: string;
+};
+
+/** The options as the OpenAI client takes them, with a bearer token applied. */
+function openAIClientOptions(options: OpenAIOptions): Omit<ClientOptions, "fetch" | "baseURL"> {
+  const { bearerToken, ...rest } = options;
+  if (bearerToken === undefined || bearerToken === "") return rest;
+  return { ...rest, apiKey: bearerToken, dangerouslyAllowBrowser: true };
+}
 
 /** The options each client was created with, which its clones inherit. */
 const givenOptions = new WeakMap<OpenAI, OpenAIOptions>();
@@ -29,11 +44,18 @@ function attest(client: OpenAI, fetchImpl: ClientOptions["fetch"], baseURL: stri
   givenOptions.set(client, { ...options });
 }
 
-/** The options a clone is created with: the client's own, with `options` over them, and never a transport. */
-function inherit(client: OpenAI, options: Partial<ClientOptions>): OpenAIOptions {
-  const merged: Partial<ClientOptions> = { ...givenOptions.get(client), ...options };
+/**
+ * The options a clone is created with: the client's own, with `options` over
+ * them, and never a transport. A credential given to the clone replaces the
+ * inherited one whichever form it takes: `apiKey` clears an inherited
+ * `bearerToken`, and `bearerToken` clears an inherited `apiKey`.
+ */
+function inherit(client: OpenAI, options: Partial<OpenAIOptions> & Partial<ClientOptions>): OpenAIOptions {
+  const merged: Partial<ClientOptions> & { bearerToken?: string } = { ...givenOptions.get(client), ...options };
   delete merged.fetch;
   delete merged.baseURL;
+  if ("apiKey" in options && !("bearerToken" in options)) delete merged.bearerToken;
+  if ("bearerToken" in options && !("apiKey" in options)) delete merged.apiKey;
   return merged;
 }
 
@@ -51,13 +73,13 @@ export class TinfoilClient extends OpenAI {
   /** @internal Only {@link create} constructs a client; anything else is refused. */
   constructor(token: symbol, httpClient: RouterHTTPClient, options: OpenAIOptions) {
     if (token !== TOKEN) throw new ConfigurationError("TinfoilClient is created with createClient");
-    super({ ...options, fetch: httpClient.fetch, baseURL: openAIURLOf(httpClient) });
+    super({ ...openAIClientOptions(options), fetch: httpClient.fetch, baseURL: openAIURLOf(httpClient) });
     this.#httpClient = httpClient;
     attest(this, httpClient.fetch, openAIURLOf(httpClient), options);
   }
 
   /** A client with `options` applied over this one's, on the same attested transport. */
-  override withOptions(options: Partial<ClientOptions>): this {
+  override withOptions(options: Partial<ClientOptions> & Partial<OpenAIOptions>): this {
     return new TinfoilClient(TOKEN, this.#httpClient, inherit(this, options)) as this;
   }
 
@@ -115,13 +137,13 @@ export class EnclaveOpenAIClient extends OpenAI {
   constructor(token: symbol, httpClient: EnclaveHTTPClient, options: OpenAIOptions) {
     if (token !== TOKEN) throw new ConfigurationError("EnclaveOpenAIClient is created with EnclaveOpenAIClient.create");
     // The transport and base URL come last, so the caller's options can't replace them.
-    super({ ...options, fetch: httpClient.fetch, baseURL: openAIURLOf(httpClient) });
+    super({ ...openAIClientOptions(options), fetch: httpClient.fetch, baseURL: openAIURLOf(httpClient) });
     this.#httpClient = httpClient;
     attest(this, httpClient.fetch, openAIURLOf(httpClient), options);
   }
 
   /** A client with `options` applied over this one's, on the same attested transport. */
-  override withOptions(options: Partial<ClientOptions>): this {
+  override withOptions(options: Partial<ClientOptions> & Partial<OpenAIOptions>): this {
     return new EnclaveOpenAIClient(TOKEN, this.#httpClient, inherit(this, options)) as this;
   }
 
@@ -152,13 +174,13 @@ export class RouterOpenAIClient extends OpenAI {
   /** @internal Only {@link create} constructs a client; anything else is refused. */
   constructor(token: symbol, httpClient: RouterHTTPClient, options: OpenAIOptions) {
     if (token !== TOKEN) throw new ConfigurationError("RouterOpenAIClient is created with RouterOpenAIClient.create");
-    super({ ...options, fetch: httpClient.fetch, baseURL: openAIURLOf(httpClient) });
+    super({ ...openAIClientOptions(options), fetch: httpClient.fetch, baseURL: openAIURLOf(httpClient) });
     this.#httpClient = httpClient;
     attest(this, httpClient.fetch, openAIURLOf(httpClient), options);
   }
 
   /** A client with `options` applied over this one's, on the same attested transport. */
-  override withOptions(options: Partial<ClientOptions>): this {
+  override withOptions(options: Partial<ClientOptions> & Partial<OpenAIOptions>): this {
     return new RouterOpenAIClient(TOKEN, this.#httpClient, inherit(this, options)) as this;
   }
 
@@ -184,13 +206,13 @@ export class GatewayOpenAIClient extends OpenAI {
   readonly #httpClient: GatewayHTTPClient;
 
   private constructor(httpClient: GatewayHTTPClient, options: OpenAIOptions) {
-    super({ ...options, fetch: httpClient.fetch, baseURL: httpClient.baseURL() });
+    super({ ...openAIClientOptions(options), fetch: httpClient.fetch, baseURL: httpClient.baseURL() });
     this.#httpClient = httpClient;
     attest(this, httpClient.fetch, httpClient.baseURL(), options);
   }
 
   /** A client with `options` applied over this one's, on the same attested transport. */
-  override withOptions(options: Partial<ClientOptions>): this {
+  override withOptions(options: Partial<ClientOptions> & Partial<OpenAIOptions>): this {
     return new GatewayOpenAIClient(this.#httpClient, inherit(this, options)) as this;
   }
 
