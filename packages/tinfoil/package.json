@@ -16,7 +16,9 @@
     "./dist/v3/index.js": "./dist/v3/index.browser.js",
     "./dist/v3/internal/cachesecret-store.js": "./dist/v3/internal/cachesecret-store.browser.js",
     "./dist/v3/internal/platform.js": "./dist/v3/internal/platform.browser.js",
-    "./dist/v3/internal/transport/tls.js": "./dist/v3/internal/transport/tls.browser.js"
+    "./dist/v3/internal/transport/tls.js": "./dist/v3/internal/transport/tls.browser.js",
+    "./dist/v3/realtime.js": "./dist/v3/realtime.browser.js",
+    "./dist/v3/internal/transport/ws.js": "./dist/v3/internal/transport/ws.browser.js"
   },
   "exports": {
     ".": {
@@ -52,7 +54,7 @@
     "build": "node scripts/generate-version.mjs && tsc",
     "test": "node scripts/generate-version.mjs && vitest run",
     "test:integration": "RUN_TINFOIL_INTEGRATION=true npm test",
-    "test:bun": "node scripts/generate-version.mjs && bun test --timeout 30000 ./test/bun-compat.bun.ts ./test/bun-ws-tls.bun.ts ./test/v3/surface.bun.ts ./test/v3/tls.bun.ts",
+    "test:bun": "node scripts/generate-version.mjs && bun test --timeout 30000 ./test/bun-compat.bun.ts ./test/bun-ws-tls.bun.ts ./test/v3/surface.bun.ts ./test/v3/tls.bun.ts ./test/v3/ws.bun.ts",
     "test:bun:integration": "RUN_TINFOIL_INTEGRATION=true bun test ./test/integration.bun.ts",
     "test:browser": "vitest run --config vite.config.browser.ts",
     "test:browser:integration": "vitest run --config vite.config.browser-test.ts",

@@ -162,6 +162,11 @@ export class KeyedTransport {
   state(signal?: AbortSignal): Promise<State<BoundFetch>> {
     return this.#cache.ensureVerified(signal);
   }
+
+  /** Marks `state` rejected by the peer, so the next request verifies again; a replaced state leaves the current one valid. */
+  invalidate(state: State<BoundFetch>): void {
+    this.#cache.invalidate(state);
+  }
 }
 
 function stripCategory(err: AttestationError): string {

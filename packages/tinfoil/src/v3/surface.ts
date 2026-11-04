@@ -7,6 +7,8 @@ export { EnclaveHTTPClient } from "./enclave-client.js";
 export { RouterHTTPClient } from "./router-client.js";
 export { GatewayHTTPClient, fetchCatalog } from "./gateway-client.js";
 export { TinfoilClient, createClient, EnclaveOpenAIClient, RouterOpenAIClient, GatewayOpenAIClient, type OpenAIOptions } from "./openai-client.js";
+export { createWebSocket, pinnedWebSocketOptions } from "./websocket.js";
+export { createRealtimeWebSocket } from "./realtime.js";
 export { TinfoilError, ConfigurationError, NetworkError, AttestationError, type ErrorCategory } from "./errors.js";
 export {
   sessionRecoveryToken,
@@ -26,6 +28,9 @@ export type {
   Catalog,
   CatalogEntry,
   ReplicaVerification,
+  WebSocketOptions,
+  PinnedWebSocket,
+  RealtimeOptions,
 } from "./options.js";
 export { SDK_VERSION } from "../version.js";
 
