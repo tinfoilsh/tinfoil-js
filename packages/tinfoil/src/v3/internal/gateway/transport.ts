@@ -11,7 +11,7 @@
  * @experimental The gateway route is new; this API may change without a major version.
  */
 import type { Verification } from "@tinfoilsh/verifier/v3";
-import { ConfigurationError, messageOf, NetworkError, TinfoilError } from "../../errors.js";
+import { AttestationError, ConfigurationError, messageOf, NetworkError, type TinfoilError } from "../../errors.js";
 import type { Catalog, Fetch, ReplicaVerification, VerificationCheck } from "../../options.js";
 import { Enclave, type EnclaveConfig } from "../enclave.js";
 import { checkEHBP, ehbpMode, type EHBPOptions } from "../transport/ehbp.js";
@@ -121,8 +121,9 @@ export class GatewayTransport {
     // Each replica's EHBP transport makes the same check; making it here
     // refuses a request before the catalog is read or a replica verified.
     checkEHBP(shape);
-    const signal = init?.signal ?? undefined;
     const request = input instanceof Request ? input : undefined;
+    // A Request carries a signal of its own; the init's takes precedence, as fetch has it.
+    const signal = init?.signal ?? request?.signal;
     const original = init?.body !== undefined ? init.body : request?.body;
     const prepared = await prepare(shape, shape.headers, original, this.#config.secret);
     const model = prepared.headers.get(MODEL_HEADER) ?? "";
@@ -146,7 +147,7 @@ export class GatewayTransport {
       const headers = new Headers(prepared.headers);
       headers.set(SEAL_HEADER, host);
       rt.models.add(model);
-      const response = await rt.fetch(url, { ...init, method: shape.method, headers, body: prepared.body });
+      const response = await rt.fetch(url, { ...init, method: shape.method, headers, body: prepared.body, signal });
       const routed = response.headers.get(SEAL_HEADER) ?? "";
       if (response.status !== 412 || routed === "" || routed === host || !prepared.replayable) return response;
       await response.body?.cancel();
@@ -245,9 +246,10 @@ export async function rank(hosts: readonly string[], prefix: string, first: stri
   return ranked;
 }
 
-/** `err` as a categorized error with `message`, keeping its category when it has one. */
+/** `err` as a categorized error with `message`, in the category it already has, or configuration when it has none. */
 function rewrap(err: unknown, message: string): TinfoilError {
-  if (err instanceof TinfoilError) return new (err.constructor as new (m: string, o?: { cause?: unknown }) => TinfoilError)(message, { cause: err });
+  if (err instanceof NetworkError) return new NetworkError(message, { cause: err });
+  if (err instanceof AttestationError) return new AttestationError(message, { cause: err });
   return new ConfigurationError(message, { cause: err });
 }
 
