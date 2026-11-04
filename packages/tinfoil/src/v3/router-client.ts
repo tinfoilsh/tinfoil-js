@@ -25,7 +25,7 @@ const TOKEN = Symbol("RouterHTTPClient");
 
 /** The factory with its test seams; {@link RouterHTTPClient.create} is this without them. */
 export async function createRouterHTTPClient(options: RouterOptions, seams: RouterClientSeams): Promise<RouterHTTPClient> {
-  const mode = resolveTransportMode(options.transportMode);
+  const mode = resolveTransportMode(options.transportMode, seams.globals);
   const baseURL = options.baseURL ?? "";
   if (baseURL !== "") {
     validateBaseURL(baseURL);

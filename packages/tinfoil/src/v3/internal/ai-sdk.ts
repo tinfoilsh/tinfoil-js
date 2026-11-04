@@ -48,8 +48,8 @@ export interface TinfoilProvider extends OpenAICompatibleProvider {
   httpClient(): EnclaveHTTPClient | RouterHTTPClient;
 }
 
-/** Seams for tests: the attested clients' own, and the globals the runtime is identified by. */
-export type TinfoilProviderSeams = RouterClientSeams & EnclaveClientSeams & { readonly globals?: RuntimeGlobals };
+/** Seams for tests: the attested clients' own, including the globals the runtime is identified by. */
+export type TinfoilProviderSeams = RouterClientSeams & EnclaveClientSeams;
 
 /**
  * The one credential the options carry, or a {@link ConfigurationError} when
