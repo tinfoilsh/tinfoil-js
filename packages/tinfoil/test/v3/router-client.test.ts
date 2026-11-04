@@ -92,6 +92,25 @@ describe("RouterHTTPClient.create", () => {
     expect(s.documentHosts).toEqual([]);
   });
 
+  it("moves past a router that attests but fails the caller's check, and keeps the next", async () => {
+    const checked: string[] = [];
+    const s = seams(["first.example", tls.host]);
+    const client = await createRouterHTTPClient(
+      {
+        verifier: verifier({ tls: TEST_PIN }),
+        transportMode: "tls",
+        verificationCheck: (v) => {
+          checked.push(v.tlsPublicKeyFP()!);
+          if (checked.length === 1) throw new Error("not this router");
+        },
+      },
+      s,
+    );
+    expect(client.enclave()).toBe(tls.host);
+    expect(s.documentHosts).toEqual(["first.example", tls.host]);
+    expect(checked).toHaveLength(2);
+  });
+
   it("verifies the fallback before returning and reports its failure by category", async () => {
     const unreachable = seams([], {
       documentFetch: async () => {
