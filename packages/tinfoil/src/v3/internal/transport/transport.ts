@@ -42,6 +42,26 @@ export function shapeOf(input: string | URL | Request, init?: RequestInit): Requ
   };
 }
 
+/**
+ * The options a Request carries besides its method, headers, body and
+ * signal, for rebuilding it as a new request: a Request can't be rebuilt
+ * from itself once its body has been read, so the fields are copied.
+ */
+export function optionsOf(request: Request): RequestInit {
+  const options: RequestInit = {
+    credentials: request.credentials,
+    redirect: request.redirect,
+    cache: request.cache,
+    referrer: request.referrer,
+    referrerPolicy: request.referrerPolicy,
+    integrity: request.integrity,
+    keepalive: request.keepalive,
+  };
+  // A navigation mode can't be given to a new request.
+  if (request.mode !== "navigate") options.mode = request.mode;
+  return options;
+}
+
 /** How requests are protected with a verification's keys. */
 export interface Mode {
   readonly name: TransportMode;

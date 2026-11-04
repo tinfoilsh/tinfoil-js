@@ -194,6 +194,29 @@ async function readBody(input: string | URL | Request, init: RequestInit | undef
  * empty string is replaced.
  */
 export function injectUserCacheSecret(raw: string, secret: string): string | null {
+  const members = objectMembers(raw);
+  if (members === null) return null;
+  const existing = members.filter((m) => m.key === USER_CACHE_SECRET_FIELD);
+  if (existing.length === 0) return appendMember(raw, members, USER_CACHE_SECRET_FIELD, JSON.stringify(secret));
+  if (existing.length !== 1 || raw.slice(existing[0]!.valueStart, existing[0]!.valueEnd) !== '""') return null;
+  return `${raw.slice(0, existing[0]!.valueStart)}${JSON.stringify(secret)}${raw.slice(existing[0]!.valueEnd)}`;
+}
+
+/** A member of a JSON object's text: its key and the range of its value and of the whole member. */
+export interface Member {
+  readonly key: string;
+  readonly start: number;
+  readonly valueStart: number;
+  readonly valueEnd: number;
+}
+
+/**
+ * The members of a JSON object's text, in order, with the ranges their
+ * values occupy; null if the text is not one JSON object with nothing but
+ * whitespace around it. The text is validated as JSON first, so the ranges
+ * are those of well-formed values.
+ */
+export function objectMembers(raw: string): Member[] | null {
   let parsed: unknown;
   try {
     parsed = JSON.parse(raw);
@@ -201,48 +224,22 @@ export function injectUserCacheSecret(raw: string, secret: string): string | nul
     return null;
   }
   if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return null;
-  const members = topLevelMembers(raw);
-  if (members === null) return null;
-  const existing = members.filter((m) => m.key === USER_CACHE_SECRET_FIELD);
-  const field = `${JSON.stringify(USER_CACHE_SECRET_FIELD)}:${JSON.stringify(secret)}`;
-  if (existing.length === 0) {
-    const end = raw.lastIndexOf("}");
-    return `${raw.slice(0, end)}${members.length > 0 ? "," : ""}${field}${raw.slice(end)}`;
-  }
-  if (existing.length !== 1) return null;
-  const [member] = existing;
-  if (raw.slice(member!.valueStart, member!.valueEnd) !== '""') return null;
-  return `${raw.slice(0, member!.valueStart)}${JSON.stringify(secret)}${raw.slice(member!.valueEnd)}`;
-}
-
-interface Member {
-  readonly key: string;
-  readonly valueStart: number;
-  readonly valueEnd: number;
-}
-
-/** The top-level members of an object body, with each value's text range; null if the text is not an object. */
-function topLevelMembers(raw: string): Member[] | null {
   const members: Member[] = [];
   let index = skipWhitespace(raw, 0);
   if (raw[index] !== "{") return null;
   index = skipWhitespace(raw, index + 1);
   if (raw[index] === "}") return members;
   for (;;) {
+    const start = index;
     const keyEnd = stringEnd(raw, index);
     if (keyEnd === null) return null;
-    let key: unknown;
-    try {
-      key = JSON.parse(raw.slice(index, keyEnd));
-    } catch {
-      return null;
-    }
+    const key = JSON.parse(raw.slice(index, keyEnd)) as string;
     index = skipWhitespace(raw, keyEnd);
     if (raw[index] !== ":") return null;
     const valueStart = skipWhitespace(raw, index + 1);
     const valueEnd = valueEndAt(raw, valueStart);
     if (valueEnd === null) return null;
-    members.push({ key: key as string, valueStart, valueEnd });
+    members.push({ key, start, valueStart, valueEnd });
     index = skipWhitespace(raw, valueEnd);
     if (raw[index] === ",") {
       index = skipWhitespace(raw, index + 1);
@@ -250,6 +247,37 @@ function topLevelMembers(raw: string): Member[] | null {
     }
     return raw[index] === "}" ? members : null;
   }
+}
+
+/** `raw` with `key: valueJSON` added as the last member. */
+export function appendMember(raw: string, members: readonly Member[], key: string, valueJSON: string): string {
+  const end = raw.lastIndexOf("}");
+  return `${raw.slice(0, end)}${members.length > 0 ? "," : ""}${JSON.stringify(key)}:${valueJSON}${raw.slice(end)}`;
+}
+
+/** `raw` with `member`'s value replaced by `valueJSON`. */
+export function replaceMember(raw: string, member: Member, valueJSON: string): string {
+  return `${raw.slice(0, member.valueStart)}${valueJSON}${raw.slice(member.valueEnd)}`;
+}
+
+/** `raw` without `member`, and without the comma that separated it. */
+export function removeMember(raw: string, members: readonly Member[], member: Member): string {
+  const index = members.indexOf(member);
+  const next = members[index + 1];
+  if (next !== undefined) return raw.slice(0, member.start) + raw.slice(next.start);
+  const previous = members[index - 1];
+  if (previous !== undefined) return raw.slice(0, previous.valueEnd) + raw.slice(member.valueEnd);
+  return raw.slice(0, member.start) + raw.slice(member.valueEnd);
+}
+
+/** The text of the first element of a JSON array's text; null for an empty array, undefined if the text is not an array. */
+export function firstArrayElement(raw: string): string | null | undefined {
+  let index = skipWhitespace(raw, 0);
+  if (raw[index] !== "[") return undefined;
+  index = skipWhitespace(raw, index + 1);
+  if (raw[index] === "]") return null;
+  const end = valueEndAt(raw, index);
+  return end === null ? undefined : raw.slice(index, end);
 }
 
 function skipWhitespace(raw: string, start: number): number {
@@ -269,7 +297,7 @@ function stringEnd(raw: string, start: number): number | null {
   return null;
 }
 
-/** The end of the JSON value starting at `start`: a string, a nested structure, or a scalar running to the next ',' or '}'. */
+/** The end of the JSON value starting at `start`: a string, a nested structure, or a scalar running to the next ',', '}' or ']'. */
 function valueEndAt(raw: string, start: number): number | null {
   if (raw[start] === '"') return stringEnd(raw, start);
   if (raw[start] === "{" || raw[start] === "[") {
@@ -292,6 +320,6 @@ function valueEndAt(raw: string, start: number): number | null {
     return null;
   }
   let end = start;
-  while (end < raw.length && raw[end] !== "," && raw[end] !== "}" && !/\s/.test(raw[end]!)) end++;
+  while (end < raw.length && raw[end] !== "," && raw[end] !== "}" && raw[end] !== "]" && !/\s/.test(raw[end]!)) end++;
   return end > start ? end : null;
 }
