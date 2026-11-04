@@ -27,9 +27,13 @@ export async function createWebSocket(client: EnclaveHTTPClient | RouterHTTPClie
 /**
  * `ws` client settings that pin a connection to the attested TLS key of
  * `client`'s current verification, for a library that builds its own
- * WebSocket to the enclave. Node only.
+ * WebSocket to the enclave. Node only. A peer whose certificate fails the
+ * pin fails the handshake and makes the client verify again before its next
+ * connection; a certificate the runtime rejects before the pin is consulted
+ * surfaces as the runtime's error on the library's socket and leaves the
+ * verification in place.
  */
 export async function pinnedWebSocketOptions(client: EnclaveHTTPClient | RouterHTTPClient, signal?: AbortSignal): Promise<WS.ClientOptions> {
   const { transport, tls } = webSocketAccessOf(client);
-  return clientWsOptions(transport, tls, signal);
+  return (await clientWsOptions(transport, tls, signal)).options;
 }

@@ -13,6 +13,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { WebSocket as WsWebSocket, WebSocketServer } from "ws";
 import { createEnclaveHTTPClient, type EnclaveHTTPClient } from "../../src/v3/enclave-client.js";
 import { AttestationError, ConfigurationError } from "../../src/v3/errors.js";
+import { isCertificateError } from "../../src/v3/internal/transport/pin-errors.js";
 import { allowedWsOptions } from "../../src/v3/internal/transport/ws.js";
 import { checkWebSocketCapability, webSocketURL } from "../../src/v3/internal/websocket.js";
 import type { Fetch, PinnedWebSocket } from "../../src/v3/options.js";
@@ -124,6 +125,14 @@ describe("webSocketURL", () => {
     });
     expect(allowedWsOptions(undefined)).toEqual({});
   });
+
+  it("recognises the pin's rejection and the runtime's certificate errors, and nothing else", () => {
+    expect(isCertificateError(new AttestationError("x"))).toBe(false);
+    expect(isCertificateError(Object.assign(new Error("x"), { code: "CERT_HAS_EXPIRED" }))).toBe(true);
+    expect(isCertificateError(Object.assign(new Error("x"), { code: "ERR_TLS_CERT_ALTNAME_INVALID" }))).toBe(true);
+    expect(isCertificateError(Object.assign(new Error("x"), { code: "ECONNREFUSED" }))).toBe(false);
+    expect(isCertificateError(undefined)).toBe(false);
+  });
 });
 
 describe("createWebSocket", () => {
@@ -215,7 +224,21 @@ describe("pinnedWebSocketOptions", () => {
     expect(connections[connections.length - 1]!.path).toBe("/lib");
     socket.close();
 
-    const mismatched = new WsWebSocket(`wss://${host}/lib`, await pinnedWebSocketOptions(await client(() => OTHER_PIN))) as unknown as PinnedWebSocket;
-    await expect(opened(mismatched)).rejects.toBeInstanceOf(AttestationError);
+  });
+
+  it("fails a library's handshake when the certificate carries another key, reaches the server with nothing, and verifies again afterwards", async () => {
+    const docs = documents();
+    const c = await client(() => OTHER_PIN, docs);
+    expect(docs.calls).toBe(1);
+    const before = connections.length;
+    const mismatched = new WsWebSocket(`wss://${host}/lib`, await pinnedWebSocketOptions(c)) as unknown as PinnedWebSocket;
+    const err = await opened(mismatched).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(AttestationError);
+    expect((err as Error).message).toMatch(/does not match the attested key/);
+    expect(connections.length).toBe(before);
+    // The pin failure retired the verification the settings were pinned to.
+    expect(docs.calls).toBe(1);
+    await pinnedWebSocketOptions(c);
+    expect(docs.calls).toBe(2);
   });
 });

@@ -73,19 +73,42 @@ export async function openClientWebSocket(transport: KeyedTransport, path: strin
   const key = state.verification.tlsPublicKeyFP();
   if (key === undefined) throw new AttestationError('document endorses no "tls" key');
   const { openPinnedWebSocket } = await import("./transport/ws.js");
-  const socket = await openPinnedWebSocket(target, key, options, tls);
-  // A connection the peer's certificate failed was opened under keys the peer no longer holds.
+  // A peer whose certificate fails the pin no longer holds the keys the connection was opened under.
+  const socket = await openPinnedWebSocket(target, key, options, tls, () => transport.invalidate(state));
+  // So does one whose certificate the runtime rejected before the pin was consulted.
   socket.addEventListener("error", (event) => {
     if (isCertificateError(event.error)) transport.invalidate(state);
   });
   return socket;
 }
 
-/** `ws` client settings pinning a connection to the client's current verification, for libraries that build their own WebSocket. */
-export async function clientWsOptions(transport: KeyedTransport, tls: TLSOptions, signal?: AbortSignal): Promise<WS.ClientOptions> {
+/** `ws` client settings pinning a connection to one verification, and a hook for errors of the connection a library builds with them. */
+export interface PinnedWsOptions {
+  readonly options: WS.ClientOptions;
+  /** Retires the verification the settings pin to if `err` means the runtime rejected the peer's certificate. */
+  readonly onConnectionError: (err: unknown) => void;
+}
+
+/**
+ * `ws` client settings pinning a connection to the client's current
+ * verification, for libraries that build their own WebSocket. A peer the
+ * pin rejects retires that verification as the handshake fails; a
+ * certificate the runtime rejects before the pin is consulted retires it
+ * through `onConnectionError`, when the caller can observe the socket.
+ */
+export async function clientWsOptions(transport: KeyedTransport, tls: TLSOptions, signal?: AbortSignal): Promise<PinnedWsOptions> {
   checkWebSocketCapability();
-  const key = (await transport.ensureVerified(signal)).tlsPublicKeyFP();
+  const { checkWsClientOptionsCapability, pinnedWsClientOptions } = await import("./transport/ws.js");
+  // A runtime that can't use the settings is refused before any verification I/O.
+  checkWsClientOptionsCapability();
+  const state = await transport.state(signal);
+  const key = state.verification.tlsPublicKeyFP();
   if (key === undefined) throw new AttestationError('document endorses no "tls" key');
-  const { pinnedWsClientOptions } = await import("./transport/ws.js");
-  return pinnedWsClientOptions(key, tls);
+  const invalidate = (): void => transport.invalidate(state);
+  return {
+    options: await pinnedWsClientOptions(key, tls, invalidate),
+    onConnectionError: (err) => {
+      if (isCertificateError(err)) invalidate();
+    },
+  };
 }

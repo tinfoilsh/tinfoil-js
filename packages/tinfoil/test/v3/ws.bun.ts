@@ -86,9 +86,9 @@ describe("createWebSocket under Bun", () => {
     const before = connections;
     const socket = await createWebSocket(await client("ab".repeat(32)), "/never");
     const err = await opened(socket).catch((e: unknown) => e);
-    expect(err).toBeInstanceOf(Error);
+    expect(err).toBeInstanceOf(AttestationError);
+    expect((err as Error).message).toMatch(/does not match the attested key/);
     expect(connections).toBe(before);
-    if (err instanceof AttestationError) expect(err.message).toMatch(/does not match the attested key|without checking/);
   });
 
   it("refuses plaintext", async () => {

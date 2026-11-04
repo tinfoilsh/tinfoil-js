@@ -13,14 +13,20 @@ export const WS_PLATFORM: "node" | "browser" = "browser";
 
 export const WEBSOCKETS_UNAVAILABLE_IN_BROWSERS = "a verified WebSocket pins the server certificate, which browsers don't expose to scripts, so it can't be opened from a browser";
 
+export type OnRejected = () => void;
+
 export function allowedWsOptions(wsOptions: Readonly<Record<string, unknown>> | undefined): Record<string, unknown> {
   return { ...wsOptions };
 }
 
-export async function pinnedWsClientOptions(_key: string, _tls: TLSOptions): Promise<WS.ClientOptions> {
+export function checkWsClientOptionsCapability(): void {
   throw new ConfigurationError(WEBSOCKETS_UNAVAILABLE_IN_BROWSERS);
 }
 
-export async function openPinnedWebSocket(_url: URL, _key: string, _options: WebSocketOptions, _tls: TLSOptions): Promise<PinnedWebSocket> {
+export async function pinnedWsClientOptions(_key: string, _tls: TLSOptions, _onRejected?: OnRejected): Promise<WS.ClientOptions> {
+  throw new ConfigurationError(WEBSOCKETS_UNAVAILABLE_IN_BROWSERS);
+}
+
+export async function openPinnedWebSocket(_url: URL, _key: string, _options: WebSocketOptions, _tls: TLSOptions, _onRejected?: OnRejected): Promise<PinnedWebSocket> {
   throw new ConfigurationError(WEBSOCKETS_UNAVAILABLE_IN_BROWSERS);
 }
