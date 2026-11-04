@@ -6,7 +6,8 @@
 import { PROTOCOL } from "ehbp";
 import { beforeAll, describe, expect, it } from "vitest";
 import { ConfigurationError } from "../../src/v3/errors.js";
-import { createUnverifiedClient, UNVERIFIED_WARNING } from "../../src/v3/unsafe.js";
+import { createUnverifiedClient } from "../../src/v3/internal/unsafe-client.js";
+import { UNVERIFIED_WARNING } from "../../src/v3/unsafe.js";
 import { createEhbpPeer, fetchOf, type EhbpPeer } from "./helpers/ehbp-peer.js";
 
 const ORIGIN = "https://dev.example";

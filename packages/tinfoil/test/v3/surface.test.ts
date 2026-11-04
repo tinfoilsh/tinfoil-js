@@ -10,6 +10,7 @@ import { describe, expect, it } from "vitest";
 import * as aiSdk from "../../src/v3/ai-sdk.js";
 import * as browser from "../../src/v3/index.browser.js";
 import * as surface from "../../src/v3/index.js";
+import * as unsafeEntry from "../../src/v3/unsafe.js";
 import { createEnclaveHTTPClient } from "../../src/v3/enclave-client.js";
 import { createGatewayHTTPClient } from "../../src/v3/gateway-client.js";
 import { createEnclaveOpenAIClient, createGatewayOpenAIClient, createRouterOpenAIClient } from "../../src/v3/openai-client.js";
@@ -150,6 +151,15 @@ describe("public surface", () => {
   it("exports exactly the specified names from both entries", () => {
     expect(Object.keys(surface).sort()).toEqual(EXPORTS);
     expect(Object.keys(browser).sort()).toEqual(EXPORTS);
+  });
+
+  it("keeps the unsafe entry to the unverified client, its warning and its options type", () => {
+    expect(Object.keys(unsafeEntry).sort()).toEqual(["UNVERIFIED_WARNING", "UnverifiedClient"]);
+    expect(unsafeEntry.UNVERIFIED_WARNING).toMatch(/insecure/i);
+    expect(staticsOf(unsafeEntry.UnverifiedClient)).toEqual(["create"]);
+    expect(methodsOf(unsafeEntry.UnverifiedClient)).toEqual(["baseURL", "keyOrigin"]);
+    const options: unsafeEntry.UnverifiedOptions | undefined = undefined;
+    void options;
   });
 
   it("shapes the HTTP clients as specified: a `create` factory and the verification methods", () => {

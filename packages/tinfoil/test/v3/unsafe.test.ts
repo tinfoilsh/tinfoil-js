@@ -8,8 +8,8 @@
 import { PROTOCOL } from "ehbp";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { ConfigurationError, NetworkError } from "../../src/v3/errors.js";
-import * as unsafe from "../../src/v3/unsafe.js";
-import { createUnverifiedClient, UNVERIFIED_WARNING, UnverifiedClient } from "../../src/v3/unsafe.js";
+import { createUnverifiedClient, type UnverifiedOptions } from "../../src/v3/internal/unsafe-client.js";
+import { UNVERIFIED_WARNING, UnverifiedClient } from "../../src/v3/unsafe.js";
 import { startEhbpServer, type EhbpServer } from "./helpers/ehbp-server.js";
 
 let server: EhbpServer;
@@ -43,7 +43,7 @@ afterAll(async () => {
 });
 
 /** Creates a client with a counting fetch and a captured warning. */
-async function client(options: unsafe.UnverifiedOptions): Promise<{ client: UnverifiedClient; warnings: string[]; requested: string[] }> {
+async function client(options: UnverifiedOptions): Promise<{ client: UnverifiedClient; warnings: string[]; requested: string[] }> {
   const warnings: string[] = [];
   const requested: string[] = [];
   const c = await createUnverifiedClient(options, {
@@ -127,12 +127,5 @@ describe("UnverifiedClient", () => {
   it("is constructed only through its factory", () => {
     expect(() => new UnverifiedClient(Symbol("x"), "", "", fetch)).toThrow(/created with UnverifiedClient.create/);
     expect(Object.getOwnPropertyNames(UnverifiedClient).filter((n) => !["length", "name", "prototype"].includes(n))).toEqual(["create"]);
-  });
-});
-
-describe("the unsafe entry", () => {
-  it("exports the client, its warning and nothing of the attested surface", () => {
-    expect(Object.keys(unsafe).sort()).toEqual(["UNVERIFIED_WARNING", "UnverifiedClient", "checkUnverifiedOptions", "createUnverifiedClient"]);
-    expect(UNVERIFIED_WARNING).toMatch(/insecure/i);
   });
 });
