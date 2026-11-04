@@ -1,31 +1,53 @@
 import { p256 } from "@noble/curves/nist.js";
 import { ASN1Obj, verifySignature } from "@freedomofpress/crypto-browser";
 import {
+  SigstoreVerifier,
+  verifyBundleTimestamp,
+} from "@freedomofpress/sigstore-browser";
+import {
   base64,
   canonicalJSON,
   concat,
   equal,
   fields,
   hex,
+  nonempty,
   object,
   sha256,
   string,
+  text,
   unbase64,
   unhex,
   utf8,
 } from "./encoding.js";
 import {
+  checkedCertificate,
   parseBundle,
   pae,
   verifyInnerTimestamp,
   verifyLogEntries,
+  type ParsedBundle,
   type SigstoreRoot,
 } from "./sigstore.js";
-import { canonicalVersion, fullVersion } from "./runtime.js";
+import { der as strictDER } from "./quote/crypto.js";
+import { canonicalVersion, fullVersion, runtimePin } from "./runtime.js";
 import { freshnessTime, PLATFORM_REPO, type Reference } from "./references.js";
 export const DEFAULT_SIGNING_KEY = unbase64(
   "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEcadRPBdmNf1LPWYcY9AZ2CrrqxsynqzLE7k3kahjPxIM42bgZbze0GnT/EmGqe1w6So5AhmXci8By8Azt8gAhw==",
 );
+export const PUBLIC_CONFIG_SCOPE = "https://registry.tinfoil.sh/scopes/public";
+const MAX_CERTIFICATE_SIZE = 16 << 10;
+const CERTIFICATE_VALIDITY = 10 * 60 * 1000;
+const CERTIFICATE_CLOCK_SKEW = 60 * 1000;
+const CODE_SIGNING = "1.3.6.1.5.5.7.3.3";
+const ECDSA_SHA256 = "1.2.840.10045.4.3.2";
+const SCOPE =
+  /^https:\/\/registry\.tinfoil\.sh\/scopes\/(?:public|[0-9a-f]{32})$/;
+export function validateScope(value: unknown): string {
+  const scope = string(value);
+  if (!SCOPE.test(scope)) throw new Error("Invalid registry scope");
+  return scope;
+}
 export function validateSigningKey(der: Uint8Array): void {
   if (!(der instanceof Uint8Array))
     throw new Error("Signing key must be DER SPKI bytes");
@@ -60,25 +82,20 @@ export function validateConfigPins(ref: Reference): void {
   configName("/" + ref.repo + "/" + (ref.tag || "revision"));
   if (ref.digest) unhex(ref.digest, 32);
 }
-async function approval(
-  value: unknown,
+interface Signer {
+  der: Uint8Array;
+  hint: string;
+  key: CryptoKey;
+  scope?: string;
+  signedAt?: Date;
+}
+async function keySigner(
+  b: ParsedBundle,
   keys: readonly Uint8Array[],
-  root: SigstoreRoot,
-): Promise<{ statement: any; payload: Uint8Array; hint: string }> {
-  const b = parseBundle(value, true);
-  if (
-    b.payload.length > 131072 ||
-    utf8(canonicalJSON(value)).length > 4 * 1024 * 1024
-  )
-    throw new Error("Approval size outside bounds");
+): Promise<Signer> {
   const hint = string(b.vm.publicKey?.hint);
   if (!hint || b.vm.certificate !== undefined)
     throw new Error("Approval requires trusted public-key hint");
-  if (
-    b.raw.dsseEnvelope.signatures[0].keyid &&
-    b.raw.dsseEnvelope.signatures[0].keyid !== hint
-  )
-    throw new Error("DSSE key ID does not match hint");
   if (b.vm.timestampVerificationData?.rfc3161Timestamps?.length)
     throw new Error("Approval must use only signed inner timestamp");
   let der: Uint8Array | undefined;
@@ -91,7 +108,106 @@ async function approval(
     false,
     ["verify"],
   );
-  if (!(await verifySignature(key, pae(b.payload), b.signature)))
+  return { der, hint, key };
+}
+async function certifiedSigner(
+  b: ParsedBundle,
+  issuerDER: Uint8Array,
+  roots: readonly Uint8Array[],
+  root: SigstoreRoot,
+): Promise<Signer> {
+  const vm = b.vm;
+  if (
+    !vm.certificate ||
+    vm.publicKey !== undefined ||
+    vm.timestampVerificationData?.rfc3161Timestamps?.length !== 1
+  )
+    throw new Error(
+      "Scoped approval requires a certificate and one signature timestamp",
+    );
+  const der = unbase64(nonempty(vm.certificate.rawBytes));
+  if (
+    der.length > MAX_CERTIFICATE_SIZE ||
+    issuerDER.length > MAX_CERTIFICATE_SIZE
+  )
+    throw new Error("Certificate size outside bounds");
+  const cert = checkedCertificate(der),
+    issuer = checkedCertificate(issuerDER);
+  if (
+    !roots.some((k) => equal(k, issuer.publicKey)) ||
+    !(await issuer.verify())
+  )
+    throw new Error("Untrusted registry root");
+  const usage = cert.extension("2.5.29.15"),
+    purposes = cert.extension("2.5.29.37"),
+    san = cert.extension("2.5.29.17"),
+    names = san ? strictDER(san.value).subs : [];
+  if (
+    cert.isCA ||
+    !cert.extBasicConstraints ||
+    !usage ||
+    strictDER(usage.value).toBitString().lastIndexOf(1) !== 0 ||
+    !purposes ||
+    strictDER(purposes.value)
+      .subs.map((x) => x.toOID())
+      .join() !== CODE_SIGNING ||
+    cert.signatureAlgorithmOid !== ECDSA_SHA256 ||
+    cert.notAfter.getTime() - cert.notBefore.getTime() > CERTIFICATE_VALIDITY ||
+    cert.notBefore < issuer.notBefore ||
+    cert.notAfter > issuer.notAfter ||
+    cert.subject.length ||
+    cert.extFulcioIssuerV1 ||
+    cert.extFulcioIssuerV2 ||
+    !san?.critical ||
+    names.length !== 1 ||
+    !names[0].tag.isContextSpecific(6) ||
+    names[0].tag.constructed ||
+    roots.some((k) => equal(k, cert.publicKey))
+  )
+    throw new Error("Invalid config signing certificate profile");
+  const scope = validateScope(text(names[0].value));
+  const times = await verifyBundleTimestamp(
+    vm.timestampVerificationData,
+    b.signature,
+    root.timestampAuthorities,
+  );
+  if (times.length !== 1) throw new Error("No trusted signature timestamp");
+  const signedAt = times[0].signingTime;
+  await new SigstoreVerifier().verifyCertificateChain(signedAt, cert, [
+    {
+      certChain: [issuer],
+      validFor: { start: issuer.notBefore, end: issuer.notAfter },
+    },
+  ]);
+  return {
+    der,
+    hint: base64(await sha256(cert.publicKey)),
+    key: await cert.publicKeyObj,
+    scope,
+    signedAt,
+  };
+}
+async function approval(
+  value: unknown,
+  keys: readonly Uint8Array[],
+  root: SigstoreRoot,
+  issuer?: Uint8Array,
+): Promise<Signer & { statement: any; payload: Uint8Array }> {
+  const b = parseBundle(value, true);
+  if (
+    b.payload.length > 131072 ||
+    utf8(canonicalJSON(value)).length > 4 * 1024 * 1024
+  )
+    throw new Error("Approval size outside bounds");
+  const signer = issuer
+    ? await certifiedSigner(b, issuer, keys, root)
+    : await keySigner(b, keys);
+  if (
+    b.raw.dsseEnvelope.signatures[0].keyid &&
+    b.raw.dsseEnvelope.signatures[0].keyid !== signer.hint
+  )
+    throw new Error("DSSE key ID does not match hint");
+  if (!(await verifySignature(signer.key, pae(b.payload), b.signature)))
     throw new Error("Invalid approval DSSE signature");
   for (const e of b.vm.tlogEntries ?? []) {
     if (
@@ -103,8 +219,8 @@ async function approval(
     )
       throw new Error("Approval requires Rekor v2 inclusion proofs");
   }
-  await verifyLogEntries(b, root, der, false);
-  return { statement: b.statement, payload: b.payload, hint };
+  await verifyLogEntries(b, root, signer.der, !!issuer);
+  return { statement: b.statement, payload: b.payload, ...signer };
 }
 function singleSubject(statement: any): { name: string; digest: string } {
   if (statement.subject.length !== 1)
@@ -135,28 +251,55 @@ async function inner(
   );
 }
 export async function verifyConfigApproval(
-  config: Uint8Array,
+  config: Uint8Array | undefined,
   value: unknown,
   ref: Reference,
   keys: readonly Uint8Array[],
   root: SigstoreRoot,
   now: Date,
   maxAge: number,
+  registry?: { issuer?: Uint8Array; scopes: readonly string[] },
 ): Promise<{
   name: string;
   digest: string;
   reference: string;
   signingKeyHint: string;
   approvalTime: Date;
+  runtime?: Reference;
+  scope?: string;
+  signatureTime?: Date;
 }> {
-  if (!config.length || config.length > 1 << 20)
+  if (config && (!config.length || config.length > 1 << 20))
     throw new Error("Config size outside bounds");
   validateConfigPins(ref);
-  const b = await approval(value, keys, root),
+  const b = await approval(value, keys, root, registry?.issuer),
     s = b.statement;
-  if (s.predicateType !== "https://tinfoil.sh/predicate/config-endorsement/v1")
+  const v2 =
+    s.predicateType === "https://tinfoil.sh/predicate/config-endorsement/v2";
+  if (
+    !v2 &&
+    s.predicateType !== "https://tinfoil.sh/predicate/config-endorsement/v1"
+  )
     throw new Error("Unsupported config approval predicate");
-  fields(s.predicate, ["freshness"]);
+  if (registry && v2 !== !!registry.issuer)
+    throw new Error("Registry approvals are certified exactly when v2");
+  const p = fields(
+    s.predicate,
+    v2 ? ["scope", "runtime", "freshness"] : ["freshness"],
+  );
+  let runtime: Reference | undefined;
+  if (v2) {
+    const r = fields(p.runtime, ["repo", "tag", "digest"]);
+    if (r.repo !== PLATFORM_REPO || fullVersion(r.tag) !== r.tag)
+      throw new Error("Invalid approved runtime");
+    unhex(r.digest, 32);
+    runtime = { repo: r.repo, tag: r.tag, digest: r.digest };
+    if (validateScope(p.scope) !== (b.scope ?? p.scope))
+      throw new Error("Certificate scope does not match signed scope");
+  }
+  const scope = b.scope ?? PUBLIC_CONFIG_SCOPE;
+  if (registry && !registry.scopes.includes(scope))
+    throw new Error("Config scope is not accepted");
   const subject = singleSubject(s),
     name = configName(subject.name);
   if (
@@ -165,21 +308,34 @@ export async function verifyConfigApproval(
     (ref.digest && ref.digest !== subject.digest)
   )
     throw new Error("Config approval does not match trusted identity");
-  if (hex(await sha256(config)) !== subject.digest)
+  if (!config && !v2)
+    throw new Error("Digest-only config approval requires v2");
+  if (config && hex(await sha256(config)) !== subject.digest)
     throw new Error("Config bytes do not match approved digest");
+  const pin = config && runtime ? runtimePin(config) : runtime;
+  if (pin?.tag !== runtime?.tag || pin?.digest !== runtime?.digest)
+    throw new Error("Config runtime does not match approved runtime");
   const approvalTime = await inner(
     s,
-    "tinfoil-config-freshness/v1",
+    v2 ? "tinfoil-config-freshness/v2" : "tinfoil-config-freshness/v1",
     root,
     now,
     maxAge,
   );
+  if (b.signedAt) {
+    freshnessTime(b.signedAt, now, maxAge);
+    if (approvalTime.getTime() > b.signedAt.getTime() + CERTIFICATE_CLOCK_SKEW)
+      throw new Error("Approval timestamp follows signature timestamp");
+  }
   return {
     name: name.name,
     digest: subject.digest,
     reference: "sha256:" + hex(await sha256(pae(b.payload))),
     signingKeyHint: b.hint,
     approvalTime,
+    runtime,
+    scope: registry ? scope : undefined,
+    signatureTime: b.signedAt,
   };
 }
 export interface ArtifactIdentity {

@@ -70,7 +70,7 @@ export function defaultSigstoreRoot(): SigstoreRoot {
   }
   return structuredClone(productionRoot);
 }
-function checkedCertificate(der: Uint8Array): X509Certificate {
+export function checkedCertificate(der: Uint8Array): X509Certificate {
   const cert = new X509Certificate(strictDER(der));
   const seen = new Set<string>();
   for (const ext of cert.extensions) {

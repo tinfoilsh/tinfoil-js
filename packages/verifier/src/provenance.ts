@@ -56,6 +56,7 @@ export interface ProvenanceOptions {
   embedded: EmbeddedReferences;
   authorizer?: VerifierOptions["configAuthorizer"];
   requiresConfig: boolean;
+  scopes?: readonly string[];
 }
 export interface VerifiedReferences {
   quote: any;
@@ -297,7 +298,9 @@ async function configReferences(
       throw new UsageError("Invalid config reference", { cause });
     }
   }
-  let bytes: Uint8Array, config: ConfigVerification;
+  let bytes: Uint8Array | undefined,
+    runtime: Reference | undefined,
+    config: ConfigVerification;
   if (opts.embedded.config) {
     bytes = opts.embedded.config.bytes;
     const name = opts.embedded.config.name ?? "",
@@ -321,7 +324,7 @@ async function configReferences(
     const material = required(doc.collateral.config, "config");
     bytes = material.config;
     if (opts.authorizer) {
-      if (!bytes.length || bytes.length > 1 << 20)
+      if (!bytes?.length || bytes.length > 1 << 20)
         throw new Error("Config size outside bounds");
       try {
         await opts.authorizer({
@@ -346,21 +349,24 @@ async function configReferences(
     } else {
       if (!material.bundle)
         throw new Error("Unsigned config requires caller authorization");
-      const approved = await verifyConfigApproval(
-        bytes,
-        material.bundle,
-        pin!,
-        opts.configKeys,
-        opts.root,
-        now,
-        opts.maxAge,
-      );
+      const { runtime: approvedRuntime, ...approved } =
+        await verifyConfigApproval(
+          bytes,
+          material.bundle,
+          pin!,
+          opts.configKeys,
+          opts.root,
+          now,
+          opts.maxAge,
+          opts.scopes && { issuer: material.issuer, scopes: opts.scopes },
+        );
       if (approved.reference !== material.reference)
         throw new Error("Endorsement reference mismatch");
       config = { source: "endorsement", ...approved };
+      runtime = approvedRuntime;
     }
   }
-  const runtime = runtimePin(bytes);
+  runtime ??= runtimePin(bytes!);
   let manifest: RuntimeManifest, runtimeTrust: ArtifactVerification;
   if (opts.embedded.runtime) {
     manifest = await parseRuntimeManifest(opts.embedded.runtime, runtime);

@@ -45,6 +45,9 @@ export const FORMAT = Object.freeze(
   ) as Record<string, string>,
 );
 /** @internal */
+export const CONFIG_ENDORSEMENT_V2 =
+  "https://tinfoil.sh/collateral/config-endorsement/v2";
+/** @internal */
 export interface CPUEndorsements {
   amdVcek?: { vcekDer: Uint8Array; certChainPem: string };
   amdCrl?: { crlDer: Uint8Array };
@@ -65,9 +68,10 @@ export interface SigstoreReference {
 }
 /** @internal */
 export interface ConfigMaterial {
-  config: Uint8Array;
+  config?: Uint8Array;
   reference: string;
   bundle?: unknown;
+  issuer?: Uint8Array;
 }
 /** @internal */
 export interface RuntimeMaterial extends SigstoreReference {
@@ -126,15 +130,22 @@ function ref(v: unknown): SigstoreReference {
     bundle: bundle(d.sigstore_bundle),
   };
 }
-function config(v: unknown, signed: boolean): ConfigMaterial {
+function config(v: unknown, format: string): ConfigMaterial {
+  const v2 = format === CONFIG_ENDORSEMENT_V2;
   const d = fields(
     v,
-    ["endorsement_ref", "config_base64", "sigstore_bundle"],
-    ["config_base64"],
+    [
+      "endorsement_ref",
+      "config_base64",
+      "sigstore_bundle",
+      ...(v2 ? ["issuer_certificate_der"] : []),
+    ],
+    v2 ? [] : ["config_base64"],
   );
-  const b = unbase64(d.config_base64);
-  if (!b.length) throw new Error("Empty config");
-  if (signed) {
+  const b =
+    d.config_base64 === undefined ? undefined : unbase64(d.config_base64);
+  if (b && !b.length) throw new Error("Empty config");
+  if (format !== FORMAT.config) {
     if (
       typeof d.endorsement_ref !== "string" ||
       !/^sha256:[0-9a-f]{64}$/.test(d.endorsement_ref)
@@ -147,6 +158,10 @@ function config(v: unknown, signed: boolean): ConfigMaterial {
     config: b,
     reference: d.endorsement_ref ?? "",
     bundle: d.sigstore_bundle,
+    issuer:
+      d.issuer_certificate_der === undefined
+        ? undefined
+        : unbase64(nonempty(d.issuer_certificate_der)),
   };
 }
 /** @internal */
@@ -183,15 +198,20 @@ export function decodeCollateral(entries: unknown): CollateralSet {
     if (
       id === "tinfoil-config" ||
       format === FORMAT["config-endorsement"] ||
+      format === CONFIG_ENDORSEMENT_V2 ||
       format === FORMAT.config
     ) {
       if (
         id !== "tinfoil-config" ||
-        ![FORMAT.config, FORMAT["config-endorsement"]].includes(format) ||
+        ![
+          FORMAT.config,
+          FORMAT["config-endorsement"],
+          CONFIG_ENDORSEMENT_V2,
+        ].includes(format) ||
         e.role !== "reference-values"
       )
         throw new Error("Conflicting config collateral");
-      out.config = config(e.data, format === FORMAT["config-endorsement"]);
+      out.config = config(e.data, format);
       continue;
     }
     if (id === "runtime" || format === FORMAT["igvm-runtime"]) {
