@@ -82,6 +82,8 @@ async function nodePinnedFetch(key: string, options: TLSOptions): Promise<BoundF
     return tls.checkServerIdentity(host, cert);
   };
   const agent = new https.Agent({ keepAlive: true });
+  // An idle pooled connection must not keep the process alive; a reused one is referenced again.
+  agent.on("free", (socket: import("node:net").Socket) => socket.unref());
   const ca = options.ca === undefined ? undefined : typeof options.ca === "string" ? options.ca : Buffer.from(options.ca);
 
   const fetchImpl: Fetch = async (input, init) => {

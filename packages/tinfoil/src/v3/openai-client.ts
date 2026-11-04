@@ -6,8 +6,9 @@
  * sends requests outside the attested client's protections.
  */
 import OpenAI, { type ClientOptions } from "openai";
-import { EnclaveHTTPClient } from "./enclave-client.js";
+import { createEnclaveHTTPClient, EnclaveHTTPClient, openAIURLOf, type EnclaveClientSeams } from "./enclave-client.js";
 import { GatewayHTTPClient } from "./gateway-client.js";
+import { ConfigurationError } from "./errors.js";
 import { notImplemented } from "./internal/not-implemented.js";
 import type { EnclaveOptions, GatewayOptions, RouterOptions } from "./options.js";
 import { RouterHTTPClient } from "./router-client.js";
@@ -55,21 +56,35 @@ export function createClient(options?: OpenAIOptions): Promise<TinfoilClient> {
  * An OpenAI client whose requests go through an {@link EnclaveHTTPClient},
  * to the `baseURL` option or, when that is unset, the enclave's `/v1/` API.
  */
+/** Marks construction by this module's factories; the constructors refuse anything else. */
+const TOKEN = Symbol("OpenAIClient");
+
+/** The enclave OpenAI factory with its test seams; {@link EnclaveOpenAIClient.create} is this without them. */
+export async function createEnclaveOpenAIClient(
+  host: string,
+  repo: string,
+  options: EnclaveOptions,
+  openaiOptions: OpenAIOptions,
+  seams: EnclaveClientSeams,
+): Promise<EnclaveOpenAIClient> {
+  const httpClient = await createEnclaveHTTPClient(host, repo, options, seams);
+  return new EnclaveOpenAIClient(TOKEN, httpClient, openaiOptions);
+}
+
 export class EnclaveOpenAIClient extends OpenAI {
   readonly #httpClient: EnclaveHTTPClient;
 
-  private constructor(httpClient: EnclaveHTTPClient, options: OpenAIOptions) {
-    super({ ...options, fetch: httpClient.fetch, baseURL: notImplemented("EnclaveOpenAIClient.baseURL") });
+  /** @internal Only {@link create} constructs a client; anything else is refused. */
+  constructor(token: symbol, httpClient: EnclaveHTTPClient, options: OpenAIOptions) {
+    if (token !== TOKEN) throw new ConfigurationError("EnclaveOpenAIClient is created with EnclaveOpenAIClient.create");
+    // The transport and base URL come last, so the caller's options can't replace them.
+    super({ ...options, fetch: httpClient.fetch, baseURL: openAIURLOf(httpClient) });
     this.#httpClient = httpClient;
   }
 
   /** Creates an enclave client as {@link EnclaveHTTPClient.create} does, and an OpenAI client over it. */
-  static async create(host: string, repo: string, options?: EnclaveOptions, openaiOptions?: OpenAIOptions): Promise<EnclaveOpenAIClient> {
-    void host;
-    void repo;
-    void options;
-    void openaiOptions;
-    return notImplemented("EnclaveOpenAIClient.create");
+  static create(host: string, repo: string, options?: EnclaveOptions, openaiOptions?: OpenAIOptions): Promise<EnclaveOpenAIClient> {
+    return createEnclaveOpenAIClient(host, repo, options ?? {}, openaiOptions ?? {}, {});
   }
 
   /** The enclave client requests go through. */
