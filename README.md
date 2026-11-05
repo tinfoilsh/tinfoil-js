@@ -26,7 +26,7 @@ const completion = await client.chat.completions.create({
 });
 ```
 
-Every client is an async factory: one that exists has been verified, and it verifies again by itself when the verification expires or the enclave's key changes. `EnclaveOpenAIClient.create(host, repo)` targets one enclave instead of the discovered router, and `RouterHTTPClient.create()` / `EnclaveHTTPClient.create(host, repo)` give a verified `fetch` for any HTTP API.
+Every attested client is an async factory: one that exists has been verified, and it verifies again by itself when the verification expires or the enclave's key changes. `EnclaveOpenAIClient.create(host, repo)` targets one enclave instead of the discovered router, and `RouterHTTPClient.create()` / `EnclaveHTTPClient.create(host, repo)` give a verified `fetch` for any HTTP API.
 
 Never put `apiKey` in browser code: route browser requests through a [proxy server](https://docs.tinfoil.sh/guides/proxy-server) that adds the key (`baseURL`), and authenticate the browser with `bearerToken`. Multi-user services must scope prompt caches to each end user with `userCacheSecret` or a per-request `user_cache_secret`; see [Prompt caching](https://docs.tinfoil.sh/sdk/prompt-caching).
 

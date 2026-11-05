@@ -648,7 +648,7 @@ interface Vector {
   report_data: string;
 }
 
-// Public-only envelope vectors covering every attested-key format.
+// Public-only envelope vectors covering the three SPKI algorithms of the v1 SPKI key format.
 // Parse must accept and preserve key formats the SDK does not interpret.
 describe("attested-key envelope vectors", () => {
   const vectors = JSON.parse(
