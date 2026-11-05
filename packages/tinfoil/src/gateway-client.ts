@@ -10,6 +10,7 @@ import type { Verification } from "@tinfoilsh/verifier";
 import type { EnclaveClientSeams } from "./enclave-client.js";
 import { ConfigurationError } from "./errors.js";
 import { resolveUserCacheSecret } from "./internal/cachesecret.js";
+import { asyncDispose } from "./internal/dispose.js";
 import { fetchCatalogWith } from "./internal/gateway/catalog.js";
 import { GatewayPolicy } from "./internal/gateway/policy.js";
 import { GatewayTransport } from "./internal/gateway/transport.js";
@@ -123,6 +124,23 @@ export class GatewayHTTPClient {
   /** The last successful verification of each replica used so far, unchecked: they may have expired or been rejected. A new array on each read. */
   get current(): ReplicaVerification[] {
     return this.#transport.verifications();
+  }
+
+  /**
+   * Refuses further use: `fetch`, `models` and `ensureVerified` reject with
+   * a {@link ConfigurationError} afterwards, and no replica is verified
+   * again; `current` still reports the replicas' last verifications.
+   * Requests are sealed and sent through the runtime's fetch, so the client
+   * holds no connections of its own to release, and a request in flight
+   * completes. Closing again does nothing.
+   */
+  async close(): Promise<void> {
+    this.#transport.close();
+  }
+
+  /** Closes the client at the end of an `await using` block; see {@link close}. */
+  [asyncDispose](): Promise<void> {
+    return this.close();
   }
 }
 

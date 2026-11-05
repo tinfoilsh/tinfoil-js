@@ -33,6 +33,8 @@ export interface TlsServer {
   /** `localhost:<port>` */
   readonly host: string;
   readonly seen: Seen[];
+  /** The TLS connections open right now, pooled ones included. */
+  openConnections(): number;
   close(): Promise<void>;
 }
 
@@ -67,12 +69,18 @@ export async function startTlsServer(route: (seen: Seen) => Reply | Promise<Repl
       });
     });
   });
+  let open = 0;
+  server.on("secureConnection", (socket) => {
+    open++;
+    socket.once("close", () => open--);
+  });
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   const port = (server.address() as AddressInfo).port;
   return {
     origin: `https://localhost:${port}`,
     host: `localhost:${port}`,
     seen,
+    openConnections: () => open,
     close: async () => {
       server.closeAllConnections();
       await new Promise<void>((resolve) => server.close(() => resolve()));
