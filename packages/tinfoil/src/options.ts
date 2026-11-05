@@ -34,6 +34,19 @@ export type TransportMode = "tls" | "ehbp";
  */
 export type VerificationCheck = (verification: Verification) => void | Promise<void>;
 
+/**
+ * The options of one call on a client, such as `ensureVerified` or
+ * `reverify`. Any setting a call takes later is a field here rather than a
+ * parameter, so callers that pass none are unaffected.
+ */
+export interface CallOptions {
+  /**
+   * Stops the call waiting and rejects it with the signal's reason. A
+   * verification or catalog fetch other callers share keeps running.
+   */
+  readonly signal?: AbortSignal;
+}
+
 /** Configures a WebSocket opened by {@link createWebSocket}. */
 export interface WebSocketOptions {
   /** The subprotocols offered in the handshake. */

@@ -12,7 +12,7 @@ import { discoverRouter } from "./internal/router.js";
 import { validateBaseURL } from "./internal/transport/base-url.js";
 import type { KeyedTransport } from "./internal/transport/transport.js";
 import { registerWebSocketAccess } from "./internal/websocket.js";
-import type { Fetch, RouterOptions } from "./options.js";
+import type { CallOptions, Fetch, RouterOptions } from "./options.js";
 
 /** Seams for tests: the enclave client's, and the fetch that retrieves the router list. */
 export interface RouterClientSeams extends EnclaveClientSeams {
@@ -59,7 +59,7 @@ export async function createRouterHTTPClient(options: RouterOptions, seams: Rout
   );
   registerWebSocketAccess(client, transport, seams.tls ?? {});
   // Discovery leaves its fallback unverified.
-  await client.ensureVerified(options.signal);
+  await client.ensureVerified({ signal: options.signal });
   return client;
 }
 
@@ -103,12 +103,12 @@ export class RouterHTTPClient {
   }
 
   /** A verification valid now, verifying first only if the cached one has expired or been rejected. */
-  ensureVerified(signal?: AbortSignal): Promise<Verification> {
-    return this.#transport.ensureVerified(signal);
+  ensureVerified(options?: CallOptions): Promise<Verification> {
+    return this.#transport.ensureVerified(options?.signal);
   }
 
   /** Verifies again even if the cached verification is still valid. */
-  reverify(signal?: AbortSignal): Promise<Verification> {
-    return this.#transport.reverify(signal);
+  reverify(options?: CallOptions): Promise<Verification> {
+    return this.#transport.reverify(options?.signal);
   }
 }

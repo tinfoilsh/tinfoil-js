@@ -164,6 +164,14 @@ describe("EnclaveHTTPClient over TLS", () => {
     expect(docs.calls).toHaveLength(2);
   });
 
+  it("stops a verification call waiting when its signal aborts, leaving the verification in place", async () => {
+    const signal = AbortSignal.abort(new Error("gave up"));
+    await expect(client.reverify({ signal })).rejects.toThrow(/gave up/);
+    await expect(client.ensureVerified({ signal })).rejects.toThrow(/gave up/);
+    expect(client.current?.tlsPublicKeyFP).toBe(TEST_PIN);
+    expect(docs.calls).toHaveLength(2);
+  });
+
   it("sends over the pinned connection, refuses other origins and plaintext, and omits the proxy header", async () => {
     const res = await client.fetch(`${tls.origin}/models`);
     expect(await res.json()).toEqual({ path: "/models", enclave: null });

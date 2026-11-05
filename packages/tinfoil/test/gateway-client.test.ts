@@ -6,7 +6,7 @@
  */
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { AttestationError, ConfigurationError, NetworkError } from "../src/errors.js";
-import { createGatewayHTTPClient, DEFAULT_GATEWAY_URL, GatewayHTTPClient, type GatewayClientSeams } from "../src/gateway-client.js";
+import { createGatewayHTTPClient, DEFAULT_GATEWAY_URL, fetchCatalog, GatewayHTTPClient, type GatewayClientSeams } from "../src/gateway-client.js";
 import { createGatewayOpenAIClient, GatewayOpenAIClient } from "../src/openai-client.js";
 import type { Catalog, Fetch, GatewayOptions } from "../src/options.js";
 import { KEY_SPKI_FP_SHA256_V1_FORMAT, KEY_X25519_HPKE_V1_FORMAT, UsageError, type Verification, type Verifier } from "../../verifier/src/index.js";
@@ -146,6 +146,15 @@ describe("GatewayHTTPClient", () => {
     expect(current[0]).toMatchObject({ reference: "tinfoilsh/test", pinnedModel: "test-model", models: ["test-model"] });
     expect(current[0]!.verification.hpkePublicKey).toBe(gateway.publicKeyHex);
     expect((await client.ensureVerified("test-model")).hpkePublicKey).toBe(gateway.publicKeyHex);
+  });
+
+  it("stops a call waiting when its signal aborts", async () => {
+    const signal = AbortSignal.abort(new Error("gave up"));
+    const before = s.calls.length;
+    await expect(client.models({ signal })).rejects.toThrow(/gave up/);
+    await expect(client.ensureVerified("test-model", { signal })).rejects.toThrow(/gave up/);
+    await expect(fetchCatalog("gateway.example", { signal })).rejects.toThrow(/gave up/);
+    expect(s.calls).toHaveLength(before);
   });
 
   it("refuses other origins, upgrades, and models the policy doesn't serve", async () => {

@@ -17,7 +17,7 @@ import { withReplay } from "./internal/transport/replay.js";
 import { tlsMode, type TLSOptions } from "./internal/transport/tls.js";
 import { isKeyRejection, KeyedTransport, type Mode } from "./internal/transport/transport.js";
 import { registerWebSocketAccess } from "./internal/websocket.js";
-import type { EnclaveOptions, Fetch, TransportMode } from "./options.js";
+import type { CallOptions, EnclaveOptions, Fetch, TransportMode } from "./options.js";
 
 /** Seams for tests: the fetch that retrieves attestation documents, the clock, the modes' settings, and the globals the runtime is identified by. */
 export interface EnclaveClientSeams {
@@ -109,7 +109,7 @@ export async function createEnclaveHTTPClient(host: string, repo: string, option
     attestedFetch(transport, host, baseURL, options.userCacheSecret ?? ""),
   );
   registerWebSocketAccess(client, transport, seams.tls ?? {});
-  await client.ensureVerified(options.signal);
+  await client.ensureVerified({ signal: options.signal });
   return client;
 }
 
@@ -160,12 +160,12 @@ export class EnclaveHTTPClient {
    * A verification valid now, verifying first only if the cached one has
    * expired or been rejected. Success means requests can be sent.
    */
-  ensureVerified(signal?: AbortSignal): Promise<Verification> {
-    return this.#transport.ensureVerified(signal);
+  ensureVerified(options?: CallOptions): Promise<Verification> {
+    return this.#transport.ensureVerified(options?.signal);
   }
 
   /** Verifies again even if the cached verification is still valid. */
-  reverify(signal?: AbortSignal): Promise<Verification> {
-    return this.#transport.reverify(signal);
+  reverify(options?: CallOptions): Promise<Verification> {
+    return this.#transport.reverify(options?.signal);
   }
 }

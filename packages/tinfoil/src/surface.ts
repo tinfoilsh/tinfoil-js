@@ -21,6 +21,7 @@ export type {
   Fetch,
   TransportMode,
   VerificationCheck,
+  CallOptions,
   EnclaveOptions,
   RouterOptions,
   GatewayOptions,
