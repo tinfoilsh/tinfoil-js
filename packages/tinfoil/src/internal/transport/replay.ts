@@ -4,7 +4,7 @@
  * The routes pass the key-rejection check: the rejection has already
  * invalidated the verification, so the replay goes out under a fresh one.
  */
-import { AttestationError, messageOf, TinfoilError } from "../../errors.js";
+import { AttestationError, ConfigurationError, messageOf, NetworkError, TinfoilError } from "../../errors.js";
 import type { Fetch } from "../../options.js";
 
 /** `next` with one replay of a request that fails `retryable`. */
@@ -37,14 +37,17 @@ function prepare(input: string | URL | Request, init: RequestInit | undefined): 
   return { first: input, again: input };
 }
 
-/** `err` with `note` appended, keeping its category and cause. */
+/**
+ * The terminal failure: `err` with `note` appended, keeping its category and
+ * cause. It is a plain error of that category, not the subclass `err` was:
+ * a key rejection no longer invites a replay once this layer has given up.
+ */
 function withNote(err: unknown, note: string): TinfoilError {
-  const message = `${err instanceof TinfoilError ? stripCategory(err) : messageOf(err)}; ${note}`;
-  const options = { cause: err instanceof TinfoilError ? (err.cause ?? err) : err };
-  if (err instanceof TinfoilError) {
-    const Ctor = err.constructor as new (message: string, options?: { cause?: unknown }) => TinfoilError;
-    return new Ctor(message, options);
-  }
+  if (!(err instanceof TinfoilError)) return new AttestationError(`${messageOf(err)}; ${note}`, { cause: err });
+  const message = `${stripCategory(err)}; ${note}`;
+  const options = { cause: err.cause ?? err };
+  if (err instanceof NetworkError) return new NetworkError(message, options);
+  if (err instanceof ConfigurationError) return new ConfigurationError(message, options);
   return new AttestationError(message, options);
 }
 
