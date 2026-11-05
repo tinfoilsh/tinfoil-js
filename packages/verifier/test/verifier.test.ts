@@ -7,6 +7,7 @@
 import { beforeAll, describe, expect, it } from "vitest";
 import { expectedOf, measurementOf } from "../conformance/adapter.js";
 import { CONFIG_ENDORSEMENT_V2_FORMAT, CONFIG_ID, FORMAT_V3, ROLE_REFERENCE_VALUES } from "../src/document/collateral/collateral.js";
+import type { ConfigEndorsement } from "../src/document/collateral/config.js";
 import type { RuntimeReference } from "../src/document/collateral/runtime.js";
 import { KEY_SPKI_FP_SHA256_V1_FORMAT, KEY_X25519_HPKE_V1_FORMAT, NONCE_SIZE, SEV_SNP_REPORT_V1_FORMAT } from "../src/document/document.js";
 import { UsageError, VerificationError, type Layer } from "../src/errors.js";
@@ -442,5 +443,47 @@ describe("additional config registry IDs", () => {
       expect(err.layer).toBe("provenance");
       expect(err.message).toMatch(/registry ID is not accepted by the caller/);
     }
+  });
+});
+
+describe("config authorizer", () => {
+  it("receives the bundle as the member's exact JSON text", async () => {
+    // The authorizer sees the collateral before any approval check, so the
+    // bundle need not verify: what matters is that it arrives byte for byte.
+    const register = "cd".repeat(48);
+    const manifest = utf8(
+      JSON.stringify({
+        version: "v1.2.3",
+        igvm: { format_version: 1, snp_launch: { measurement: register }, tdx_launch: { mrtd: register, rtmr0: "0".repeat(96), rtmr1: "0".repeat(96), rtmr2: "0".repeat(96), rtmr3: "0".repeat(96) } },
+      }),
+    );
+    const platform = utf8(JSON.stringify({ format: ARTIFACT_FORMAT_V2, measurements: {}, machines: {}, policies: {} }));
+    const config = utf8(`name: app\ncvm-version: v1.2.3@sha256:${toHex(await sha256(manifest))}\n`);
+    const bundleText = `{ "mediaType" : "t\\u00e9st\\/é😀" ,\n "n" : [ 18446744073709551616 , 1.0 , {} ], "s" : "}{" }`;
+    const data = `{"endorsement_ref":"sha256:${"ab".repeat(32)}","config_base64":${JSON.stringify(b64(config))},"sigstore_bundle":${bundleText}}`;
+    const nonce = new Uint8Array(NONCE_SIZE).fill(7);
+    const { bytes } = await buildDocument(
+      { nonce, collateralFormat: FORMAT_V3, collateral: [{ id: CONFIG_ID, role: ROLE_REFERENCE_VALUES, format: CONFIG_ENDORSEMENT_V2_FORMAT, data }] },
+      () => ({ format: SEV_SNP_REPORT_V1_FORMAT, report: new Uint8Array(1184).fill(1) }),
+    );
+    let seen: ConfigEndorsement | undefined;
+    const v = await Verifier.create({
+      embeddedReferences: { runtime: manifest, platform },
+      configAuthorizer: (endorsement) => {
+        seen = endorsement;
+      },
+    });
+    const err = await v.verifyV3At(bytes, nonce, "", new Date()).catch((e: unknown) => e);
+    expect(seen?.bundle).toBe(bundleText);
+    const member = utf8(seen!.bundle!);
+    const marker = utf8(`"sigstore_bundle":`);
+    const start = Buffer.from(bytes).indexOf(Buffer.from(marker)) + marker.length;
+    expect(bytes.subarray(start, start + member.length)).toEqual(member);
+    expect(bytes[start + member.length]).toBe("}".charCodeAt(0));
+    expect(JSON.parse(seen!.bundle!)).toEqual({ mediaType: "tést/é😀", n: [18446744073709552000, 1, {}], s: "}{" });
+    expect(seen!.config).toEqual(config);
+    // The config was authorized; the bogus quote fails next, at the quote layer.
+    expect(err).toBeInstanceOf(VerificationError);
+    expect((err as VerificationError).layer).toBe("quote");
   });
 });

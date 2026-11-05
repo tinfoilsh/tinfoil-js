@@ -353,7 +353,22 @@ describe("config collateral", () => {
       expect(got).toBeDefined();
       expect(got!.reference).toBe(reference);
       expect(got!.config).toEqual(enc(config));
-      expect(got!.bundle).toEqual(strictParse(enc(`{"mediaType":"test"}`)));
+      expect(got!.bundle).toBe(`{"mediaType":"test"}`);
+    });
+
+    it("hands the bundle on as the member's exact bytes", () => {
+      // Whitespace, escapes, non-ASCII, nested containers, a number beyond
+      // 2^53 and braces inside strings must all survive untouched.
+      const bundleText = `{ "mediaType" : "t\\u00e9st\\/é😀" ,\n\t"n": [ 18446744073709551616 , 1.0 , {} ], "s" : "}{" }`;
+      const withText = { ...entry, data: data.replace(`{"mediaType":"test"}`, bundleText) };
+      const wire = enc(marshalEntries([withText]));
+      const got = decodeWire([withText]).config!;
+      expect(got.bundle).toBe(bundleText);
+      const member = enc(got.bundle!);
+      const start = Buffer.from(wire).indexOf(Buffer.from(enc(`"sigstore_bundle":`))) + `"sigstore_bundle":`.length;
+      expect(wire.subarray(start, start + member.length)).toEqual(member);
+      expect(wire[start + member.length]).toBe("}".charCodeAt(0));
+      expect(JSON.parse(got.bundle!)).toEqual({ mediaType: "tést/é😀", n: [18446744073709552000, 1, {}], s: "}{" });
     });
 
     it.each<[string, (entries: WireEntry[]) => WireEntry[]]>([

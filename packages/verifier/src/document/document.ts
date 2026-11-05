@@ -165,9 +165,8 @@ export class Document {
     const c = this.#d.collateral.config;
     if (c === undefined) throw new NotFoundError(`document carries no "${CONFIG_ID}" reference-values entry`);
     return {
-      reference: c.reference,
+      ...c,
       ...(c.config === undefined ? {} : { config: c.config.slice() }),
-      bundle: cloneOpt(c.bundle),
       ...(c.issuer === undefined ? {} : { issuer: c.issuer.slice() }),
     };
   }
