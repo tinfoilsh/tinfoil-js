@@ -92,6 +92,14 @@ export interface VerifierOptions {
    * repeats.
    */
   readonly configRegistryIDs?: readonly string[];
+  /**
+   * Registry IDs accepted alongside the public registry: the accepted set
+   * is the public registry ID followed by these. Validated and in conflict
+   * like `configRegistryIDs`, which it cannot be combined with. Must be
+   * non-empty, canonical and without repeats, the public registry ID
+   * included.
+   */
+  readonly additionalConfigRegistryIDs?: readonly string[];
   readonly embeddedReferences?: EmbeddedReferences;
 }
 
@@ -103,6 +111,8 @@ export interface VerifierOptions {
 export interface DangerousTestOnlyRoots extends quote.VendorRoots {
   /** Sigstore trusted-root JSON. */
   readonly sigstore?: Uint8Array;
+  /** PEM-encoded P-256 registry root keys, replacing the public signing keys as config approval and registry roots. */
+  readonly registryRoots?: readonly string[];
 }
 
 /** An exact config/runtime pair the caller trusts, validated and copied. */
@@ -495,7 +505,7 @@ async function assemble(options: VerifierOptions, roots: DangerousTestOnlyRoots)
   if (options.configAuthorizer !== undefined && (embedded.configReference !== undefined || configKeys !== undefined)) {
     throw new UsageError("config authorizer conflicts with embedded config or config signing keys");
   }
-  const configRegistryIDs = options.configRegistryIDs === undefined ? undefined : usage(() => registryIDsOf(options.configRegistryIDs!));
+  const configRegistryIDs = registryPolicyOf(options);
   if (configRegistryIDs !== undefined && (embedded.configReference !== undefined || options.configAuthorizer !== undefined)) {
     throw new UsageError("config authority pins require endorsement verification");
   }
@@ -508,7 +518,8 @@ async function assemble(options: VerifierOptions, roots: DangerousTestOnlyRoots)
   const publicKeys = await publicSigningKeys();
   // Without caller-pinned config keys, the public keys are the registry
   // roots as well: they issue the signing certificates of certified approvals.
-  const configVerifier = configKeys === undefined ? new ConfigVerifier(prov.root, publicKeys, publicKeys) : new ConfigVerifier(prov.root, configKeys);
+  const registryKeys = roots.registryRoots === undefined ? publicKeys : await keysOf("registry roots", roots.registryRoots);
+  const configVerifier = configKeys === undefined ? new ConfigVerifier(prov.root, registryKeys, registryKeys) : new ConfigVerifier(prov.root, configKeys);
   const freshnessVerifier = new FreshnessVerifier(prov.root, freshnessKeys ?? publicKeys);
   const policy: Policy = {
     embedded,
@@ -539,11 +550,33 @@ interface ConfigPins {
   readonly registryIDs?: readonly string[];
 }
 
+/**
+ * The accepted registry IDs the options pin, or undefined for the default:
+ * the caller's exact list, or the public registry plus the additional ones.
+ * Giving both is a usage error.
+ */
+function registryPolicyOf(options: VerifierOptions): readonly string[] | undefined {
+  const exact = options.configRegistryIDs === undefined ? undefined : usage(() => registryIDsOf(options.configRegistryIDs!));
+  if (options.additionalConfigRegistryIDs === undefined) return exact;
+  const additional = usage(() => additionalRegistryIDsOf(options.additionalConfigRegistryIDs!));
+  if (exact !== undefined) throw new UsageError("config registry IDs must be supplied once");
+  return additional;
+}
+
 /** Validates and copies the caller's registry ID list. */
 function registryIDsOf(registryIDs: readonly string[]): readonly string[] {
   if (!Array.isArray(registryIDs) || registryIDs.some((s) => typeof s !== "string")) throw new Error("config registry IDs must be a list of strings");
   validateRegistryIDs(registryIDs);
   return [...registryIDs];
+}
+
+/** The public registry ID followed by the caller's additional registry IDs, validated as one list. */
+function additionalRegistryIDsOf(registryIDs: readonly string[]): readonly string[] {
+  if (!Array.isArray(registryIDs) || registryIDs.some((s) => typeof s !== "string")) {
+    throw new Error("additional config registry IDs must be a list of strings");
+  }
+  if (registryIDs.length === 0) throw new Error("additional config registry IDs must not be empty");
+  return registryIDsOf([PUBLIC_REGISTRY_ID, ...registryIDs]);
 }
 
 /** Runs one pipeline step; an error that is not already classified is attributed to `layer`. */
