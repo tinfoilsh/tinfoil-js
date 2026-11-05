@@ -18,8 +18,8 @@ function deferred<T>() { let resolve!: (value: T) => void, reject!: (reason: unk
 beforeEach(() => { mocks.verify.mockReset().mockResolvedValue(success()); mocks.fetchEvidence.mockReset().mockResolvedValue(new Uint8Array([1])); mocks.build.mockReset().mockResolvedValue({ fetch: vi.fn(async () => new Response("ok")), getSessionRecoveryToken: vi.fn() }); mocks.nonce = 0; });
 afterEach(() => vi.useRealTimers());
 describe("SecureClient v3 ownership", () => {
-  it("allows registry scope policy without a repository pin", async () => {
-    const verification = { configScopes: ["https://registry.tinfoil.sh/scopes/" + "0".repeat(32)] };
+  it("allows registry ID policy without a repository pin", async () => {
+    const verification = { configRegistryIDs: ["https://registry.tinfoil.sh/scopes/" + "0".repeat(32)] };
     const client = new SecureClient({ ...options, configRepo: "", verification });
     await client.ready();
     expect(mocks.verify.mock.calls[0][2]).toBe("");

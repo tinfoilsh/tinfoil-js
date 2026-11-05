@@ -34,7 +34,7 @@ export interface ConfigVerification {
   readonly reference: string;
   readonly signingKeyHint: string;
   readonly approvalTime?: Date;
-  readonly scope?: string;
+  readonly registryID?: string;
   readonly signatureTime?: Date;
 }
 export interface ArtifactVerification {
@@ -64,7 +64,7 @@ export interface VerifierOptions {
   readonly freshnessMaxAgeMs?: number;
   readonly pinnedRegisters?: ExpectedMeasurement;
   readonly configSigningKeys?: readonly Uint8Array[];
-  readonly configScopes?: readonly string[];
+  readonly configRegistryIDs?: readonly string[];
   readonly freshnessSigningKeys?: readonly Uint8Array[];
   readonly embeddedReferences?: EmbeddedReferences;
   readonly configAuthorizer?: (
