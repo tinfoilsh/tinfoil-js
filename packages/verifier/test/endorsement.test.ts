@@ -280,7 +280,7 @@ describe.skipIf(withoutVectors)(vectorsTitle("authenticateFreshness"), () => {
     const code = await authenticateCodeOf(fixture);
     // Bundle verification already demands a verified observer timestamp; the witness time check behind it would reject the same way.
     await expect(authenticateFreshness(await clientOf(fixture), toJson(wire), code, clockOf(fixture), 0)).rejects.toThrow(
-      /no verified observer timestamp/,
+      /no verified observer timestamp/i,
     );
   });
 

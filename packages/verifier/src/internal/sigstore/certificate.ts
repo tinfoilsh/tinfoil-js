@@ -5,22 +5,24 @@
  * source-repository claims the verifier binds artifacts to.
  *
  * What the library's `verifyDsse` enforces, so this module does not repeat it:
- * the leaf chains to a certificate authority of the root valid at its
- * notBefore; the SCT extension is present, non-empty, names no log twice,
- * and at least one SCT verifies against a CT log valid at its time; at least
- * one log entry, no more than 32, none duplicated; an inclusion proof on
- * every entry (Merkle path and signed checkpoint) and the inclusion promise
- * of the first, when present, under the log's key; the certificate valid at
- * every entry's integration time and at every RFC 3161 timestamp, each of
- * which verifies under a timestamp authority of the root; exactly one DSSE
- * signature, verified over the pre-authentication encoding under the
- * certificate key; every entry of kind "dsse" with a body consistent with the
- * envelope.
+ * a bundle of media type version 0.2 or 0.3 with at least one log entry and
+ * no more than 32; the signing-identity policy before any proof; for every
+ * entry from a log of the root, an inclusion proof (Merkle path and signed
+ * checkpoint), the inclusion promise when present under the log's key valid
+ * at the integration time, the certificate valid at that time, and a body
+ * consistent with the envelope, with at least one log operator verified
+ * (entries from logs the root does not name are ignored); every RFC 3161
+ * timestamp verifies under a timestamp authority of the root; some verified
+ * time anchors the signature, a promise-signed integration time or an
+ * RFC 3161 timestamp, and the leaf chains to a certificate authority of the
+ * root at every such time; the SCT extension is present, non-empty, names no
+ * log twice, and every SCT verifies against a CT log valid at its time;
+ * exactly one DSSE signature, verified over the pre-authentication encoding
+ * under the certificate key; every entry of kind "dsse".
  *
- * What the library does not enforce: that some verified time anchors the
- * signature. A bare integration time is unsigned (the inclusion proof covers
- * the entry body only), so this module requires the first entry's inclusion
- * promise, which signs its integration time, or an RFC 3161 timestamp.
+ * The library accepts the anchoring promise on any entry of a known log.
+ * This module requires it on the first entry, whose integration time is the
+ * one reported as `verifiedLogTime`, or an RFC 3161 timestamp.
  */
 import { SigstoreVerifier, type SigstoreBundle, type TrustedRoot as LibraryTrustedRoot, type VerificationPolicy, type X509Certificate } from "@freedomofpress/sigstore-browser";
 import { map, object, str } from "../json/decode.js";
