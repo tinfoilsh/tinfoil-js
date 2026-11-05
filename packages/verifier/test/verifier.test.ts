@@ -263,6 +263,11 @@ describe("Verifier.create options", () => {
     mutable.digest = "b".repeat(64);
     mutable.runtime.digest = "cd".repeat(32);
     expect(() => copied.checkRepoVerifiability(`org/project@r1@sha256:${digest}`)).not.toThrow();
+    // Nor does a later change to embedded config bytes: the reference was settled from a copy.
+    const fromBytes = await Verifier.create({ embeddedReferences: { config: { name: "/org/project/r1", bytes } } });
+    const bytesDigest = toHex(await sha256(bytes));
+    bytes.fill(0);
+    expect(() => fromBytes.checkRepoVerifiability(`org/project@r1@sha256:${bytesDigest}`)).not.toThrow();
     // Like every configured trust source, it needs config collateral.
     if (withoutVectors) return;
     const fixture = loadFixture("golden/golden-happy.json");

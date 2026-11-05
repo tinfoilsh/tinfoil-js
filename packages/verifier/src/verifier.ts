@@ -662,8 +662,9 @@ async function embeddedOf(refs: EmbeddedReferences): Promise<Embedded> {
   }
   let configReference: ConfigReference | undefined;
   if (refs.config !== undefined) {
-    const config = refs.config;
-    configReference = { name: config.name ?? "", digest: toHex(await sha256(config.bytes)), runtime: usage(() => configRuntime(config.bytes)) };
+    // Copied once so the digest and the runtime pin come from the same bytes, whatever the caller does to its buffer meanwhile.
+    const bytes = refs.config.bytes.slice();
+    configReference = { name: refs.config.name ?? "", digest: toHex(await sha256(bytes)), runtime: usage(() => configRuntime(bytes)) };
   } else if (refs.configReference !== undefined) {
     configReference = usage(() => configReferenceOf(refs.configReference!));
   }
