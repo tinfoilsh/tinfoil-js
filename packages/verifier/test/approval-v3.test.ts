@@ -142,23 +142,23 @@ describe("authentic approval trust boundaries", () => {
 });
 
 describe("certified registry approvals", () => {
-  const verify = (bundle: unknown, scopes = [certified.scope]) =>
+  const verify = (bundle: unknown, registryIDs = [certified.scope]) =>
     verifyConfigApproval(
       undefined, bundle, { repo: "", tag: "", digest: "" },
       [unbase64(certified.rootKey)], certified.root as any,
       new Date(certified.now), maxAge,
-      { issuer: unbase64(certified.issuer), scopes },
+      { issuer: unbase64(certified.issuer), registryIDs },
     );
 
-  it("authenticates the scope and digest without config bytes or identity pins", async () => {
+  it("authenticates the registry ID and digest without config bytes or identity pins", async () => {
     const approved = await verify(certified.bundles["normal-p256"]);
     expect(approved.digest).toBe(hex(await sha256(unbase64(certified.config))));
-    expect(approved.scope).toBe(certified.scope);
+    expect(approved.registryID).toBe(certified.scope);
     expect(approved.name).toBe("/acme/app/v7");
     expect(approved.runtime?.tag).toBe("v1.2.3");
     await expect(verify(certified.bundles["normal-p256"], [
       "https://registry.tinfoil.sh/scopes/" + "0".repeat(32),
-    ])).rejects.toThrow("scope is not accepted");
+    ])).rejects.toThrow("registry ID is not accepted");
   });
 
   it.each([

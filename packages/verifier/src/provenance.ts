@@ -56,7 +56,7 @@ export interface ProvenanceOptions {
   embedded: EmbeddedReferences;
   authorizer?: VerifierOptions["configAuthorizer"];
   requiresConfig: boolean;
-  scopes?: readonly string[];
+  registryIDs?: readonly string[];
 }
 export interface VerifiedReferences {
   quote: any;
@@ -358,7 +358,7 @@ async function configReferences(
           opts.root,
           now,
           opts.maxAge,
-          opts.scopes && { issuer: material.issuer, scopes: opts.scopes },
+          opts.registryIDs && { issuer: material.issuer, registryIDs: opts.registryIDs },
         );
       if (approved.reference !== material.reference)
         throw new Error("Endorsement reference mismatch");

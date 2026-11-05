@@ -35,19 +35,19 @@ import { freshnessTime, PLATFORM_REPO, type Reference } from "./references.js";
 export const DEFAULT_SIGNING_KEY = unbase64(
   "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEcadRPBdmNf1LPWYcY9AZ2CrrqxsynqzLE7k3kahjPxIM42bgZbze0GnT/EmGqe1w6So5AhmXci8By8Azt8gAhw==",
 );
-export const PUBLIC_CONFIG_SCOPE = "https://registry.tinfoil.sh/scopes/public";
+export const PUBLIC_CONFIG_REGISTRY_ID = "https://registry.tinfoil.sh/scopes/public";
 const MAX_CERTIFICATE_SIZE = 16 << 10;
 const CERTIFICATE_VALIDITY = 10 * 60 * 1000;
 const CERTIFICATE_CLOCK_SKEW = 60 * 1000;
 const CODE_SIGNING = "1.3.6.1.5.5.7.3.3";
 const ECDSA_SHA256 = "1.2.840.10045.4.3.2";
 const MAX_APPROVAL_RECEIPTS = 8;
-const SCOPE =
+const REGISTRY_ID =
   /^https:\/\/registry\.tinfoil\.sh\/scopes\/(?:public|[0-9a-f]{32})$/;
-export function validateScope(value: unknown): string {
-  const scope = string(value);
-  if (!SCOPE.test(scope)) throw new Error("Invalid registry scope");
-  return scope;
+export function validateRegistryID(value: unknown): string {
+  const registryID = string(value);
+  if (!REGISTRY_ID.test(registryID)) throw new Error("Invalid registry ID");
+  return registryID;
 }
 export function validateSigningKey(der: Uint8Array): void {
   if (!(der instanceof Uint8Array))
@@ -87,7 +87,7 @@ interface Signer {
   der: Uint8Array;
   hint: string;
   key: CryptoKey;
-  scope?: string;
+  registryID?: string;
   signedAt?: Date;
 }
 async function keySigner(
@@ -166,7 +166,7 @@ async function certifiedSigner(
     roots.some((k) => equal(k, cert.publicKey))
   )
     throw new Error("Invalid config signing certificate profile");
-  const scope = validateScope(text(names[0].value));
+  const registryID = validateRegistryID(text(names[0].value));
   validateSigningKey(cert.publicKey);
   const times = await verifyBundleTimestamp(
     vm.timestampVerificationData,
@@ -185,7 +185,7 @@ async function certifiedSigner(
     der,
     hint: base64(await sha256(cert.publicKey)),
     key: await cert.publicKeyObj,
-    scope,
+    registryID,
     signedAt,
   };
 }
@@ -265,7 +265,7 @@ export async function verifyConfigApproval(
   root: SigstoreRoot,
   now: Date,
   maxAge: number,
-  registry?: { issuer?: Uint8Array; scopes: readonly string[] },
+  registry?: { issuer?: Uint8Array; registryIDs: readonly string[] },
 ): Promise<{
   name: string;
   digest: string;
@@ -273,7 +273,7 @@ export async function verifyConfigApproval(
   signingKeyHint: string;
   approvalTime: Date;
   runtime?: Reference;
-  scope?: string;
+  registryID?: string;
   signatureTime?: Date;
 }> {
   if (config && (!config.length || config.length > 1 << 20))
@@ -301,12 +301,12 @@ export async function verifyConfigApproval(
       throw new Error("Invalid approved runtime");
     unhex(r.digest, 32);
     runtime = { repo: r.repo, tag: r.tag, digest: r.digest };
-    if (validateScope(p.scope) !== (b.scope ?? p.scope))
-      throw new Error("Certificate scope does not match signed scope");
+    if (validateRegistryID(p.scope) !== (b.registryID ?? p.scope))
+      throw new Error("Certificate registry ID does not match signed registry ID");
   }
-  const scope = b.scope ?? PUBLIC_CONFIG_SCOPE;
-  if (registry && !registry.scopes.includes(scope))
-    throw new Error("Config scope is not accepted");
+  const registryID = b.registryID ?? PUBLIC_CONFIG_REGISTRY_ID;
+  if (registry && !registry.registryIDs.includes(registryID))
+    throw new Error("Config registry ID is not accepted");
   const subject = singleSubject(s),
     name = configName(subject.name);
   if (
@@ -341,7 +341,7 @@ export async function verifyConfigApproval(
     signingKeyHint: b.hint,
     approvalTime,
     runtime,
-    scope: registry ? scope : undefined,
+    registryID: registry ? registryID : undefined,
     signatureTime: b.signedAt,
   };
 }

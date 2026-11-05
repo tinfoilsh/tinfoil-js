@@ -10,9 +10,9 @@ import {
 import { DEFAULT_MAX_AGE, PLATFORM_V2 } from "./references.js";
 import {
   DEFAULT_SIGNING_KEY,
-  PUBLIC_CONFIG_SCOPE,
+  PUBLIC_CONFIG_REGISTRY_ID,
   configName,
-  validateScope,
+  validateRegistryID,
   validateSigningKey,
 } from "./approvals.js";
 import { decodeRuntimeManifest, runtimePin } from "./runtime.js";
@@ -143,7 +143,7 @@ function buildState(
     "freshnessMaxAgeMs",
     "pinnedRegisters",
     "configSigningKeys",
-    "configScopes",
+    "configRegistryIDs",
     "freshnessSigningKeys",
     "embeddedReferences",
     "configAuthorizer",
@@ -206,16 +206,16 @@ function buildState(
     throw new Error("Invalid config authorizer or conflicting signing keys");
   if (embedded.runtime && embedded.platform && options.freshnessSigningKeys)
     throw new Error("Freshness signing keys have no endorsed artifact");
-  const scopes = options.configScopes && [...options.configScopes];
+  const registryIDs = options.configRegistryIDs && [...options.configRegistryIDs];
   if (
-    scopes &&
-    (!scopes.length ||
-      new Set(scopes.map(validateScope)).size !== scopes.length ||
+    registryIDs &&
+    (!registryIDs.length ||
+      new Set(registryIDs.map(validateRegistryID)).size !== registryIDs.length ||
       options.configSigningKeys ||
       options.configAuthorizer ||
       embedded.config)
   )
-    throw new Error("Config scopes must be unique and use registry trust");
+    throw new Error("Config registry IDs must be unique and use registry trust");
   return {
     provenance: {
       root: structuredClone(trust.sigstoreRoot ?? defaultSigstoreRoot()),
@@ -227,13 +227,13 @@ function buildState(
       requiresConfig: !!(
         options.embeddedReferences ||
         options.configSigningKeys ||
-        options.configScopes ||
+        options.configRegistryIDs ||
         options.freshnessSigningKeys ||
         options.configAuthorizer
       ),
-      scopes: options.configSigningKeys
+      registryIDs: options.configSigningKeys
         ? undefined
-        : (scopes ?? [PUBLIC_CONFIG_SCOPE]),
+        : (registryIDs ?? [PUBLIC_CONFIG_REGISTRY_ID]),
     },
     pins,
     trust: { amdRootPem: trust.amdRootPem, intelRootPem: trust.intelRootPem },
