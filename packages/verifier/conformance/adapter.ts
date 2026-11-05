@@ -158,7 +158,7 @@ async function runStage(stage: string, raw: unknown): Promise<Result> {
   let prov: ProvenanceClient;
   try {
     prov = roots.sigstore ? await ProvenanceClient.fromJSON(roots.sigstore) : await ProvenanceClient.default();
-  } catch (err) {
+  } catch {
     return malformed(stage);
   }
 
@@ -225,7 +225,7 @@ async function sigstoreRoot(roots: DangerousTestOnlyRoots): Promise<TrustedRoot 
   if (!roots.sigstore) return embeddedTrustedRoot();
   try {
     return await parseTrustedRoot(roots.sigstore);
-  } catch (err) {
+  } catch {
     return undefined;
   }
 }
@@ -245,7 +245,7 @@ async function authenticateApproval(in_: Input, roots: DangerousTestOnlyRoots): 
   let keys;
   try {
     keys = await pinnedKeys(pems);
-  } catch (err) {
+  } catch {
     return malformed(stage);
   }
   const root = await sigstoreRoot(roots);
@@ -336,7 +336,7 @@ export function rejectionCode(err: unknown): { code: RejectionCode; exitCode: Ex
 async function layer(stage: string, code: RejectionCode, body: () => Promise<Result>): Promise<Result> {
   try {
     return await body();
-  } catch (err) {
+  } catch {
     return reject(stage, code);
   }
 }
@@ -344,7 +344,7 @@ async function layer(stage: string, code: RejectionCode, body: () => Promise<Res
 async function decodeOrUndefined(doc: Uint8Array): Promise<document.Document | undefined> {
   try {
     return await document.dangerousTestOnlyDecode(doc);
-  } catch (err) {
+  } catch {
     return undefined;
   }
 }
