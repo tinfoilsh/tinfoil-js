@@ -23,15 +23,15 @@ import {
   parseConfigName,
   parseConfigStatement,
   PLATFORM_ARTIFACT_NAME,
-  PUBLIC_SCOPE,
+  PUBLIC_REGISTRY_ID,
   publicSigningKeys,
   runtimeArtifactName,
-  SCOPE_PREFIX,
+  REGISTRY_ID_PREFIX,
   validateConfigIdentity,
   validateConfigPins,
   validateFreshnessArtifact,
   validateRevision,
-  validateScope,
+  validateRegistryID,
   type ConfigPolicy,
   type FreshnessArtifact,
   type FreshnessPolicy,
@@ -41,9 +41,9 @@ import { pinnedKeys, type PinnedKey } from "../src/internal/sigstore/keyed.js";
 import { endorsementReference, MAX_TIMESTAMP_SIZE, timestampInput, verifyTimestamp } from "../src/internal/sigstore/timestamp.js";
 import type { TrustedRoot } from "../src/internal/sigstore/trusted-root.js";
 import { PUBLIC_SIGNING_KEY_PEM } from "../src/trust/signing-keys.js";
-import { CERTIFICATE_CLOCK_SKEW_MS } from "../src/internal/endorsement/scope.js";
+import { CERTIFICATE_CLOCK_SKEW_MS } from "../src/internal/endorsement/registry-certificate.js";
 import { b64, build, newLog, newSigner, rootOf, toJson, type Signer, type TestLog } from "./helpers/keyed.js";
-import { dnsName, newRegistry, OID_KP_SERVER_AUTH, scopeCertificate, uriName, type Registry, type ScopeCertificateOptions } from "./helpers/registry.js";
+import { dnsName, newRegistry, OID_KP_SERVER_AUTH, registryCertificate, uriName, type Registry, type RegistryCertificateOptions } from "./helpers/registry.js";
 import { authorityJson, extension, name, newTimestampAuthority, seq, timestampResponse, tlv, type TimestampAuthority } from "./helpers/tsa.js";
 
 const CONFIG_DOMAIN = "tinfoil-config-freshness/v1\0";
@@ -78,7 +78,7 @@ interface ConfigOptions {
   readonly name?: string;
   readonly config?: Uint8Array;
   readonly v2?: boolean;
-  readonly scope?: string;
+  readonly registryID?: string;
   readonly runtime?: { repo: string; tag: string; digest: string };
   readonly genTime?: Date;
   readonly signer?: Signer;
@@ -100,7 +100,7 @@ async function configBundle(opts: ConfigOptions = {}): Promise<{ json: unknown; 
   const config = opts.config ?? (v2 ? V2_CONFIG : V1_CONFIG);
   const predicate: Record<string, unknown> = {};
   if (v2) {
-    predicate.scope = opts.scope ?? PUBLIC_SCOPE;
+    predicate.scope = opts.registryID ?? PUBLIC_REGISTRY_ID;
     predicate.runtime = opts.runtime ?? { repo: "tinfoilsh/cvmimage", tag: "v1.2.3", digest: RUNTIME_DIGEST };
   }
   const core = {
@@ -144,7 +144,7 @@ describe("timestamp authority helper", () => {
   });
 });
 
-describe("config names and scopes", () => {
+describe("config names and registry IDs", () => {
   it("parses /org/project/revision names", () => {
     expect(parseConfigName("/acme/app/v7")).toEqual({ identity: "/acme/app", revision: "v7" });
     expect(parseConfigName("/a-b/c0/1.2_3-x")).toEqual({ identity: "/a-b/c0", revision: "1.2_3-x" });
@@ -156,12 +156,12 @@ describe("config names and scopes", () => {
     expect(() => validateRevision("")).toThrow(/revision/);
   });
 
-  it("accepts the public scope and canonical hex scope ids only", () => {
-    expect(() => validateScope(PUBLIC_SCOPE)).not.toThrow();
-    expect(() => validateScope(SCOPE_PREFIX + "0".repeat(32))).not.toThrow();
-    expect(() => validateScope(SCOPE_PREFIX + "A".repeat(32))).toThrow(/scope/);
-    expect(() => validateScope(SCOPE_PREFIX + "0".repeat(31))).toThrow(/scope/);
-    expect(() => validateScope("https://example.com/scopes/public")).toThrow(/scope/);
+  it("accepts the public registry ID and canonical hex private registry IDs only", () => {
+    expect(() => validateRegistryID(PUBLIC_REGISTRY_ID)).not.toThrow();
+    expect(() => validateRegistryID(REGISTRY_ID_PREFIX + "0".repeat(32))).not.toThrow();
+    expect(() => validateRegistryID(REGISTRY_ID_PREFIX + "A".repeat(32))).toThrow(/registry ID/);
+    expect(() => validateRegistryID(REGISTRY_ID_PREFIX + "0".repeat(31))).toThrow(/registry ID/);
+    expect(() => validateRegistryID("https://example.com/scopes/public")).toThrow(/registry ID/);
   });
 
   it("validates pins independently of the clock", () => {
@@ -177,11 +177,11 @@ describe("config statements", () => {
   it("decodes v1 and v2 statements strictly", async () => {
     const v1 = parseConfigStatement((await configBundle()).payload);
     expect(v1.predicateType).toBe(CONFIG_ENDORSEMENT_PREDICATE_TYPE);
-    expect(v1.scope).toBe("");
+    expect(v1.registryID).toBe("");
     expect(v1.runtime).toBeUndefined();
     expect(v1.timestamp.length).toBeGreaterThan(0);
     const v2 = parseConfigStatement((await configBundle({ v2: true })).payload);
-    expect(v2.scope).toBe(PUBLIC_SCOPE);
+    expect(v2.registryID).toBe(PUBLIC_REGISTRY_ID);
     expect(v2.runtime).toEqual({ repo: "tinfoilsh/cvmimage", tag: "v1.2.3", digest: RUNTIME_DIGEST });
   });
 
@@ -195,7 +195,7 @@ describe("config statements", () => {
     ["an uppercase digest", (s) => (s.subject[0].digest.sha256 = s.subject[0].digest.sha256.toUpperCase()), /one lowercase SHA-256 digest/],
     ["a name without a revision", (s) => (s.subject[0].name = "acme"), /no revision/],
     ["a runtime on a v1 statement", (s) => (s.predicate.runtime = { repo: "tinfoilsh/cvmimage", tag: "v1.2.3", digest: RUNTIME_DIGEST }), /v1 config endorsement cannot/],
-    ["a scope on a v1 statement", (s) => (s.predicate.scope = PUBLIC_SCOPE), /v1 config endorsement cannot/],
+    ["a registry ID on a v1 statement", (s) => (s.predicate.scope = PUBLIC_REGISTRY_ID), /v1 config endorsement cannot/],
     ["no inner timestamp", (s) => delete s.predicate.freshness, /requires an inner timestamp/],
     ["an empty inner timestamp", (s) => (s.predicate.freshness.rfc3161Timestamp = ""), /requires an inner timestamp/],
     ["a null freshness", (s) => (s.predicate.freshness = null), /requires an inner timestamp/],
@@ -204,10 +204,10 @@ describe("config statements", () => {
     expect(() => parseConfigStatement(payload)).toThrow(pattern);
   });
 
-  it("rejects a v2 statement without a scope or runtime, or with an invalid one", async () => {
+  it("rejects a v2 statement without a registry ID or runtime, or with an invalid one", async () => {
     const cases: [ConfigOptions, RegExp][] = [
       [{ v2: true, tamper: (s) => delete s.predicate.runtime }, /requires a runtime reference/],
-      [{ v2: true, tamper: (s) => delete s.predicate.scope }, /scope/],
+      [{ v2: true, tamper: (s) => delete s.predicate.scope }, /registry ID/],
       [{ v2: true, runtime: { repo: "other/repo", tag: "v1.2.3", digest: RUNTIME_DIGEST } }, /runtime repository/],
       [{ v2: true, runtime: { repo: "tinfoilsh/cvmimage", tag: "v1.2", digest: RUNTIME_DIGEST } }, /full semantic version/],
     ];
@@ -239,7 +239,7 @@ describe("ConfigVerifier", () => {
     expect(verified.signingKeyHint).toBe(signer.hint);
     expect(verified.approvalTime).toEqual(GEN_TIME);
     expect(verified.reference).toBe(await endorsementReference(payload));
-    expect(verified.scope).toBe("");
+    expect(verified.registryID).toBe("");
     expect(verified.runtime).toBeUndefined();
   });
 
@@ -248,8 +248,8 @@ describe("ConfigVerifier", () => {
     const verifier = new ConfigVerifier(root, keys);
     const verified = await verifier.verify(config, toJson(json), policy({ digest: await hex(config) }));
     expect(verified.runtime).toEqual({ repo: "tinfoilsh/cvmimage", tag: "v1.2.3", digest: RUNTIME_DIGEST });
-    // Under caller-pinned keys no scope is established, whatever the statement claims.
-    expect(verified.scope).toBe("");
+    // Under caller-pinned keys no registry ID is established, whatever the statement claims.
+    expect(verified.registryID).toBe("");
     expect(verified.signatureTime).toBeUndefined();
     // Without the config bytes, a v2 statement still pins the digest and runtime.
     expect((await verifier.verify(undefined, toJson(json), policy())).digest).toBe(await hex(config));
@@ -297,7 +297,7 @@ describe("ConfigVerifier", () => {
     // A timestamp minted over a v1 core does not verify a statement whose core differs.
     const wrongDomain = await configBundle({ timestampDomain: CONFIG_DOMAIN_V2 });
     await expect(verifier.verify(wrongDomain.config, toJson(wrongDomain.json), policy())).rejects.toThrow(/inner timestamp: .*does not match the input/);
-    const retargeted = await configBundle({ v2: true, tamper: (s) => (s.predicate.scope = SCOPE_PREFIX + "0".repeat(32)) });
+    const retargeted = await configBundle({ v2: true, tamper: (s) => (s.predicate.scope = REGISTRY_ID_PREFIX + "0".repeat(32)) });
     await expect(verifier.verify(retargeted.config, toJson(retargeted.json), policy())).rejects.toThrow(/inner timestamp: .*does not match the input/);
   });
 
@@ -309,10 +309,10 @@ describe("ConfigVerifier", () => {
 });
 
 describe("certified config approvals", () => {
-  const PRIVATE_SCOPE = SCOPE_PREFIX + "9c4a7f21e0b836d56a13c8fe42d907ab";
+  const PRIVATE_REGISTRY_ID = REGISTRY_ID_PREFIX + "9c4a7f21e0b836d56a13c8fe42d907ab";
   let registry: Registry;
   let rootKeys: PinnedKey[];
-  /** Verifies under the registry: the root key signs plain approvals and issues scope certificates. */
+  /** Verifies under the registry: the root key signs plain approvals and issues signing certificates. */
   let verifier: ConfigVerifier;
 
   beforeAll(async () => {
@@ -321,36 +321,36 @@ describe("certified config approvals", () => {
     verifier = new ConfigVerifier(root, rootKeys, rootKeys);
   });
 
-  /** A scope certificate over the default signer's key, by default for the public scope at GEN_TIME. */
-  const leaf = (opts: Partial<ScopeCertificateOptions> = {}, spki = signer.spki): Promise<Uint8Array> =>
-    scopeCertificate(registry, spki, { scope: PUBLIC_SCOPE, now: GEN_TIME, ...opts });
+  /** A registry signing certificate over the default signer's key, by default for the public registry at GEN_TIME. */
+  const leaf = (opts: Partial<RegistryCertificateOptions> = {}, spki = signer.spki): Promise<Uint8Array> =>
+    registryCertificate(registry, spki, { registryID: PUBLIC_REGISTRY_ID, now: GEN_TIME, ...opts });
 
-  it("accepts a certified v2 approval and reports the certificate's scope and the signature time", async () => {
+  it("accepts a certified v2 approval and reports the certificate's registry ID and the signature time", async () => {
     const certificate = await leaf();
     const { json, config, payload } = await configBundle({ v2: true, certificate });
-    const verified = await verifier.verifyCertified(config, toJson(json), registry.rootDer, policy({ scopes: [PUBLIC_SCOPE] }));
-    expect(verified.scope).toBe(PUBLIC_SCOPE);
+    const verified = await verifier.verifyCertified(config, toJson(json), registry.rootDer, policy({ registryIDs: [PUBLIC_REGISTRY_ID] }));
+    expect(verified.registryID).toBe(PUBLIC_REGISTRY_ID);
     expect(verified.signatureTime).toEqual(GEN_TIME);
     expect(verified.approvalTime).toEqual(GEN_TIME);
     expect(verified.signingKeyHint).toBe(signer.hint);
     expect(verified.reference).toBe(await endorsementReference(payload));
     expect(verified.runtime).toEqual({ repo: "tinfoilsh/cvmimage", tag: "v1.2.3", digest: RUNTIME_DIGEST });
-    // Digest-only verification works the same way; an unpinned scope accepts any.
-    expect((await verifier.verifyCertified(undefined, toJson(json), registry.rootDer, policy())).scope).toBe(PUBLIC_SCOPE);
+    // Digest-only verification works the same way; an unpinned registry ID accepts any.
+    expect((await verifier.verifyCertified(undefined, toJson(json), registry.rootDer, policy())).registryID).toBe(PUBLIC_REGISTRY_ID);
   });
 
-  it("accepts a private scope only when the certificate, the statement and the caller agree", async () => {
-    const certificate = await leaf({ scope: PRIVATE_SCOPE });
-    const { json, config } = await configBundle({ v2: true, scope: PRIVATE_SCOPE, certificate });
-    const verified = await verifier.verifyCertified(config, toJson(json), registry.rootDer, policy({ scopes: [PUBLIC_SCOPE, PRIVATE_SCOPE] }));
-    expect(verified.scope).toBe(PRIVATE_SCOPE);
-    await expect(verifier.verifyCertified(config, toJson(json), registry.rootDer, policy({ scopes: [PUBLIC_SCOPE] }))).rejects.toThrow(
-      /scope is not accepted by the caller/,
+  it("accepts a private registry ID only when the certificate, the statement and the caller agree", async () => {
+    const certificate = await leaf({ registryID: PRIVATE_REGISTRY_ID });
+    const { json, config } = await configBundle({ v2: true, registryID: PRIVATE_REGISTRY_ID, certificate });
+    const verified = await verifier.verifyCertified(config, toJson(json), registry.rootDer, policy({ registryIDs: [PUBLIC_REGISTRY_ID, PRIVATE_REGISTRY_ID] }));
+    expect(verified.registryID).toBe(PRIVATE_REGISTRY_ID);
+    await expect(verifier.verifyCertified(config, toJson(json), registry.rootDer, policy({ registryIDs: [PUBLIC_REGISTRY_ID] }))).rejects.toThrow(
+      /registry ID is not accepted by the caller/,
     );
-    // A certificate for another scope than the statement names.
-    const mismatched = await configBundle({ v2: true, scope: PUBLIC_SCOPE, certificate });
+    // A certificate for another registry than the statement names.
+    const mismatched = await configBundle({ v2: true, registryID: PUBLIC_REGISTRY_ID, certificate });
     await expect(verifier.verifyCertified(mismatched.config, toJson(mismatched.json), registry.rootDer, policy())).rejects.toThrow(
-      /certificate scope does not match signed scope/,
+      /certificate registry ID does not match signed registry ID/,
     );
   });
 
@@ -360,20 +360,20 @@ describe("certified config approvals", () => {
     expect(() => new ConfigVerifier(root, keys).verifyCertified(config, toJson(json), registry.rootDer, policy())).toThrow(/registry root trust is not configured/);
     expect(() => verifier.verifyCertified(config, toJson(json), new Uint8Array(), policy())).toThrow(/requires an issuer certificate/);
     const v1 = await configBundle({ certificate });
-    await expect(verifier.verifyCertified(v1.config, toJson(v1.json), registry.rootDer, policy())).rejects.toThrow(/scoped endorsement requires a v2 statement/);
+    await expect(verifier.verifyCertified(v1.config, toJson(v1.json), registry.rootDer, policy())).rejects.toThrow(/certified registry endorsement requires a v2 statement/);
     // Under registry roots a key-signed v2 statement must be certified; a key-signed v1 statement is public.
     const keyed = await configBundle({ v2: true, signer: registry.root });
     await expect(verifier.verify(keyed.config, toJson(keyed.json), policy())).rejects.toThrow(/v2 registry endorsement requires an issuer certificate/);
     const legacy = await configBundle({ signer: registry.root });
-    expect((await verifier.verify(legacy.config, toJson(legacy.json), policy({ scopes: [PUBLIC_SCOPE] }))).scope).toBe(PUBLIC_SCOPE);
-    await expect(verifier.verify(legacy.config, toJson(legacy.json), policy({ scopes: [PRIVATE_SCOPE] }))).rejects.toThrow(/scope is not accepted/);
+    expect((await verifier.verify(legacy.config, toJson(legacy.json), policy({ registryIDs: [PUBLIC_REGISTRY_ID] }))).registryID).toBe(PUBLIC_REGISTRY_ID);
+    await expect(verifier.verify(legacy.config, toJson(legacy.json), policy({ registryIDs: [PRIVATE_REGISTRY_ID] }))).rejects.toThrow(/registry ID is not accepted/);
   });
 
-  it("validates the scope pins", () => {
-    expect(() => validateConfigPins(policy({ scopes: [] }))).toThrow(/must not be empty/);
-    expect(() => validateConfigPins(policy({ scopes: [PUBLIC_SCOPE, PUBLIC_SCOPE] }))).toThrow(/duplicate/);
-    expect(() => validateConfigPins(policy({ scopes: ["https://example.invalid/scope"] }))).toThrow(/canonical registry scope/);
-    expect(() => validateConfigPins(policy({ scopes: [PRIVATE_SCOPE] }))).not.toThrow();
+  it("validates the registry ID pins", () => {
+    expect(() => validateConfigPins(policy({ registryIDs: [] }))).toThrow(/must not be empty/);
+    expect(() => validateConfigPins(policy({ registryIDs: [PUBLIC_REGISTRY_ID, PUBLIC_REGISTRY_ID] }))).toThrow(/duplicate/);
+    expect(() => validateConfigPins(policy({ registryIDs: ["https://example.invalid/scope"] }))).toThrow(/canonical registry URI/);
+    expect(() => validateConfigPins(policy({ registryIDs: [PRIVATE_REGISTRY_ID] }))).not.toThrow();
   });
 
   it("fixes the signing time by the bundle timestamp and bounds the inner timestamp by it", async () => {
@@ -414,7 +414,7 @@ describe("certified config approvals", () => {
 
   it("rejects a certificate the registry root did not issue, or one issued to the root key", async () => {
     const other = await newRegistry(GEN_TIME);
-    const foreign = await scopeCertificate(other, signer.spki, { scope: PUBLIC_SCOPE, now: GEN_TIME });
+    const foreign = await registryCertificate(other, signer.spki, { registryID: PUBLIC_REGISTRY_ID, now: GEN_TIME });
     const { json, config } = await configBundle({ v2: true, certificate: foreign });
     await expect(verifier.verifyCertified(config, toJson(json), other.rootDer, policy())).rejects.toThrow(/untrusted registry root/);
     await expect(verifier.verifyCertified(config, toJson(json), registry.rootDer, policy())).rejects.toThrow(/verifying config signing certificate/);
@@ -424,7 +424,7 @@ describe("certified config approvals", () => {
   });
 
   it("rejects a signing certificate outside the profile", async () => {
-    const cases: [string, Partial<ScopeCertificateOptions>, RegExp][] = [
+    const cases: [string, Partial<RegistryCertificateOptions>, RegExp][] = [
       ["a CA", { basicConstraints: seq(tlv(0x01, [0xff])) }, /profile/],
       ["a TLS purpose", { extendedKeyUsage: [OID_KP_SERVER_AUTH] }, /profile/],
       ["an extra purpose", { extendedKeyUsage: [OID_KP_SERVER_AUTH, "1.3.6.1.5.5.7.3.3"] }, /profile/],
@@ -432,17 +432,17 @@ describe("certified config approvals", () => {
       ["key encipherment", { keyUsage: tlv(0x03, [0x05, 0x20]) }, /profile/],
       ["a long lifetime", { notAfter: new Date(GEN_TIME.getTime() + 3600_000) }, /profile/],
       ["a subject", { subject: name("customer") }, /profile/],
-      ["an extra DNS identity", { subjectAltNames: [uriName(PUBLIC_SCOPE), dnsName("customer.example")] }, /critical URI SAN/],
-      ["no scope", { subjectAltNames: "none" }, /critical URI SAN/],
+      ["an extra DNS identity", { subjectAltNames: [uriName(PUBLIC_REGISTRY_ID), dnsName("customer.example")] }, /critical URI SAN/],
+      ["no registry ID", { subjectAltNames: "none" }, /critical URI SAN/],
       ["a non-critical SAN", { sanCritical: false }, /critical URI SAN/],
-      ["a duplicate scope", { subjectAltNames: [uriName(PUBLIC_SCOPE), uriName(PUBLIC_SCOPE)] }, /critical URI SAN/],
-      ["a non-canonical scope", { scope: SCOPE_PREFIX + "PUBLIC" }, /canonical registry scope/],
+      ["a duplicate registry ID", { subjectAltNames: [uriName(PUBLIC_REGISTRY_ID), uriName(PUBLIC_REGISTRY_ID)] }, /critical URI SAN/],
+      ["a non-canonical registry ID", { registryID: REGISTRY_ID_PREFIX + "PUBLIC" }, /canonical registry URI/],
       ["an unknown critical extension", { extraExtensions: [extension("1.2.3.4", true, tlv(0x04, [0]))] }, /unsupported critical extension/],
       ["a validity outside the issuer's", { notBefore: new Date(registry.notBefore.getTime() - 1000) }, /profile/],
     ];
     for (const [what, opts, want] of cases) {
       const certificate = await leaf(opts);
-      const { json, config } = await configBundle({ v2: true, scope: opts.scope ?? PUBLIC_SCOPE, certificate });
+      const { json, config } = await configBundle({ v2: true, registryID: opts.registryID ?? PUBLIC_REGISTRY_ID, certificate });
       await expect(verifier.verifyCertified(config, toJson(json), registry.rootDer, policy()), what).rejects.toThrow(want);
     }
     // Valid at issue, expired by the signing time.

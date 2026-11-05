@@ -144,7 +144,7 @@ export function checkLayout(bundle: Bundle, timestamps: "none" | "one"): void {
 export function signatureTimestamp(bundle: Bundle): Uint8Array {
   const timestamps = bundle.rfc3161Timestamps;
   if (timestamps.length !== 1 || timestamps[0]!.length === 0 || timestamps[0]!.length > MAX_TIMESTAMP_SIZE) {
-    throw new Error("scoped endorsement requires one bounded signature timestamp");
+    throw new Error("certified registry endorsement requires one bounded signature timestamp");
   }
   return timestamps[0]!;
 }

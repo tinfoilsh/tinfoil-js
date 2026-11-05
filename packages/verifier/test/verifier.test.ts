@@ -212,27 +212,27 @@ describe("Verifier.create options", () => {
     await expect(Verifier.create({ embeddedReferences: { config: { name: "bad name", bytes: config } } })).rejects.toThrow(UsageError);
   });
 
-  it("accepts registry scope pins only alongside registry trust", async () => {
-    const privateScope = "https://registry.tinfoil.sh/scopes/9c4a7f21e0b836d56a13c8fe42d907ab";
-    const scoped = await Verifier.create({ configScopes: [privateScope, "https://registry.tinfoil.sh/scopes/public"] });
-    expect(scoped.callerAuthorizesConfig()).toBe(false);
-    expect(() => scoped.checkRepoVerifiability("org/project@r1")).not.toThrow();
-    await expect(Verifier.create({ configScopes: [] })).rejects.toThrow(/must not be empty/);
-    await expect(Verifier.create({ configScopes: [privateScope, privateScope] })).rejects.toThrow(/duplicate/);
-    await expect(Verifier.create({ configScopes: ["https://example.invalid/scope"] })).rejects.toThrow(/canonical registry scope/);
-    await expect(Verifier.create({ configScopes: "public" as unknown as string[] })).rejects.toThrow(UsageError);
+  it("accepts registry ID pins only alongside registry trust", async () => {
+    const privateRegistryID = "https://registry.tinfoil.sh/scopes/9c4a7f21e0b836d56a13c8fe42d907ab";
+    const pinned = await Verifier.create({ configRegistryIDs: [privateRegistryID, "https://registry.tinfoil.sh/scopes/public"] });
+    expect(pinned.callerAuthorizesConfig()).toBe(false);
+    expect(() => pinned.checkRepoVerifiability("org/project@r1")).not.toThrow();
+    await expect(Verifier.create({ configRegistryIDs: [] })).rejects.toThrow(/must not be empty/);
+    await expect(Verifier.create({ configRegistryIDs: [privateRegistryID, privateRegistryID] })).rejects.toThrow(/duplicate/);
+    await expect(Verifier.create({ configRegistryIDs: ["https://example.invalid/scope"] })).rejects.toThrow(/canonical registry URI/);
+    await expect(Verifier.create({ configRegistryIDs: "public" as unknown as string[] })).rejects.toThrow(UsageError);
     const { pem } = await newSigner();
-    await expect(Verifier.create({ configScopes: [privateScope], configSigningKeys: [pem] })).rejects.toThrow(/registry root verification/);
-    await expect(Verifier.create({ configScopes: [privateScope], configAuthorizer: () => undefined })).rejects.toThrow(/require endorsement verification/);
+    await expect(Verifier.create({ configRegistryIDs: [privateRegistryID], configSigningKeys: [pem] })).rejects.toThrow(/registry root verification/);
+    await expect(Verifier.create({ configRegistryIDs: [privateRegistryID], configAuthorizer: () => undefined })).rejects.toThrow(/require endorsement verification/);
     const config = { bytes: utf8(`cvm-version: v1.2.3@sha256:${"a".repeat(64)}\n`) };
-    await expect(Verifier.create({ configScopes: [privateScope], embeddedReferences: { config } })).rejects.toThrow(/require endorsement verification/);
+    await expect(Verifier.create({ configRegistryIDs: [privateRegistryID], embeddedReferences: { config } })).rejects.toThrow(/require endorsement verification/);
   });
 
-  it("requires config collateral once scopes are pinned", async () => {
+  it("requires config collateral once registry IDs are pinned", async () => {
     if (withoutVectors) return;
     const fixture = loadFixture("golden/golden-happy.json");
-    const scoped = await dangerousTestOnlyVerifier(rootsOf(fixture), { configScopes: ["https://registry.tinfoil.sh/scopes/public"] });
-    const err = await scoped.verifyV3At(inputBytes(fixture, "document_b64"), hex(fixture.input.nonce_hex ?? ""), repoOf(fixture), clockOf(fixture)).catch((e: unknown) => e);
+    const pinned = await dangerousTestOnlyVerifier(rootsOf(fixture), { configRegistryIDs: ["https://registry.tinfoil.sh/scopes/public"] });
+    const err = await pinned.verifyV3At(inputBytes(fixture, "document_b64"), hex(fixture.input.nonce_hex ?? ""), repoOf(fixture), clockOf(fixture)).catch((e: unknown) => e);
     expect(err).toBeInstanceOf(VerificationError);
     expect((err as VerificationError).layer).toBe("provenance");
     expect((err as Error).message).toMatch(/configured trust requires/);

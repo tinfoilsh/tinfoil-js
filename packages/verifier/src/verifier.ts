@@ -27,10 +27,10 @@ import {
   MAX_CONFIG_SIZE,
   parseConfigName,
   PLATFORM_ARTIFACT_NAME,
-  PUBLIC_SCOPE,
+  PUBLIC_REGISTRY_ID,
   publicSigningKeys,
   validateConfigPins,
-  validateScopes,
+  validateRegistryIDs,
   type ArtifactKind,
   type ConfigPolicy,
 } from "./internal/endorsement/approval.js";
@@ -69,12 +69,13 @@ export interface VerifierOptions {
   /** Authorizes an unsigned config; throwing rejects the document at the provenance layer. */
   readonly configAuthorizer?: (endorsement: ConfigEndorsement) => void | Promise<void>;
   /**
-   * The registry scopes a config approval may be accepted under, replacing
-   * public-only trust: an approval certified for another scope rejects. Needs
-   * registry trust, so it conflicts with config signing keys, an embedded
-   * config and a config authorizer. Must be non-empty without repeats.
+   * The registry IDs a config approval may be accepted under, replacing
+   * public-only trust: an approval certified for another registry rejects.
+   * Needs registry trust, so it conflicts with config signing keys, an
+   * embedded config and a config authorizer. Must be non-empty without
+   * repeats.
    */
-  readonly configScopes?: readonly string[];
+  readonly configRegistryIDs?: readonly string[];
   readonly embeddedReferences?: EmbeddedReferences;
 }
 
@@ -106,7 +107,7 @@ interface Policy {
   readonly pinnedRegisters?: Expected;
   readonly freshnessMaxAgeMs: number;
   readonly configAuthorizer?: (endorsement: ConfigEndorsement) => void | Promise<void>;
-  readonly configScopes?: readonly string[];
+  readonly configRegistryIDs?: readonly string[];
   readonly configKeysPinned: boolean;
   readonly freshnessKeysPinned: boolean;
 }
@@ -248,7 +249,7 @@ export class Verifier {
       this.#policy.configKeysPinned ||
       this.#policy.freshnessKeysPinned ||
       this.#policy.configAuthorizer !== undefined ||
-      this.#policy.configScopes !== undefined
+      this.#policy.configRegistryIDs !== undefined
     );
   }
 
@@ -290,13 +291,14 @@ export class Verifier {
 
   /**
    * The config pins `repo` imposes, as a config policy without a clock. The
-   * accepted scopes are the caller's, or the public scope alone under the
-   * registry roots; caller-pinned keys leave the scope unpinned.
+   * accepted registry IDs are the caller's, or the public registry alone
+   * under the registry roots; caller-pinned keys leave the registry ID
+   * unpinned.
    */
   #referencePins(ref: string): ConfigPins {
-    let scopes = this.#policy.configScopes;
-    if (scopes === undefined && !this.#policy.configKeysPinned) scopes = [PUBLIC_SCOPE];
-    const pins: ConfigPins = { identity: "", revision: "", digest: "", scopes };
+    let registryIDs = this.#policy.configRegistryIDs;
+    if (registryIDs === undefined && !this.#policy.configKeysPinned) registryIDs = [PUBLIC_REGISTRY_ID];
+    const pins: ConfigPins = { identity: "", revision: "", digest: "", registryIDs };
     if (this.#policy.configAuthorizer !== undefined && ref !== "") {
       throw new UsageError("config authorizer cannot authenticate repository or revision pins; enforce them in caller policy");
     }
@@ -347,7 +349,7 @@ export class Verifier {
     if (embedded !== undefined) {
       return {
         expected: embedded.runtime,
-        config: { source: "embedded", name: embedded.name, digest: embedded.digest, reference: "", signingKeyHint: "", scope: "" },
+        config: { source: "embedded", name: embedded.name, digest: embedded.digest, reference: "", signingKeyHint: "", registryID: "" },
       };
     }
     const material = doc.configEndorsement();
@@ -361,7 +363,7 @@ export class Verifier {
         throw new VerificationError("provenance", `authorizing config: ${message(err)}`, { cause: err });
       }
       const digest = toHex(await sha256(config));
-      return { expected: configRuntime(config), config: { source: "policy", name: "", digest, reference: "", signingKeyHint: "", scope: "" } };
+      return { expected: configRuntime(config), config: { source: "policy", name: "", digest, reference: "", signingKeyHint: "", registryID: "" } };
     }
     if (material.bundle === undefined) throw new Error("unsigned config requires a config authorizer");
     const policy: ConfigPolicy = {
@@ -371,7 +373,7 @@ export class Verifier {
       now,
       maxAgeMs: this.#policy.freshnessMaxAgeMs,
       futureSkewMs: 0,
-      ...(pins.scopes === undefined ? {} : { scopes: pins.scopes }),
+      ...(pins.registryIDs === undefined ? {} : { registryIDs: pins.registryIDs }),
     };
     let approved;
     try {
@@ -401,7 +403,7 @@ export class Verifier {
         reference: approved.reference,
         signingKeyHint: approved.signingKeyHint,
         approvalTime: approved.approvalTime,
-        scope: approved.scope,
+        registryID: approved.registryID,
         ...(approved.signatureTime === undefined ? {} : { signatureTime: approved.signatureTime }),
       },
     };
@@ -477,19 +479,19 @@ async function assemble(options: VerifierOptions, roots: DangerousTestOnlyRoots)
   if (options.configAuthorizer !== undefined && (embedded.configReference !== undefined || configKeys !== undefined)) {
     throw new UsageError("config authorizer conflicts with embedded config or config signing keys");
   }
-  const configScopes = options.configScopes === undefined ? undefined : usage(() => scopesOf(options.configScopes!));
-  if (configScopes !== undefined && (embedded.configReference !== undefined || options.configAuthorizer !== undefined)) {
+  const configRegistryIDs = options.configRegistryIDs === undefined ? undefined : usage(() => registryIDsOf(options.configRegistryIDs!));
+  if (configRegistryIDs !== undefined && (embedded.configReference !== undefined || options.configAuthorizer !== undefined)) {
     throw new UsageError("config authority pins require endorsement verification");
   }
-  if (configScopes !== undefined && configKeys !== undefined) {
-    throw new UsageError("config scope policy requires Tinfoil registry root verification");
+  if (configRegistryIDs !== undefined && configKeys !== undefined) {
+    throw new UsageError("config registry ID policy requires Tinfoil registry root verification");
   }
   if (embedded.runtime !== undefined && embedded.platform !== undefined && freshnessKeys !== undefined) {
     throw new UsageError("freshness signing keys have no endorsed artifact to verify");
   }
   const publicKeys = await publicSigningKeys();
   // Without caller-pinned config keys, the public keys are the registry
-  // roots as well: they issue the scope certificates of certified approvals.
+  // roots as well: they issue the signing certificates of certified approvals.
   const configVerifier = configKeys === undefined ? new ConfigVerifier(prov.root, publicKeys, publicKeys) : new ConfigVerifier(prov.root, configKeys);
   const freshnessVerifier = new FreshnessVerifier(prov.root, freshnessKeys ?? publicKeys);
   const policy: Policy = {
@@ -497,7 +499,7 @@ async function assemble(options: VerifierOptions, roots: DangerousTestOnlyRoots)
     pinnedRegisters,
     freshnessMaxAgeMs,
     configAuthorizer: options.configAuthorizer,
-    configScopes,
+    configRegistryIDs,
     configKeysPinned: configKeys !== undefined,
     freshnessKeysPinned: freshnessKeys !== undefined,
   };
@@ -518,14 +520,14 @@ interface ConfigPins {
   readonly identity: string;
   readonly revision: string;
   readonly digest: string;
-  readonly scopes?: readonly string[];
+  readonly registryIDs?: readonly string[];
 }
 
-/** Validates and copies the caller's scope list. */
-function scopesOf(scopes: readonly string[]): readonly string[] {
-  if (!Array.isArray(scopes) || scopes.some((s) => typeof s !== "string")) throw new Error("config scopes must be a list of strings");
-  validateScopes(scopes);
-  return [...scopes];
+/** Validates and copies the caller's registry ID list. */
+function registryIDsOf(registryIDs: readonly string[]): readonly string[] {
+  if (!Array.isArray(registryIDs) || registryIDs.some((s) => typeof s !== "string")) throw new Error("config registry IDs must be a list of strings");
+  validateRegistryIDs(registryIDs);
+  return [...registryIDs];
 }
 
 /** Runs one pipeline step; an error that is not already classified is attributed to `layer`. */

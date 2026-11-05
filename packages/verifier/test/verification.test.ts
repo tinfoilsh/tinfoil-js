@@ -23,7 +23,7 @@ function fields(): { fields: VerificationFields; launch: Uint8Array; rtmr1: Uint
         { id: "hpke", format: KEY_X25519_HPKE_V1_FORMAT, data: "hpke" },
         { id: "tls", format: "https://example.invalid/other", data: "other" },
       ],
-      config: { source: "endorsement", name: "/o/p/r1", digest: "c", reference: "sha256:c", signingKeyHint: "h", approvalTime: AT, scope: "", signatureTime: AT },
+      config: { source: "endorsement", name: "/o/p/r1", digest: "c", reference: "sha256:c", signingKeyHint: "h", approvalTime: AT, registryID: "", signatureTime: AT },
       runtime: { source: "endorsement", repo: "tinfoilsh/cvmimage", tag: "v1.2.3", digest: "r", name: "m", commit: "0".repeat(40), approvalTime: AT },
       freshnessExpiresAt: AT,
       metadata: { verifier: { name: "n", version: "v" }, verifiedAt: AT },

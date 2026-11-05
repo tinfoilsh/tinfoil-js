@@ -17,11 +17,11 @@ export interface ConfigVerification {
   /** Undefined when the config was not approved by a timestamped endorsement. */
   readonly approvalTime?: Date;
   /**
-   * The registry scope the endorsement was accepted under: the one its
-   * certificate assigns, the public scope for a key-signed registry
+   * The registry ID the endorsement was accepted under: the one its
+   * certificate assigns, the public registry ID for a key-signed registry
    * approval, "" when none applies.
    */
-  readonly scope: string;
+  readonly registryID: string;
   /** When a certificate-signed approval's signature was made; undefined otherwise. */
   readonly signatureTime?: Date;
 }

@@ -3,9 +3,9 @@
  * in-toto statement whose predicate carries an RFC 3161 timestamp of the
  * statement's canonical core; that timestamp, not the log, establishes when
  * the approval was made. A config approval is signed either with a pinned
- * key or, for a scoped deployment, with a short-lived registry certificate
- * that assigns the scope and is itself timestamped and rooted in a pinned
- * registry key.
+ * key or, for a certified registry deployment, with a short-lived registry
+ * certificate that assigns the registry ID and is itself timestamped and
+ * rooted in a pinned registry key.
  */
 import { RUNTIME_REPO, validateRuntimeReference, type RuntimeReference } from "../../document/collateral/runtime.js";
 import { sha256, toHex } from "../bytes.js";
@@ -21,7 +21,7 @@ import { endorsementReference, MAX_STATEMENT_SIZE, MAX_TIMESTAMP_SIZE, timestamp
 import type { TrustedRoot } from "../sigstore/trusted-root.js";
 import { PUBLIC_SIGNING_KEY_PEM } from "../../trust/signing-keys.js";
 import { SHA256_DIGEST_RE } from "./reference.js";
-import { CERTIFICATE_CLOCK_SKEW_MS, verifySigningCertificate } from "./scope.js";
+import { CERTIFICATE_CLOCK_SKEW_MS, verifySigningCertificate } from "./registry-certificate.js";
 import { checkTime, newTimePolicy, type TimePolicy } from "./time.js";
 
 export const IN_TOTO_STATEMENT_V1 = "https://in-toto.io/Statement/v1";
@@ -38,9 +38,10 @@ export const PLATFORM_TAG_PREFIX = "platform-";
 const RUNTIME_NAME_PREFIX = "tinfoil-inference-";
 const RUNTIME_NAME_SUFFIX = "-manifest.json";
 
-export const SCOPE_PREFIX = "https://registry.tinfoil.sh/scopes/";
-export const PUBLIC_SCOPE = SCOPE_PREFIX + "public";
-const SCOPE_ID_HEX_LEN = 32;
+/** Registry IDs are URIs under this prefix; the wire form keeps its historical path. */
+export const REGISTRY_ID_PREFIX = "https://registry.tinfoil.sh/scopes/";
+export const PUBLIC_REGISTRY_ID = REGISTRY_ID_PREFIX + "public";
+const REGISTRY_ID_HEX_LEN = 32;
 
 /** The domain prefixes of the timestamped canonical cores. */
 const CONFIG_FRESHNESS_DOMAIN = "tinfoil-config-freshness/v1\0";
@@ -64,16 +65,16 @@ export function publicSigningKeys(): Promise<PinnedKey[]> {
   return pinnedKeys([PUBLIC_SIGNING_KEY_PEM]);
 }
 
-// ---------------------------------------------------------------- names and scopes
+// ---------------------------------------------------------------- names and registry IDs
 
-/** The public scope, or a canonical 128-bit lowercase-hex scope URI. */
-export function validateScope(scope: string): void {
-  if (scope === PUBLIC_SCOPE) return;
-  if (scope.startsWith(SCOPE_PREFIX)) {
-    const id = scope.slice(SCOPE_PREFIX.length);
-    if (id.length === SCOPE_ID_HEX_LEN && /^[0-9a-f]+$/.test(id)) return;
+/** The public registry ID, or a canonical private one: a 128-bit lowercase-hex identifier under the prefix. */
+export function validateRegistryID(registryID: string): void {
+  if (registryID === PUBLIC_REGISTRY_ID) return;
+  if (registryID.startsWith(REGISTRY_ID_PREFIX)) {
+    const id = registryID.slice(REGISTRY_ID_PREFIX.length);
+    if (id.length === REGISTRY_ID_HEX_LEN && /^[0-9a-f]+$/.test(id)) return;
   }
-  throw new Error("scope must be a canonical registry scope URI");
+  throw new Error("registry ID must be a canonical registry URI");
 }
 
 /** A canonical /org/project identity: exactly two slug components after a leading slash. */
@@ -123,7 +124,8 @@ interface ApprovalStatement {
 }
 
 export interface ConfigStatement extends ApprovalStatement {
-  readonly scope: string;
+  /** The registry ID the statement names (its `scope` member); "" on a v1 statement. */
+  readonly registryID: string;
   readonly runtime?: RuntimeReference;
 }
 
@@ -168,8 +170,9 @@ function innerTimestamp(predicate: JsonObject, what: string): Uint8Array {
 
 /**
  * Strict decode of a config endorsement statement: the in-toto v1 type, the
- * v1 or v2 predicate type (v2 requires a scope and a runtime reference, v1
- * forbids both), one versioned config subject, and the inner timestamp.
+ * v1 or v2 predicate type (v2 requires a registry ID and a runtime
+ * reference, v1 forbids both), one versioned config subject, and the inner
+ * timestamp.
  */
 export function parseConfigStatement(payload: Uint8Array): ConfigStatement {
   let decoded: { s: JsonObject; predicate: JsonObject };
@@ -184,7 +187,7 @@ export function parseConfigStatement(payload: Uint8Array): ConfigStatement {
   if (type !== IN_TOTO_STATEMENT_V1 || (predicateType !== CONFIG_ENDORSEMENT_PREDICATE_TYPE && predicateType !== CONFIG_ENDORSEMENT_PREDICATE_TYPE_V2)) {
     throw new Error("unsupported config endorsement statement type");
   }
-  const scope = str(predicate, "scope");
+  const registryID = str(predicate, "scope");
   const runtimeValue = predicate.get("runtime");
   let runtime: RuntimeReference | undefined;
   if (runtimeValue !== undefined && runtimeValue !== null) {
@@ -192,22 +195,22 @@ export function parseConfigStatement(payload: Uint8Array): ConfigStatement {
     runtime = { repo: str(r, "repo"), tag: str(r, "tag"), digest: str(r, "digest") };
   }
   if (predicateType === CONFIG_ENDORSEMENT_PREDICATE_TYPE_V2) {
-    validateScope(scope);
+    validateRegistryID(registryID);
     if (runtime === undefined) throw new Error("config endorsement requires a runtime reference");
     validateRuntimeReference(runtime);
-  } else if (runtime !== undefined || scope !== "") {
+  } else if (runtime !== undefined || registryID !== "") {
     throw new Error("v1 config endorsement cannot contain a runtime reference");
   }
   const subject = singleSubject(s, "config endorsement");
   parseConfigName(subject.name);
   const timestamp = innerTimestamp(predicate, "config endorsement");
-  return { type, subject, predicateType, scope, ...(runtime === undefined ? {} : { runtime }), timestamp };
+  return { type, subject, predicateType, registryID, ...(runtime === undefined ? {} : { runtime }), timestamp };
 }
 
 /** The domain-separated canonical core a config endorsement's timestamp covers. */
 export function configTimestampInput(s: ConfigStatement): Uint8Array {
   const predicate = new Map<string, JsonValue>();
-  if (s.scope !== "") predicate.set("scope", s.scope);
+  if (s.registryID !== "") predicate.set("scope", s.registryID);
   if (s.runtime !== undefined) {
     predicate.set("runtime", new Map<string, JsonValue>([["repo", s.runtime.repo], ["tag", s.runtime.tag], ["digest", s.runtime.digest]]));
   }
@@ -269,8 +272,8 @@ export interface ConfigPolicy {
   readonly maxAgeMs: number;
   /** 0 selects the default. */
   readonly futureSkewMs: number;
-  /** The scopes the caller accepts; undefined leaves the scope unpinned, an empty list is invalid. */
-  readonly scopes?: readonly string[];
+  /** The registry IDs the caller accepts; undefined leaves the registry ID unpinned, an empty list is invalid. */
+  readonly registryIDs?: readonly string[];
 }
 
 export interface ConfigVerified {
@@ -282,29 +285,29 @@ export interface ConfigVerified {
   /** The runtime the endorsement pins, when it carries one (v2). */
   readonly runtime?: RuntimeReference;
   /**
-   * The scope the approval was accepted under: the certificate's scope on
-   * the certified path, the public scope for a key-signed approval under the
-   * registry roots, and "" under caller-pinned keys.
+   * The registry ID the approval was accepted under: the certificate's on
+   * the certified path, the public registry ID for a key-signed approval
+   * under the registry roots, and "" under caller-pinned keys.
    */
-  readonly scope: string;
+  readonly registryID: string;
   /** When the certificate-signed signature was made; undefined for a key-signed approval. */
   readonly signatureTime?: Date;
 }
 
-/** Validates the identity, revision, digest and scope pins; an empty pin is unset. */
+/** Validates the identity, revision, digest and registry ID pins; an empty pin is unset. */
 export function validateConfigPins(policy: ConfigPolicy): void {
   if (policy.identity !== "") validateConfigIdentity(policy.identity);
   if (policy.revision !== "") validateRevision(policy.revision);
   if (policy.digest !== "" && !SHA256_DIGEST_RE.test(policy.digest)) throw new Error("digest pin must be lowercase SHA-256");
-  if (policy.scopes !== undefined) validateScopes(policy.scopes);
+  if (policy.registryIDs !== undefined) validateRegistryIDs(policy.registryIDs);
 }
 
-/** A non-empty list of canonical scopes without repeats. */
-export function validateScopes(scopes: readonly string[]): void {
-  if (scopes.length === 0) throw new Error("config scopes must not be empty");
-  scopes.forEach((scope, i) => {
-    validateScope(scope);
-    if (scopes.slice(0, i).includes(scope)) throw new Error("duplicate config scope");
+/** A non-empty list of canonical registry IDs without repeats. */
+export function validateRegistryIDs(registryIDs: readonly string[]): void {
+  if (registryIDs.length === 0) throw new Error("config registry IDs must not be empty");
+  registryIDs.forEach((registryID, i) => {
+    validateRegistryID(registryID);
+    if (registryIDs.slice(0, i).includes(registryID)) throw new Error("duplicate config registry ID");
   });
 }
 
@@ -319,9 +322,9 @@ export class ConfigVerifier {
 
   /**
    * @internal `keys` sign key-signed approvals. `rootKeys`, when given, are
-   * the registry roots that issue scope certificates; under them a scoped
-   * (v2) approval must be certificate-signed and a key-signed approval is
-   * public.
+   * the registry roots that issue registry certificates; under them a
+   * registry (v2) approval must be certificate-signed and a key-signed
+   * approval is public.
    */
   constructor(
     readonly root: TrustedRoot,
@@ -340,7 +343,7 @@ export class ConfigVerifier {
    * statement that pins the digest alone), the endorsed runtime equals the
    * config's own pin, the bundle verifies under a pinned key, and the
    * predicate's timestamp falls inside the policy window. Under registry
-   * roots a scoped (v2) statement rejects here: it must be certified.
+   * roots a registry (v2) statement rejects here: it must be certified.
    */
   verify(config: Uint8Array | undefined, bundleJson: JsonValue, policy: ConfigPolicy): Promise<ConfigVerified> {
     return this.#verify(config, bundleJson, undefined, policy);
@@ -350,9 +353,9 @@ export class ConfigVerifier {
    * Verifies a certificate-signed config approval: the bundle's RFC 3161
    * timestamp fixes the signing time inside the policy window, the signing
    * certificate is authenticated at that time under `issuerDer` and the
-   * registry roots, its scope equals the statement's, the bundle verifies
-   * under the certificate, and the inner timestamp does not follow the
-   * signing time by more than the allowed skew.
+   * registry roots, its registry ID equals the statement's, the bundle
+   * verifies under the certificate, and the inner timestamp does not follow
+   * the signing time by more than the allowed skew.
    */
   verifyCertified(config: Uint8Array | undefined, bundleJson: JsonValue, issuerDer: Uint8Array, policy: ConfigPolicy): Promise<ConfigVerified> {
     if (this.#rootKeys.length === 0) throw new Error("registry root trust is not configured");
@@ -385,26 +388,28 @@ export class ConfigVerifier {
     }
     const digest = decodeLowerHex("subject digest", hexDigest, 32);
 
-    let scope = "";
+    let registryID = "";
     let hint: string;
     let signatureTime: Date | undefined;
     if (issuerDer !== undefined) {
-      if (s.predicateType !== CONFIG_ENDORSEMENT_PREDICATE_TYPE_V2) throw new Error("scoped endorsement requires a v2 statement");
+      if (s.predicateType !== CONFIG_ENDORSEMENT_PREDICATE_TYPE_V2) throw new Error("certified registry endorsement requires a v2 statement");
       signatureTime = await signedTimestamp(this.root, bundle);
       checkTime(window, signatureTime);
       if (bundle.certificate === undefined) throw new Error("certified approval bundle must carry a signing certificate");
-      const signing = await verifySigningCertificate(bundle.certificate, issuerDer, this.#rootKeys, signatureTime, validateScope);
-      scope = signing.scope;
-      if (scope !== s.scope) throw new Error("certificate scope does not match signed scope");
+      const signing = await verifySigningCertificate(bundle.certificate, issuerDer, this.#rootKeys, signatureTime, validateRegistryID);
+      registryID = signing.registryID;
+      if (registryID !== s.registryID) throw new Error("certificate registry ID does not match signed registry ID");
       hint = await verifyCertifiedBundle(this.root, bundle, signing.certificate, digest);
     } else {
       if (this.#rootKeys.length !== 0 && s.predicateType === CONFIG_ENDORSEMENT_PREDICATE_TYPE_V2) {
         throw new Error("v2 registry endorsement requires an issuer certificate");
       }
       hint = await verifyKeyedBundle(this.root, bundle, this.keys, digest);
-      if (this.#rootKeys.length !== 0) scope = PUBLIC_SCOPE;
+      if (this.#rootKeys.length !== 0) registryID = PUBLIC_REGISTRY_ID;
     }
-    if (policy.scopes !== undefined && !policy.scopes.includes(scope)) throw new Error("config scope is not accepted by the caller");
+    if (policy.registryIDs !== undefined && !policy.registryIDs.includes(registryID)) {
+      throw new Error("config registry ID is not accepted by the caller");
+    }
 
     let approvalTime: Date;
     try {
@@ -423,7 +428,7 @@ export class ConfigVerifier {
       signingKeyHint: hint,
       approvalTime,
       ...(s.runtime === undefined ? {} : { runtime: s.runtime }),
-      scope,
+      registryID,
       ...(signatureTime === undefined ? {} : { signatureTime }),
     };
   }
