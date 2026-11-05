@@ -86,7 +86,7 @@ export interface DeviceEvidenceItem {
   readonly evidence: JsonValue | undefined;
 }
 
-/** A parsed v3 attestation document. Accessors return copies, as in the reference. */
+/** A parsed v3 attestation document. Its accessors return copies, so a caller cannot alter what it holds. */
 export class Document {
   readonly #d: DecodedDocument;
 

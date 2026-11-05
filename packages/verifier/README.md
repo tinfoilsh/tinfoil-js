@@ -45,7 +45,7 @@ Every error is a `VerifyError`. A `UsageError` means the verifier was built or c
 
 ### Pinning
 
-Obtaining `tlsPublicKeyFP()` pins nothing: a transport must compare it with the live peer certificate's SPKI fingerprint on every new TLS connection, in addition to normal hostname and certificate validation; `certPubkeyFP(certDer)` computes the same form from a DER certificate. Likewise `hpkePublicKey()` only identifies the key request bodies must be sealed to.
+Reading `tlsPublicKeyFP` pins nothing: a transport must compare it with the live peer certificate's SPKI fingerprint on every new TLS connection, in addition to normal hostname and certificate validation; `certPubkeyFP(certDer)` computes the same form from a DER certificate. Likewise `hpkePublicKey` only identifies the key request bodies must be sealed to.
 
 See [Attestation architecture](https://docs.tinfoil.sh/verification/attestation-architecture) and [Verification in Tinfoil](https://docs.tinfoil.sh/verification/verification-in-tinfoil) for what gets verified.
 
