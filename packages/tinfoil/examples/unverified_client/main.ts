@@ -11,17 +11,25 @@
  * package's main entry.
  *
  * Prerequisites:
- * - Export your API key: export TINFOIL_API_KEY="<YOUR_API_KEY>"
- * - Optionally point TINFOIL_UNVERIFIED_URL at your development server
+ * - Point TINFOIL_UNVERIFIED_URL at your development server, for example
+ *   export TINFOIL_UNVERIFIED_URL="http://localhost:8080/v1/"
+ * - Export the credential that server expects: export TINFOIL_API_KEY="<KEY>"
  *
  * Run: npx ts-node main.ts
  */
 import { UnverifiedClient } from "tinfoil/unsafe";
 
 async function main() {
+  // The client never discovers a server by itself, and this example never
+  // defaults to one: a URL is required, so nothing real is sent unverified
+  // by accident.
+  const baseURL = process.env.TINFOIL_UNVERIFIED_URL;
+  if (!baseURL) {
+    console.error("TINFOIL_UNVERIFIED_URL is required: the base URL of the development server to talk to without attestation.");
+    process.exit(1);
+  }
+
   try {
-    // The client never discovers a server by itself: name the one to talk to.
-    const baseURL = process.env.TINFOIL_UNVERIFIED_URL ?? "https://inference.tinfoil.sh/v1/";
     const client = await UnverifiedClient.create({ baseURL });
 
     // Relative request URLs resolve against the base URL.

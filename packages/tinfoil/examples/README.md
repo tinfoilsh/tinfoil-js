@@ -12,7 +12,7 @@ or all of them with `./run-all.sh`.
 | [`ai-sdk/`](ai-sdk/) | The Vercel AI SDK on the server with `createTinfoil` from `tinfoil/ai-sdk` |
 | [`ai-sdk-react/`](ai-sdk-react/) | The Vercel AI SDK's `useChat` in a browser app (pattern files, not runnable) |
 | [`http_client/`](http_client/) | Custom HTTP requests with `RouterHTTPClient.fetch` |
-| [`unverified_client/`](unverified_client/) | `UnverifiedClient` from `tinfoil/unsafe`, which skips attestation; for development only, never in production |
+| [`unverified_client/`](unverified_client/) | `UnverifiedClient` from `tinfoil/unsafe`, which skips attestation; needs `TINFOIL_UNVERIFIED_URL`, for development only, never in production |
 
 Browser apps must not hold the API key: route requests through a
 [proxy server](https://docs.tinfoil.sh/guides/proxy-server) that adds it, and

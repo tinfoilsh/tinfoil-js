@@ -20,8 +20,9 @@ async function main() {
     const client = await RouterHTTPClient.create();
     console.log("Verified enclave:", client.enclave());
 
-    // Request URLs are absolute; baseURL() is where the client's requests go.
-    const response = await client.fetch(new URL("/v1/chat/completions", client.baseURL()), {
+    // Request URLs are absolute. baseURL() is where the client's requests go; a
+    // relative path appended to it keeps any path a proxy base URL carries.
+    const response = await client.fetch(new URL("v1/chat/completions", client.baseURL().replace(/\/?$/, "/")), {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
