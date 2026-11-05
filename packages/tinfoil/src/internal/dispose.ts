@@ -1,6 +1,10 @@
+/// <reference lib="esnext.disposable" preserve="true" />
 /**
  * What the HTTP clients' lifecycle shares: the symbol an `await using`
  * declaration disposes with, and the error a closed client answers with.
+ * The lib reference above is kept in the published types, so
+ * `Symbol.asyncDispose` and `AsyncDisposable` resolve for a consumer whose
+ * own lib predates them.
  */
 import { ConfigurationError } from "../errors.js";
 
