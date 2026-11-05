@@ -35,5 +35,5 @@ Unchanged: `userCacheSecret` and the per-request `user_cache_secret` field, thei
 | `compareMeasurements`, `measurementFingerprint`, `hashAttestationDocument`, `PredicateType`, `AttestationMeasurement`, `HardwareMeasurement` | the `Measurement` and `Expected` types with `parseRegister`, `parseExpectedSevSnp`, `parseExpectedTdx`, `registerHex` and `formatMeasurement`; `codeMeasurement()` and `enclaveMeasurement()` on a `Verification`; `pinnedRegisters` on the verifier to require registers |
 | `getVerificationDocument()`, `VerificationDocument`, `VerificationStepState`, `cloneVerificationDocument`, `VERIFICATION_DOCUMENT_SCHEMA_VERSION` | removed: a `Verification` holds every fact, and a `VerificationError` carries its `layer` |
 | `TinfoilError`, `ConfigurationError`, `FetchError`, `AttestationError` | `VerifyError` with `UsageError` (invalid inputs) and `VerificationError` (the document must not be trusted); the `tinfoil` package keeps its own error classes |
-| `VERIFIER_NAME`, `VERIFIER_VERSION` | `verification.metadata().verifier` |
+| `VERIFIER_NAME`, `VERIFIER_VERSION` | `verification.metadata.verifier` |
 | `@tinfoilsh/verifier/v3` (pre-release entry) | the package root |
