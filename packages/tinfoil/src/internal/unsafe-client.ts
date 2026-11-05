@@ -18,7 +18,7 @@
 import { Identity, PROTOCOL } from "ehbp";
 import { ConfigurationError, messageOf, NetworkError, TinfoilError } from "../errors.js";
 import { readBounded } from "./fetch.js";
-import { validateBaseURL } from "./transport/base-url.js";
+import { normalizeBaseURL, validateBaseURL } from "./transport/base-url.js";
 import { sealedFetchTo } from "./transport/ehbp.js";
 import { ENCLAVE_URL_HEADER } from "./transport/header.js";
 import { normalizedOrigin, originOf, requestURL } from "./transport/origin.js";
@@ -28,8 +28,8 @@ import type { Fetch } from "../options.js";
 export interface UnverifiedOptions {
   /**
    * Where requests go. Defaults to the key origin's `/v1/`. A relative request
-   * URL is resolved against it. HTTPS, or HTTP only to localhost or a loopback
-   * IP address.
+   * URL is resolved against it, so it is made to end with `/`. HTTPS, or HTTP
+   * only to localhost or a loopback IP address.
    */
   readonly baseURL?: string;
   /**
@@ -58,7 +58,7 @@ const MAX_KEY_CONFIG_BYTES = 64 * 1024;
 /** Marks construction by this module's factory; the constructor refuses anything else. */
 const TOKEN = Symbol("UnverifiedClient");
 
-/** The option checks that need no network I/O. */
+/** The option checks that need no network I/O. The base URL comes back ending with `/`. */
 export function checkUnverifiedOptions(options: UnverifiedOptions): { baseURL: string; keyOrigin: string } {
   if (options.baseURL === undefined && options.keyOrigin === undefined) {
     throw new ConfigurationError("UnverifiedClient needs a baseURL or a keyOrigin; it never discovers a server by itself");
@@ -68,7 +68,7 @@ export function checkUnverifiedOptions(options: UnverifiedOptions): { baseURL: s
   const keyOrigin = originOf(keySource);
   const baseURL = options.baseURL ?? `${keyOrigin}/v1/`;
   checkURL(baseURL);
-  return { baseURL, keyOrigin };
+  return { baseURL: normalizeBaseURL(baseURL), keyOrigin };
 }
 
 /** HTTPS or loopback HTTP, as for a base URL, and no credentials, which the key fetch and the requests would otherwise send. */
@@ -163,7 +163,7 @@ export class UnverifiedClient {
    * {@link ConfigurationError}.
    */
   readonly fetch: Fetch;
-  /** Where requests go. */
+  /** Where requests go; always ends with `/`. */
   readonly baseURL: string;
   /** The origin the sealing key was fetched from. */
   readonly keyOrigin: string;

@@ -84,6 +84,8 @@ describe("GatewayHTTPClient.create", () => {
       { verifier: v, url: "not a url" },
       { verifier: v, url: "ftp://gateway.example/v1/" },
       { verifier: v, url: "https://user:pw@gateway.example/v1/" },
+      { verifier: v, url: "https://gateway.example/v1/?key=1" },
+      { verifier: v, url: "https://gateway.example/v1/#frag" },
       { verifier: v, pinnedModelsOnly: true },
       { verifier: verifier(gateway.publicKeyHex, true) },
       { verifier: v, modelPins: new Map([["m", { repo: "other/m" }]]) },
@@ -112,6 +114,9 @@ describe("GatewayHTTPClient.create", () => {
     expect(client.current).toEqual([]);
     const supplied = await createGatewayHTTPClient({ verifier: verifier(gateway.publicKeyHex), url: GATEWAY_URL, catalog: () => new Map() as Catalog }, seams());
     expect(await supplied.models()).toEqual([]);
+    const bare = await createGatewayHTTPClient({ verifier: verifier(gateway.publicKeyHex), url: "https://gateway.example/v1" }, seams());
+    expect(bare.baseURL).toBe(GATEWAY_URL);
+    await expect(bare.fetch("https://other.example/v1/models")).rejects.toThrow(/client is bound/);
   });
 });
 

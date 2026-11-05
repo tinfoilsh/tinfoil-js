@@ -93,6 +93,13 @@ describe("UnverifiedClient", () => {
     expect(fromBase.client.keyOrigin).toBe(server.origin);
     const response = await fromBase.client.fetch("models");
     expect(await response.json()).toMatchObject({ path: "/api/models", sealed: false });
+    const bare = await client({ baseURL: `${server.origin}/api` });
+    expect(bare.client.baseURL).toBe(`${server.origin}/api/`);
+    expect(await (await bare.client.fetch("models")).json()).toMatchObject({ path: "/api/models" });
+    await expect(bare.client.fetch("https://other.example/api/models")).rejects.toThrow(/client is bound/);
+    for (const bad of [`${server.origin}/api/?key=1`, `${server.origin}/api/#frag`]) {
+      await expect(client({ baseURL: bad }), bad).rejects.toBeInstanceOf(ConfigurationError);
+    }
   });
 
   it("names the key origin to a proxy and keeps requests on the proxy", async () => {

@@ -10,7 +10,7 @@ import { Identity } from "ehbp";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { AttestationError, ConfigurationError, NetworkError } from "../src/errors.js";
 import { Enclave } from "../src/internal/enclave.js";
-import { isLoopback, validateBaseURL, validateTLSBaseURL } from "../src/internal/transport/base-url.js";
+import { isLoopback, normalizeBaseURL, validateBaseURL, validateTLSBaseURL } from "../src/internal/transport/base-url.js";
 import { checkEHBP, ehbpMode } from "../src/internal/transport/ehbp.js";
 import { ENCLAVE_URL_HEADER, withEnclaveURL } from "../src/internal/transport/header.js";
 import { withReplay } from "../src/internal/transport/replay.js";
@@ -229,14 +229,22 @@ describe("base URL rules", () => {
     for (const ok of ["https://proxy.example/v1/", "http://localhost:8080/", "http://127.0.0.1/", "http://127.9.9.9:3000/x", "http://[::1]:8443/"]) {
       expect(() => validateBaseURL(ok), ok).not.toThrow();
     }
-    for (const bad of ["http://proxy.example/", "http://10.0.0.1/", "ftp://x/", "/relative", "http://localhost.evil.example/"]) {
+    for (const bad of ["http://proxy.example/", "http://10.0.0.1/", "ftp://x/", "/relative", "http://localhost.evil.example/", "https://proxy.example/v1/?key=1", "https://proxy.example/v1/#frag", "https://proxy.example/?"]) {
       expect(() => validateBaseURL(bad), bad).toThrow(ConfigurationError);
     }
+    expect(() => validateBaseURL("https://proxy.example/v1?x=1")).toThrow(/query string or fragment/);
     expect(isLoopback("LOCALHOST")).toBe(true);
     expect(isLoopback("[::1]")).toBe(true);
     expect(isLoopback("127.0.0.1")).toBe(true);
     expect(isLoopback("128.0.0.1")).toBe(false);
     expect(isLoopback("localhost.evil.example")).toBe(false);
+  });
+
+  it("ends a base URL with a slash, leaving one that already does unchanged", () => {
+    expect(normalizeBaseURL("https://proxy.example.com")).toBe("https://proxy.example.com/");
+    expect(normalizeBaseURL("https://proxy.example.com/v1")).toBe("https://proxy.example.com/v1/");
+    expect(normalizeBaseURL("https://proxy.example.com/v1/")).toBe("https://proxy.example.com/v1/");
+    expect(normalizeBaseURL("http://localhost:8080")).toBe("http://localhost:8080/");
   });
 
   it("requires a TLS-mode base URL to stay on the enclave's origin", () => {

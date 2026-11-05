@@ -109,7 +109,11 @@ export interface EnclaveOptions {
    * which requires `"ehbp"`. Requests to a proxy carry `X-Tinfoil-Enclave-Url`
    * so it can forward them. A proxy must use HTTPS, since EHBP doesn't seal
    * headers such as the API key; `http://` is accepted only for localhost or
-   * a loopback IP address.
+   * a loopback IP address. It is made to end with `/`; a query string or
+   * fragment is a {@link ConfigurationError}. For the OpenAI clients this is
+   * the API root, used as the OpenAI SDK uses its `baseURL`: nothing is
+   * appended, so a proxy that expects the enclave's own paths needs `/v1/`
+   * on the end.
    */
   readonly baseURL?: string;
   /** The verification policy; undefined selects the defaults. */
@@ -135,7 +139,10 @@ export interface RouterOptions {
    * requires `"ehbp"`: the router isn't known before discovery, so a base URL
    * can't name its origin. Requests carry `X-Tinfoil-Enclave-Url`. The proxy
    * must use HTTPS; `http://` is accepted only for localhost or a loopback IP
-   * address.
+   * address. It is made to end with `/`; a query string or fragment is a
+   * {@link ConfigurationError}. For the OpenAI clients this is the API root,
+   * used as the OpenAI SDK uses its `baseURL`: nothing is appended, so a
+   * proxy that expects the enclave's own paths needs `/v1/` on the end.
    */
   readonly baseURL?: string;
   /**
@@ -217,7 +224,7 @@ export interface GatewayOptions {
   readonly verificationCheck?: VerificationCheck;
   /** As for {@link RouterOptions.userCacheSecret}. */
   readonly userCacheSecret?: string;
-  /** The gateway's base URL; undefined selects Tinfoil's gateway. */
+  /** The gateway's base URL, made to end with `/`; undefined selects Tinfoil's gateway. A query string or fragment is a {@link ConfigurationError}. */
   readonly url?: string;
   /**
    * Read on every request and must return an immutable catalog. Undefined

@@ -121,6 +121,8 @@ describe("EnclaveHTTPClient.create", () => {
       ["enclave.example", "tinfoilsh/repo", { verifier: v, baseURL: "http://proxy.example/" }],
       ["enclave.example", "tinfoilsh/repo", { verifier: v, baseURL: "https://proxy.example/" }],
       ["enclave.example", "tinfoilsh/repo", { verifier: v, transportMode: "tls", baseURL: "https://proxy.example/" }],
+      ["enclave.example", "tinfoilsh/repo", { verifier: v, transportMode: "ehbp", baseURL: "https://proxy.example/v1/?key=1" }],
+      ["enclave.example", "tinfoilsh/repo", { verifier: v, transportMode: "ehbp", baseURL: "https://proxy.example/v1/#frag" }],
       ["enclave.example", "bad repo", { verifier: v }],
     ];
     for (const [host, repo, options] of cases) {
@@ -332,6 +334,26 @@ describe("EnclaveHTTPClient over EHBP", () => {
     expect(bodiless.sealed).toBe(false);
     await expect(proxied.fetch("https://enclave.example/echo", { method: "POST", body: "x" })).rejects.toThrow();
     await expect(proxied.fetch("https://other.example/echo")).rejects.toThrow(/client is bound to enclave/);
+  });
+
+  it("ends the base URL with a slash, keeps requests on its origin, and gives an OpenAI client the same paths either way", async () => {
+    const options = (baseURL: string): EnclaveOptions => ({ verifier: verifier(() => ({ tls: "ab".repeat(32), hpke: ehbp.publicKeyHex })), transportMode: "ehbp", baseURL });
+    const bare = await createEnclaveHTTPClient("enclave.example", "", options(ehbp.origin), { documentFetch: documents().fetch });
+    expect(bare.baseURL).toBe(`${ehbp.origin}/`);
+    expect((await (await bare.fetch(new URL("echo", bare.baseURL), { method: "POST", body: "under" })).json()).text).toBe("under");
+    await expect(bare.fetch("https://other.example/echo")).rejects.toThrow(/client is bound to enclave/);
+    const slashed = await createEnclaveHTTPClient("enclave.example", "", options(`${ehbp.origin}/`), { documentFetch: documents().fetch });
+    expect(slashed.baseURL).toBe(`${ehbp.origin}/`);
+
+    const paths: string[] = [];
+    for (const base of [`${ehbp.origin}/v1`, `${ehbp.origin}/v1/`]) {
+      const ai = await createEnclaveOpenAIClient("enclave.example", "", options(base), { apiKey: "k" }, { documentFetch: documents().fetch });
+      expect(ai.baseURL).toBe(`${ehbp.origin}/v1/`);
+      const completion = await ai.chat.completions.create({ model: "test", messages: [{ role: "user", content: "hi" }] });
+      expect(completion.choices[0]!.message.content).toBe("sealed");
+      paths.push(ehbp.seen[ehbp.seen.length - 1]!.path);
+    }
+    expect(paths).toEqual(["/v1/chat/completions", "/v1/chat/completions"]);
   });
 
   it("replays once after the enclave rotates its key, re-verifying in between", async () => {
