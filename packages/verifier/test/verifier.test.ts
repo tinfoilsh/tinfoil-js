@@ -237,7 +237,8 @@ describe("Verifier.create options", () => {
     expect(() => v.checkRepoVerifiability(`org/project@r1@sha256:${digest}`)).not.toThrow();
     expect(() => v.checkRepoVerifiability("org/project@r2")).toThrow(/embedded config does not match/);
     expect(() => v.checkRepoVerifiability(`org/project@sha256:${"b".repeat(64)}`)).toThrow(/embedded config does not match/);
-    // Without a name, only the digest can be pinned.
+    // Without a name the reference has no identity, so any repository reference, which always
+    // pins an identity, mismatches even when its digest agrees; only the empty reference fits.
     const unnamed = await Verifier.create({ embeddedReferences: { configReference: { digest, runtime } } });
     expect(() => unnamed.checkRepoVerifiability(`org/project@sha256:${digest}`)).toThrow(/embedded config does not match/);
     expect(() => unnamed.checkRepoVerifiability("")).not.toThrow();
