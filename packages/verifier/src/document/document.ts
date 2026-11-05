@@ -275,7 +275,7 @@ export function randomNonce(): Uint8Array {
   return crypto.getRandomValues(new Uint8Array(NONCE_SIZE));
 }
 
-// --- internal (document.go unexported helpers) ---
+// --- internal helpers ---
 
 const DOCUMENT_MEMBERS = [
   "format",

@@ -1,8 +1,8 @@
 # @tinfoilsh/verifier
 
-Browser-compatible TypeScript library for verifying AMD SEV-SNP attestation reports and Sigstore code provenance.
+Verifies Tinfoil attestation documents in TypeScript, on Node, Bun and in browsers: the enclave's hardware quote (AMD SEV-SNP or Intel TDX), the Sigstore provenance of the code and platform it runs, the freshness of those endorsements, and the policy that ties the quote's measurements to the release. The verifier opens no connections, keeps no state between calls, and uses WebCrypto only.
 
-**Most users should use the main [`tinfoil`](https://www.npmjs.com/package/tinfoil) package instead.** It includes this verifier and runs it automatically. Use this package directly for standalone verification, custom verification flows, or audit tooling.
+**Most users should use the main [`tinfoil`](https://www.npmjs.com/package/tinfoil) package instead.** Its clients fetch the document, run this verifier and bind every request to the verified enclave. Use this package directly for standalone verification, custom verification flows, or audit tooling. Coming from 1.x? See [Migrating from 1.x to 2.0](https://github.com/tinfoilsh/tinfoil-js/blob/main/MIGRATION.md).
 
 ## Installation
 
@@ -13,28 +13,39 @@ npm install @tinfoilsh/verifier
 ## Quick Start
 
 ```typescript
-import { Verifier } from '@tinfoilsh/verifier';
+import { Verifier, randomNonce } from "@tinfoilsh/verifier";
 
-const verifier = new Verifier({
-  serverURL: 'https://enclave.example.com',
-  configRepo: 'tinfoilsh/confidential-model-router',
-});
-const attestation = await verifier.verify();
+// Embedded production trust roots and signing keys, 7-day freshness bound.
+const verifier = await Verifier.create();
 
-console.log(attestation.measurement);
-console.log(attestation.tlsPublicKeyFingerprint);
-console.log(attestation.hpkePublicKey);
+// The enclave serves its document for a nonce you choose.
+const nonce = randomNonce();
+const hex = Array.from(nonce, (b) => b.toString(16).padStart(2, "0")).join("");
+const response = await fetch(`https://inference.tinfoil.sh/.well-known/tinfoil-attestation?nonce=${hex}`);
+const document = new Uint8Array(await response.arrayBuffer());
 
-// Per-step results and measurements
-const doc = verifier.getVerificationDocument();
-console.log(doc?.securityVerified);
+const verification = await verifier.verifyV3(document, nonce, "tinfoilsh/confidential-model-router");
+
+verification.codeDigest();         // the verified release
+verification.enclaveMeasurement(); // the quote's authenticated registers
+verification.tlsPublicKeyFP();     // the endorsed TLS key (SPKI SHA-256), if any
+verification.hpkePublicKey();      // the endorsed HPKE key, if any
+verification.freshnessExpiresAt(); // when a cached verification stops authorizing requests
 ```
 
-`verifyBundle(bundle)` verifies an attestation bundle you already hold. Failed verification throws `AttestationError`, a failed fetch in `verify()` throws `FetchError`, and missing options throw `ConfigurationError`.
+`verifyV3` samples the clock once and judges every time-bound check at that instant; `verifyV3At(document, nonce, repo, when)` uses `when` instead. The `repo` pin is `owner/name[@tag][@sha256:digest]` (`parseReference` validates one), and `checkRepoVerifiability(repo)` rejects a pin the verifier could never accept, without a document.
 
-Obtaining `tlsPublicKeyFingerprint` does not pin anything: a custom transport must compare it with the live peer certificate's SPKI on every new TLS connection, in addition to normal hostname and certificate validation.
+`Verifier.create(options)` configures the policy: `pinnedRegisters` must match the enclave's registers, `freshnessMaxAgeMs` bounds witness age, `configSigningKeys` and `freshnessSigningKeys` replace the public trust in the config and approval signers, `configAuthorizer` lets the caller authorize the config itself, and `embeddedReferences` supplies caller-trusted reference values for the config, runtime or platform. An option that cannot be honoured is a `UsageError`.
 
-Release metadata and attestation bundles are fetched through Tinfoil-hosted GitHub proxy endpoints, so verification fails in environments that cannot reach them.
+A `Verification` is immutable and its accessors return copies: `codeDigest()`, `codeTag()`, `configRepo()`, `codeMeasurement()` (the registers the release fixes), `enclaveMeasurement()`, `cryptoMaterial()` and `cryptoMaterialData(id, format)` for every endorsed key, `config()`, `runtime()` and `platform()` for what a config-based verification accepted and where each reference came from, and `metadata()` for the verifier's name and version and when it ran.
+
+### Errors
+
+Every error is a `VerifyError`. A `UsageError` means the verifier was built or called with invalid inputs, so retrying won't help. A `VerificationError` means the document must not be trusted; its `layer` names the check that failed: `envelope` (document shape and nonce binding), `provenance` (code, config and platform endorsements and their freshness), `quote` (the hardware quote) or `policy` (the measurements against the release).
+
+### Pinning
+
+Obtaining `tlsPublicKeyFP()` pins nothing: a transport must compare it with the live peer certificate's SPKI fingerprint on every new TLS connection, in addition to normal hostname and certificate validation; `certPubkeyFP(certDer)` computes the same form from a DER certificate. Likewise `hpkePublicKey()` only identifies the key request bodies must be sealed to.
 
 See [Attestation architecture](https://docs.tinfoil.sh/verification/attestation-architecture) and [Verification in Tinfoil](https://docs.tinfoil.sh/verification/verification-in-tinfoil) for what gets verified.
 
@@ -44,6 +55,7 @@ See [Attestation architecture](https://docs.tinfoil.sh/verification/attestation-
 npm run build
 npm test
 npm run test:browser
+npm run test:conformance   # the shared tinfoil-conformance fixtures; set TINFOIL_CONFORMANCE_FIXTURES to its vectors/v3
 ```
 
 ## Reporting Vulnerabilities
