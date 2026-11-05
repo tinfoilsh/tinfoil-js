@@ -93,6 +93,8 @@ export class GatewayHTTPClient {
     this.#transport = transport;
     this.fetch = fetchImpl;
     this.baseURL = baseURL;
+    // The client's state lives in the transport; the client itself never changes once created.
+    Object.freeze(this);
   }
 
   /**

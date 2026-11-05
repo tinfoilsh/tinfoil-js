@@ -74,6 +74,7 @@ describe("UnverifiedClient", () => {
     expect(requested).toEqual([`${server.origin}${PROTOCOL.KEYS_PATH}`]);
     expect(requested.some((u) => u.includes("tinfoil-attestation"))).toBe(false);
     expect(Object.keys(c)).toEqual(["fetch", "baseURL", "keyOrigin"]);
+    expect(() => ((c as { keyOrigin: string }).keyOrigin = "https://evil.example")).toThrow(TypeError);
     expect(c.baseURL).toBe(`${server.origin}/v1/`);
     expect(c.keyOrigin).toBe(server.origin);
 

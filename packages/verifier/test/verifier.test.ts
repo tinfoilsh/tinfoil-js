@@ -219,6 +219,8 @@ describe("Verifier.create options", () => {
     expect(v.freshnessMaxAgeMs).toBe(7 * 24 * 60 * 60 * 1000);
     expect(v.pinnedRegisters).toBeUndefined();
     expect(v.callerAuthorizesConfig).toBe(false);
+    // The policy can't be reported differently from how it is enforced.
+    expect(() => ((v as { callerAuthorizesConfig: boolean }).callerAuthorizesConfig = true)).toThrow(TypeError);
     expect(() => v.checkRepoVerifiability("tinfoilsh/repo@v1.0.0")).not.toThrow();
     expect(() => v.checkRepoVerifiability("no slash")).toThrow(UsageError);
   });

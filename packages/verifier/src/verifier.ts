@@ -189,6 +189,8 @@ export class Verifier {
     this.freshnessMaxAgeMs = parts.policy.freshnessMaxAgeMs;
     this.pinnedRegisters = parts.policy.pinnedRegisters === undefined ? undefined : Object.freeze(cloneExpected(parts.policy.pinnedRegisters));
     this.callerAuthorizesConfig = parts.policy.embedded.configReference !== undefined || parts.policy.configAuthorizer !== undefined;
+    // The properties describe the policy the verifier enforces, so neither can be changed after it is built.
+    Object.freeze(this);
   }
 
   /**

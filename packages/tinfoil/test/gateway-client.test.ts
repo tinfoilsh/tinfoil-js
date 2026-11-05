@@ -106,6 +106,7 @@ describe("GatewayHTTPClient.create", () => {
     const client = await createGatewayHTTPClient({ verifier: verifier(gateway.publicKeyHex), url: GATEWAY_URL }, s);
     expect(s.calls).toEqual(["https://gateway.example/catalog"]);
     expect(Object.keys(client)).toEqual(["fetch", "baseURL"]);
+    expect(() => ((client as { baseURL: string }).baseURL = "https://evil.example/")).toThrow(TypeError);
     expect(client.baseURL).toBe(GATEWAY_URL);
     expect(await client.models()).toEqual(["other", "test-model"]);
     expect(client.current).toEqual([]);

@@ -153,6 +153,7 @@ describe("EnclaveHTTPClient over TLS", () => {
   it("is verified on creation and exposes the facts", async () => {
     expect(docs.calls).toEqual([`https://${tls.host}/.well-known/tinfoil-attestation?nonce=${docs.calls[0]!.split("nonce=")[1]}`]);
     expect(Object.keys(client)).toEqual(["fetch", "baseURL", "enclave", "repo"]);
+    expect(() => ((client as { enclave: string }).enclave = "evil.example")).toThrow(TypeError);
     expect(client.enclave).toBe(tls.host);
     expect(client.repo).toBe("tinfoilsh/repo");
     expect(client.baseURL).toBe(`https://${tls.host}/`);

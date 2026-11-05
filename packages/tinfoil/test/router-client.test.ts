@@ -147,6 +147,7 @@ describe("RouterHTTPClient over TLS", () => {
 
   it("binds to the first router that verifies without verifying it again", () => {
     expect(Object.keys(client)).toEqual(["fetch", "baseURL", "enclave", "repo"]);
+    expect(() => ((client as { enclave: string }).enclave = "evil.example")).toThrow(TypeError);
     expect(client.enclave).toBe(tls.host);
     expect(client.repo).toBe(ROUTER_REPO);
     expect(client.baseURL).toBe(`https://${tls.host}/`);

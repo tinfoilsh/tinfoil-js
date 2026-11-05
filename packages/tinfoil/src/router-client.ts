@@ -83,6 +83,8 @@ export class RouterHTTPClient {
     this.enclave = transport.enclave().host();
     this.repo = transport.enclave().repo();
     setOpenAIURL(this, openAIURL);
+    // The client's state lives in the transport; the client itself never changes once created.
+    Object.freeze(this);
   }
 
   /**

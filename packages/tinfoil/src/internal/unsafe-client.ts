@@ -174,6 +174,7 @@ export class UnverifiedClient {
     this.fetch = fetchImpl;
     this.baseURL = baseURL;
     this.keyOrigin = keyOrigin;
+    Object.freeze(this);
   }
 
   /**
