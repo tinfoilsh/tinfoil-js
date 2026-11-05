@@ -101,6 +101,11 @@ jobs:
       - name: Run browser tests
         run: npm run test:browser
 
+      - name: Run browser integration tests
+        run: npm run test:browser:integration
+        env:
+          TINFOIL_API_KEY: ${{ secrets.TINFOIL_API_KEY }}
+
   test-bun:
     name: Test (Bun)
     runs-on: ubuntu-latest
@@ -127,4 +132,9 @@ jobs:
 
       - name: Run Bun unit tests
         run: npm run test:bun -w tinfoil
+
+      - name: Run Bun integration tests
+        run: npm run test:bun:integration -w tinfoil
+        env:
+          TINFOIL_API_KEY: ${{ secrets.TINFOIL_API_KEY }}
 

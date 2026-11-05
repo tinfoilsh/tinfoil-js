@@ -9,9 +9,10 @@ import { playwright } from "@vitest/browser-playwright";
  * variants, as a bundler does from the published package, so the browser
  * tests run the browser build's modules from source. The mapping is read
  * from package.json, so the harness can't drift from the field, and every
- * mapped module must exist as source on both sides.
+ * mapped module must exist as source on both sides. The live browser lane's
+ * config shares it.
  */
-function browserField(): Plugin {
+export function browserField(): Plugin {
   const pkg = JSON.parse(readFileSync(resolve(__dirname, "package.json"), "utf8")) as { browser: Record<string, string> };
   const toSource = (dist: string): string => resolve(__dirname, dist.replace(/^\.\/dist\//, "src/").replace(/\.js$/, ".ts"));
   const mapped = new Map<string, string>();
