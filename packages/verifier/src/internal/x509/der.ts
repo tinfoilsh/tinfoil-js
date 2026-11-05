@@ -4,12 +4,14 @@
  * BER-only is rejected, so two encodings of one value can't both verify.
  *
  * The ASN.1 tokenizer from `@freedomofpress/crypto-browser` splits the bytes
- * into a tree and checks that nested lengths add up. It accepts a number of
- * BER encodings, so `decode` walks the raw bytes alongside its tree and
- * rejects every one of them: a length that fits a shorter form, an INTEGER
- * with a redundant sign byte, a BOOLEAN other than 0x00/0xFF, a constructed
- * string, an unused-bit count with set bits, a time with a missing 'Z' or a
- * non-DER fraction, and any bytes after the top-level element. A DER
+ * into a tree, checks that nested lengths add up, and rejects a length that
+ * fits a shorter form and bytes after the top-level element. It accepts the
+ * other BER encodings, so `decode` walks the raw bytes alongside its tree
+ * and rejects every one of them, repeating the tokenizer's own checks rather
+ * than relying on them: a length that fits a shorter form, an INTEGER with a
+ * redundant sign byte, a BOOLEAN other than 0x00/0xFF, a constructed string,
+ * an unused-bit count with set bits, a time with a missing 'Z' or a non-DER
+ * fraction, and any bytes after the top-level element. A DER
  * fraction on a GeneralizedTime passes `decode`; whether a schema admits it
  * is decided by `time()`, which rejects fractions unless asked to accept them.
  */

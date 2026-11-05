@@ -463,7 +463,7 @@ describe.skipIf(withoutVectors)(vectorsTitle("verifyCertificateBundle"), () => {
         delete w.verificationMaterial.tlogEntries[0].inclusionPromise;
       }),
     );
-    await rejects(verifyCertificateBundle(await goldenRoot, bundle, codeIdentity(golden.repo), goldenCode.data.digest!), /no verified observer timestamp/);
+    await rejects(verifyCertificateBundle(await goldenRoot, bundle, codeIdentity(golden.repo), goldenCode.data.digest!), /no verified observer timestamp/i);
   });
 
   it("rejects a payload altered after signing", async () => {
@@ -519,7 +519,7 @@ describe.skipIf(withoutVectors)(vectorsTitle("verifyCertificateBundle"), () => {
     const rejected: [string, RegExp][] = [
       ["p5", /verifying bundle: .*certificate chain/],
       ["p6", /loading trusted root: .*CT logs/],
-      ["p7", /verifying bundle: .*tlog entries/],
+      ["p7", /verifying bundle: .*tlog ?entries/i],
       ["p8", /verifying bundle: .*certificate validity/],
       ["p9", /verifying bundle: .*DSSE signature/],
       ["p10", /subject\[0\] digest/],

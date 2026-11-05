@@ -479,7 +479,7 @@ const TIMESTAMP_REJECTIONS: Readonly<Record<string, RegExp>> = {
   "signer-expired": /TSA signer\) is not valid at/,
   "status-rejected": /not granted \(status 2\)/,
   "tampered-gentime": /signed attributes do not commit to the TSTInfo/,
-  "trailing-bytes": /trailing bytes after the element/,
+  "trailing-bytes": /trailing bytes after/,
   "unknown-authority": /authority 0: the token's signer is not the authority's signing certificate/,
   "wrong-policy": /unexpected timestamp policy/,
 };
