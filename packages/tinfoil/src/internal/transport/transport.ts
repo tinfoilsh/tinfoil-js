@@ -9,7 +9,7 @@
  * {@link isKeyRejection}; replaying the request is up to the layer above.
  */
 import type { Verification } from "@tinfoilsh/verifier";
-import { AttestationError, messageOf } from "../../errors.js";
+import { AttestationError, stripCategory } from "../../errors.js";
 import type { Fetch, TransportMode } from "../../options.js";
 import type { Enclave } from "../enclave.js";
 import { VerifiedEnclave, type State } from "../verified.js";
@@ -167,9 +167,4 @@ export class KeyedTransport {
   invalidate(state: State<BoundFetch>): void {
     this.#cache.invalidate(state);
   }
-}
-
-function stripCategory(err: AttestationError): string {
-  const prefix = `${err.category} error: `;
-  return err.message.startsWith(prefix) ? err.message.slice(prefix.length) : messageOf(err);
 }

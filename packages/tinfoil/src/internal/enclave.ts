@@ -18,7 +18,7 @@ import {
   Verifier,
   type Verification,
 } from "@tinfoilsh/verifier";
-import { AttestationError, ConfigurationError, messageOf, NetworkError, TinfoilError } from "../errors.js";
+import { AttestationError, ConfigurationError, messageOf, NetworkError, stripCategory, TinfoilError, withMessage } from "../errors.js";
 import type { Fetch, VerificationCheck } from "../options.js";
 import { fetchDocument } from "./fetch.js";
 
@@ -213,16 +213,7 @@ function retryable(err: TinfoilError): boolean {
 
 /** The terminal failure, keeping the first attempt's as diagnostics. */
 function joined(last: TinfoilError, first: TinfoilError): TinfoilError {
-  const message = `${stripCategory(last)} (first attempt: ${first.message})`;
-  const options = { cause: last.cause ?? last };
-  if (last instanceof NetworkError) return new NetworkError(message, options);
-  if (last instanceof ConfigurationError) return new ConfigurationError(message, options);
-  return new AttestationError(message, options);
-}
-
-function stripCategory(err: TinfoilError): string {
-  const prefix = `${err.category} error: `;
-  return err.message.startsWith(prefix) ? err.message.slice(prefix.length) : err.message;
+  return withMessage(last, `${stripCategory(last)} (first attempt: ${first.message})`);
 }
 
 function sleep(ms: number, signal?: AbortSignal): Promise<void> {
