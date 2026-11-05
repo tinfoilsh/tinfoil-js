@@ -22,8 +22,8 @@ import {
   parseFreshnessStatement,
   validateFreshnessTime,
   validateWitness,
-  witnessLogTime,
 } from "../src/internal/endorsement/freshness.js";
+import { promisedLogTime } from "../src/internal/sigstore/keyed.js";
 import {
   FRESHNESS_WITNESS_IDENTITY,
   MULTI_PLATFORM_PREDICATE_TYPE,
@@ -284,7 +284,7 @@ describe.skipIf(withoutVectors)(vectorsTitle("authenticateFreshness"), () => {
     );
   });
 
-  describe("witnessLogTime", () => {
+  describe("promisedLogTime", () => {
     let root: Awaited<ReturnType<typeof clientOf>>["root"];
     let entry: TlogEntry;
     beforeAll(async () => {
@@ -295,32 +295,32 @@ describe.skipIf(withoutVectors)(vectorsTitle("authenticateFreshness"), () => {
     });
 
     it("returns the promised integration time of the vector's witness", async () => {
-      await expect(witnessLogTime(root, [entry])).resolves.toEqual(new Date(Number(entry.integratedTime) * 1000));
+      await expect(promisedLogTime(root, [entry])).resolves.toEqual(new Date(Number(entry.integratedTime) * 1000));
     });
 
     it("is undefined without a promise or an integration time", async () => {
-      await expect(witnessLogTime(root, [])).resolves.toBeUndefined();
-      await expect(witnessLogTime(root, [{ ...entry, inclusionPromise: undefined }])).resolves.toBeUndefined();
-      await expect(witnessLogTime(root, [{ ...entry, integratedTime: undefined }])).resolves.toBeUndefined();
+      await expect(promisedLogTime(root, [])).resolves.toBeUndefined();
+      await expect(promisedLogTime(root, [{ ...entry, inclusionPromise: undefined }])).resolves.toBeUndefined();
+      await expect(promisedLogTime(root, [{ ...entry, integratedTime: undefined }])).resolves.toBeUndefined();
     });
 
     it("rejects a promise that does not verify under the log key", async () => {
       const tampered = new Uint8Array(entry.inclusionPromise!);
       tampered[tampered.length - 1] ^= 0x01;
-      await expect(witnessLogTime(root, [{ ...entry, inclusionPromise: tampered }])).rejects.toThrow(/inclusion promise does not verify/);
+      await expect(promisedLogTime(root, [{ ...entry, inclusionPromise: tampered }])).rejects.toThrow(/inclusion promise does not verify/);
       // The promise signs over the integration time, the index and the body, so none can change.
-      await expect(witnessLogTime(root, [{ ...entry, integratedTime: entry.integratedTime! + 1n }])).rejects.toThrow(/does not verify/);
-      await expect(witnessLogTime(root, [{ ...entry, logIndex: entry.logIndex + 1n }])).rejects.toThrow(/does not verify/);
+      await expect(promisedLogTime(root, [{ ...entry, integratedTime: entry.integratedTime! + 1n }])).rejects.toThrow(/does not verify/);
+      await expect(promisedLogTime(root, [{ ...entry, logIndex: entry.logIndex + 1n }])).rejects.toThrow(/does not verify/);
       const body = new Uint8Array(entry.canonicalizedBody);
       body[0] ^= 0x01;
-      await expect(witnessLogTime(root, [{ ...entry, canonicalizedBody: body }])).rejects.toThrow(/does not verify/);
+      await expect(promisedLogTime(root, [{ ...entry, canonicalizedBody: body }])).rejects.toThrow(/does not verify/);
     });
 
     it("rejects a log the trusted root does not list and a time outside the log key's validity", async () => {
-      await expect(witnessLogTime(root, [{ ...entry, logId: "00".repeat(32) }])).rejects.toThrow(/does not list/);
+      await expect(promisedLogTime(root, [{ ...entry, logId: "00".repeat(32) }])).rejects.toThrow(/does not list/);
       const log = root.transparencyLogs.find((l) => l.logId === entry.logId)!;
       const before = BigInt(Math.floor(log.validFrom.getTime() / 1000)) - 1n;
-      await expect(witnessLogTime(root, [{ ...entry, integratedTime: before }])).rejects.toThrow(/outside the log key's validity/);
+      await expect(promisedLogTime(root, [{ ...entry, integratedTime: before }])).rejects.toThrow(/outside the log key's validity/);
     });
   });
 });

@@ -61,6 +61,8 @@ export interface VerifiedRelease {
   readonly identity: SigningIdentity;
   readonly payload: Uint8Array;
   readonly subjects: readonly Subject[];
+  /** The first log entry's integration time, present only when its inclusion promise verified under the log's key. */
+  readonly verifiedLogTime?: Date;
 }
 
 /**
@@ -103,7 +105,13 @@ export class ProvenanceClient {
   async verifyBundle(bundleJson: JsonValue, sanPattern: RegExp, hexDigest: string, subjectName?: string): Promise<VerifiedRelease> {
     const bundle = parseBundle(bundleJson);
     const verified = await verifyCertificateBundle(this.root, bundle, sanPattern, hexDigest, subjectName);
-    return { bundle, identity: verified.identity, payload: verified.payload, subjects: statementSubjects(verified.payload) };
+    return {
+      bundle,
+      identity: verified.identity,
+      payload: verified.payload,
+      subjects: statementSubjects(verified.payload),
+      ...(verified.verifiedLogTime === undefined ? {} : { verifiedLogTime: verified.verifiedLogTime }),
+    };
   }
 
   /**

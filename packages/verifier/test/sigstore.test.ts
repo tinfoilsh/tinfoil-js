@@ -466,6 +466,21 @@ describe.skipIf(withoutVectors)(vectorsTitle("verifyCertificateBundle"), () => {
     await rejects(verifyCertificateBundle(await goldenRoot, bundle, codeIdentity(golden.repo), goldenCode.data.digest!), /no verified observer timestamp/i);
   });
 
+  it("rejects a first entry from a log the root does not list even when a later entry verifies", async () => {
+    // The library ignores entries from logs the root does not name, so a
+    // later entry from a listed log can satisfy it while the first entry's
+    // promise and time go unchecked; that time must never be reported.
+    const bundle = parseBundle(
+      mutated(goldenCode.data.sigstore_bundle, (w) => {
+        const first = w.verificationMaterial.tlogEntries[0];
+        const unknown = structuredClone(first);
+        unknown.logId.keyId = Buffer.alloc(32).toString("base64");
+        w.verificationMaterial.tlogEntries = [unknown, first];
+      }),
+    );
+    await rejects(verifyCertificateBundle(await goldenRoot, bundle, codeIdentity(golden.repo), goldenCode.data.digest!), /verifying bundle: .*does not list/);
+  });
+
   it("rejects a payload altered after signing", async () => {
     const bundle = parseBundle(
       mutated(goldenCode.data.sigstore_bundle, (w) => {
