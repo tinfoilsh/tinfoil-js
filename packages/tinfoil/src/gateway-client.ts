@@ -83,15 +83,18 @@ export async function createGatewayHTTPClient(options: GatewayOptions, seams: Ga
 export class GatewayHTTPClient {
   /** As {@link EnclaveHTTPClient.fetch}. */
   readonly fetch: Fetch;
+  /** The gateway's base URL, which requests are sent to. */
+  readonly baseURL: string;
   readonly #transport: GatewayTransport;
-  readonly #baseURL: string;
 
   /** @internal Only {@link create} constructs a client; anything else is refused. */
   constructor(token: symbol, transport: GatewayTransport, baseURL: string, fetchImpl: Fetch) {
     if (token !== TOKEN) throw new ConfigurationError("GatewayHTTPClient is created with GatewayHTTPClient.create");
     this.#transport = transport;
-    this.#baseURL = baseURL;
     this.fetch = fetchImpl;
+    this.baseURL = baseURL;
+    // The client's state lives in the transport; the client itself never changes once created.
+    Object.freeze(this);
   }
 
   /**
@@ -101,11 +104,6 @@ export class GatewayHTTPClient {
    */
   static create(options?: GatewayOptions): Promise<GatewayHTTPClient> {
     return createGatewayHTTPClient(options ?? {}, {});
-  }
-
-  /** The gateway's base URL, which requests are sent to. */
-  baseURL(): string {
-    return this.#baseURL;
   }
 
   /**
@@ -122,8 +120,8 @@ export class GatewayHTTPClient {
     return this.#transport.ensureVerified(model, signal);
   }
 
-  /** The last successful verification of each replica used so far, unchecked: they may have expired or been rejected. */
-  current(): ReplicaVerification[] {
+  /** The last successful verification of each replica used so far, unchecked: they may have expired or been rejected. A new array on each read. */
+  get current(): ReplicaVerification[] {
     return this.#transport.verifications();
   }
 }

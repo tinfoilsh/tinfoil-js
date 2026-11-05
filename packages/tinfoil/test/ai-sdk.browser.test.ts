@@ -23,7 +23,7 @@ function verifier(hpke: string): Verifier {
     checkRepoVerifiability: (repo: string) => {
       if (repo === "") throw new UsageError("repo required");
     },
-    callerAuthorizesConfig: () => false,
+    callerAuthorizesConfig: false,
     verifyV3At: async () =>
       ({
         cryptoMaterial: [
@@ -84,7 +84,7 @@ describe("createTinfoil in a browser", () => {
     const seen = peer.seen[peer.seen.length - 1]!;
     expect(seen.sealed).toBe(true);
     expect(seen.headers["authorization"]).toBe("Bearer short-lived");
-    expect(tinfoil.httpClient().enclave()).toBe(ENCLAVE);
+    expect(tinfoil.httpClient.enclave).toBe(ENCLAVE);
   });
 
   it("streams an answer chunk by chunk before the stream ends", async () => {

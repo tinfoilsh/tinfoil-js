@@ -21,7 +21,7 @@ function verifier(hpke: string, authorizes = false): Verifier {
     checkRepoVerifiability: (repo: string) => {
       if (repo === "") throw new UsageError("repo required");
     },
-    callerAuthorizesConfig: () => authorizes,
+    callerAuthorizesConfig: authorizes,
     verifyV3At: async () => {
       const material = [
         { id: "tls", format: KEY_SPKI_FP_SHA256_V1_FORMAT, data: "ab".repeat(32) },
@@ -105,9 +105,11 @@ describe("GatewayHTTPClient.create", () => {
     const s = seams();
     const client = await createGatewayHTTPClient({ verifier: verifier(gateway.publicKeyHex), url: GATEWAY_URL }, s);
     expect(s.calls).toEqual(["https://gateway.example/catalog"]);
-    expect(client.baseURL()).toBe(GATEWAY_URL);
+    expect(Object.keys(client)).toEqual(["fetch", "baseURL"]);
+    expect(() => ((client as { baseURL: string }).baseURL = "https://evil.example/")).toThrow(TypeError);
+    expect(client.baseURL).toBe(GATEWAY_URL);
     expect(await client.models()).toEqual(["other", "test-model"]);
-    expect(client.current()).toEqual([]);
+    expect(client.current).toEqual([]);
     const supplied = await createGatewayHTTPClient({ verifier: verifier(gateway.publicKeyHex), url: GATEWAY_URL, catalog: () => new Map() as Catalog }, seams());
     expect(await supplied.models()).toEqual([]);
   });
@@ -139,7 +141,7 @@ describe("GatewayHTTPClient", () => {
     expect(last.headers["x-tinfoil-seal"]).toMatch(/^replica-[ab]\.example$/);
     expect(last.headers["x-tinfoil-model"]).toBe("test-model");
     expect(last.headers["x-tinfoil-cache-prefix"]).toMatch(/^[0-9a-f]{64}$/);
-    const current = client.current();
+    const current = client.current;
     expect(current).toHaveLength(1);
     expect(current[0]).toMatchObject({ reference: "tinfoilsh/test", pinnedModel: "test-model", models: ["test-model"] });
     expect(current[0]!.verification.hpkePublicKey).toBe(gateway.publicKeyHex);
@@ -174,8 +176,8 @@ describe("GatewayHTTPClient", () => {
     const res = await c.fetch(`${GATEWAY_URL}chat/completions`, { method: "POST", body: '{"model":"test-model"}', headers: { "content-type": "application/json", "x-raw": "1" } });
     expect(res.status).toBe(200);
     expect(checked).toHaveLength(2);
-    expect(c.current().map((r) => r.host)).toHaveLength(1);
-    expect(gateway.seen[gateway.seen.length - 1]!.headers["x-tinfoil-seal"]).toBe(c.current()[0]!.host);
+    expect(c.current.map((r) => r.host)).toHaveLength(1);
+    expect(gateway.seen[gateway.seen.length - 1]!.headers["x-tinfoil-seal"]).toBe(c.current[0]!.host);
   });
 
   it("falls over to a replica that verifies and runs the caller's check", async () => {
@@ -189,7 +191,7 @@ describe("GatewayHTTPClient", () => {
     const c = await createGatewayHTTPClient({ verifier: verifier(gateway.publicKeyHex), url: GATEWAY_URL, verificationCheck: (v) => void checked.push(v.hpkePublicKey!) }, failing);
     const res = await c.fetch(`${GATEWAY_URL}chat/completions`, { method: "POST", body: '{"model":"test-model"}', headers: { "content-type": "application/json", "x-raw": "1" } });
     expect(res.status).toBe(200);
-    expect(c.current().map((r) => r.host)).toEqual(["replica-b.example"]);
+    expect(c.current.map((r) => r.host)).toEqual(["replica-b.example"]);
     expect(checked).toEqual([gateway.publicKeyHex]);
     expect(() => new (GatewayHTTPClient as unknown as new (...a: unknown[]) => unknown)(Symbol("x"))).toThrow(ConfigurationError);
   });
@@ -200,7 +202,7 @@ describe("GatewayOpenAIClient", () => {
     const ai = await createGatewayOpenAIClient({ verifier: verifier(gateway.publicKeyHex), url: GATEWAY_URL, userCacheSecret: "option-secret" }, { apiKey: "k" }, seams({ resolveSecret: undefined }));
     expect(ai).toBeInstanceOf(GatewayOpenAIClient);
     expect(ai.baseURL).toBe(GATEWAY_URL);
-    expect(ai.httpClient()).toBeInstanceOf(GatewayHTTPClient);
+    expect(ai.httpClient).toBeInstanceOf(GatewayHTTPClient);
     const reply = await ai.chat.completions.create({ model: "test-model", messages: [{ role: "user", content: "hi" }] });
     expect(reply.choices[0]!.message.content).toBe("sealed");
     const last = gateway.seen[gateway.seen.length - 1]!;
@@ -209,6 +211,6 @@ describe("GatewayOpenAIClient", () => {
     const sent = JSON.parse(new TextDecoder().decode(last.body)) as Record<string, unknown>;
     expect(sent.cache_salt).toMatch(/^[A-Za-z0-9_-]{43}$/);
     expect(sent.user_cache_secret).toBeUndefined();
-    expect(() => new (GatewayOpenAIClient as unknown as new (...a: unknown[]) => unknown)(Symbol("x"), ai.httpClient(), {})).toThrow(ConfigurationError);
+    expect(() => new (GatewayOpenAIClient as unknown as new (...a: unknown[]) => unknown)(Symbol("x"), ai.httpClient, {})).toThrow(ConfigurationError);
   });
 });

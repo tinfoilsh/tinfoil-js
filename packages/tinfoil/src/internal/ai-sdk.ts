@@ -45,7 +45,7 @@ export interface TinfoilProvider extends OpenAICompatibleProvider {
    * The client requests go through. It verifies the service again when the
    * verification expires or its key changes, and is bound to that service.
    */
-  httpClient(): EnclaveHTTPClient | RouterHTTPClient;
+  readonly httpClient: EnclaveHTTPClient | RouterHTTPClient;
 }
 
 /** Seams for tests: the attested clients' own, including the globals the runtime is identified by. */
@@ -89,7 +89,8 @@ export async function createTinfoilProvider(options: TinfoilProviderOptions, sea
     fetch: client.fetch as typeof globalThis.fetch,
     supportsStructuredOutputs: true,
   });
-  Object.defineProperty(provider, "httpClient", { value: () => client, writable: false, configurable: false, enumerable: true });
+  // The provider is a function with the models' factories as properties; the client joins them as a fixed one.
+  Object.defineProperty(provider, "httpClient", { value: client, writable: false, configurable: false, enumerable: true });
   return provider as TinfoilProvider;
 }
 

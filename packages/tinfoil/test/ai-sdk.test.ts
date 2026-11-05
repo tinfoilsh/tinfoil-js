@@ -31,7 +31,7 @@ function verifier(keys: { tls?: string; hpke?: string }): Verifier {
     checkRepoVerifiability: (repo: string) => {
       if (repo === "") throw new UsageError("repo required");
     },
-    callerAuthorizesConfig: () => false,
+    callerAuthorizesConfig: false,
     verifyV3At: async () => {
       const material = [
         ...(keys.tls === undefined ? [] : [{ id: "tls", format: KEY_SPKI_FP_SHA256_V1_FORMAT, data: keys.tls }]),
@@ -143,7 +143,7 @@ describe("createTinfoil's option checks", () => {
       { bearerToken: "t", enclave: { host: "enclave.example", repo: "tinfoilsh/repo" }, baseURL: `${ehbp.origin}/`, verifier: verifier({ tls: "ab".repeat(32), hpke: ehbp.publicKeyHex }) },
       { ...seams([]), globals: worker },
     );
-    expect(sealed.httpClient()).toBeInstanceOf(EnclaveHTTPClient);
+    expect(sealed.httpClient).toBeInstanceOf(EnclaveHTTPClient);
     const node = { process: { versions: { node: "22.0.0" } } } as RuntimeGlobals;
     await expect(createTinfoilProvider({ apiKey: "k", transportMode: "tls", verifier: verifier({ tls: TEST_PIN }) }, { ...s, globals: node })).resolves.toBeDefined();
   });
@@ -163,11 +163,11 @@ describe("the provider over the discovered router", () => {
   });
 
   it("is bound to the verified router and exposes it", () => {
-    const client = tinfoil.httpClient();
+    const client = tinfoil.httpClient;
     expect(client).toBeInstanceOf(RouterHTTPClient);
-    expect(client.enclave()).toBe(tls.host);
-    expect(client.repo()).toBe(ROUTER_REPO);
-    expect(client.current()?.tlsPublicKeyFP).toBe(TEST_PIN);
+    expect(client.enclave).toBe(tls.host);
+    expect(client.repo).toBe(ROUTER_REPO);
+    expect(client.current?.tlsPublicKeyFP).toBe(TEST_PIN);
     expect(Object.getOwnPropertyDescriptor(tinfoil, "httpClient")?.writable).toBe(false);
   });
 
@@ -249,10 +249,10 @@ describe("the provider over one enclave", () => {
       { bearerToken: "short-lived", enclave: { host: "enclave.example", repo: "tinfoilsh/repo" }, transportMode: "ehbp", baseURL: `${ehbp.origin}/`, verifier: verifier({ tls: "ab".repeat(32), hpke: ehbp.publicKeyHex }) },
       s,
     );
-    const client = tinfoil.httpClient();
+    const client = tinfoil.httpClient;
     expect(client).toBeInstanceOf(EnclaveHTTPClient);
-    expect(client.enclave()).toBe("enclave.example");
-    expect(client.current()?.hpkePublicKey).toBe(ehbp.publicKeyHex);
+    expect(client.enclave).toBe("enclave.example");
+    expect(client.current?.hpkePublicKey).toBe(ehbp.publicKeyHex);
 
     const { text } = await generateText({ model: tinfoil(MODEL), prompt: "Say pong", maxRetries: 0 });
     expect(text).toBe("pong");

@@ -18,7 +18,7 @@ function verifier(repos: string[] = []): Verifier {
     checkRepoVerifiability: (repo: string) => {
       if (repo === "") throw new UsageError("repo required");
     },
-    callerAuthorizesConfig: () => false,
+    callerAuthorizesConfig: false,
     verifyV3At: async (_doc: Uint8Array, _nonce: Uint8Array, repo: string) => {
       repos.push(repo);
       const material = [{ id: "tls", format: KEY_SPKI_FP_SHA256_V1_FORMAT, data: PIN }];

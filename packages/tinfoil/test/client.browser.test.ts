@@ -35,7 +35,7 @@ function verifier(hpke: string | undefined): Verifier {
     checkRepoVerifiability: (repo: string) => {
       if (repo === "") throw new UsageError("repo required");
     },
-    callerAuthorizesConfig: () => false,
+    callerAuthorizesConfig: false,
     verifyV3At: async () => {
       const material = [{ id: "tls", format: KEY_SPKI_FP_SHA256_V1_FORMAT, data: "ab".repeat(32) }, ...(hpke === undefined ? [] : [{ id: "hpke", format: KEY_X25519_HPKE_V1_FORMAT, data: hpke }])];
       return {
@@ -128,9 +128,9 @@ describe("EnclaveHTTPClient in a browser", () => {
   it("verifies, seals requests to the enclave's key, and restricts the origin", async () => {
     const client = await createEnclaveHTTPClient(ENCLAVE, "tinfoilsh/repo", { verifier: verifier(peer.publicKeyHex) }, seams());
     expect(client).toBeInstanceOf(EnclaveHTTPClient);
-    expect(client.enclave()).toBe(ENCLAVE);
-    expect(client.baseURL()).toBe(`https://${ENCLAVE}/`);
-    expect(client.current()?.hpkePublicKey).toBe(peer.publicKeyHex);
+    expect(client.enclave).toBe(ENCLAVE);
+    expect(client.baseURL).toBe(`https://${ENCLAVE}/`);
+    expect(client.current?.hpkePublicKey).toBe(peer.publicKeyHex);
     const res = await client.fetch(`https://${ENCLAVE}/echo`, { method: "POST", body: "prompt" });
     expect(await res.json()).toEqual({ path: "/echo", sealed: true, text: "prompt" });
     await expect(client.fetch("https://other.example/echo")).rejects.toThrow(/client is bound to enclave/);
@@ -206,8 +206,8 @@ describe("OpenAI clients in a browser", () => {
   it("creates the recommended client over the discovered router with the cache secret spliced in", async () => {
     const ai = await createTinfoilClient({ bearerToken: "jwt" }, seams(), { verifier: verifier(peer.publicKeyHex) });
     expect(ai).toBeInstanceOf(TinfoilClient);
-    expect(ai.httpClient()).toBeInstanceOf(RouterHTTPClient);
-    expect(ai.httpClient().enclave()).toBe(ENCLAVE);
+    expect(ai.httpClient).toBeInstanceOf(RouterHTTPClient);
+    expect(ai.httpClient.enclave).toBe(ENCLAVE);
     expect(ai.baseURL).toBe(`https://${ENCLAVE}/v1/`);
     const reply = await ai.chat.completions.create({ model: "test", messages: [{ role: "user", content: "hi" }] });
     expect(reply.choices[0]!.message.content).toBe("sealed");
@@ -232,7 +232,7 @@ describe("the gateway in a browser", () => {
     expect(last.headers["x-tinfoil-model"]).toBe("test-model");
     const sent = JSON.parse(new TextDecoder().decode(last.body)) as Record<string, unknown>;
     expect(sent.cache_salt).toMatch(/^[A-Za-z0-9_-]{43}$/);
-    expect(ai.httpClient().current().map((r) => r.host)).toEqual(["replica.example"]);
+    expect(ai.httpClient.current.map((r) => r.host)).toEqual(["replica.example"]);
   });
 });
 

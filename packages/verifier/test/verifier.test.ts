@@ -103,7 +103,7 @@ describe.skipIf(withoutVectors)(vectorsTitle("verifyV3At on the full-verify vect
       const expires = v.freshnessExpiresAt;
       expect(expires).toBeDefined();
       expect(expires!.getTime()).toBeGreaterThanOrEqual(c.at.getTime());
-      expect(expires!.getTime()).toBeLessThanOrEqual(c.at.getTime() + c.verifier.freshnessMaxAgeMs() + 5 * 60 * 1000);
+      expect(expires!.getTime()).toBeLessThanOrEqual(c.at.getTime() + c.verifier.freshnessMaxAgeMs + 5 * 60 * 1000);
     });
   }
 });
@@ -178,7 +178,12 @@ describe.skipIf(withoutVectors)(vectorsTitle("verifyV3At caller mistakes"), () =
     if (launch.platform !== "sev-snp") throw new Error("golden-happy is an SEV-SNP document");
     const matching = await dangerousTestOnlyVerifier(rootsOf(c.fixture), { pinnedRegisters: { platform: "sev-snp", launch: launch.launch } });
     await expect(matching.verifyV3At(c.doc, c.nonce, c.repo, c.at)).resolves.toBeDefined();
-    expect(matching.pinnedRegisters()).toEqual({ platform: "sev-snp", launch: launch.launch });
+    expect(matching.pinnedRegisters).toEqual({ platform: "sev-snp", launch: launch.launch });
+    // The pins are one frozen copy: every read is the same object, and the policy keeps its own.
+    expect(matching.pinnedRegisters).toBe(matching.pinnedRegisters);
+    expect(Object.isFrozen(matching.pinnedRegisters)).toBe(true);
+    (matching.pinnedRegisters as { launch: Uint8Array }).launch[0] ^= 0xff;
+    await expect(matching.verifyV3At(c.doc, c.nonce, c.repo, c.at)).resolves.toBeDefined();
 
     const conflicting = await dangerousTestOnlyVerifier(rootsOf(c.fixture), { pinnedRegisters: { platform: "sev-snp", launch: new Uint8Array(48).fill(9) } });
     const err = await conflicting.verifyV3At(c.doc, c.nonce, c.repo, c.at).catch((e: unknown) => e);
@@ -196,7 +201,7 @@ describe.skipIf(withoutVectors)(vectorsTitle("verifyV3At caller mistakes"), () =
     // The witnesses were logged at the vector's clock; one second later a
     // one-millisecond window no longer covers them.
     const tight = await dangerousTestOnlyVerifier(rootsOf(c.fixture), { freshnessMaxAgeMs: 1 });
-    expect(tight.freshnessMaxAgeMs()).toBe(1);
+    expect(tight.freshnessMaxAgeMs).toBe(1);
     const later = new Date(c.at.getTime() + 1000);
     await expect(c.verifier.verifyV3At(c.doc, c.nonce, c.repo, later)).resolves.toBeDefined();
     const err = await tight.verifyV3At(c.doc, c.nonce, c.repo, later).catch((e: unknown) => e);
@@ -211,9 +216,11 @@ describe("Verifier.create options", () => {
 
   it("defaults to a seven-day freshness window, no pins and endorsement-authorized configs", async () => {
     const v = await Verifier.create();
-    expect(v.freshnessMaxAgeMs()).toBe(7 * 24 * 60 * 60 * 1000);
-    expect(v.pinnedRegisters()).toBeUndefined();
-    expect(v.callerAuthorizesConfig()).toBe(false);
+    expect(v.freshnessMaxAgeMs).toBe(7 * 24 * 60 * 60 * 1000);
+    expect(v.pinnedRegisters).toBeUndefined();
+    expect(v.callerAuthorizesConfig).toBe(false);
+    // The policy can't be reported differently from how it is enforced.
+    expect(() => ((v as { callerAuthorizesConfig: boolean }).callerAuthorizesConfig = true)).toThrow(TypeError);
     expect(() => v.checkRepoVerifiability("tinfoilsh/repo@v1.0.0")).not.toThrow();
     expect(() => v.checkRepoVerifiability("no slash")).toThrow(UsageError);
   });
@@ -235,10 +242,10 @@ describe("Verifier.create options", () => {
 
   it("accepts an embedded v2 platform artifact and derives the config reference from embedded config bytes", async () => {
     const platform = await Verifier.create({ embeddedReferences: { platform: artifact(ARTIFACT_FORMAT_V2) } });
-    expect(platform.callerAuthorizesConfig()).toBe(false);
+    expect(platform.callerAuthorizesConfig).toBe(false);
     const config = utf8(`name: app\ncvm-version: v1.2.3@sha256:${"a".repeat(64)}\n`);
     const embedded = await Verifier.create({ embeddedReferences: { config: { name: "/org/project/r1", bytes: config } } });
-    expect(embedded.callerAuthorizesConfig()).toBe(true);
+    expect(embedded.callerAuthorizesConfig).toBe(true);
     expect(() => embedded.checkRepoVerifiability("org/project@r1")).not.toThrow();
     expect(() => embedded.checkRepoVerifiability("org/other@r1")).toThrow(/embedded config does not match/);
     await expect(Verifier.create({ embeddedReferences: { config: { name: "bad name", bytes: config } } })).rejects.toThrow(UsageError);
@@ -256,7 +263,7 @@ describe("Verifier.create options", () => {
     const digest = "a".repeat(64);
     const reference: EmbeddedConfigReference = { name: "/org/project/r1", digest, runtime };
     const v = await Verifier.create({ embeddedReferences: { configReference: reference, runtime: manifest } });
-    expect(v.callerAuthorizesConfig()).toBe(true);
+    expect(v.callerAuthorizesConfig).toBe(true);
     expect(() => v.checkRepoVerifiability("")).not.toThrow();
     expect(() => v.checkRepoVerifiability(`org/project@r1@sha256:${digest}`)).not.toThrow();
     expect(() => v.checkRepoVerifiability("org/project@r2")).toThrow(/embedded config does not match/);
@@ -306,7 +313,7 @@ describe("Verifier.create options", () => {
   it("accepts registry ID pins only alongside registry trust", async () => {
     const privateRegistryID = "https://registry.tinfoil.sh/scopes/9c4a7f21e0b836d56a13c8fe42d907ab";
     const pinned = await Verifier.create({ configRegistryIDs: [privateRegistryID, "https://registry.tinfoil.sh/scopes/public"] });
-    expect(pinned.callerAuthorizesConfig()).toBe(false);
+    expect(pinned.callerAuthorizesConfig).toBe(false);
     expect(() => pinned.checkRepoVerifiability("org/project@r1")).not.toThrow();
     await expect(Verifier.create({ configRegistryIDs: [] })).rejects.toThrow(/must not be empty/);
     await expect(Verifier.create({ configRegistryIDs: [privateRegistryID, privateRegistryID] })).rejects.toThrow(/duplicate/);
@@ -335,7 +342,7 @@ describe("Verifier.create options", () => {
     await expect(Verifier.create({ configAuthorizer: () => undefined, embeddedReferences: { config } })).rejects.toThrow(/conflicts/);
     await expect(Verifier.create({ configAuthorizer: () => undefined, configSigningKeys: [pem] })).rejects.toThrow(UsageError);
     const authorizer = await Verifier.create({ configAuthorizer: () => undefined });
-    expect(authorizer.callerAuthorizesConfig()).toBe(true);
+    expect(authorizer.callerAuthorizesConfig).toBe(true);
     expect(() => authorizer.checkRepoVerifiability("org/project")).toThrow(/enforce them in caller policy/);
     expect(() => authorizer.checkRepoVerifiability("")).not.toThrow();
   });
@@ -355,7 +362,7 @@ describe("additional config registry IDs", () => {
 
   it("accepts the public registry plus the given registry IDs, supplied once and validated as one list", async () => {
     const v = await Verifier.create({ additionalConfigRegistryIDs: [PRIVATE_REGISTRY_ID] });
-    expect(v.callerAuthorizesConfig()).toBe(false);
+    expect(v.callerAuthorizesConfig).toBe(false);
     expect(() => v.checkRepoVerifiability("org/project@r1")).not.toThrow();
     await expect(Verifier.create({ additionalConfigRegistryIDs: [] })).rejects.toThrow(/additional config registry IDs must not be empty/);
     await expect(Verifier.create({ additionalConfigRegistryIDs: [PUBLIC_REGISTRY_ID] })).rejects.toThrow(/duplicate config registry ID/);

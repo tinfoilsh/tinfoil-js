@@ -120,16 +120,25 @@ export class EnclaveHTTPClient {
    * {@link ConfigurationError}.
    */
   readonly fetch: Fetch;
+  /** Where requests go: the `baseURL` option, or the enclave's own origin. */
+  readonly baseURL: string;
+  /** The host of the verified enclave, even when `baseURL` is a proxy. */
+  readonly enclave: string;
+  /** The repository pin, empty when the verifier authorizes the config instead. */
+  readonly repo: string;
   readonly #transport: KeyedTransport;
-  readonly #baseURL: string;
 
   /** @internal Only {@link create} constructs a client; anything else is refused. */
   constructor(token: symbol, transport: KeyedTransport, baseURL: string, openAIURL: string, fetchImpl: Fetch) {
     if (token !== TOKEN) throw new ConfigurationError("EnclaveHTTPClient is created with EnclaveHTTPClient.create");
     this.#transport = transport;
-    this.#baseURL = baseURL;
     this.fetch = fetchImpl;
+    this.baseURL = baseURL;
+    this.enclave = transport.enclave().host();
+    this.repo = transport.enclave().repo();
     setOpenAIURL(this, openAIURL);
+    // The client's state lives in the transport; the client itself never changes once created.
+    Object.freeze(this);
   }
 
   /**
@@ -142,23 +151,8 @@ export class EnclaveHTTPClient {
     return createEnclaveHTTPClient(host, repo, options ?? {}, {});
   }
 
-  /** Where requests go: the `baseURL` option, or the enclave's own origin. */
-  baseURL(): string {
-    return this.#baseURL;
-  }
-
-  /** The host of the verified enclave, even when `baseURL` is a proxy. */
-  enclave(): string {
-    return this.#transport.enclave().host();
-  }
-
-  /** The repository pin, empty when the verifier authorizes the config instead. */
-  repo(): string {
-    return this.#transport.enclave().repo();
-  }
-
   /** The last successful verification, unchecked: it may have expired or been rejected. */
-  current(): Verification | undefined {
+  get current(): Verification | undefined {
     return this.#transport.current();
   }
 
