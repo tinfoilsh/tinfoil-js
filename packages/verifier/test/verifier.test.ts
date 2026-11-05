@@ -6,11 +6,13 @@
  */
 import { beforeAll, describe, expect, it } from "vitest";
 import { expectedOf, measurementOf } from "../conformance/adapter.js";
+import type { RuntimeReference } from "../src/document/collateral/runtime.js";
 import { NONCE_SIZE } from "../src/document/document.js";
 import { UsageError, VerificationError, type Layer } from "../src/errors.js";
+import { sha256, toHex } from "../src/internal/bytes.js";
 import { ARTIFACT_FORMAT, ARTIFACT_FORMAT_V2 } from "../src/internal/policy/artifact.js";
 import type { Expected } from "../src/measurement.js";
-import { dangerousTestOnlyVerifier, Verifier } from "../src/verifier.js";
+import { dangerousTestOnlyVerifier, Verifier, type EmbeddedConfigReference } from "../src/verifier.js";
 import { conformanceAvailable, inputBytes, loadFixture, loadFixtures, repoOf, vectorsTitle, type ConformanceFixture } from "./helpers/conformance.js";
 import { newSigner } from "./helpers/keyed.js";
 import { clockOf, rootsOf } from "./helpers/verify.js";
@@ -210,6 +212,59 @@ describe("Verifier.create options", () => {
     expect(() => embedded.checkRepoVerifiability("org/project@r1")).not.toThrow();
     expect(() => embedded.checkRepoVerifiability("org/other@r1")).toThrow(/embedded config does not match/);
     await expect(Verifier.create({ embeddedReferences: { config: { name: "bad name", bytes: config } } })).rejects.toThrow(UsageError);
+  });
+
+  it("accepts an embedded config reference in place of the config bytes", async () => {
+    const register = "cd".repeat(48);
+    const manifest = utf8(
+      JSON.stringify({
+        version: "v1.2.3",
+        igvm: { format_version: 1, snp_launch: { measurement: register }, tdx_launch: { mrtd: register, rtmr0: "0".repeat(96), rtmr1: "0".repeat(96), rtmr2: "0".repeat(96), rtmr3: "0".repeat(96) } },
+      }),
+    );
+    const runtime: RuntimeReference = { repo: "tinfoilsh/cvmimage", tag: "v1.2.3", digest: toHex(await sha256(manifest)) };
+    const digest = "a".repeat(64);
+    const reference: EmbeddedConfigReference = { name: "/org/project/r1", digest, runtime };
+    const v = await Verifier.create({ embeddedReferences: { configReference: reference, runtime: manifest } });
+    expect(v.callerAuthorizesConfig()).toBe(true);
+    expect(() => v.checkRepoVerifiability("")).not.toThrow();
+    expect(() => v.checkRepoVerifiability(`org/project@r1@sha256:${digest}`)).not.toThrow();
+    expect(() => v.checkRepoVerifiability("org/project@r2")).toThrow(/embedded config does not match/);
+    expect(() => v.checkRepoVerifiability(`org/project@sha256:${"b".repeat(64)}`)).toThrow(/embedded config does not match/);
+    // Without a name, only the digest can be pinned.
+    const unnamed = await Verifier.create({ embeddedReferences: { configReference: { digest, runtime } } });
+    expect(() => unnamed.checkRepoVerifiability(`org/project@sha256:${digest}`)).toThrow(/embedded config does not match/);
+    expect(() => unnamed.checkRepoVerifiability("")).not.toThrow();
+    // The two forms of an embedded config are exclusive.
+    const bytes = utf8(`cvm-version: v1.2.3@sha256:${runtime.digest}\n`);
+    await expect(Verifier.create({ embeddedReferences: { config: { bytes }, configReference: reference } })).rejects.toThrow(/mutually exclusive/);
+    // The reference is validated like one derived from config bytes, and the embedded manifest must be the one it pins.
+    for (const bad of [
+      { ...reference, digest: "" },
+      { ...reference, digest: "A".repeat(64) },
+      { ...reference, name: "/invalid" },
+      { ...reference, runtime: { ...runtime, repo: "other/runtime" } },
+      { ...reference, runtime: { ...runtime, tag: "1.2.3" } },
+      { ...reference, runtime: { ...runtime, digest: "cd".repeat(32) } },
+      { ...reference, runtime: "v1.2.3" as unknown as RuntimeReference },
+      { ...reference, digest: 7 as unknown as string },
+    ]) {
+      await expect(Verifier.create({ embeddedReferences: { configReference: bad, runtime: manifest } })).rejects.toThrow(UsageError);
+    }
+    // A later change to the caller's object does not reach the verifier.
+    const mutable = { name: "/org/project/r1", digest, runtime: { ...runtime } };
+    const copied = await Verifier.create({ embeddedReferences: { configReference: mutable } });
+    mutable.digest = "b".repeat(64);
+    mutable.runtime.digest = "cd".repeat(32);
+    expect(() => copied.checkRepoVerifiability(`org/project@r1@sha256:${digest}`)).not.toThrow();
+    // Like every configured trust source, it needs config collateral.
+    if (withoutVectors) return;
+    const fixture = loadFixture("golden/golden-happy.json");
+    const embedded = await dangerousTestOnlyVerifier(rootsOf(fixture), { embeddedReferences: { configReference: reference } });
+    const err = await embedded.verifyV3At(inputBytes(fixture, "document_b64"), hex(fixture.input.nonce_hex ?? ""), "", clockOf(fixture)).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(VerificationError);
+    expect((err as VerificationError).layer).toBe("provenance");
+    expect((err as Error).message).toMatch(/configured trust requires/);
   });
 
   it("accepts registry ID pins only alongside registry trust", async () => {

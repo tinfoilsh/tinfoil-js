@@ -14,7 +14,7 @@ import {
   SIGSTORE_FRESHNESS_V1_FORMAT,
 } from "./document/collateral/collateral.js";
 import type { ConfigEndorsement } from "./document/collateral/config.js";
-import type { RuntimeReference } from "./document/collateral/runtime.js";
+import { validateRuntimeReference, type RuntimeReference } from "./document/collateral/runtime.js";
 import { InvalidInputError, parse as parseDocument, type Document } from "./document/document.js";
 import { UsageError, VerificationError, VerifyError, type Layer } from "./errors.js";
 import { sha256, toHex } from "./internal/bytes.js";
@@ -47,10 +47,26 @@ import { pinnedKeys, type PinnedKey } from "./internal/sigstore/keyed.js";
 import { cloneExpected, REGISTER_SIZE, type Expected } from "./measurement.js";
 import { Verification, type ArtifactVerification, type ConfigVerification } from "./verification.js";
 
+/**
+ * An exact config the caller trusts without holding its bytes: its digest
+ * and the runtime release it pins, optionally with its name. The document's
+ * config endorsement is not consulted; the quote must still bind the digest.
+ */
+export interface EmbeddedConfigReference {
+  /** The /org/project/revision name; absent or "" leaves the name unpinned. */
+  readonly name?: string;
+  /** Lowercase hex SHA-256 of the config bytes. */
+  readonly digest: string;
+  /** The runtime release the config pins (its `cvm-version`). */
+  readonly runtime: RuntimeReference;
+}
+
 /** Caller-trusted reference values that replace endorsement checks for the components supplied. */
 export interface EmbeddedReferences {
-  /** Exact config bytes, optionally with their /org/project/revision name. */
+  /** Exact config bytes, optionally with their /org/project/revision name. Exclusive with `configReference`. */
   readonly config?: { readonly name?: string; readonly bytes: Uint8Array };
+  /** The config's digest and runtime pin, when the bytes themselves are not disclosed. Exclusive with `config`. */
+  readonly configReference?: EmbeddedConfigReference;
   /** The exact runtime manifest the config pins. */
   readonly runtime?: Uint8Array;
   /** A platform-endorsements/v2 policy artifact. */
@@ -89,15 +105,15 @@ export interface DangerousTestOnlyRoots extends quote.VendorRoots {
   readonly sigstore?: Uint8Array;
 }
 
-/** An exact config/runtime pair the caller trusts. */
-interface EmbeddedConfigReference {
+/** An exact config/runtime pair the caller trusts, validated and copied. */
+interface ConfigReference {
   readonly name: string;
   readonly digest: string;
   readonly runtime: RuntimeReference;
 }
 
 interface Embedded {
-  readonly configReference?: EmbeddedConfigReference;
+  readonly configReference?: ConfigReference;
   readonly runtime?: Uint8Array;
   readonly platform?: Uint8Array;
 }
@@ -598,18 +614,32 @@ async function keysOf(what: string, pems: readonly string[]): Promise<PinnedKey[
   }
 }
 
-/** Validates the embedded references and derives the config reference from embedded config bytes. */
+/**
+ * Validates the embedded references and settles the config reference: the
+ * caller's own, or one derived from embedded config bytes. Both come from
+ * the caller, so a runtime manifest the reference does not pin is rejected
+ * here rather than at verification.
+ */
 async function embeddedOf(refs: EmbeddedReferences): Promise<Embedded> {
-  if (refs.config === undefined && refs.runtime === undefined && refs.platform === undefined) {
+  if (refs.config === undefined && refs.configReference === undefined && refs.runtime === undefined && refs.platform === undefined) {
     throw new UsageError("embedded references must contain at least one component");
   }
-  let configReference: EmbeddedConfigReference | undefined;
+  if (refs.config !== undefined && refs.configReference !== undefined) {
+    throw new UsageError("embedded config bytes and reference are mutually exclusive");
+  }
+  let configReference: ConfigReference | undefined;
   if (refs.config !== undefined) {
-    const name = refs.config.name ?? "";
-    if (name !== "") usage(() => parseConfigName(name));
-    const runtime = usage(() => configRuntime(refs.config!.bytes));
-    configReference = { name, digest: toHex(await sha256(refs.config.bytes)), runtime };
-    if (refs.runtime !== undefined) await parseManifest(refs.runtime, runtime);
+    const config = refs.config;
+    configReference = { name: config.name ?? "", digest: toHex(await sha256(config.bytes)), runtime: usage(() => configRuntime(config.bytes)) };
+  } else if (refs.configReference !== undefined) {
+    configReference = usage(() => configReferenceOf(refs.configReference!));
+  }
+  if (configReference !== undefined) {
+    const reference = configReference;
+    if (reference.name !== "") usage(() => parseConfigName(reference.name));
+    usage(() => decodeLowerHex("config digest", reference.digest, 32));
+    usage(() => validateRuntimeReference(reference.runtime));
+    if (refs.runtime !== undefined) await parseManifest(refs.runtime, reference.runtime);
   }
   if (refs.runtime !== undefined) decodeManifest(refs.runtime);
   if (refs.platform !== undefined && parseArtifact(refs.platform).format !== ARTIFACT_FORMAT_V2) {
@@ -620,6 +650,24 @@ async function embeddedOf(refs: EmbeddedReferences): Promise<Embedded> {
     ...(refs.runtime === undefined ? {} : { runtime: refs.runtime.slice() }),
     ...(refs.platform === undefined ? {} : { platform: refs.platform.slice() }),
   };
+}
+
+/** A copy of the caller's config reference with every field a string; validation follows. */
+function configReferenceOf(ref: EmbeddedConfigReference): ConfigReference {
+  const name = ref.name ?? "";
+  const runtime = ref.runtime as Partial<RuntimeReference> | undefined;
+  if (
+    typeof name !== "string" ||
+    typeof ref.digest !== "string" ||
+    typeof runtime !== "object" ||
+    runtime === null ||
+    typeof runtime.repo !== "string" ||
+    typeof runtime.tag !== "string" ||
+    typeof runtime.digest !== "string"
+  ) {
+    throw new Error("embedded config reference requires a string name, digest and runtime reference");
+  }
+  return { name, digest: ref.digest, runtime: { repo: runtime.repo, tag: runtime.tag, digest: runtime.digest } };
 }
 
 function message(err: unknown): string {
