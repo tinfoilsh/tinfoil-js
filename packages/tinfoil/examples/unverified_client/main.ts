@@ -1,25 +1,41 @@
 /**
  * UnverifiedClient Example - Development/Testing Only
  *
- * WARNING: UnverifiedClient skips enclave verification. Use only for:
+ * WARNING: UnverifiedClient skips enclave verification. Request bodies are
+ * sealed to whatever key the server hands out, so it exists only to exercise
+ * the EHBP protocol against a local development server. Use only for:
  * - Local development against mock endpoints
- * - Testing when verification is not required
  * - Debugging transport issues
  *
- * For production, always use TinfoilAI or SecureClient which verify the enclave.
+ * For anything that handles real data, use the attested clients from the
+ * package's main entry.
  *
  * Prerequisites:
- * - Export your API key: export TINFOIL_API_KEY="<YOUR_API_KEY>"
+ * - Point TINFOIL_UNVERIFIED_URL at your development server, for example
+ *   export TINFOIL_UNVERIFIED_URL="http://localhost:8080/v1/"
+ * - Export the credential that server expects: export TINFOIL_API_KEY="<KEY>"
  *
  * Run: npx ts-node main.ts
  */
 import { UnverifiedClient } from "tinfoil/unsafe";
 
 async function main() {
-  try {
-    const client = new UnverifiedClient();
+  // The client never discovers a server by itself, and this example never
+  // defaults to one: a URL is required, so nothing real is sent unverified
+  // by accident.
+  const baseURL = process.env.TINFOIL_UNVERIFIED_URL;
+  if (!baseURL) {
+    console.error("TINFOIL_UNVERIFIED_URL is required: the base URL of the development server to talk to without attestation.");
+    process.exit(1);
+  }
 
-    const response = await client.fetch("/v1/chat/completions", {
+  try {
+    // A trailing slash keeps the base URL's last path segment when relative
+    // request URLs resolve against it.
+    const client = await UnverifiedClient.create({ baseURL: baseURL.replace(/\/?$/, "/") });
+
+    // Relative request URLs resolve against the base URL.
+    const response = await client.fetch("chat/completions", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
