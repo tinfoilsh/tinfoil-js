@@ -30,7 +30,9 @@ async function main() {
   }
 
   try {
-    const client = await UnverifiedClient.create({ baseURL });
+    // A trailing slash keeps the base URL's last path segment when relative
+    // request URLs resolve against it.
+    const client = await UnverifiedClient.create({ baseURL: baseURL.replace(/\/?$/, "/") });
 
     // Relative request URLs resolve against the base URL.
     const response = await client.fetch("chat/completions", {
