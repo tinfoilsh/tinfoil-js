@@ -26,9 +26,17 @@ const completion = await client.chat.completions.create({
 });
 ```
 
-Every attested client is an async factory: one that exists has been verified, and it verifies again by itself when the verification expires or the enclave's key changes. `EnclaveOpenAIClient.create(host, repo)` targets one enclave instead of the discovered router, and `RouterHTTPClient.create()` / `EnclaveHTTPClient.create(host, repo)` give a verified `fetch` for any HTTP API.
+Every attested client is an async factory: one that exists has been verified, and it verifies again by itself when the verification expires or the enclave's key changes. `createClient` takes the OpenAI client's own options and nothing else, so it is a drop-in for `new OpenAI(...)`. Anything about the route itself lives on the configurable clients: `RouterOpenAIClient.create(routerOptions, openaiOptions)` for the discovered router with a proxy, transport mode, verifier or cache-secret setting; `EnclaveOpenAIClient.create(host, repo, options, openaiOptions)` for one enclave instead of the router; and `RouterHTTPClient.create()` / `EnclaveHTTPClient.create(host, repo)` for a verified `fetch` to any HTTP API.
 
-Never put `apiKey` in browser code: route browser requests through a [proxy server](https://docs.tinfoil.sh/guides/proxy-server) that adds the key (`baseURL`), and authenticate the browser with `bearerToken`. Multi-user services must scope prompt caches to each end user with `userCacheSecret` or a per-request `user_cache_secret`; see [Prompt caching](https://docs.tinfoil.sh/sdk/prompt-caching).
+Never put `apiKey` in browser code. Route browser requests through a [proxy server](https://docs.tinfoil.sh/guides/proxy-server) that adds the key, and authenticate the browser with a token of your own:
+
+```typescript
+import { RouterOpenAIClient } from "tinfoil";
+
+const client = await RouterOpenAIClient.create({ baseURL: "https://proxy.example.com/" }, { bearerToken: "<SESSION_TOKEN>" });
+```
+
+The request body is still encrypted to the verified enclave's key; the proxy only forwards it. Multi-user services must scope prompt caches to each end user with `userCacheSecret` or a per-request `user_cache_secret`; see [Prompt caching](https://docs.tinfoil.sh/sdk/prompt-caching).
 
 ## Documentation
 
