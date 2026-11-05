@@ -19,7 +19,7 @@ function browserField(): Plugin {
     // The entry point is built output a consumer's bundler picks through
     // the exports map, not a module another source file imports; the tests
     // import both entries by name and compare their surfaces.
-    if (from === "./dist/v3/index.js") continue;
+    if (from === "./dist/index.js") continue;
     const [source, variant] = [toSource(from), toSource(to)];
     if (!existsSync(source) || !existsSync(variant)) throw new Error(`package.json maps ${from} to ${to}, but a source module is missing`);
     mapped.set(source, variant);
@@ -42,7 +42,7 @@ export default defineConfig({
     include: ["openai", "ai", "@ai-sdk/openai-compatible"],
   },
   test: {
-    include: ["test/v3/*.browser.test.ts"],
+    include: ["test/*.browser.test.ts"],
     testTimeout: 30_000,
     browser: {
       enabled: true,
