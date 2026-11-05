@@ -17,7 +17,7 @@ import type { ConfigEndorsement } from "./document/collateral/config.js";
 import { validateRuntimeReference, type RuntimeReference } from "./document/collateral/runtime.js";
 import { InvalidInputError, parse as parseDocument, type Document } from "./document/document.js";
 import { UsageError, VerificationError, VerifyError, type Layer } from "./errors.js";
-import { sha256, toHex } from "./internal/bytes.js";
+import { sha256, toHex, utf8 } from "./internal/bytes.js";
 import { decodeLowerHex } from "./internal/canonical.js";
 import {
   ConfigVerifier,
@@ -38,6 +38,7 @@ import { authenticateFreshness, MAX_FRESHNESS_AGE_MS } from "./internal/endorsem
 import { ProvenanceClient } from "./internal/endorsement/provenance.js";
 import { parseReference, type AuthenticatedArtifact } from "./internal/endorsement/reference.js";
 import { authenticateRuntime } from "./internal/endorsement/runtime.js";
+import { strictParse } from "./internal/json/index.js";
 import { ARTIFACT_FORMAT, ARTIFACT_FORMAT_V2, parse as parseArtifact, type Artifact } from "./internal/policy/artifact.js";
 import * as quote from "./internal/quote/quote.js";
 import { configRuntime } from "./internal/runtime/config.js";
@@ -392,6 +393,9 @@ export class Verifier {
       return { expected: configRuntime(config), config: { source: "policy", name: "", digest, reference: "", signingKeyHint: "", registryID: "" } };
     }
     if (material.bundle === undefined) throw new Error("unsigned config requires a config authorizer");
+    // The document carries the bundle as its source text; parsing it again
+    // strictly reproduces the tree the approval verifier works on.
+    const bundle = strictParse(utf8(material.bundle));
     const policy: ConfigPolicy = {
       identity: pins.identity,
       revision: pins.revision,
@@ -407,8 +411,8 @@ export class Verifier {
       // roots; caller-pinned keys ignore it and verify the key-signed bundle.
       approved =
         material.issuer !== undefined && !this.#policy.configKeysPinned
-          ? await this.#configVerifier.verifyCertified(material.config, material.bundle, material.issuer, policy)
-          : await this.#configVerifier.verify(material.config, material.bundle, policy);
+          ? await this.#configVerifier.verifyCertified(material.config, bundle, material.issuer, policy)
+          : await this.#configVerifier.verify(material.config, bundle, policy);
     } catch (err) {
       throw new Error(`verifying config approval: ${message(err)}`);
     }

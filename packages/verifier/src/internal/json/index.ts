@@ -7,13 +7,15 @@
  * - duplicate member names reject at any depth, compared on decoded names;
  * - trailing data after the top-level value rejects;
  * - nesting deeper than 10000 levels rejects;
- * - numbers keep their source literal so u64 fields survive above 2^53.
+ * - numbers keep their source literal so u64 fields survive above 2^53;
+ * - objects remember their source text, so a decoder can hand a member on
+ *   as the exact text it was sent as (see {@link sourceText}).
  *
  * Parsing is JSON.parse plus checks: TextDecoder handles UTF-8, a scan over
- * the validated text rejects duplicates and keeps member order and number
- * literals, and a final walk rejects lone surrogates. Unknown-member rejection
- * depends on the member set each decoder expects, so it lives in the decoders
- * (see decode.ts), not here.
+ * the validated text rejects duplicates and keeps member order, number
+ * literals and object spans, and a final walk rejects lone surrogates.
+ * Unknown-member rejection depends on the member set each decoder expects, so
+ * it lives in the decoders (see decode.ts), not here.
  */
 
 /** A parsed JSON value. Objects are Maps so member names can't collide with Object.prototype. */
@@ -102,40 +104,63 @@ export function strictParse(bytes: Uint8Array): JsonValue {
   return toJsonValue(parsed, scan(text));
 }
 
+/**
+ * The source text of an object {@link strictParse} produced: the span from
+ * its opening to its closing brace, byte for byte as parsed, since the text
+ * is a lossless decoding of valid UTF-8. Undefined for any other Map, such
+ * as a copy from {@link cloneJsonValue} or one built by hand.
+ */
+export function sourceText(o: JsonObject): string | undefined {
+  const span = sources.get(o);
+  return span === undefined ? undefined : span.text.slice(span.start, span.end);
+}
+
+/** Each parsed object's span in its source text, released with the object. */
+const sources = new WeakMap<JsonObject, { readonly text: string; readonly start: number; readonly end: number }>();
+
 /** What scan() recovers from the text that JSON.parse's output lacks. */
 interface Scan {
-  /** Each object's member names in source order, objects in document order. */
-  readonly orders: readonly string[][];
+  readonly text: string;
+  /** Each object in document order: its member names in source order and its span in `text`. */
+  readonly objects: readonly ObjectScan[];
   /** Every number literal, in document order. */
   readonly numbers: readonly string[];
+}
+
+interface ObjectScan {
+  readonly order: string[];
+  readonly start: number;
+  /** The index after the closing brace. */
+  end: number;
 }
 
 /**
  * Scans text JSON.parse has already validated for what its output lacks:
  * rejects duplicate member names (compared after unescaping) and nesting
  * deeper than MAX_DEPTH, and records each object's member names in source
- * order and every number's source literal (so integers beyond 2^53 and "1"
- * vs "1.0" stay distinguishable). Because the grammar is already checked,
- * this only tracks nesting, decodes each string followed by ':' (a member
- * name), and copies number tokens.
+ * order and span, and every number's source literal (so integers beyond
+ * 2^53 and "1" vs "1.0" stay distinguishable). Because the grammar is
+ * already checked, this only tracks nesting, decodes each string followed
+ * by ':' (a member name), and copies number tokens.
  */
 function scan(text: string): Scan {
-  const orders: string[][] = [];
+  const objects: ObjectScan[] = [];
   const numbers: string[] = [];
-  const stack: ({ readonly seen: Set<string>; readonly order: string[] } | null)[] = [];
+  const stack: ({ readonly seen: Set<string>; readonly object: ObjectScan } | null)[] = [];
   for (let i = 0; i < text.length; i++) {
     const c = text.charCodeAt(i);
     if (c === 0x7b /* { */ || c === 0x5b /* [ */) {
       if (stack.length >= MAX_DEPTH) throw new JsonError("exceeded max depth");
       if (c === 0x7b) {
-        const order: string[] = [];
-        orders.push(order);
-        stack.push({ seen: new Set(), order });
+        const object: ObjectScan = { order: [], start: i, end: -1 };
+        objects.push(object);
+        stack.push({ seen: new Set(), object });
       } else {
         stack.push(null);
       }
     } else if (c === 0x7d /* } */ || c === 0x5d /* ] */) {
-      stack.pop();
+      const top = stack.pop();
+      if (top) top.object.end = i + 1;
     } else if (c === 0x22 /* " */) {
       const start = i;
       for (i++; text.charCodeAt(i) !== 0x22; i++) {
@@ -148,7 +173,7 @@ function scan(text: string): Scan {
         const name = JSON.parse(text.slice(start, i + 1)) as string;
         if (top.seen.has(name)) throw new JsonError(`duplicate object member name ${JSON.stringify(name)}`);
         top.seen.add(name);
-        top.order.push(name);
+        top.object.order.push(name);
       }
     } else if (c === 0x2d /* - */ || (c >= 0x30 && c <= 0x39)) {
       // A number token; valid JSON puts digits only inside strings or numbers.
@@ -157,7 +182,7 @@ function scan(text: string): Scan {
       numbers.push(text.slice(start, i + 1));
     }
   }
-  return { orders, numbers };
+  return { text, objects, numbers };
 }
 
 const LONE_SURROGATE = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/;
@@ -171,12 +196,13 @@ function checkString(s: string): string {
 
 /**
  * Converts JSON.parse output to JsonValue without recursion: objects become
- * Maps (so names can't collide with Object.prototype) in source member order,
- * numbers become JsonNumbers holding their source literal (both consumed from
- * the scan in document order, which is the order this walk visits values),
- * and every string and member name is checked for lone surrogates.
+ * Maps (so names can't collide with Object.prototype) in source member order
+ * and remember their source span, numbers become JsonNumbers holding their
+ * source literal (both consumed from the scan in document order, which is
+ * the order this walk visits values), and every string and member name is
+ * checked for lone surrogates.
  */
-function toJsonValue(root: unknown, { orders, numbers }: Scan): JsonValue {
+function toJsonValue(root: unknown, { text, objects, numbers }: Scan): JsonValue {
   let nextObject = 0;
   let nextNumber = 0;
   type Frame = { readonly src: Record<string, unknown> | unknown[]; readonly keys: string[]; idx: number; readonly out: Map<string, JsonValue> | JsonValue[] };
@@ -190,14 +216,16 @@ function toJsonValue(root: unknown, { orders, numbers }: Scan): JsonValue {
     }
     if (Array.isArray(v)) return { src: v, keys: [], idx: 0, out: [] };
     const o = v as Record<string, unknown>;
-    const keys = orders[nextObject++];
-    if (keys === undefined || keys.length !== Object.keys(o).length) {
+    const scanned = objects[nextObject++];
+    if (scanned === undefined || scanned.order.length !== Object.keys(o).length) {
       throw new JsonError("member scan disagrees with JSON.parse");
     }
-    return { src: o, keys: keys.map(checkString), idx: 0, out: new Map() };
+    const out = new Map<string, JsonValue>();
+    sources.set(out, { text, start: scanned.start, end: scanned.end });
+    return { src: o, keys: scanned.order.map(checkString), idx: 0, out };
   };
   const finish = (v: JsonValue): JsonValue => {
-    if (nextNumber !== numbers.length || nextObject !== orders.length) {
+    if (nextNumber !== numbers.length || nextObject !== objects.length) {
       throw new JsonError("scan disagrees with JSON.parse");
     }
     return v;

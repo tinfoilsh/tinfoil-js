@@ -6,6 +6,7 @@ import {
   canonicalize,
   cloneJsonValue,
   serialize,
+  sourceText,
   strictParse,
   type JsonObject,
   type JsonValue,
@@ -352,6 +353,36 @@ describe("serialize", () => {
   it("rejects lone surrogates and invalid number literals", () => {
     expect(() => serialize(["\udc00"])).toThrow(JsonError);
     expect(() => serialize(new JsonNumber("1."))).toThrow(JsonError);
+  });
+});
+
+describe("sourceText", () => {
+  it("is each parsed object's span, untouched, at every depth", () => {
+    const inner = `{ "k\\u00e9" : [ 1.50 , { } , "}" ] ,\n "é😀":{"x":null} }`;
+    const s = `{"a":${inner},"b":[${inner}],"c":{}}`;
+    const root = parseObj(s);
+    expect(sourceText(root)).toBe(s);
+    expect(sourceText(root.get("a") as JsonObject)).toBe(inner);
+    expect(sourceText((root.get("b") as JsonValue[])[0] as JsonObject)).toBe(inner);
+    expect(sourceText(root.get("c") as JsonObject)).toBe("{}");
+    const nested = (root.get("a") as JsonObject).get("é😀") as JsonObject;
+    expect(sourceText(nested)).toBe(`{"x":null}`);
+    expect(sourceText(((root.get("a") as JsonObject).get("ké") as JsonValue[])[1] as JsonObject)).toBe("{ }");
+  });
+
+  it("re-encodes to exactly the bytes parsed", () => {
+    const prefix = utf8('{"before":"é","v":');
+    const member = bytes("{\"s\":\"\\u00e9", [0xc3, 0xa9, 0xf0, 0x9f, 0x98, 0x80], '", "n":1e2}');
+    const src = bytes(Array.from(prefix), Array.from(member), "}");
+    const v = (strictParse(src) as JsonObject).get("v") as JsonObject;
+    expect(utf8(sourceText(v)!)).toEqual(member);
+  });
+
+  it("is undefined for a copy or a hand-built Map", () => {
+    const root = parseObj('{"a":{}}');
+    expect(sourceText(cloneJsonValue(root) as JsonObject)).toBeUndefined();
+    expect(sourceText((cloneJsonValue(root) as JsonObject).get("a") as JsonObject)).toBeUndefined();
+    expect(sourceText(new Map())).toBeUndefined();
   });
 });
 
