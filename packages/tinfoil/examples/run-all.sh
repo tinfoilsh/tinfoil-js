@@ -20,7 +20,7 @@ EXAMPLES=(
   "chat"
   "streaming"
   "ai-sdk"
-  "secure_client"
+  "http_client"
   "unverified_client"
 )
 

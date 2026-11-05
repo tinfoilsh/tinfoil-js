@@ -1,22 +1,27 @@
 /**
- * SecureClient Example - Low-level Verified Fetch
+ * HTTP Client Example - Verified Fetch
  *
- * SecureClient provides a fetch-compatible API with automatic enclave verification
- * and end-to-end encryption. Use this when you need more control than TinfoilAI,
- * or when integrating with non-OpenAI-compatible endpoints.
+ * RouterHTTPClient gives a fetch-compatible `fetch` bound to the verified
+ * enclave: the client verifies the router before it is returned, and every
+ * request goes to that enclave over the pinned (or sealed) transport. Use it
+ * when you need more control than the OpenAI client, or when calling
+ * endpoints the OpenAI client does not cover. EnclaveHTTPClient.create(host,
+ * repo) does the same for one named enclave.
  *
  * Prerequisites:
  * - Export your API key: export TINFOIL_API_KEY="<YOUR_API_KEY>"
  *
  * Run: npx ts-node main.ts
  */
-import { SecureClient } from "tinfoil";
+import { RouterHTTPClient } from "tinfoil";
 
 async function main() {
   try {
-    const client = new SecureClient();
+    const client = await RouterHTTPClient.create();
+    console.log("Verified enclave:", client.enclave());
 
-    const response = await client.fetch("/v1/chat/completions", {
+    // Request URLs are absolute; baseURL() is where the client's requests go.
+    const response = await client.fetch(new URL("/v1/chat/completions", client.baseURL()), {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
