@@ -73,11 +73,11 @@ const noSleep = { slept: [] as number[], sleep: async (ms: number): Promise<void
 /** A verifier whose verification carries only the given crypto material, for the transport-key rules. */
 function stubVerifier(material: { id: string; format: string; data: string }[], expiresAt: Date): Verifier {
   const verification = {
-    cryptoMaterial: () => material.map((m) => ({ ...m })),
+    cryptoMaterial: material.map((m) => ({ ...m })),
     cryptoMaterialData: (id: string, format: string) => material.find((m) => m.id === id && m.format === format)?.data,
-    tlsPublicKeyFP: () => material.find((m) => m.id === "tls" && m.format === KEY_SPKI_FP_SHA256_V1_FORMAT)?.data,
-    hpkePublicKey: () => material.find((m) => m.id === "hpke" && m.format === KEY_X25519_HPKE_V1_FORMAT)?.data,
-    freshnessExpiresAt: () => new Date(expiresAt.getTime()),
+    tlsPublicKeyFP: material.find((m) => m.id === "tls" && m.format === KEY_SPKI_FP_SHA256_V1_FORMAT)?.data,
+    hpkePublicKey: material.find((m) => m.id === "hpke" && m.format === KEY_X25519_HPKE_V1_FORMAT)?.data,
+    freshnessExpiresAt: new Date(expiresAt.getTime()),
   } as unknown as Verification;
   return {
     checkRepoVerifiability: () => {},
@@ -120,10 +120,10 @@ describe.skipIf(!conformanceAvailable())(vectorsTitle("Enclave"), () => {
     const enclave = await Enclave.create(config({ fetch }));
     const v = await enclave.verify();
     expect(urls).toEqual([`https://${HOST}/.well-known/tinfoil-attestation?nonce=${golden.fixture.input.nonce_hex}`]);
-    expect(v.codeDigest()).toBe(golden.expected.codeDigest);
-    expect(v.tlsPublicKeyFP()).toBe(golden.expected.tls);
-    expect(v.hpkePublicKey()).toBe(golden.expected.hpke);
-    expect(v.freshnessExpiresAt()!.getTime()).toBeGreaterThan(golden.at.getTime());
+    expect(v.codeDigest).toBe(golden.expected.codeDigest);
+    expect(v.tlsPublicKeyFP).toBe(golden.expected.tls);
+    expect(v.hpkePublicKey).toBe(golden.expected.hpke);
+    expect(v.freshnessExpiresAt!.getTime()).toBeGreaterThan(golden.at.getTime());
     expect(enclave.host()).toBe(HOST);
     expect(enclave.repo()).toBe(golden.fixture.input.repo);
     expect(enclave.verifier()).toBe(golden.verifier);
@@ -172,8 +172,8 @@ describe.skipIf(!conformanceAvailable())(vectorsTitle("Enclave"), () => {
     const tlsOnly = stubVerifier([{ id: "tls", format: KEY_SPKI_FP_SHA256_V1_FORMAT, data: "ab".repeat(32) }], later);
     const { fetch } = serving([() => new Response(golden.document)]);
     const v = await (await Enclave.create(config({ fetch, verifier: tlsOnly }))).verifyOnce();
-    expect(v.tlsPublicKeyFP()).toBe("ab".repeat(32));
-    expect(v.hpkePublicKey()).toBeUndefined();
+    expect(v.tlsPublicKeyFP).toBe("ab".repeat(32));
+    expect(v.hpkePublicKey).toBeUndefined();
 
     const oddTls = stubVerifier([{ id: "tls", format: "https://example.com/other", data: "x" }], later);
     const err = await (await Enclave.create(config({ fetch, verifier: oddTls }))).verifyOnce().catch((e: unknown) => e);
@@ -191,7 +191,7 @@ describe.skipIf(!conformanceAvailable())(vectorsTitle("Enclave"), () => {
     noSleep.slept.length = 0;
     const recovered = serving([() => new Response("busy", { status: 503, statusText: "Service Unavailable" }), () => new Response(golden.document)]);
     const v = await (await Enclave.create(config({ fetch: recovered.fetch }))).verify();
-    expect(v.tlsPublicKeyFP()).toBe(golden.expected.tls);
+    expect(v.tlsPublicKeyFP).toBe(golden.expected.tls);
     expect(recovered.urls).toHaveLength(2);
     expect(noSleep.slept).toEqual([VERIFICATION_RETRY_DELAY_MS]);
 
@@ -216,7 +216,7 @@ describe.skipIf(!conformanceAvailable())(vectorsTitle("Enclave"), () => {
   it("runs the verification check after the policy and does not retry its rejection", async () => {
     const seen: string[] = [];
     const { fetch, urls } = serving([() => new Response(golden.document)]);
-    const accepting = await Enclave.create(config({ fetch, verificationCheck: (v) => void seen.push(v.tlsPublicKeyFP()!) }));
+    const accepting = await Enclave.create(config({ fetch, verificationCheck: (v) => void seen.push(v.tlsPublicKeyFP!) }));
     await accepting.verify();
     expect(seen).toEqual([golden.expected.tls]);
 
@@ -261,7 +261,7 @@ describe.skipIf(!conformanceAvailable())(vectorsTitle("Enclave"), () => {
       expect(urls).toHaveLength(0);
 
       const first = await cache.ensureVerified();
-      expect(first.verification.tlsPublicKeyFP()).toBe(golden.expected.tls);
+      expect(first.verification.tlsPublicKeyFP).toBe(golden.expected.tls);
       expect(first.bound).toBe(1);
       expect(bound[0]).toBe(first.verification);
       expect(cache.current()).toBe(first.verification);
@@ -275,7 +275,7 @@ describe.skipIf(!conformanceAvailable())(vectorsTitle("Enclave"), () => {
       // Past the window the cache verifies again; at this clock the policy
       // rejects the stale witnesses, so the refresh fails and the stale
       // verification stays current but is never served as valid.
-      now = new Date(again.verification.freshnessExpiresAt()!.getTime() + 1);
+      now = new Date(again.verification.freshnessExpiresAt!.getTime() + 1);
       await expect(cache.ensureVerified()).rejects.toBeInstanceOf(AttestationError);
       expect(urls).toHaveLength(4);
       expect(cache.current()).toBe(again.verification);
@@ -318,7 +318,7 @@ describe.skipIf(!conformanceAvailable())(vectorsTitle("Enclave"), () => {
       controller.abort(new Error("impatient"));
       await expect(impatient).rejects.toThrow(/impatient/);
       release();
-      expect((await patient).verification.tlsPublicKeyFP()).toBe(golden.expected.tls);
+      expect((await patient).verification.tlsPublicKeyFP).toBe(golden.expected.tls);
       expect(urls).toHaveLength(1);
     });
 
@@ -331,7 +331,7 @@ describe.skipIf(!conformanceAvailable())(vectorsTitle("Enclave"), () => {
       budget.abort(new Error("budget spent"));
       await expect(probe).rejects.toThrow(/budget spent/);
       release();
-      expect((await request).verification.tlsPublicKeyFP()).toBe(golden.expected.tls);
+      expect((await request).verification.tlsPublicKeyFP).toBe(golden.expected.tls);
       expect(cache.current()).toBeDefined();
       expect(urls).toHaveLength(1);
     });
@@ -342,9 +342,9 @@ describe("Enclave against a live enclave", () => {
   it.skipIf(!RUN_INTEGRATION)("verifies inference.tinfoil.sh under the embedded roots", async () => {
     const enclave = await Enclave.create({ host: "inference.tinfoil.sh", repo: "tinfoilsh/confidential-model-router" });
     const v = await enclave.verify();
-    expect(v.tlsPublicKeyFP()).toMatch(/^[0-9a-f]{64}$/);
-    expect(v.hpkePublicKey()).toMatch(/^[0-9a-f]{64}$/);
-    expect(v.freshnessExpiresAt()!.getTime()).toBeGreaterThan(Date.now());
+    expect(v.tlsPublicKeyFP).toMatch(/^[0-9a-f]{64}$/);
+    expect(v.hpkePublicKey).toMatch(/^[0-9a-f]{64}$/);
+    expect(v.freshnessExpiresAt!.getTime()).toBeGreaterThan(Date.now());
     const cache = new VerifiedEnclave(enclave, noBinding);
     const state = await cache.ensureVerified();
     expect(cache.current()).toBe(state.verification);

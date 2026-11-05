@@ -39,11 +39,11 @@ function verifier(hpke: string | undefined): Verifier {
     verifyV3At: async () => {
       const material = [{ id: "tls", format: KEY_SPKI_FP_SHA256_V1_FORMAT, data: "ab".repeat(32) }, ...(hpke === undefined ? [] : [{ id: "hpke", format: KEY_X25519_HPKE_V1_FORMAT, data: hpke }])];
       return {
-        cryptoMaterial: () => material.map((m) => ({ ...m })),
-        tlsPublicKeyFP: () => "ab".repeat(32),
-        hpkePublicKey: () => hpke,
-        codeDigest: () => "11".repeat(32),
-        freshnessExpiresAt: () => new Date(Date.now() + 60_000),
+        cryptoMaterial: material.map((m) => ({ ...m })),
+        tlsPublicKeyFP: "ab".repeat(32),
+        hpkePublicKey: hpke,
+        codeDigest: "11".repeat(32),
+        freshnessExpiresAt: new Date(Date.now() + 60_000),
       } as unknown as Verification;
     },
   } as unknown as Verifier;
@@ -130,7 +130,7 @@ describe("EnclaveHTTPClient in a browser", () => {
     expect(client).toBeInstanceOf(EnclaveHTTPClient);
     expect(client.enclave()).toBe(ENCLAVE);
     expect(client.baseURL()).toBe(`https://${ENCLAVE}/`);
-    expect(client.current()?.hpkePublicKey()).toBe(peer.publicKeyHex);
+    expect(client.current()?.hpkePublicKey).toBe(peer.publicKeyHex);
     const res = await client.fetch(`https://${ENCLAVE}/echo`, { method: "POST", body: "prompt" });
     expect(await res.json()).toEqual({ path: "/echo", sealed: true, text: "prompt" });
     await expect(client.fetch("https://other.example/echo")).rejects.toThrow(/client is bound to enclave/);

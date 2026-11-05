@@ -65,7 +65,7 @@ export function ehbpMode(options: EHBPOptions = {}): Mode {
     name: "ehbp",
     validateRequest: checkEHBP,
     async bind(v: Verification): Promise<BoundFetch> {
-      const key = v.hpkePublicKey();
+      const key = v.hpkePublicKey;
       if (key === undefined) throw new AttestationError("document endorses no HPKE key; cannot use the EHBP transport mode (use the TLS transport mode)");
       let identity: Identity;
       try {

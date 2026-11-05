@@ -22,10 +22,10 @@ function verifier(pin: string): Verifier {
     checkRepoVerifiability: () => {},
     verifyV3At: async () =>
       ({
-        cryptoMaterial: () => [{ id: "tls", format: "https://tinfoil.sh/key/spki-fp-sha256/v1", data: pin }],
-        tlsPublicKeyFP: () => pin,
-        hpkePublicKey: () => undefined,
-        freshnessExpiresAt: () => new Date(Date.now() + 60_000),
+        cryptoMaterial: [{ id: "tls", format: "https://tinfoil.sh/key/spki-fp-sha256/v1", data: pin }],
+        tlsPublicKeyFP: pin,
+        hpkePublicKey: undefined,
+        freshnessExpiresAt: new Date(Date.now() + 60_000),
       }) as unknown as Verification,
   } as unknown as Verifier;
 }

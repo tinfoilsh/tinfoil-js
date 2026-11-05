@@ -41,11 +41,11 @@ function verifier(hpke: string | ((document: string) => string), authorizes = fa
         { id: "hpke", format: KEY_X25519_HPKE_V1_FORMAT, data: key },
       ];
       return {
-        cryptoMaterial: () => material.map((m) => ({ ...m })),
-        tlsPublicKeyFP: () => "ab".repeat(32),
-        hpkePublicKey: () => key,
-        codeDigest: () => "11".repeat(32),
-        freshnessExpiresAt: () => new Date(Date.now() + 60_000),
+        cryptoMaterial: material.map((m) => ({ ...m })),
+        tlsPublicKeyFP: "ab".repeat(32),
+        hpkePublicKey: key,
+        codeDigest: "11".repeat(32),
+        freshnessExpiresAt: new Date(Date.now() + 60_000),
       } as unknown as Verification;
     },
   } as unknown as Verifier;
@@ -468,7 +468,7 @@ describe("GatewayTransport", () => {
     const current = t.verifications();
     expect(current).toHaveLength(1);
     expect(current[0]).toMatchObject({ host: order[2], models: [MODEL], reference: "tinfoilsh/test", pinnedModel: "" });
-    expect(current[0]!.verification.hpkePublicKey()).toBe(keyOf(order[2]!));
+    expect(current[0]!.verification.hpkePublicKey).toBe(keyOf(order[2]!));
   });
 
   it("seals to the replica's own key, so a body sealed under another replica's key is rejected by the peer", async () => {
@@ -516,7 +516,7 @@ describe("GatewayTransport", () => {
     });
     expect(await t.models()).toEqual(["other", MODEL]);
     const v = await t.ensureVerified(MODEL);
-    expect(v.hpkePublicKey()).toBe(keyOf(order[1]!));
+    expect(v.hpkePublicKey).toBe(keyOf(order[1]!));
     expect([...new Set(attempts)]).toEqual([order[0], order[1]]);
     expect(repos).toEqual(["tinfoilsh/test@v1"]);
     await t.ensureVerified(MODEL);

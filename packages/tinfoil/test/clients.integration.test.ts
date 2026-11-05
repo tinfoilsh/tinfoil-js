@@ -22,7 +22,7 @@ describe.each<TransportMode>(["tls", "ehbp"])("EnclaveHTTPClient against %s on a
     async () => {
       const http = await EnclaveHTTPClient.create(HOST, REPO, { transportMode });
       expect(http.enclave()).toBe(HOST);
-      expect(http.current()?.tlsPublicKeyFP()).toMatch(SHA256_HEX);
+      expect(http.current()?.tlsPublicKeyFP).toMatch(SHA256_HEX);
 
       const ai = await EnclaveOpenAIClient.create(HOST, REPO, { transportMode }, { apiKey });
       expect(ai.baseURL).toBe(`https://${HOST}/v1/`);
@@ -40,7 +40,7 @@ describe.each<TransportMode>(["tls", "ehbp"])("RouterOpenAIClient against %s on 
       const ai = await RouterOpenAIClient.create({ transportMode }, { apiKey });
       const router = ai.httpClient();
       expect(router.repo()).toBe(REPO);
-      expect(router.current()?.tlsPublicKeyFP()).toMatch(SHA256_HEX);
+      expect(router.current()?.tlsPublicKeyFP).toMatch(SHA256_HEX);
       expect(ai.baseURL).toBe(`https://${router.enclave()}/v1/`);
       await completeChat(ai);
     },
@@ -68,7 +68,7 @@ describe("GatewayHTTPClient on the live gateway", () => {
       const models = await http.models();
       expect(models).toEqual([...catalog.keys()].sort());
       const verification = await http.ensureVerified(models[0]!);
-      expect(verification.hpkePublicKey()).toMatch(SHA256_HEX);
+      expect(verification.hpkePublicKey).toMatch(SHA256_HEX);
       expect(http.current().map((r) => r.reference)).toEqual([catalog.get(models[0]!)!.repo]);
     },
     180_000,

@@ -38,11 +38,11 @@ function verifier(keys: { tls?: string; hpke?: string }): Verifier {
         ...(keys.hpke === undefined ? [] : [{ id: "hpke", format: KEY_X25519_HPKE_V1_FORMAT, data: keys.hpke }]),
       ];
       return {
-        cryptoMaterial: () => material.map((m) => ({ ...m })),
-        tlsPublicKeyFP: () => keys.tls,
-        hpkePublicKey: () => keys.hpke,
-        codeDigest: () => "11".repeat(32),
-        freshnessExpiresAt: () => new Date(Date.now() + 60_000),
+        cryptoMaterial: material.map((m) => ({ ...m })),
+        tlsPublicKeyFP: keys.tls,
+        hpkePublicKey: keys.hpke,
+        codeDigest: "11".repeat(32),
+        freshnessExpiresAt: new Date(Date.now() + 60_000),
       } as unknown as Verification;
     },
   } as unknown as Verifier;
@@ -167,7 +167,7 @@ describe("the provider over the discovered router", () => {
     expect(client).toBeInstanceOf(RouterHTTPClient);
     expect(client.enclave()).toBe(tls.host);
     expect(client.repo()).toBe(ROUTER_REPO);
-    expect(client.current()?.tlsPublicKeyFP()).toBe(TEST_PIN);
+    expect(client.current()?.tlsPublicKeyFP).toBe(TEST_PIN);
     expect(Object.getOwnPropertyDescriptor(tinfoil, "httpClient")?.writable).toBe(false);
   });
 
@@ -252,7 +252,7 @@ describe("the provider over one enclave", () => {
     const client = tinfoil.httpClient();
     expect(client).toBeInstanceOf(EnclaveHTTPClient);
     expect(client.enclave()).toBe("enclave.example");
-    expect(client.current()?.hpkePublicKey()).toBe(ehbp.publicKeyHex);
+    expect(client.current()?.hpkePublicKey).toBe(ehbp.publicKeyHex);
 
     const { text } = await generateText({ model: tinfoil(MODEL), prompt: "Say pong", maxRetries: 0 });
     expect(text).toBe("pong");

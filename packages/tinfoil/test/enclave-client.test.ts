@@ -32,11 +32,11 @@ function verifier(keys: () => { tls?: string; hpke?: string }): Verifier {
         ...(k.hpke === undefined ? [] : [{ id: "hpke", format: KEY_X25519_HPKE_V1_FORMAT, data: k.hpke }]),
       ];
       return {
-        cryptoMaterial: () => material.map((m) => ({ ...m })),
-        tlsPublicKeyFP: () => k.tls,
-        hpkePublicKey: () => k.hpke,
-        codeDigest: () => "11".repeat(32),
-        freshnessExpiresAt: () => new Date(Date.now() + 60_000),
+        cryptoMaterial: material.map((m) => ({ ...m })),
+        tlsPublicKeyFP: k.tls,
+        hpkePublicKey: k.hpke,
+        codeDigest: "11".repeat(32),
+        freshnessExpiresAt: new Date(Date.now() + 60_000),
       } as unknown as Verification;
     },
   } as unknown as Verifier;
@@ -155,8 +155,8 @@ describe("EnclaveHTTPClient over TLS", () => {
     expect(client.enclave()).toBe(tls.host);
     expect(client.repo()).toBe("tinfoilsh/repo");
     expect(client.baseURL()).toBe(`https://${tls.host}/`);
-    expect(client.current()?.tlsPublicKeyFP()).toBe(TEST_PIN);
-    expect((await client.ensureVerified()).codeDigest()).toBe("11".repeat(32));
+    expect(client.current()?.tlsPublicKeyFP).toBe(TEST_PIN);
+    expect((await client.ensureVerified()).codeDigest).toBe("11".repeat(32));
     expect(docs.calls).toHaveLength(1);
     await client.reverify();
     expect(docs.calls).toHaveLength(2);
@@ -271,13 +271,13 @@ describe("EnclaveHTTPClient over EHBP", () => {
       { verifier: verifier(() => ({ tls: "ab".repeat(32), hpke: verified++ === 0 ? stale : ehbp.publicKeyHex })), transportMode: "ehbp", baseURL: `${ehbp.origin}/` },
       { documentFetch: docs.fetch, sleep: async () => {} },
     );
-    expect(client.current()?.hpkePublicKey()).toBe(stale);
+    expect(client.current()?.hpkePublicKey).toBe(stale);
     const before = ehbp.seen.length;
     const res = await client.fetch(`${ehbp.origin}/echo`, { method: "POST", body: "again" });
     expect((await res.json()).text).toBe("again");
     expect(verified).toBe(2);
     expect(ehbp.seen.length).toBe(before + 1);
-    expect(client.current()?.hpkePublicKey()).toBe(ehbp.publicKeyHex);
+    expect(client.current()?.hpkePublicKey).toBe(ehbp.publicKeyHex);
   });
 
   it("runs the caller's verification check and backs an OpenAI client on the proxy base URL", async () => {
@@ -290,7 +290,7 @@ describe("EnclaveHTTPClient over EHBP", () => {
         verifier: verifier(() => ({ tls: "ab".repeat(32), hpke: ehbp.publicKeyHex })),
         transportMode: "ehbp",
         baseURL: `${ehbp.origin}/`,
-        verificationCheck: (v) => void seen.push(v.hpkePublicKey()!),
+        verificationCheck: (v) => void seen.push(v.hpkePublicKey!),
       },
       { apiKey: "k" },
       { documentFetch: docs.fetch },

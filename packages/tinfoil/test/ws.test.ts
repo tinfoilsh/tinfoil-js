@@ -42,11 +42,11 @@ function verifier(pin: () => string): Verifier {
     },
     verifyV3At: async () =>
       ({
-        cryptoMaterial: () => [{ id: "tls", format: KEY_SPKI_FP_SHA256_V1_FORMAT, data: pin() }],
-        tlsPublicKeyFP: () => pin(),
-        hpkePublicKey: () => undefined,
-        codeDigest: () => "11".repeat(32),
-        freshnessExpiresAt: () => new Date(Date.now() + 60_000),
+        cryptoMaterial: [{ id: "tls", format: KEY_SPKI_FP_SHA256_V1_FORMAT, data: pin() }],
+        tlsPublicKeyFP: pin(),
+        hpkePublicKey: undefined,
+        codeDigest: "11".repeat(32),
+        freshnessExpiresAt: new Date(Date.now() + 60_000),
       }) as unknown as Verification,
   } as unknown as Verifier;
 }
@@ -198,14 +198,14 @@ describe("createWebSocket", () => {
       ...verifier(() => TEST_PIN),
       verifyV3At: async () =>
         ({
-          cryptoMaterial: () => [
+          cryptoMaterial: [
             { id: "tls", format: KEY_SPKI_FP_SHA256_V1_FORMAT, data: TEST_PIN },
             { id: "hpke", format: KEY_X25519_HPKE_V1_FORMAT, data: hpke },
           ],
-          tlsPublicKeyFP: () => TEST_PIN,
-          hpkePublicKey: () => hpke,
-          codeDigest: () => "11".repeat(32),
-          freshnessExpiresAt: () => new Date(Date.now() + 60_000),
+          tlsPublicKeyFP: TEST_PIN,
+          hpkePublicKey: hpke,
+          codeDigest: "11".repeat(32),
+          freshnessExpiresAt: new Date(Date.now() + 60_000),
         }) as unknown as Verification,
     } as unknown as Verifier;
     const c = await createEnclaveHTTPClient(host, "tinfoilsh/repo", { verifier: sealing, transportMode: "ehbp" }, { documentFetch: documents().fetch, tls: { ca: TEST_CERT } });
