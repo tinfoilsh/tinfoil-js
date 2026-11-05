@@ -9,7 +9,7 @@ import { AttestationError, ConfigurationError, NetworkError, TinfoilError } from
 import { createRouterOpenAIClient, createTinfoilClient, RouterOpenAIClient, TinfoilClient } from "../../src/v3/openai-client.js";
 import type { Fetch, RouterOptions } from "../../src/v3/options.js";
 import { createRouterHTTPClient, RouterHTTPClient, type RouterClientSeams } from "../../src/v3/router-client.js";
-import { KEY_SPKI_FP_SHA256_V1_FORMAT, KEY_X25519_HPKE_V1_FORMAT, UsageError, type Verification, type Verifier } from "../../../verifier/src/v3/index.js";
+import { KEY_SPKI_FP_SHA256_V1_FORMAT, KEY_X25519_HPKE_V1_FORMAT, UsageError, type Verification, type Verifier } from "../../../verifier/src/index.js";
 import { startEhbpServer, type EhbpServer } from "./helpers/ehbp-server.js";
 import { startTlsServer, TEST_CERT, TEST_PIN, type TlsServer } from "./helpers/tls-server.js";
 

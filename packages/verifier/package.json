@@ -1,7 +1,7 @@
 {
   "name": "@tinfoilsh/verifier",
   "version": "1.4.0",
-  "description": "AMD SEV-SNP attestation verifier for Node.js and browsers",
+  "description": "Tinfoil attestation document verifier (AMD SEV-SNP and Intel TDX) for Node.js and browsers",
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -11,11 +11,6 @@
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js",
       "default": "./dist/index.js"
-    },
-    "./v3": {
-      "types": "./dist/v3/index.d.ts",
-      "import": "./dist/v3/index.js",
-      "default": "./dist/v3/index.js"
     }
   },
   "scripts": {
@@ -24,9 +19,7 @@
     "check:types": "tsc -p tsconfig.test.json",
     "test": "vitest run",
     "test:conformance": "npm run build:conformance && TINFOIL_CONFORMANCE_FIXTURES=${TINFOIL_CONFORMANCE_FIXTURES:-../../../tinfoil-conformance/vectors/v3} vitest run test/conformance.test.ts",
-    "test:integration": "RUN_TINFOIL_INTEGRATION=true npm test",
     "test:browser": "vitest run --config vite.config.playwright.ts",
-    "test:browser:integration": "vitest run --config vite.config.integration.ts",
     "check:es2020": "test -n \"$(find dist -name '*.js')\" && find dist -name '*.js' -exec acorn --ecma2020 --module --silent {} +",
     "clean": "rm -rf dist dist-conformance",
     "prepublishOnly": "npm run build",
@@ -36,6 +29,8 @@
     "attestation",
     "amd",
     "sev-snp",
+    "intel",
+    "tdx",
     "verifier"
   ],
   "author": "Tinfoil",

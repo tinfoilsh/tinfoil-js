@@ -2,7 +2,7 @@
  * Retrieves raw attestation documents from enclaves. Nothing is parsed here;
  * verification belongs to the verifier.
  */
-import { NONCE_SIZE } from "@tinfoilsh/verifier/v3";
+import { NONCE_SIZE } from "@tinfoilsh/verifier";
 import { SDK_NAME, SDK_VERSION } from "../../version.js";
 import { ConfigurationError, messageOf, NetworkError, TinfoilError } from "../errors.js";
 import type { Fetch } from "../options.js";

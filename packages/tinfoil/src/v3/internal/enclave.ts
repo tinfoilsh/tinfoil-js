@@ -17,7 +17,7 @@ import {
   UsageError,
   Verifier,
   type Verification,
-} from "@tinfoilsh/verifier/v3";
+} from "@tinfoilsh/verifier";
 import { AttestationError, ConfigurationError, messageOf, NetworkError, TinfoilError } from "../errors.js";
 import type { Fetch, VerificationCheck } from "../options.js";
 import { fetchDocument } from "./fetch.js";

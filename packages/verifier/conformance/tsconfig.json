@@ -6,5 +6,5 @@
     "declaration": false,
     "declarationMap": false
   },
-  "include": ["./**/*", "../src/v3/**/*"]
+  "include": ["./**/*", "../src/**/*"]
 }

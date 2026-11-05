@@ -10,10 +10,10 @@ import { AttestationError, ConfigurationError, NetworkError } from "../../src/v3
 import { Enclave, fromVerify, RejectedError, VERIFICATION_RETRY_DELAY_MS, type EnclaveConfig } from "../../src/v3/internal/enclave.js";
 import { VerifiedEnclave } from "../../src/v3/internal/verified.js";
 import type { Fetch } from "../../src/v3/options.js";
-import { dangerousTestOnlyVerifier } from "../../../verifier/src/v3/verifier.js";
-import { KEY_SPKI_FP_SHA256_V1_FORMAT, KEY_X25519_HPKE_V1_FORMAT, UsageError, VerificationError, type Verification, type Verifier } from "../../../verifier/src/v3/index.js";
-import { conformanceAvailable, inputBytes, loadFixture, vectorsTitle, type ConformanceFixture } from "../../../verifier/test/v3/helpers/conformance.js";
-import { clockOf, rootsOf } from "../../../verifier/test/v3/helpers/verify.js";
+import { dangerousTestOnlyVerifier } from "../../../verifier/src/verifier.js";
+import { KEY_SPKI_FP_SHA256_V1_FORMAT, KEY_X25519_HPKE_V1_FORMAT, UsageError, VerificationError, type Verification, type Verifier } from "../../../verifier/src/index.js";
+import { conformanceAvailable, inputBytes, loadFixture, vectorsTitle, type ConformanceFixture } from "../../../verifier/test/helpers/conformance.js";
+import { clockOf, rootsOf } from "../../../verifier/test/helpers/verify.js";
 import { beforeAll, describe, expect, it } from "vitest";
 
 const RUN_INTEGRATION = process.env.RUN_TINFOIL_INTEGRATION === "true";
