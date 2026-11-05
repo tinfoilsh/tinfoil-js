@@ -20,14 +20,16 @@
  * exactly one DSSE signature, verified over the pre-authentication encoding
  * under the certificate key; every entry of kind "dsse".
  *
- * The library accepts the anchoring promise on any entry of a known log.
- * This module requires it on the first entry, whose integration time is the
- * one reported as `verifiedLogTime`, or an RFC 3161 timestamp.
+ * The library accepts the anchoring promise on any entry of a known log and
+ * does not report which entries it verified, so `verifiedLogTime` is proven
+ * here: the first entry's promise is verified under its log's key from the
+ * root, or else an RFC 3161 timestamp must be present.
  */
 import { SigstoreVerifier, type SigstoreBundle, type TrustedRoot as LibraryTrustedRoot, type VerificationPolicy, type X509Certificate } from "@freedomofpress/sigstore-browser";
 import { map, object, str } from "../json/decode.js";
 import { serialize, strictParse, type JsonObject, type JsonValue } from "../json/index.js";
 import { IN_TOTO_PAYLOAD_TYPE, type Bundle } from "./bundle.js";
+import { promisedLogTime } from "./keyed.js";
 import type { TrustedRoot } from "./trusted-root.js";
 
 export const GITHUB_OIDC_ISSUER = "https://token.actions.githubusercontent.com";
@@ -49,7 +51,7 @@ export interface SigningIdentity {
 export interface VerifiedBundle {
   readonly identity: SigningIdentity;
   readonly payload: Uint8Array;
-  /** The first log entry's integration time, present only when its inclusion promise verified. */
+  /** The first log entry's integration time, present only when its inclusion promise verified here under the log's key. */
   readonly verifiedLogTime?: Date;
 }
 
@@ -90,12 +92,19 @@ export async function verifyCertificateBundle(
   const identity = policy.identity;
   if (identity === undefined) throw new Error("verifying bundle: the signing certificate was not checked");
 
-  // The signature must be anchored by a time the library verified: the first
-  // entry's promise (a signature over its integration time) or an RFC 3161
-  // timestamp. A bare integration time is the bundle's own claim.
-  const first = bundle.tlogEntries[0];
-  const promised = first !== undefined && first.inclusionPromise !== undefined && first.integratedTime !== undefined;
-  if (!promised && bundle.rfc3161Timestamps.length === 0) {
+  // The signature must be anchored by a verified time. The library requires
+  // one but does not say which entry supplied it, and it ignores entries from
+  // logs the root does not list, so the first entry's promise is verified
+  // here under its log's key before its time is reported; without one, an
+  // RFC 3161 timestamp must be present. A bare integration time is the
+  // bundle's own claim.
+  let verifiedLogTime: Date | undefined;
+  try {
+    verifiedLogTime = await promisedLogTime(root, bundle.tlogEntries);
+  } catch (err) {
+    throw new Error(`verifying bundle: ${message(err)}`);
+  }
+  if (verifiedLogTime === undefined && bundle.rfc3161Timestamps.length === 0) {
     throw new Error("verifying bundle: no verified observer timestamp (no inclusion promise on the first log entry and no RFC 3161 timestamp)");
   }
 
@@ -104,7 +113,7 @@ export async function verifyCertificateBundle(
   return {
     identity,
     payload: bundle.dsse.payload,
-    ...(promised ? { verifiedLogTime: new Date(Number(first.integratedTime) * 1000) } : {}),
+    ...(verifiedLogTime === undefined ? {} : { verifiedLogTime }),
   };
 }
 

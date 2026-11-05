@@ -15,7 +15,7 @@
 import { concat, sha256, toHex, utf8 } from "../bytes.js";
 import { decodeBase64 } from "../canonical.js";
 import { arr, object, str, struct } from "../json/decode.js";
-import { canonicalize, strictParse, type JsonValue } from "../json/index.js";
+import { canonicalize, JsonNumber, strictParse, type JsonValue } from "../json/index.js";
 import { bytesEqual, expectSequence, isUniversal } from "../x509/certificate.js";
 import { bitString, decode, DerError, ecdsaSignatureToRaw, oid, pemBlocks, TAG } from "../x509/der.js";
 import { IN_TOTO_PAYLOAD_TYPE, type Bundle, type TlogEntry } from "./bundle.js";
@@ -352,6 +352,35 @@ export async function verifyLogSignature(key: CryptoKey, data: Uint8Array, signa
   } catch {
     return false;
   }
+}
+
+/**
+ * The first log entry's integration time, proven by the log's inclusion
+ * promise: a signature under the key of the log the entry names, listed in
+ * `root` and valid at that time, over the canonical record of the entry's
+ * body, integration time, index and log id. Undefined when the first entry
+ * states no time or carries no promise; a log the root does not list, a time
+ * outside the key's validity, or a promise that does not verify rejects.
+ */
+export async function promisedLogTime(root: TrustedRoot, entries: readonly TlogEntry[]): Promise<Date | undefined> {
+  const first = entries[0];
+  if (first === undefined || first.integratedTime === undefined || first.inclusionPromise === undefined) return undefined;
+  const log = root.transparencyLogs.find((l) => l.logId === first.logId);
+  if (log === undefined) throw new Error("first log entry names a transparency log the trusted root does not list");
+  const at = new Date(Number(first.integratedTime) * 1000);
+  if (at.getTime() < log.validFrom.getTime() || (log.validTo !== undefined && at.getTime() > log.validTo.getTime())) {
+    throw new Error("first log entry's integration time is outside the log key's validity");
+  }
+  const record = new Map<string, JsonValue>([
+    ["body", toBase64(first.canonicalizedBody)],
+    ["integratedTime", new JsonNumber(first.integratedTime.toString())],
+    ["logID", first.logId],
+    ["logIndex", new JsonNumber(first.logIndex.toString())],
+  ]);
+  if (!(await verifyLogSignature(log.publicKey, canonicalize(record), first.inclusionPromise))) {
+    throw new Error("first log entry's inclusion promise does not verify under the log key");
+  }
+  return at;
 }
 
 /** The host name of the log's base URL in the trusted root: the origin its checkpoints must state. */
