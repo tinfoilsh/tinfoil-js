@@ -611,7 +611,7 @@ describe("config and runtime accessors", () => {
     const doc = docWith({
       collateral: {
         ...decodeCollateralSet([]),
-        config: { reference: "ref", config: enc("config"), bundle },
+        config: { reference: "ref", config: enc("config"), bundle: "{}" },
         runtime: { repo: "", tag: "", digest: "", manifest: enc("manifest"), bundle },
       },
     });
@@ -621,7 +621,7 @@ describe("config and runtime accessors", () => {
     const againConfig = doc.configEndorsement();
     expect(againConfig.reference).toBe("ref");
     expect(dec(againConfig.config!)).toBe("config");
-    expect(againConfig.bundle).toEqual(new Map());
+    expect(againConfig.bundle).toBe("{}");
 
     const runtime = doc.runtime();
     runtime.manifest[0] = "!".charCodeAt(0);
