@@ -124,7 +124,8 @@ describe("replay", () => {
       },
     });
     const err = await streaming("https://x.example/", { method: "POST", body: stream }).catch((e: unknown) => e);
-    expect(err).toBeInstanceOf(PeerLacksKeyError);
+    expect(err).toBeInstanceOf(AttestationError);
+    expect(err).not.toBeInstanceOf(PeerLacksKeyError);
     expect((err as Error).message).toBe("attestation error: stale key; cannot replay the request after key rotation: body is not replayable");
 
     const controller = new AbortController();
@@ -226,5 +227,42 @@ describe("KeyedTransport", () => {
     expect(closed).toEqual(["k1"]);
     expect((await t.reverify()).tlsPublicKeyFP()).toBe("k2");
     expect(closed).toEqual(["k1", "k2"]);
+  });
+
+  it("reports a key rejection it cannot replay, because the body is a stream, as an attestation error that is no longer replayable", async () => {
+    const t = await transport(
+      () => "k1",
+      () => "k2",
+    );
+    const replayed = withReplay(t.fetch, isKeyRejection);
+    const stream = new ReadableStream<Uint8Array>({
+      start(c) {
+        c.enqueue(new TextEncoder().encode("s"));
+        c.close();
+      },
+    });
+    const err = await replayed(`https://${HOST}/v1/chat`, { method: "POST", body: stream }).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(AttestationError);
+    expect(err).not.toBeInstanceOf(KeyRejectionError);
+    expect(isKeyRejection(err)).toBe(false);
+    expect((err as Error).message).toBe("attestation error: peer changed key; cannot replay the request after key rotation: body is not replayable");
+    expect((err as Error).cause).toBeInstanceOf(PeerLacksKeyError);
+    expect(((err as Error).cause as Error).message).toBe("attestation error: peer changed key");
+  });
+
+  it("reports a replay the peer rejects again as an attestation error carrying both rejections", async () => {
+    let verified = 0;
+    const t = await transport(
+      () => `k${++verified}`,
+      () => "other",
+    );
+    const replayed = withReplay(t.fetch, isKeyRejection);
+    const err = await replayed(`https://${HOST}/v1/chat`, { method: "POST", body: "payload" }).catch((e: unknown) => e);
+    expect(verified).toBe(2);
+    expect(err).toBeInstanceOf(AttestationError);
+    expect(err).not.toBeInstanceOf(KeyRejectionError);
+    expect(isKeyRejection(err)).toBe(false);
+    expect((err as Error).message).toBe("attestation error: peer changed key; the replay failed too; first attempt: attestation error: peer changed key");
+    expect((err as Error).cause).toBeInstanceOf(PeerLacksKeyError);
   });
 });
