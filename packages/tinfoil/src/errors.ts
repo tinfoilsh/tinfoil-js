@@ -55,6 +55,24 @@ export function messageOf(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
 }
 
+/** The message of `err` without its category prefix: what it was constructed with. */
+export function stripCategory(err: TinfoilError): string {
+  const prefix = `${err.category} error: `;
+  return err.message.startsWith(prefix) ? err.message.slice(prefix.length) : err.message;
+}
+
+/**
+ * A plain error of `err`'s category with `message`, caused by what caused
+ * `err` (or `err` itself): the form a layer throws when it gives up on
+ * `err`, leaving behind any subclass and what that promised the caller.
+ */
+export function withMessage(err: TinfoilError, message: string): TinfoilError {
+  const options = { cause: err.cause ?? err };
+  if (err instanceof NetworkError) return new NetworkError(message, options);
+  if (err instanceof ConfigurationError) return new ConfigurationError(message, options);
+  return new AttestationError(message, options);
+}
+
 /** `err` as a {@link NetworkError}, unless it is already a client error. */
 export function wrapNetwork(err: unknown): TinfoilError {
   return err instanceof TinfoilError ? err : new NetworkError(messageOf(err), { cause: err });

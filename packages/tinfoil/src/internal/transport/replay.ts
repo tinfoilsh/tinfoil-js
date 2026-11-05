@@ -4,7 +4,7 @@
  * The routes pass the key-rejection check: the rejection has already
  * invalidated the verification, so the replay goes out under a fresh one.
  */
-import { AttestationError, ConfigurationError, messageOf, NetworkError, TinfoilError } from "../../errors.js";
+import { AttestationError, messageOf, stripCategory, TinfoilError, withMessage } from "../../errors.js";
 import type { Fetch } from "../../options.js";
 
 /** `next` with one replay of a request that fails `retryable`. */
@@ -44,14 +44,5 @@ function prepare(input: string | URL | Request, init: RequestInit | undefined): 
  */
 function withNote(err: unknown, note: string): TinfoilError {
   if (!(err instanceof TinfoilError)) return new AttestationError(`${messageOf(err)}; ${note}`, { cause: err });
-  const message = `${stripCategory(err)}; ${note}`;
-  const options = { cause: err.cause ?? err };
-  if (err instanceof NetworkError) return new NetworkError(message, options);
-  if (err instanceof ConfigurationError) return new ConfigurationError(message, options);
-  return new AttestationError(message, options);
-}
-
-function stripCategory(err: TinfoilError): string {
-  const prefix = `${err.category} error: `;
-  return err.message.startsWith(prefix) ? err.message.slice(prefix.length) : err.message;
+  return withMessage(err, `${stripCategory(err)}; ${note}`);
 }
