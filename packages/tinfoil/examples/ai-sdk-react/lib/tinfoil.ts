@@ -62,7 +62,7 @@ async function initializeTransport(): Promise<DefaultChatTransport<UIMessage>> {
   // Create the transport with the client's fetch. Request URLs are absolute,
   // so the API path is resolved against where the client's requests go.
   return new DefaultChatTransport({
-    api: new URL("/v1/chat/completions", client.baseURL()).href,
+    api: new URL("/v1/chat/completions", client.baseURL).href,
     fetch: client.fetch,
     // Optional: If using a proxy, add custom headers for it to read.
     // These headers are visible to your proxy but the body remains encrypted.
@@ -88,7 +88,7 @@ export async function createTinfoilTransport(options: {
   });
 
   return new DefaultChatTransport({
-    api: new URL("/v1/chat/completions", client.baseURL()).href,
+    api: new URL("/v1/chat/completions", client.baseURL).href,
     fetch: client.fetch,
   });
 }
