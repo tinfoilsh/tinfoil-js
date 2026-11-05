@@ -5,7 +5,7 @@
  * fetch and every probe share one 30-second budget, so a long list of
  * unreachable routers can't hold up a client before it falls back.
  */
-import type { Verifier } from "@tinfoilsh/verifier/v3";
+import type { Verifier } from "@tinfoilsh/verifier";
 import type { Fetch, VerificationCheck } from "../options.js";
 import { Enclave, type EnclaveConfig } from "./enclave.js";
 import { getFollowingRedirects, isAuthority, readBounded } from "./fetch.js";

@@ -15,7 +15,7 @@ import { ConfigurationError } from "../../src/v3/errors.js";
 import type { RuntimeGlobals } from "../../src/v3/internal/platform.js";
 import type { Fetch } from "../../src/v3/options.js";
 import { RouterHTTPClient } from "../../src/v3/router-client.js";
-import { KEY_SPKI_FP_SHA256_V1_FORMAT, KEY_X25519_HPKE_V1_FORMAT, UsageError, type Verification, type Verifier } from "../../../verifier/src/v3/index.js";
+import { KEY_SPKI_FP_SHA256_V1_FORMAT, KEY_X25519_HPKE_V1_FORMAT, UsageError, type Verification, type Verifier } from "../../../verifier/src/index.js";
 import { startEhbpServer, type EhbpServer } from "./helpers/ehbp-server.js";
 import { paced, startTlsServer, TEST_CERT, TEST_PIN, type Seen, type TlsServer } from "./helpers/tls-server.js";
 

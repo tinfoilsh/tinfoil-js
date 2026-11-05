@@ -3,7 +3,7 @@
  * Every client checks its options before any network I/O, so a misconfigured
  * client fails at creation rather than on its first request.
  */
-import type { Verification, Verifier } from "@tinfoilsh/verifier/v3";
+import type { Verification, Verifier } from "@tinfoilsh/verifier";
 
 /**
  * A client's `fetch`: the standard signature, bound to the client's attested

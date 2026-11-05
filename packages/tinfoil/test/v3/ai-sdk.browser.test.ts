@@ -3,7 +3,7 @@
  * EHBP peer behind a mocked fetch, generating text through sealed bodies and
  * streaming an answer chunk by chunk.
  */
-import { KEY_SPKI_FP_SHA256_V1_FORMAT, KEY_X25519_HPKE_V1_FORMAT, UsageError, type Verification, type Verifier } from "@tinfoilsh/verifier/v3";
+import { KEY_SPKI_FP_SHA256_V1_FORMAT, KEY_X25519_HPKE_V1_FORMAT, UsageError, type Verification, type Verifier } from "@tinfoilsh/verifier";
 import { generateText, streamText } from "ai";
 import { beforeAll, describe, expect, it } from "vitest";
 import { createTinfoil } from "../../src/v3/ai-sdk.js";

@@ -8,7 +8,7 @@ import { ConfigurationError } from "../../src/v3/errors.js";
 import { DEFAULT_ROUTER_URL, discoverRouter, FALLBACK_ROUTER_HOST, fetchRouters, MAX_ROUTER_BYTES, type DiscoveryConfig } from "../../src/v3/internal/router.js";
 import { tlsMode } from "../../src/v3/internal/transport/tls.js";
 import type { Fetch } from "../../src/v3/options.js";
-import { KEY_SPKI_FP_SHA256_V1_FORMAT, UsageError, type Verification, type Verifier } from "../../../verifier/src/v3/index.js";
+import { KEY_SPKI_FP_SHA256_V1_FORMAT, UsageError, type Verification, type Verifier } from "../../../verifier/src/index.js";
 
 const PIN = "ab".repeat(32);
 

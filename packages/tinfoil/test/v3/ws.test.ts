@@ -19,7 +19,7 @@ import { allowedWsOptions } from "../../src/v3/internal/transport/ws.js";
 import { checkWebSocketCapability, webSocketURL } from "../../src/v3/internal/websocket.js";
 import type { Fetch, PinnedWebSocket } from "../../src/v3/options.js";
 import { createWebSocket, pinnedWebSocketOptions } from "../../src/v3/websocket.js";
-import { KEY_SPKI_FP_SHA256_V1_FORMAT, KEY_X25519_HPKE_V1_FORMAT, UsageError, type Verification, type Verifier } from "../../../verifier/src/v3/index.js";
+import { KEY_SPKI_FP_SHA256_V1_FORMAT, KEY_X25519_HPKE_V1_FORMAT, UsageError, type Verification, type Verifier } from "../../../verifier/src/index.js";
 import { TEST_CERT, TEST_KEY, TEST_PIN } from "./helpers/tls-server.js";
 
 const OTHER_PIN = "ab".repeat(32);

@@ -10,7 +10,7 @@
  *
  * @experimental The gateway route is new; this API may change without a major version.
  */
-import type { Verification } from "@tinfoilsh/verifier/v3";
+import type { Verification } from "@tinfoilsh/verifier";
 import { AttestationError, ConfigurationError, messageOf, NetworkError, type TinfoilError } from "../../errors.js";
 import type { Catalog, Fetch, ReplicaVerification, VerificationCheck } from "../../options.js";
 import { Enclave, type EnclaveConfig } from "../enclave.js";

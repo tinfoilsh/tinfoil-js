@@ -11,20 +11,20 @@
  * Test roots and the appraisal clock are per-call arguments; the adapter
  * mutates no production state.
  */
-import * as document from "../src/v3/document/document.js";
-import { UsageError, VerificationError } from "../src/v3/errors.js";
-import { MULTI_PLATFORM_PREDICATE_TYPE, ProvenanceClient } from "../src/v3/internal/endorsement/provenance.js";
-import { parseReference } from "../src/v3/internal/endorsement/reference.js";
-import { ARTIFACT_FORMAT } from "../src/v3/internal/policy/artifact.js";
-import * as quote from "../src/v3/internal/quote/quote.js";
-import { registerHex, type Expected, type Measurement as V3Measurement, type Register } from "../src/v3/measurement.js";
-import { Verifier } from "../src/v3/index.js";
-import { dangerousTestOnlyVerifier, type DangerousTestOnlyRoots } from "../src/v3/verifier.js";
-import { checkTime, newTimePolicy } from "../src/v3/internal/endorsement/time.js";
-import { parseBundleBytes } from "../src/v3/internal/sigstore/bundle.js";
-import { pinnedKeys, verifyKeyedBundle } from "../src/v3/internal/sigstore/keyed.js";
-import { verifyTimestamp } from "../src/v3/internal/sigstore/timestamp.js";
-import { embeddedTrustedRoot, parseTrustedRoot, type TrustedRoot } from "../src/v3/internal/sigstore/trusted-root.js";
+import * as document from "../src/document/document.js";
+import { UsageError, VerificationError } from "../src/errors.js";
+import { MULTI_PLATFORM_PREDICATE_TYPE, ProvenanceClient } from "../src/internal/endorsement/provenance.js";
+import { parseReference } from "../src/internal/endorsement/reference.js";
+import { ARTIFACT_FORMAT } from "../src/internal/policy/artifact.js";
+import * as quote from "../src/internal/quote/quote.js";
+import { registerHex, type Expected, type Measurement as V3Measurement, type Register } from "../src/measurement.js";
+import { Verifier } from "../src/index.js";
+import { dangerousTestOnlyVerifier, type DangerousTestOnlyRoots } from "../src/verifier.js";
+import { checkTime, newTimePolicy } from "../src/internal/endorsement/time.js";
+import { parseBundleBytes } from "../src/internal/sigstore/bundle.js";
+import { pinnedKeys, verifyKeyedBundle } from "../src/internal/sigstore/keyed.js";
+import { verifyTimestamp } from "../src/internal/sigstore/timestamp.js";
+import { embeddedTrustedRoot, parseTrustedRoot, type TrustedRoot } from "../src/internal/sigstore/trusted-root.js";
 
 export const SCHEMA_VERSION = "1";
 export const SDK_NAME = "tinfoil-js";

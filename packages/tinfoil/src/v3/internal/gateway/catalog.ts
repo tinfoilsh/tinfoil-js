@@ -6,7 +6,7 @@
  *
  * @experimental The gateway route is new; this API may change without a major version.
  */
-import { parseReference } from "@tinfoilsh/verifier/v3";
+import { parseReference } from "@tinfoilsh/verifier";
 import { ConfigurationError, messageOf, NetworkError, TinfoilError } from "../../errors.js";
 import type { Catalog, CatalogEntry, Fetch } from "../../options.js";
 import { getFollowingRedirects, isAuthority, readBounded } from "../fetch.js";

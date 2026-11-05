@@ -11,7 +11,7 @@ import { ehbpMode } from "../../src/v3/internal/transport/ehbp.js";
 import { PeerLacksKeyError } from "../../src/v3/internal/transport/transport.js";
 import type { Fetch } from "../../src/v3/options.js";
 import { decryptResponseWithToken, deserializeSessionRecoveryToken, serializeSessionRecoveryToken, sessionRecoveryToken } from "../../src/v3/session-recovery.js";
-import { KEY_X25519_HPKE_V1_FORMAT, type Verification } from "../../../verifier/src/v3/index.js";
+import { KEY_X25519_HPKE_V1_FORMAT, type Verification } from "../../../verifier/src/index.js";
 import { paced, startEhbpServer, type EhbpServer } from "./helpers/ehbp-server.js";
 
 let server: EhbpServer;

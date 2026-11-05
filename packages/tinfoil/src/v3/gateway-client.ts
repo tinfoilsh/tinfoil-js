@@ -6,7 +6,7 @@
  *
  * @experimental The gateway route is new; this API may change without a major version.
  */
-import type { Verification } from "@tinfoilsh/verifier/v3";
+import type { Verification } from "@tinfoilsh/verifier";
 import type { EnclaveClientSeams } from "./enclave-client.js";
 import { ConfigurationError } from "./errors.js";
 import { resolveUserCacheSecret } from "./internal/cachesecret.js";

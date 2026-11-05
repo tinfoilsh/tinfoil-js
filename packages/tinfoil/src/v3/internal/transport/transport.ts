@@ -8,7 +8,7 @@
  * verification the request was sent under and is reported through
  * {@link isKeyRejection}; replaying the request is up to the layer above.
  */
-import type { Verification } from "@tinfoilsh/verifier/v3";
+import type { Verification } from "@tinfoilsh/verifier";
 import { AttestationError, messageOf } from "../../errors.js";
 import type { Fetch, TransportMode } from "../../options.js";
 import type { Enclave } from "../enclave.js";

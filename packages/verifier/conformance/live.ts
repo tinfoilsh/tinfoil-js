@@ -5,7 +5,7 @@
  * endorsed key, and report the facts. Test tooling: Node APIs are fine here.
  */
 import { connect } from "node:tls";
-import { certPubkeyFP, NONCE_SIZE, randomNonce, Verifier, type Verification } from "../src/v3/index.js";
+import { certPubkeyFP, NONCE_SIZE, randomNonce, Verifier, type Verification } from "../src/index.js";
 import { VERIFIER_NAME, VERIFIER_VERSION } from "../src/version.js";
 import { ExitCode, expectedOf, measurementOf, rejectionCode, type Output, type Result } from "./adapter.js";
 

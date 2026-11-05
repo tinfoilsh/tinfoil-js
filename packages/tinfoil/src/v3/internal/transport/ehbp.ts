@@ -8,7 +8,7 @@
  * request body is accepted but its response cannot interleave with it.
  * This mode works wherever fetch does, browsers included.
  */
-import type { Verification } from "@tinfoilsh/verifier/v3";
+import type { Verification } from "@tinfoilsh/verifier";
 import { Identity, PROTOCOL, type RequestContext } from "ehbp";
 import { AttestationError, ConfigurationError, messageOf, NetworkError } from "../../errors.js";
 import type { Fetch } from "../../options.js";

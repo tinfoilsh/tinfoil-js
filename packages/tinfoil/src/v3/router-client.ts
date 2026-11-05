@@ -4,7 +4,7 @@
  * otherwise inference.tinfoil.sh. Discovery runs again each time a client is
  * created and tries routers for at most 30 seconds before falling back.
  */
-import type { Verification } from "@tinfoilsh/verifier/v3";
+import type { Verification } from "@tinfoilsh/verifier";
 import { attestedFetch, modeFor, resolveTransportMode, setOpenAIURL, type EnclaveClientSeams } from "./enclave-client.js";
 import { ConfigurationError } from "./errors.js";
 import { resolveUserCacheSecret } from "./internal/cachesecret.js";
