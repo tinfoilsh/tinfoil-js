@@ -7,36 +7,36 @@
   "types": "dist/index.d.ts",
   "sideEffects": false,
   "browser": {
-    "./dist/v3/index.js": "./dist/v3/index.browser.js",
-    "./dist/v3/internal/cachesecret-store.js": "./dist/v3/internal/cachesecret-store.browser.js",
-    "./dist/v3/internal/platform.js": "./dist/v3/internal/platform.browser.js",
-    "./dist/v3/internal/transport/tls.js": "./dist/v3/internal/transport/tls.browser.js",
-    "./dist/v3/realtime.js": "./dist/v3/realtime.browser.js",
-    "./dist/v3/internal/transport/ws.js": "./dist/v3/internal/transport/ws.browser.js"
+    "./dist/index.js": "./dist/index.browser.js",
+    "./dist/internal/cachesecret-store.js": "./dist/internal/cachesecret-store.browser.js",
+    "./dist/internal/platform.js": "./dist/internal/platform.browser.js",
+    "./dist/internal/transport/tls.js": "./dist/internal/transport/tls.browser.js",
+    "./dist/realtime.js": "./dist/realtime.browser.js",
+    "./dist/internal/transport/ws.js": "./dist/internal/transport/ws.browser.js"
   },
   "exports": {
-    "./v3": {
-      "types": "./dist/v3/index.d.ts",
-      "browser": "./dist/v3/index.browser.js",
-      "import": "./dist/v3/index.js",
-      "default": "./dist/v3/index.js"
+    ".": {
+      "types": "./dist/index.d.ts",
+      "browser": "./dist/index.browser.js",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
     },
-    "./v3/ai-sdk": {
-      "types": "./dist/v3/ai-sdk.d.ts",
-      "import": "./dist/v3/ai-sdk.js",
-      "default": "./dist/v3/ai-sdk.js"
+    "./ai-sdk": {
+      "types": "./dist/ai-sdk.d.ts",
+      "import": "./dist/ai-sdk.js",
+      "default": "./dist/ai-sdk.js"
     },
-    "./v3/unsafe": {
-      "types": "./dist/v3/unsafe.d.ts",
-      "import": "./dist/v3/unsafe.js",
-      "default": "./dist/v3/unsafe.js"
+    "./unsafe": {
+      "types": "./dist/unsafe.d.ts",
+      "import": "./dist/unsafe.js",
+      "default": "./dist/unsafe.js"
     }
   },
   "scripts": {
     "build": "node scripts/generate-version.mjs && tsc",
     "test": "node scripts/generate-version.mjs && vitest run",
     "test:integration": "RUN_TINFOIL_INTEGRATION=true npm test",
-    "test:bun": "node scripts/generate-version.mjs && bun test --timeout 30000 ./test/v3/surface.bun.ts ./test/v3/tls.bun.ts ./test/v3/ws.bun.ts",
+    "test:bun": "node scripts/generate-version.mjs && bun test --timeout 30000 ./test/surface.bun.ts ./test/tls.bun.ts ./test/ws.bun.ts",
     "test:browser": "vitest run --config vite.config.browser.ts",
     "lint": "eslint src/**/*.ts",
     "check:es2020": "test -n \"$(find dist -name '*.js')\" && find dist -name '*.js' -exec acorn --ecma2020 --module --silent {} +",
