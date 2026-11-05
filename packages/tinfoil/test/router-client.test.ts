@@ -24,7 +24,7 @@ function verifier(keys: { tls?: string; hpke?: string }, authorizes = false): Ve
     checkRepoVerifiability: (repo: string) => {
       if (repo === "") throw new UsageError("repo required");
     },
-    callerAuthorizesConfig: () => authorizes,
+    callerAuthorizesConfig: authorizes,
     verifyV3At: async () => {
       const material = [
         ...(keys.tls === undefined ? [] : [{ id: "tls", format: KEY_SPKI_FP_SHA256_V1_FORMAT, data: keys.tls }]),
@@ -106,7 +106,7 @@ describe("RouterHTTPClient.create", () => {
       },
       s,
     );
-    expect(client.enclave()).toBe(tls.host);
+    expect(client.enclave).toBe(tls.host);
     expect(s.documentHosts).toEqual(["first.example", tls.host]);
     expect(checked).toHaveLength(2);
   });
@@ -146,10 +146,12 @@ describe("RouterHTTPClient over TLS", () => {
   });
 
   it("binds to the first router that verifies without verifying it again", () => {
-    expect(client.enclave()).toBe(tls.host);
-    expect(client.repo()).toBe(ROUTER_REPO);
-    expect(client.baseURL()).toBe(`https://${tls.host}/`);
-    expect(client.current()?.tlsPublicKeyFP).toBe(TEST_PIN);
+    expect(Object.keys(client)).toEqual(["fetch", "baseURL", "enclave", "repo"]);
+    expect(() => ((client as { enclave: string }).enclave = "evil.example")).toThrow(TypeError);
+    expect(client.enclave).toBe(tls.host);
+    expect(client.repo).toBe(ROUTER_REPO);
+    expect(client.baseURL).toBe(`https://${tls.host}/`);
+    expect(client.current?.tlsPublicKeyFP).toBe(TEST_PIN);
     expect(s.documentHosts.filter((h) => h === tls.host)).toHaveLength(1);
   });
 
@@ -174,13 +176,13 @@ describe("RouterHTTPClient over TLS", () => {
       seams([tls.host], { resolveSecret: undefined }),
     );
     expect(ai.baseURL).toBe(`https://${tls.host}/v1/`);
-    expect(ai.httpClient()).toBeInstanceOf(RouterHTTPClient);
+    expect(ai.httpClient).toBeInstanceOf(RouterHTTPClient);
     const reply = await ai.chat.completions.create({ model: "test", messages: [{ role: "user", content: "hi" }] });
     expect(reply.choices[0]!.message.content).toBe("pinned");
     const last = tls.seen[tls.seen.length - 1]!;
     expect(JSON.parse(new TextDecoder().decode(last.body)).user_cache_secret).toBe("option-secret");
     expect(last.headers.authorization).toBe("Bearer k");
-    expect(() => new (RouterOpenAIClient as unknown as new (...a: unknown[]) => unknown)(Symbol("x"), ai.httpClient(), {})).toThrow(ConfigurationError);
+    expect(() => new (RouterOpenAIClient as unknown as new (...a: unknown[]) => unknown)(Symbol("x"), ai.httpClient, {})).toThrow(ConfigurationError);
     expect(() => new (RouterHTTPClient as unknown as new (...a: unknown[]) => unknown)(Symbol("x"))).toThrow(ConfigurationError);
   });
 });
@@ -192,8 +194,8 @@ describe("RouterHTTPClient over EHBP", () => {
       { verifier: verifier({ tls: "ab".repeat(32), hpke: ehbp.publicKeyHex }), transportMode: "ehbp", baseURL: `${ehbp.origin}/` },
       s,
     );
-    expect(client.enclave()).toBe("router.example");
-    expect(client.baseURL()).toBe(`${ehbp.origin}/`);
+    expect(client.enclave).toBe("router.example");
+    expect(client.baseURL).toBe(`${ehbp.origin}/`);
     const res = await client.fetch(`${ehbp.origin}/v1/chat/completions`, { method: "POST", body: BODY, headers: { "x-raw": "1" } });
     expect(await res.text()).toBe(`${BODY.slice(0, -1)},"user_cache_secret":"resolved-secret"}`);
     const last = ehbp.seen[ehbp.seen.length - 1]!;
@@ -220,11 +222,11 @@ describe("createClient", () => {
     const ai = await createTinfoilClient({ apiKey: "k" }, s, { verifier: verifier({ tls: TEST_PIN }) });
     expect(ai).toBeInstanceOf(TinfoilClient);
     expect(ai.baseURL).toBe(`https://${tls.host}/v1/`);
-    expect(ai.httpClient()).toBeInstanceOf(RouterHTTPClient);
-    expect(ai.httpClient().repo()).toBe(ROUTER_REPO);
+    expect(ai.httpClient).toBeInstanceOf(RouterHTTPClient);
+    expect(ai.httpClient.repo).toBe(ROUTER_REPO);
     const reply = await ai.chat.completions.create({ model: "test", messages: [{ role: "user", content: "hi" }] });
     expect(reply.choices[0]!.message.content).toBe("pinned");
     expect(JSON.parse(new TextDecoder().decode(tls.seen[tls.seen.length - 1]!.body)).user_cache_secret).toBe("resolved-secret");
-    expect(() => new (TinfoilClient as unknown as new (...a: unknown[]) => unknown)(Symbol("x"), ai.httpClient(), {})).toThrow(ConfigurationError);
+    expect(() => new (TinfoilClient as unknown as new (...a: unknown[]) => unknown)(Symbol("x"), ai.httpClient, {})).toThrow(ConfigurationError);
   });
 });

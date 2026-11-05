@@ -34,7 +34,7 @@ export async function createRouterHTTPClient(options: RouterOptions, seams: Rout
       throw new ConfigurationError('a base URL is a proxy when discovering the router, which requires transportMode "ehbp"');
     }
   }
-  if (options.verifier?.callerAuthorizesConfig()) {
+  if (options.verifier?.callerAuthorizesConfig) {
     throw new ConfigurationError("caller-authorized config requires an explicit enclave");
   }
   const transport = await discoverRouter({
@@ -66,16 +66,25 @@ export async function createRouterHTTPClient(options: RouterOptions, seams: Rout
 export class RouterHTTPClient {
   /** As {@link EnclaveHTTPClient.fetch}. */
   readonly fetch: Fetch;
+  /** Where requests go: the `baseURL` option, or the router's own origin. */
+  readonly baseURL: string;
+  /** The host of the verified router, even when `baseURL` is a proxy. */
+  readonly enclave: string;
+  /** The repository the router is verified against. */
+  readonly repo: string;
   readonly #transport: KeyedTransport;
-  readonly #baseURL: string;
 
   /** @internal Only {@link create} constructs a client; anything else is refused. */
   constructor(token: symbol, transport: KeyedTransport, baseURL: string, openAIURL: string, fetchImpl: Fetch) {
     if (token !== TOKEN) throw new ConfigurationError("RouterHTTPClient is created with RouterHTTPClient.create");
     this.#transport = transport;
-    this.#baseURL = baseURL;
     this.fetch = fetchImpl;
+    this.baseURL = baseURL;
+    this.enclave = transport.enclave().host();
+    this.repo = transport.enclave().repo();
     setOpenAIURL(this, openAIURL);
+    // The client's state lives in the transport; the client itself never changes once created.
+    Object.freeze(this);
   }
 
   /**
@@ -88,23 +97,8 @@ export class RouterHTTPClient {
     return createRouterHTTPClient(options ?? {}, {});
   }
 
-  /** Where requests go: the `baseURL` option, or the router's own origin. */
-  baseURL(): string {
-    return this.#baseURL;
-  }
-
-  /** The host of the verified router, even when `baseURL` is a proxy. */
-  enclave(): string {
-    return this.#transport.enclave().host();
-  }
-
-  /** The repository the router is verified against. */
-  repo(): string {
-    return this.#transport.enclave().repo();
-  }
-
   /** The last successful verification, unchecked: it may have expired or been rejected. */
-  current(): Verification | undefined {
+  get current(): Verification | undefined {
     return this.#transport.current();
   }
 

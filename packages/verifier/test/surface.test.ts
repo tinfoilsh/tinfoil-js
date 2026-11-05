@@ -47,7 +47,9 @@ const EXPORTS = [
   "formatMeasurement",
 ].sort();
 
-const VERIFIER_METHODS = ["verifyV3", "verifyV3At", "checkRepoVerifiability", "callerAuthorizesConfig", "pinnedRegisters", "freshnessMaxAgeMs"].sort();
+const VERIFIER_METHODS = ["verifyV3", "verifyV3At", "checkRepoVerifiability"].sort();
+/** The policy a verifier carries as own properties, in declaration order. */
+const VERIFIER_PROPERTIES = ["freshnessMaxAgeMs", "pinnedRegisters", "callerAuthorizesConfig"];
 /** The facts a verification carries as own properties, in declaration order. */
 const VERIFICATION_PROPERTIES = [
   "codeDigest",
@@ -130,6 +132,7 @@ describe("public surface", () => {
     expect(typeof surface.Verifier.create).toBe("function");
     expect(Object.getOwnPropertyNames(surface.Verifier).filter((n) => !["length", "name", "prototype"].includes(n))).toEqual(["create"]);
     expect(methodsOf(surface.Verifier)).toEqual(VERIFIER_METHODS);
+    expect(gettersOf(surface.Verifier)).toEqual([]);
     expect(methodsOf(surface.Verification)).toEqual(VERIFICATION_METHODS);
     expect(gettersOf(surface.Verification)).toEqual(VERIFICATION_GETTERS);
     expect(Object.keys(verification())).toEqual(VERIFICATION_PROPERTIES);
@@ -143,7 +146,8 @@ describe("public surface", () => {
   it("builds a default verifier through the public entry", async () => {
     const v = await surface.Verifier.create();
     expect(v).toBeInstanceOf(surface.Verifier);
-    expect(v.freshnessMaxAgeMs()).toBe(7 * 24 * 60 * 60 * 1000);
+    expect(Object.keys(v)).toEqual(VERIFIER_PROPERTIES);
+    expect(v.freshnessMaxAgeMs).toBe(7 * 24 * 60 * 60 * 1000);
     await expect(v.verifyV3At(new Uint8Array(), new Uint8Array(32), "org/repo", new Date(Number.NaN))).rejects.toBeInstanceOf(surface.UsageError);
   });
 

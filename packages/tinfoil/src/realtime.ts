@@ -20,12 +20,12 @@ import type { RealtimeOptions } from "./options.js";
  * only.
  */
 export async function createRealtimeWebSocket(client: TinfoilClient | EnclaveOpenAIClient | RouterOpenAIClient, options: RealtimeOptions): Promise<OpenAIRealtimeWS> {
-  const httpClient = client.httpClient();
+  const httpClient = client.httpClient;
   const { transport, tls } = webSocketAccessOf(httpClient);
   const pinned = await clientWsOptions(transport, tls, options.signal);
   const { OpenAIRealtimeWS } = await import("openai/realtime/ws");
   // The session goes to the enclave itself, not to a proxy the HTTP client may send through.
-  const endpoint = { apiKey: client.apiKey, baseURL: `https://${httpClient.enclave()}/v1/`, _callApiKey: client._callApiKey.bind(client) };
+  const endpoint = { apiKey: client.apiKey, baseURL: `https://${httpClient.enclave}/v1/`, _callApiKey: client._callApiKey.bind(client) };
   const session = await OpenAIRealtimeWS.create(endpoint, { model: options.model, options: { ...allowedWsOptions(options.wsOptions), ...pinned.options } });
   session.socket.on("error", pinned.onConnectionError);
   return session;

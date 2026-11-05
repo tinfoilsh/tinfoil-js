@@ -18,9 +18,9 @@ describe("RouterHTTPClient under Bun on the live router", () => {
     "discovers and verifies a router",
     async () => {
       const http = await RouterHTTPClient.create();
-      expect(http.repo()).toBe(LIVE_REPO);
-      expect(http.current()?.tlsPublicKeyFP).toMatch(SHA256_HEX);
-      expect(http.current()?.hpkePublicKey).toMatch(SHA256_HEX);
+      expect(http.repo).toBe(LIVE_REPO);
+      expect(http.current?.tlsPublicKeyFP).toMatch(SHA256_HEX);
+      expect(http.current?.hpkePublicKey).toMatch(SHA256_HEX);
     },
     180_000,
   );
@@ -32,9 +32,9 @@ for (const transportMode of ["tls", "ehbp"] as const satisfies readonly Transpor
       "verifies a router and completes a chat through it",
       async () => {
         const ai = await RouterOpenAIClient.create({ transportMode }, { apiKey });
-        const router = ai.httpClient();
-        expect(router.repo()).toBe(LIVE_REPO);
-        expect(ai.baseURL).toBe(`https://${router.enclave()}/v1/`);
+        const router = ai.httpClient;
+        expect(router.repo).toBe(LIVE_REPO);
+        expect(ai.baseURL).toBe(`https://${router.enclave}/v1/`);
         const completed = await completeChat(ai);
         expect(completed.finishReason).toBeTruthy();
       },

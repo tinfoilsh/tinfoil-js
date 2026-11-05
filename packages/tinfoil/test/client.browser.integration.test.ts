@@ -17,11 +17,11 @@ describe("the browser build on the live router", () => {
   it.skipIf(!RUN_INTEGRATION || bearerToken === "")("verifies the router over EHBP with a bearer token, completes a chat and streams a completion", async () => {
     const ai = await createClient({ bearerToken });
     expect(ai).toBeInstanceOf(TinfoilClient);
-    const router = ai.httpClient();
+    const router = ai.httpClient;
     expect(router).toBeInstanceOf(RouterHTTPClient);
-    expect(router.repo()).toBe(LIVE_REPO);
-    expect(router.current()?.hpkePublicKey).toMatch(SHA256_HEX);
-    expect(ai.baseURL).toBe(`https://${router.enclave()}/v1/`);
+    expect(router.repo).toBe(LIVE_REPO);
+    expect(router.current?.hpkePublicKey).toMatch(SHA256_HEX);
+    expect(ai.baseURL).toBe(`https://${router.enclave}/v1/`);
 
     const completed = await completeChat(ai);
     expect(completed.finishReason).toBeTruthy();

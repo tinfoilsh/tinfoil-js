@@ -73,8 +73,10 @@ describe("UnverifiedClient", () => {
     expect(warnings).toEqual([UNVERIFIED_WARNING]);
     expect(requested).toEqual([`${server.origin}${PROTOCOL.KEYS_PATH}`]);
     expect(requested.some((u) => u.includes("tinfoil-attestation"))).toBe(false);
-    expect(c.baseURL()).toBe(`${server.origin}/v1/`);
-    expect(c.keyOrigin()).toBe(server.origin);
+    expect(Object.keys(c)).toEqual(["fetch", "baseURL", "keyOrigin"]);
+    expect(() => ((c as { keyOrigin: string }).keyOrigin = "https://evil.example")).toThrow(TypeError);
+    expect(c.baseURL).toBe(`${server.origin}/v1/`);
+    expect(c.keyOrigin).toBe(server.origin);
 
     const response = await c.fetch("/v1/chat/completions", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ hi: 1 }) });
     expect(response.status).toBe(200);
@@ -86,9 +88,9 @@ describe("UnverifiedClient", () => {
 
   it("derives the base URL from the key origin and the key origin from the base URL", async () => {
     const fromKey = await client({ keyOrigin: server.origin });
-    expect(fromKey.client.baseURL()).toBe(`${server.origin}/v1/`);
+    expect(fromKey.client.baseURL).toBe(`${server.origin}/v1/`);
     const fromBase = await client({ baseURL: `${server.origin}/api/` });
-    expect(fromBase.client.keyOrigin()).toBe(server.origin);
+    expect(fromBase.client.keyOrigin).toBe(server.origin);
     const response = await fromBase.client.fetch("models");
     expect(await response.json()).toMatchObject({ path: "/api/models", sealed: false });
   });
