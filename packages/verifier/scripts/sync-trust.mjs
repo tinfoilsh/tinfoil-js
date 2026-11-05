@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Refreshes the embedded trust anchors in src/v3/trust/ from their publishers:
+// Refreshes the embedded trust anchors in src/trust/ from their publishers:
 //
 //   - the Sigstore trusted root: the trusted_root.json target of the Sigstore
 //     TUF repository, fetched by a TUF client bootstrapped from the
@@ -23,12 +23,12 @@
 // Sigstore root is authenticated by TUF and changes routinely, so it is
 // always accepted.
 //
-// Tinfoil's signing key in src/v3/trust/signing-keys.ts is maintained by
+// Tinfoil's signing key in src/trust/signing-keys.ts is maintained by
 // hand, not fetched.
 //
 //   npm run sync:trust [-- --accept-root-change]
 //
-// Each module exports one string constant. src/v3/trust/SOURCE records where
+// Each module exports one string constant. src/trust/SOURCE records where
 // each file came from, when, and the SHA-256 of the embedded bytes.
 import { X509Certificate } from "@freedomofpress/sigstore-browser";
 import { TUFClient } from "@freedomofpress/tuf-browser";
@@ -38,7 +38,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const here = dirname(fileURLToPath(import.meta.url));
-const out = join(here, "..", "src", "v3", "trust");
+const out = join(here, "..", "src", "trust");
 const acceptRootChange = process.argv.includes("--accept-root-change");
 
 const SIGSTORE_TUF = "https://tuf-repo-cdn.sigstore.dev/";
