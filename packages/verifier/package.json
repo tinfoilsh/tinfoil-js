@@ -17,6 +17,7 @@
     "build": "tsc",
     "build:conformance": "tsc -p conformance/tsconfig.json",
     "check:types": "tsc -p tsconfig.test.json",
+    "lint": "eslint src conformance test scripts",
     "test": "vitest run",
     "test:conformance": "npm run build:conformance && TINFOIL_CONFORMANCE_FIXTURES=${TINFOIL_CONFORMANCE_FIXTURES:-../../../tinfoil-conformance/vectors/v3} vitest run test/conformance.test.ts",
     "test:browser": "vitest run --config vite.config.playwright.ts",
