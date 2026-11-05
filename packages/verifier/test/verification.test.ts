@@ -48,6 +48,7 @@ describe("Verification", () => {
       expect(v.freshnessExpiresAt!.getUTCFullYear()).toBe(2026);
       expect(v.metadata.verifiedAt.getUTCFullYear()).toBe(2026);
       expect(v.config!.approvalTime!.getUTCFullYear()).toBe(2026);
+      expect(v.config!.signatureTime!.getUTCFullYear()).toBe(2026);
       expect(v.runtime!.approvalTime!.getUTCFullYear()).toBe(2026);
     } finally {
       AT.setFullYear(2026);
