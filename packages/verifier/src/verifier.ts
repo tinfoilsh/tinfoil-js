@@ -14,7 +14,7 @@ import {
   SIGSTORE_FRESHNESS_V1_FORMAT,
 } from "./document/collateral/collateral.js";
 import type { ConfigEndorsement } from "./document/collateral/config.js";
-import type { RuntimeReference } from "./document/collateral/runtime.js";
+import { validateRuntimeReference, type RuntimeReference } from "./document/collateral/runtime.js";
 import { InvalidInputError, parse as parseDocument, type Document } from "./document/document.js";
 import { UsageError, VerificationError, VerifyError, type Layer } from "./errors.js";
 import { sha256, toHex } from "./internal/bytes.js";
@@ -27,10 +27,10 @@ import {
   MAX_CONFIG_SIZE,
   parseConfigName,
   PLATFORM_ARTIFACT_NAME,
-  PUBLIC_SCOPE,
+  PUBLIC_REGISTRY_ID,
   publicSigningKeys,
   validateConfigPins,
-  validateScopes,
+  validateRegistryIDs,
   type ArtifactKind,
   type ConfigPolicy,
 } from "./internal/endorsement/approval.js";
@@ -47,10 +47,26 @@ import { pinnedKeys, type PinnedKey } from "./internal/sigstore/keyed.js";
 import { cloneExpected, REGISTER_SIZE, type Expected } from "./measurement.js";
 import { Verification, type ArtifactVerification, type ConfigVerification } from "./verification.js";
 
+/**
+ * An exact config the caller trusts without holding its bytes: its digest
+ * and the runtime release it pins, optionally with its name. The document's
+ * config endorsement is not consulted; the quote must still bind the digest.
+ */
+export interface EmbeddedConfigReference {
+  /** The /org/project/revision name; absent or "" leaves the name unpinned. */
+  readonly name?: string;
+  /** Lowercase hex SHA-256 of the config bytes. */
+  readonly digest: string;
+  /** The runtime release the config pins (its `cvm-version`). */
+  readonly runtime: RuntimeReference;
+}
+
 /** Caller-trusted reference values that replace endorsement checks for the components supplied. */
 export interface EmbeddedReferences {
-  /** Exact config bytes, optionally with their /org/project/revision name. */
+  /** Exact config bytes, optionally with their /org/project/revision name. Exclusive with `configReference`. */
   readonly config?: { readonly name?: string; readonly bytes: Uint8Array };
+  /** The config's digest and runtime pin, when the bytes themselves are not disclosed. Exclusive with `config`. */
+  readonly configReference?: EmbeddedConfigReference;
   /** The exact runtime manifest the config pins. */
   readonly runtime?: Uint8Array;
   /** A platform-endorsements/v2 policy artifact. */
@@ -69,12 +85,21 @@ export interface VerifierOptions {
   /** Authorizes an unsigned config; throwing rejects the document at the provenance layer. */
   readonly configAuthorizer?: (endorsement: ConfigEndorsement) => void | Promise<void>;
   /**
-   * The registry scopes a config approval may be accepted under, replacing
-   * public-only trust: an approval certified for another scope rejects. Needs
-   * registry trust, so it conflicts with config signing keys, an embedded
-   * config and a config authorizer. Must be non-empty without repeats.
+   * The registry IDs a config approval may be accepted under, replacing
+   * public-only trust: an approval certified for another registry rejects.
+   * Needs registry trust, so it conflicts with config signing keys, an
+   * embedded config and a config authorizer. Must be non-empty without
+   * repeats.
    */
-  readonly configScopes?: readonly string[];
+  readonly configRegistryIDs?: readonly string[];
+  /**
+   * Registry IDs accepted alongside the public registry: the accepted set
+   * is the public registry ID followed by these. Validated and in conflict
+   * like `configRegistryIDs`, which it cannot be combined with. Must be
+   * non-empty, canonical and without repeats, the public registry ID
+   * included.
+   */
+  readonly additionalConfigRegistryIDs?: readonly string[];
   readonly embeddedReferences?: EmbeddedReferences;
 }
 
@@ -86,17 +111,19 @@ export interface VerifierOptions {
 export interface DangerousTestOnlyRoots extends quote.VendorRoots {
   /** Sigstore trusted-root JSON. */
   readonly sigstore?: Uint8Array;
+  /** PEM-encoded P-256 registry root keys, replacing the public signing keys as config approval and registry roots. */
+  readonly registryRoots?: readonly string[];
 }
 
-/** An exact config/runtime pair the caller trusts. */
-interface EmbeddedConfigReference {
+/** An exact config/runtime pair the caller trusts, validated and copied. */
+interface ConfigReference {
   readonly name: string;
   readonly digest: string;
   readonly runtime: RuntimeReference;
 }
 
 interface Embedded {
-  readonly configReference?: EmbeddedConfigReference;
+  readonly configReference?: ConfigReference;
   readonly runtime?: Uint8Array;
   readonly platform?: Uint8Array;
 }
@@ -106,7 +133,7 @@ interface Policy {
   readonly pinnedRegisters?: Expected;
   readonly freshnessMaxAgeMs: number;
   readonly configAuthorizer?: (endorsement: ConfigEndorsement) => void | Promise<void>;
-  readonly configScopes?: readonly string[];
+  readonly configRegistryIDs?: readonly string[];
   readonly configKeysPinned: boolean;
   readonly freshnessKeysPinned: boolean;
 }
@@ -248,7 +275,7 @@ export class Verifier {
       this.#policy.configKeysPinned ||
       this.#policy.freshnessKeysPinned ||
       this.#policy.configAuthorizer !== undefined ||
-      this.#policy.configScopes !== undefined
+      this.#policy.configRegistryIDs !== undefined
     );
   }
 
@@ -290,13 +317,14 @@ export class Verifier {
 
   /**
    * The config pins `repo` imposes, as a config policy without a clock. The
-   * accepted scopes are the caller's, or the public scope alone under the
-   * registry roots; caller-pinned keys leave the scope unpinned.
+   * accepted registry IDs are the caller's, or the public registry alone
+   * under the registry roots; caller-pinned keys leave the registry ID
+   * unpinned.
    */
   #referencePins(ref: string): ConfigPins {
-    let scopes = this.#policy.configScopes;
-    if (scopes === undefined && !this.#policy.configKeysPinned) scopes = [PUBLIC_SCOPE];
-    const pins: ConfigPins = { identity: "", revision: "", digest: "", scopes };
+    let registryIDs = this.#policy.configRegistryIDs;
+    if (registryIDs === undefined && !this.#policy.configKeysPinned) registryIDs = [PUBLIC_REGISTRY_ID];
+    const pins: ConfigPins = { identity: "", revision: "", digest: "", registryIDs };
     if (this.#policy.configAuthorizer !== undefined && ref !== "") {
       throw new UsageError("config authorizer cannot authenticate repository or revision pins; enforce them in caller policy");
     }
@@ -347,7 +375,7 @@ export class Verifier {
     if (embedded !== undefined) {
       return {
         expected: embedded.runtime,
-        config: { source: "embedded", name: embedded.name, digest: embedded.digest, reference: "", signingKeyHint: "", scope: "" },
+        config: { source: "embedded", name: embedded.name, digest: embedded.digest, reference: "", signingKeyHint: "", registryID: "" },
       };
     }
     const material = doc.configEndorsement();
@@ -361,7 +389,7 @@ export class Verifier {
         throw new VerificationError("provenance", `authorizing config: ${message(err)}`, { cause: err });
       }
       const digest = toHex(await sha256(config));
-      return { expected: configRuntime(config), config: { source: "policy", name: "", digest, reference: "", signingKeyHint: "", scope: "" } };
+      return { expected: configRuntime(config), config: { source: "policy", name: "", digest, reference: "", signingKeyHint: "", registryID: "" } };
     }
     if (material.bundle === undefined) throw new Error("unsigned config requires a config authorizer");
     const policy: ConfigPolicy = {
@@ -371,7 +399,7 @@ export class Verifier {
       now,
       maxAgeMs: this.#policy.freshnessMaxAgeMs,
       futureSkewMs: 0,
-      ...(pins.scopes === undefined ? {} : { scopes: pins.scopes }),
+      ...(pins.registryIDs === undefined ? {} : { registryIDs: pins.registryIDs }),
     };
     let approved;
     try {
@@ -401,7 +429,7 @@ export class Verifier {
         reference: approved.reference,
         signingKeyHint: approved.signingKeyHint,
         approvalTime: approved.approvalTime,
-        scope: approved.scope,
+        registryID: approved.registryID,
         ...(approved.signatureTime === undefined ? {} : { signatureTime: approved.signatureTime }),
       },
     };
@@ -477,27 +505,28 @@ async function assemble(options: VerifierOptions, roots: DangerousTestOnlyRoots)
   if (options.configAuthorizer !== undefined && (embedded.configReference !== undefined || configKeys !== undefined)) {
     throw new UsageError("config authorizer conflicts with embedded config or config signing keys");
   }
-  const configScopes = options.configScopes === undefined ? undefined : usage(() => scopesOf(options.configScopes!));
-  if (configScopes !== undefined && (embedded.configReference !== undefined || options.configAuthorizer !== undefined)) {
+  const configRegistryIDs = registryPolicyOf(options);
+  if (configRegistryIDs !== undefined && (embedded.configReference !== undefined || options.configAuthorizer !== undefined)) {
     throw new UsageError("config authority pins require endorsement verification");
   }
-  if (configScopes !== undefined && configKeys !== undefined) {
-    throw new UsageError("config scope policy requires Tinfoil registry root verification");
+  if (configRegistryIDs !== undefined && configKeys !== undefined) {
+    throw new UsageError("config registry ID policy requires Tinfoil registry root verification");
   }
   if (embedded.runtime !== undefined && embedded.platform !== undefined && freshnessKeys !== undefined) {
     throw new UsageError("freshness signing keys have no endorsed artifact to verify");
   }
   const publicKeys = await publicSigningKeys();
   // Without caller-pinned config keys, the public keys are the registry
-  // roots as well: they issue the scope certificates of certified approvals.
-  const configVerifier = configKeys === undefined ? new ConfigVerifier(prov.root, publicKeys, publicKeys) : new ConfigVerifier(prov.root, configKeys);
+  // roots as well: they issue the signing certificates of certified approvals.
+  const registryKeys = roots.registryRoots === undefined ? publicKeys : await keysOf("registry roots", roots.registryRoots);
+  const configVerifier = configKeys === undefined ? new ConfigVerifier(prov.root, registryKeys, registryKeys) : new ConfigVerifier(prov.root, configKeys);
   const freshnessVerifier = new FreshnessVerifier(prov.root, freshnessKeys ?? publicKeys);
   const policy: Policy = {
     embedded,
     pinnedRegisters,
     freshnessMaxAgeMs,
     configAuthorizer: options.configAuthorizer,
-    configScopes,
+    configRegistryIDs,
     configKeysPinned: configKeys !== undefined,
     freshnessKeysPinned: freshnessKeys !== undefined,
   };
@@ -518,14 +547,36 @@ interface ConfigPins {
   readonly identity: string;
   readonly revision: string;
   readonly digest: string;
-  readonly scopes?: readonly string[];
+  readonly registryIDs?: readonly string[];
 }
 
-/** Validates and copies the caller's scope list. */
-function scopesOf(scopes: readonly string[]): readonly string[] {
-  if (!Array.isArray(scopes) || scopes.some((s) => typeof s !== "string")) throw new Error("config scopes must be a list of strings");
-  validateScopes(scopes);
-  return [...scopes];
+/**
+ * The accepted registry IDs the options pin, or undefined for the default:
+ * the caller's exact list, or the public registry plus the additional ones.
+ * Giving both is a usage error.
+ */
+function registryPolicyOf(options: VerifierOptions): readonly string[] | undefined {
+  const exact = options.configRegistryIDs === undefined ? undefined : usage(() => registryIDsOf(options.configRegistryIDs!));
+  if (options.additionalConfigRegistryIDs === undefined) return exact;
+  const additional = usage(() => additionalRegistryIDsOf(options.additionalConfigRegistryIDs!));
+  if (exact !== undefined) throw new UsageError("config registry IDs must be supplied once");
+  return additional;
+}
+
+/** Validates and copies the caller's registry ID list. */
+function registryIDsOf(registryIDs: readonly string[]): readonly string[] {
+  if (!Array.isArray(registryIDs) || registryIDs.some((s) => typeof s !== "string")) throw new Error("config registry IDs must be a list of strings");
+  validateRegistryIDs(registryIDs);
+  return [...registryIDs];
+}
+
+/** The public registry ID followed by the caller's additional registry IDs, validated as one list. */
+function additionalRegistryIDsOf(registryIDs: readonly string[]): readonly string[] {
+  if (!Array.isArray(registryIDs) || registryIDs.some((s) => typeof s !== "string")) {
+    throw new Error("additional config registry IDs must be a list of strings");
+  }
+  if (registryIDs.length === 0) throw new Error("additional config registry IDs must not be empty");
+  return registryIDsOf([PUBLIC_REGISTRY_ID, ...registryIDs]);
 }
 
 /** Runs one pipeline step; an error that is not already classified is attributed to `layer`. */
@@ -596,18 +647,33 @@ async function keysOf(what: string, pems: readonly string[]): Promise<PinnedKey[
   }
 }
 
-/** Validates the embedded references and derives the config reference from embedded config bytes. */
+/**
+ * Validates the embedded references and settles the config reference: the
+ * caller's own, or one derived from embedded config bytes. Both come from
+ * the caller, so a runtime manifest the reference does not pin is rejected
+ * here rather than at verification.
+ */
 async function embeddedOf(refs: EmbeddedReferences): Promise<Embedded> {
-  if (refs.config === undefined && refs.runtime === undefined && refs.platform === undefined) {
+  if (refs.config === undefined && refs.configReference === undefined && refs.runtime === undefined && refs.platform === undefined) {
     throw new UsageError("embedded references must contain at least one component");
   }
-  let configReference: EmbeddedConfigReference | undefined;
+  if (refs.config !== undefined && refs.configReference !== undefined) {
+    throw new UsageError("embedded config bytes and reference are mutually exclusive");
+  }
+  let configReference: ConfigReference | undefined;
   if (refs.config !== undefined) {
-    const name = refs.config.name ?? "";
-    if (name !== "") usage(() => parseConfigName(name));
-    const runtime = usage(() => configRuntime(refs.config!.bytes));
-    configReference = { name, digest: toHex(await sha256(refs.config.bytes)), runtime };
-    if (refs.runtime !== undefined) await parseManifest(refs.runtime, runtime);
+    // Copied once so the digest and the runtime pin come from the same bytes, whatever the caller does to its buffer meanwhile.
+    const bytes = refs.config.bytes.slice();
+    configReference = { name: refs.config.name ?? "", digest: toHex(await sha256(bytes)), runtime: usage(() => configRuntime(bytes)) };
+  } else if (refs.configReference !== undefined) {
+    configReference = usage(() => configReferenceOf(refs.configReference!));
+  }
+  if (configReference !== undefined) {
+    const reference = configReference;
+    if (reference.name !== "") usage(() => parseConfigName(reference.name));
+    usage(() => decodeLowerHex("config digest", reference.digest, 32));
+    usage(() => validateRuntimeReference(reference.runtime));
+    if (refs.runtime !== undefined) await parseManifest(refs.runtime, reference.runtime);
   }
   if (refs.runtime !== undefined) decodeManifest(refs.runtime);
   if (refs.platform !== undefined && parseArtifact(refs.platform).format !== ARTIFACT_FORMAT_V2) {
@@ -618,6 +684,24 @@ async function embeddedOf(refs: EmbeddedReferences): Promise<Embedded> {
     ...(refs.runtime === undefined ? {} : { runtime: refs.runtime.slice() }),
     ...(refs.platform === undefined ? {} : { platform: refs.platform.slice() }),
   };
+}
+
+/** A copy of the caller's config reference with every field a string; validation follows. */
+function configReferenceOf(ref: EmbeddedConfigReference): ConfigReference {
+  const name = ref.name ?? "";
+  const runtime = ref.runtime as Partial<RuntimeReference> | undefined;
+  if (
+    typeof name !== "string" ||
+    typeof ref.digest !== "string" ||
+    typeof runtime !== "object" ||
+    runtime === null ||
+    typeof runtime.repo !== "string" ||
+    typeof runtime.tag !== "string" ||
+    typeof runtime.digest !== "string"
+  ) {
+    throw new Error("embedded config reference requires a string name, digest and runtime reference");
+  }
+  return { name, digest: ref.digest, runtime: { repo: runtime.repo, tag: runtime.tag, digest: runtime.digest } };
 }
 
 function message(err: unknown): string {
