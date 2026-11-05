@@ -108,7 +108,7 @@ describe("createPinnedWebSocket", () => {
     );
     const outcome = await waitForOutcome(socket);
     expect(outcome).toBeInstanceOf(Error);
-    expect((outcome as Error).message).toContain("TLS pinning failed");
+    expect((outcome as Error).message).toContain("attested key");
   });
 
   it("does not allow wsOptions to disable pinning", async () => {
@@ -125,7 +125,7 @@ describe("createPinnedWebSocket", () => {
     );
     const outcome = await waitForOutcome(socket);
     expect(outcome).toBeInstanceOf(Error);
-    expect((outcome as Error).message).toContain("TLS pinning failed");
+    expect((outcome as Error).message).toContain("attested key");
   });
 
   it("strips createConnection so wsOptions cannot bypass pinning", async () => {
@@ -138,7 +138,7 @@ describe("createPinnedWebSocket", () => {
     const outcome = await waitForOutcome(socket);
     expect(createConnection).not.toHaveBeenCalled();
     expect(outcome).toBeInstanceOf(Error);
-    expect((outcome as Error).message).toContain("TLS pinning failed");
+    expect((outcome as Error).message).toContain("attested key");
   });
 
   it("strips custom agents so wsOptions cannot bypass pinning", async () => {
@@ -152,7 +152,7 @@ describe("createPinnedWebSocket", () => {
     const outcome = await waitForOutcome(socket);
     expect(createConnection).not.toHaveBeenCalled();
     expect(outcome).toBeInstanceOf(Error);
-    expect((outcome as Error).message).toContain("TLS pinning failed");
+    expect((outcome as Error).message).toContain("attested key");
     agent.destroy();
   });
 
@@ -174,7 +174,7 @@ describe("createPinnedWebSocket", () => {
     );
     const outcome = await waitForOutcome(socket);
     expect(outcome).toBeInstanceOf(Error);
-    expect((outcome as Error).message).toContain("TLS pinning failed");
+    expect((outcome as Error).message).toContain("attested key");
   });
 
   it("strips servername so hostname validation uses the URL host", async () => {

@@ -164,6 +164,6 @@ describe("Bun WebSocket TLS pinning capability", () => {
       ),
     );
     expect(mismatch.connected).toBe(false);
-    expect(mismatch.error).toContain("TLS pinning failed");
+    expect(mismatch.error).toContain("attested key");
   }, 30_000);
 });

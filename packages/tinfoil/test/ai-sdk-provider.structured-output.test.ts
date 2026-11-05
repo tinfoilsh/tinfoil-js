@@ -5,8 +5,8 @@ import { createTinfoilAI } from "../src/ai-sdk-provider";
 
 const transport = vi.hoisted(() => ({ fetch: vi.fn<typeof fetch>() }));
 
-vi.mock("../src/secure-client", () => ({
-  SecureClient: class {
+vi.mock("../src/client", () => ({
+  Client: class {
     async ready() {}
     getBaseURL() { return "https://enclave.invalid/v1/"; }
     fetch = transport.fetch;
@@ -167,4 +167,20 @@ describe("createTinfoilAI structured output requests", () => {
     expect(result.output).toEqual(selection);
     expect(sentBody().response_format).toEqual({ type: "json_object" });
   });
+  it("preserves tool schemas and caller-selected tool choice through the SDK provider", async () => {
+    transport.fetch.mockResolvedValueOnce(Response.json({ choices: [{ message: { role: "assistant", content: null, tool_calls: [{ id: "call", type: "function", function: { name: "select", arguments: JSON.stringify(selection) } }] }, finish_reason: "tool_calls" }] }));
+    const provider = await createTinfoilAI("test-key");
+    const result = await generateText({
+      model: provider(MODEL), prompt: PROMPT, maxRetries: 0,
+      tools: { select: { description: "Choose from the supplied records", inputSchema: selectionSchema } },
+      toolChoice: { type: "tool", toolName: "select" },
+    });
+    const body = sentBody();
+    expect(body.tool_choice).toEqual({ type: "function", function: { name: "select" } });
+    expect(body.tools[0]).toMatchObject({ type: "function", function: { name: "select", description: "Choose from the supplied records", parameters: { type: "object", required: ["person_id", "evidence_ids"], additionalProperties: false } } });
+    expect(body.tools[0].function.parameters.properties.person_id).toEqual({ type: "string", enum: [...PERSON_IDS], description: PERSON_DESCRIPTION });
+    expect(result.toolCalls[0].input).toEqual(selection);
+    expect(body).not.toHaveProperty("response_format");
+  });
+
 });

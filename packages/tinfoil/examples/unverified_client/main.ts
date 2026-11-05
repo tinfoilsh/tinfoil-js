@@ -6,7 +6,7 @@
  * - Testing when verification is not required
  * - Debugging transport issues
  *
- * For production, always use TinfoilAI or SecureClient which verify the enclave.
+ * For production, always use TinfoilAI or Client which verify the enclave.
  *
  * Prerequisites:
  * - Export your API key: export TINFOIL_API_KEY="<YOUR_API_KEY>"

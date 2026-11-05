@@ -1,18 +1,26 @@
-// Error classes
+export { UsageError, VerificationError } from "./errors.js";
 export {
-  TinfoilError,
-  ConfigurationError,
-  FetchError,
-  AttestationError,
-} from './errors.js';
-
-// Verification
-export { verifyAttestation } from './attestation.js';
-export { assembleAttestationBundle } from './bundle.js';
-export { Verifier } from './client.js';
-export { cloneVerificationDocument } from './json.js';
-export { VERIFICATION_DOCUMENT_SCHEMA_VERSION, VERIFIER_NAME, VERIFIER_VERSION } from './version.js';
-export { PredicateType, compareMeasurements, measurementFingerprint, hashAttestationDocument } from './types.js';
-export type { AttestationDocument, AttestationMeasurement, AttestationResponse, AttestationBundle, VerificationDocument, VerificationStepState, HardwareMeasurement, SoftwareIdentity } from './types.js';
-export type { VerifierOptions } from './client.js';
-export { verifyCertificate, type CertVerificationResult } from './cert-verify.js';
+  Verifier,
+  Verification,
+  verifyDocumentV3,
+  verifyDocumentV3At,
+} from "./client.js";
+export { randomNonce, NONCE_SIZE, KEY_TLS, KEY_HPKE } from "./document.js";
+export { parseReference } from "./references.js";
+export { fetchAttestationDocument } from "./fetch.js";
+export type { FetchAttestationOptions } from "./fetch.js";
+export type {
+  VerifierOptions,
+  Measurement,
+  SNPMeasurement,
+  TDXMeasurement,
+  ExpectedMeasurement,
+  CryptoMaterialItem,
+  VerificationMetadata,
+  ConfigVerification,
+  ArtifactVerification,
+  ReferenceSource,
+  EmbeddedReferences,
+  UntrustedConfig,
+} from "./types.js";
+export { VERIFIER_NAME, VERIFIER_VERSION } from "./version.js";

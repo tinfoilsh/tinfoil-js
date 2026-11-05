@@ -167,51 +167,38 @@ export function injectUserCacheSecret(raw: string, secret: string): string | nul
   return raw.slice(0, end) + separator + field + raw.slice(end);
 }
 
-function topLevelValueRange(raw: string, field: string): [number, number] | null {
+export interface JSONMemberRange { key: string; start: number; valueStart: number; valueEnd: number; end: number }
+/** Lexical member ranges retain exact JSON number tokens and caller formatting. */
+export function topLevelMembers(raw: string): JSONMemberRange[] | null {
   let index = skipWhitespace(raw, 0);
-  let matchingRange: [number, number] | null = null;
-  if (raw[index] !== "{") {
-    return null;
-  }
-  index += 1;
-
+  if (raw[index] !== "{") return null;
+  index++;
+  const members: JSONMemberRange[] = [];
   while (index < raw.length) {
+    const start = index;
     index = skipWhitespace(raw, index);
-    if (raw[index] === "}") {
-      return null;
-    }
+    if (raw[index] === "}") return members;
     const keyEnd = stringEnd(raw, index);
-    if (keyEnd === null) {
-      return null;
-    }
+    if (keyEnd === null) return null;
     let key: unknown;
-    try {
-      key = JSON.parse(raw.slice(index, keyEnd));
-    } catch {
-      return null;
-    }
+    try { key = JSON.parse(raw.slice(index, keyEnd)); } catch { return null; }
     index = skipWhitespace(raw, keyEnd);
-    if (raw[index] !== ":") {
-      return null;
-    }
+    if (raw[index] !== ":" || typeof key !== "string") return null;
     const valueStart = skipWhitespace(raw, index + 1);
     const valueEnd = jsonValueEnd(raw, valueStart);
-    if (valueEnd === null) {
-      return null;
-    }
-    if (key === field) {
-      matchingRange = [valueStart, valueEnd];
-    }
+    if (valueEnd === null) return null;
     index = skipWhitespace(raw, valueEnd);
-    if (raw[index] === ",") {
-      index += 1;
-    } else if (raw[index] === "}") {
-      return matchingRange;
-    } else {
-      return null;
-    }
+    members.push({ key, start, valueStart, valueEnd, end: index });
+    if (raw[index] === ",") index++;
+    else if (raw[index] === "}") return members;
+    else return null;
   }
   return null;
+}
+export function topLevelValueRange(raw: string, field: string): [number, number] | null {
+  const matches = topLevelMembers(raw)?.filter(member => member.key === field);
+  const last = matches?.[matches.length - 1];
+  return last ? [last.valueStart, last.valueEnd] : null;
 }
 
 function skipWhitespace(raw: string, start: number): number {
@@ -239,7 +226,7 @@ function stringEnd(raw: string, start: number): number | null {
   return null;
 }
 
-function jsonValueEnd(raw: string, start: number): number | null {
+export function jsonValueEnd(raw: string, start: number): number | null {
   if (raw[start] === "\"") {
     return stringEnd(raw, start);
   }

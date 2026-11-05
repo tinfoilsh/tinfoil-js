@@ -6,7 +6,7 @@
  * satisfy bundlers.
  */
 import type * as WS from "ws";
-import { ConfigurationError } from "./verifier.js";
+import { ConfigurationError } from "./errors.js";
 
 export interface SecureWebSocketOptions {
   protocols?: string | string[];

@@ -1,0 +1,14 @@
+{
+  "schemaVersion": 1,
+  "upstreamRevision": "3444516ca6474d1c7c845b8fa60f2083ddcb918b",
+  "corrections": [
+    {
+      "path": "golden/s19-vcek-cert-tcb.json",
+      "originalCode": "POLICY_REJECTED",
+      "correctedCode": "QUOTE_REJECTED",
+      "rules": ["S19", "I1", "I4", "AM3"],
+      "contract": "sdk-flywheel/ERROR_ARCHITECTURE.md at cb2c2e2816747c60cedfe98db0b9cf4754993363: the quote layer authenticates vendor certificate/report bindings before policy checks",
+      "reason": "The supplied VCEK TCB does not equal the signed report's REPORTED_TCB. The report is not authentic under that vendor certificate. Acceptance remains rejected; only its specification-mandated layer changes."
+    }
+  ]
+}

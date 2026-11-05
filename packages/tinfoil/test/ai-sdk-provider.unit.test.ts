@@ -8,9 +8,9 @@ const secureClientMock = {
   fetch: vi.fn(async () => new Response()),
 };
 
-vi.mock("../src/secure-client", () => {
+vi.mock("../src/client", () => {
   return {
-    SecureClient: vi.fn(function () { return secureClientMock; }),
+    Client: vi.fn(function () { return secureClientMock; }),
   };
 });
 

@@ -2,73 +2,63 @@ name: Run tests
 
 on:
   push:
-    branches:
-      - main
+    branches: [main]
   pull_request:
+  workflow_call:
+  workflow_dispatch:
+    inputs:
+      live_integration:
+        description: Run credentialed live API integration tests
+        type: boolean
+        default: false
 
 permissions: {}
 
 jobs:
   test:
-    name: Test (Node ${{ matrix.node-version }})
+    name: Node ${{ matrix.node-version }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
     strategy:
+      fail-fast: false
       matrix:
-        node-version: [22, 24, 26]
+        node-version: [22.23.4, 24.22.1, 26.12.1]
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           persist-credentials: false
-
-      - name: Set up Node.js
-        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
         with:
           node-version: ${{ matrix.node-version }}
-          cache: "npm"
-
-      - name: Install dependencies
-        run: npm ci
-
-      - name: Install Playwright browsers
-        run: npx playwright install --with-deps chromium webkit
-
-      - name: Build
-        run: npm run build
-
-      - name: Check ES2020 compatibility
-        run: npm run check:es2020
-
-      - name: Lint
-        run: npm run lint
-
-      - name: Run tests
-        run: npm test
-
-      - name: Run integration tests
-        run: npm run test:integration
-        env:
-          TINFOIL_API_KEY: ${{ secrets.TINFOIL_API_KEY }}
-
-      - name: Run browser tests
-        run: npm run test:browser
-
-      - name: Run browser integration tests
-        run: npm run test:browser:integration
-        env:
-          TINFOIL_API_KEY: ${{ secrets.TINFOIL_API_KEY }}
-
-      - name: Upload test coverage
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+          cache: npm
+      - name: Use the validated npm release
+        run: npm install --global npm@11.17.0
+      - run: npm ci
+      - name: Install conformance schema validator
+        run: |
+          python3 -m venv .conformance-python
+          .conformance-python/bin/pip install jsonschema==4.25.1
+          echo "$GITHUB_WORKSPACE/.conformance-python/bin" >> "$GITHUB_PATH"
+      - run: npm run build
+      - run: npm run check:es2020
+      - run: npm run lint
+      - run: npm test
+      - name: All tinfoil-conformance fixtures, zero skips
+        run: npm run test:conformance -- --report artifacts/node-${{ matrix.node-version }}.json
+      - name: Packed public packages
+        run: npm run test:packages
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         if: always()
         with:
-          name: coverage-node-${{ matrix.node-version }}
-          path: coverage/
-          if-no-files-found: ignore
+          name: node-${{ matrix.node-version }}-evidence
+          path: |
+            artifacts/*.json
+            coverage/
+          if-no-files-found: error
 
-  test-bun:
-    name: Test (Bun)
+  browsers:
+    name: Chromium and WebKit
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -76,26 +66,95 @@ jobs:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           persist-credentials: false
-
-      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
-
-      - name: Set up Node.js
-        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
         with:
-          node-version: "22"
-          cache: "npm"
+          node-version: 24.22.1
+          cache: npm
+      - name: Use the validated npm release
+        run: npm install --global npm@11.17.0
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium webkit
+      - name: Fetch pinned corpus
+        run: |
+          git clone --no-checkout https://github.com/tinfoilsh/tinfoil-conformance.git .conformance-corpus
+          git -C .conformance-corpus checkout --detach 3444516ca6474d1c7c845b8fa60f2083ddcb918b
+      - run: npm run build
+      - name: Public browser behavior and all tinfoil-conformance fixtures in each engine
+        run: npm run test:browser
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        if: always()
+        with:
+          name: browser-evidence
+          path: |
+            artifacts/*.json
+            packages/*/.vitest-attachments/
+          if-no-files-found: error
 
-      - name: Install dependencies
-        run: npm ci
+  test-bun:
+    name: Bun
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: 1.4.3
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version: 24.22.1
+          cache: npm
+      - name: Use the validated npm release
+        run: npm install --global npm@11.17.0
+      - run: npm ci
+      - name: Install conformance schema validator
+        run: |
+          python3 -m venv .conformance-python
+          .conformance-python/bin/pip install jsonschema==4.25.1
+          echo "$GITHUB_WORKSPACE/.conformance-python/bin" >> "$GITHUB_PATH"
+      - run: npm run build
+      - run: npm run test:bun -w tinfoil
+      - name: All fixtures through Bun, zero skips
+        run: npm run test:conformance -- --runtime bun --report artifacts/bun.json
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        if: always()
+        with:
+          name: bun-evidence
+          path: artifacts/*.json
+          if-no-files-found: error
 
-      - name: Build
-        run: npm run build
-
-      - name: Run Bun unit tests
-        run: npm run test:bun -w tinfoil
-
-      - name: Run Bun integration tests
-        run: npm run test:bun:integration -w tinfoil
-        env:
-          TINFOIL_API_KEY: ${{ secrets.TINFOIL_API_KEY }}
-
+  live-integration:
+    name: Opt-in live integrations
+    if: github.event_name == 'workflow_dispatch' && inputs.live_integration
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    env:
+      TINFOIL_API_KEY: ${{ secrets.TINFOIL_API_KEY }}
+      TINFOIL_TEST_ENDPOINT: https://inference.tinfoil.sh
+      TINFOIL_TEST_IDENTITY: tinfoilsh/confidential-model-router
+      VITE_TINFOIL_TEST_ENDPOINT: https://inference.tinfoil.sh
+      VITE_TINFOIL_TEST_IDENTITY: tinfoilsh/confidential-model-router
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version: 24.22.1
+          cache: npm
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: 1.4.3
+      - name: Require explicitly configured live credentials
+        run: test -n "$TINFOIL_API_KEY"
+      - name: Use the validated npm release
+        run: npm install --global npm@11.17.0
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium webkit
+      - run: npm run build
+      - run: npm run test:integration
+      - run: npm run test:bun:integration -w tinfoil
+      - run: npm run test:browser:integration

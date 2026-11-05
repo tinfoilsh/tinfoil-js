@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { encryptedBodyRequest, normalizeEncryptedBodyRequestArgs, getServerIdentity, createEncryptedBodyFetch, createUnverifiedEncryptedBodyFetch } from "../src/encrypted-body-fetch";
+import { normalizeEncryptedBodyRequestArgs, getServerIdentity, createEncryptedBodyFetch, createUnverifiedEncryptedBodyFetch } from "../src/encrypted-body-fetch";
 import { Identity, KeyConfigMismatchError, PROTOCOL } from "ehbp";
 
 describe("encrypted-body-fetch", () => {
@@ -143,7 +143,7 @@ describe("encrypted-body-fetch", () => {
     });
   });
 
-  describe("encryptedBodyRequest", () => {
+  describe("bound EHBP requests", () => {
     let originalFetch: typeof globalThis.fetch;
 
     beforeEach(() => {
@@ -154,34 +154,6 @@ describe("encrypted-body-fetch", () => {
       globalThis.fetch = originalFetch;
     });
 
-    function capturingTransport() {
-      const request = vi.fn(async () => new Response(null));
-      return {
-        request,
-        transport: { request } as unknown as import("ehbp").Transport,
-      };
-    }
-
-    it("makes request with valid HPKE key", async () => {
-      const serverIdentity = await Identity.generate();
-      const keyHex = await serverIdentity.getPublicKeyHex();
-
-      let apiRequestMade = false;
-      globalThis.fetch = vi.fn(async (input: RequestInfo | URL) => {
-        const url = input instanceof Request ? input.url : input.toString();
-        if (url === "https://api.example.com/test") {
-          apiRequestMade = true;
-        }
-        return new Response("ok");
-      }) as typeof fetch;
-
-      await encryptedBodyRequest(
-        "https://api.example.com/test",
-        keyHex
-      );
-
-      expect(apiRequestMade).toBe(true);
-    });
 
     it("passes through nonce-less errors after encrypted requests", async () => {
       const serverIdentity = await Identity.generate();
@@ -194,9 +166,8 @@ describe("encrypted-body-fetch", () => {
         },
       })) as typeof fetch;
 
-      const response = await encryptedBodyRequest(
+      const response = await createEncryptedBodyFetch("https://api.example.com", keyHex).fetch(
         "https://api.example.com/test",
-        keyHex,
         { method: "POST", body: "secret" },
       );
 
@@ -206,21 +177,9 @@ describe("encrypted-body-fetch", () => {
     });
 
     it("inherits a Request body when init explicitly sets body to null", async () => {
-      const { request: requestSpy, transport } = capturingTransport();
-      const request = new Request("https://api.example.com/test", {
-        method: "POST",
-        body: "inherited body",
-      });
-
-      await encryptedBodyRequest(
-        request,
-        "",
-        { body: null },
-        transport,
-      );
-
-      const sentBody = requestSpy.mock.calls[0][1]!.body as BodyInit;
-      await expect(new Response(sentBody).text()).resolves.toBe("inherited body");
+      const request = new Request("https://api.example.com/test", { method: "POST", body: "inherited body" });
+      const normalized = normalizeEncryptedBodyRequestArgs(request, { body: null });
+      await expect(new Response(normalized.init!.body as BodyInit).text()).resolves.toBe("inherited body");
     });
 
     it("retains EHBP key mismatch errors", async () => {
@@ -234,9 +193,8 @@ describe("encrypted-body-fetch", () => {
         headers: { "Content-Type": PROTOCOL.PROBLEM_JSON_MEDIA_TYPE },
       })) as typeof fetch;
 
-      await expect(encryptedBodyRequest(
+      await expect(createEncryptedBodyFetch("https://api.example.com", keyHex).fetch(
         "https://api.example.com/test",
-        keyHex,
         { method: "POST", body: "secret" },
       )).rejects.toBeInstanceOf(KeyConfigMismatchError);
     });
@@ -315,7 +273,7 @@ describe("encrypted-body-fetch", () => {
       }
     });
 
-    it("allows requests to the enclave origin when routing through a proxy", async () => {
+    it("refuses requests to the enclave origin when configured for a proxy", async () => {
       const serverIdentity = await Identity.generate();
       const keyHex = await serverIdentity.getPublicKeyHex();
 
@@ -330,7 +288,7 @@ describe("encrypted-body-fetch", () => {
         );
         await expect(
           transport.fetch("https://enclave.example.com/test")
-        ).resolves.toBeInstanceOf(Response);
+        ).rejects.toThrow(/refusing to send request/);
       } finally {
         globalThis.fetch = originalFetch;
       }
@@ -386,7 +344,7 @@ describe("encrypted-body-fetch", () => {
         expect(sentRequest?.integrity).toBe("sha256-init");
         expect(sentRequest?.keepalive).toBe(false);
         expect(sentRequest?.mode).toBe("same-origin");
-        expect(sentRequest?.redirect).toBe("error");
+        expect(sentRequest?.redirect).toBe("manual"); // Redirect policy is enforced by the origin guard.
         expect(sentRequest?.referrer).toBe("");
         expect(sentRequest?.referrerPolicy).toBe("no-referrer");
         expect(sentRequest?.signal.aborted).toBe(false);

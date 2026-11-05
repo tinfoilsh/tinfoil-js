@@ -71,7 +71,7 @@ describe("Bun compatibility", () => {
       const wrongFingerprint = "0000000000000000000000000000000000000000000000000000000000000000";
       const pinnedFetch = await createPinnedTlsFetch("https://www.cloudflare.com", wrongFingerprint);
 
-      await expect(pinnedFetch("/")).rejects.toThrow("TLS pinning failed");
+      await expect(pinnedFetch("/")).rejects.toThrow("attested key");
     });
 
     it("should reject HTTP connections during creation", async () => {
@@ -82,7 +82,7 @@ describe("Bun compatibility", () => {
           "http://example.com",
           "0000000000000000000000000000000000000000000000000000000000000000"
         )
-      ).rejects.toThrow("Insecure connection rejected");
+      ).rejects.toThrow("must be HTTPS");
     });
 
     it("should verify certificate on every request", async () => {
@@ -139,7 +139,44 @@ describe("Bun compatibility", () => {
 
       // Create pinned fetch and make a request - should still verify and fail
       const pinnedFetch = await createPinnedTlsFetch("https://www.wikipedia.org", wrongFingerprint);
-      await expect(pinnedFetch("/")).rejects.toThrow("TLS pinning failed");
+      await expect(pinnedFetch("/")).rejects.toThrow("attested key");
     });
+  });
+});
+
+describe("Bun immutable pin bindings on actual HTTPS", () => {
+  it("does not reuse ordinary or previously pinned connections under a different key", async () => {
+    const { createServer } = await import("node:https");
+    const { readFileSync } = await import("node:fs");
+    const { X509Certificate, createHash } = await import("node:crypto");
+    const { fileURLToPath } = await import("node:url");
+    const certPath = fileURLToPath(new URL("./fixtures/ws-test-cert.pem", import.meta.url));
+    const cert = readFileSync(certPath), key = readFileSync(new URL("./fixtures/ws-test-key.pem", import.meta.url));
+    const fingerprint = createHash("sha256").update(new X509Certificate(cert).publicKey.export({ type: "spki", format: "der" })).digest("hex");
+    let received = 0;
+    const server = createServer({ cert, key }, (_request, response) => { received++; response.end("accepted"); });
+    await new Promise<void>(resolve => server.listen(0, "127.0.0.1", resolve));
+    const address = server.address() as { port: number };
+    const endpoint = `https://127.0.0.1:${address.port}`;
+    const module = fileURLToPath(new URL("../src/pinned-tls-fetch.ts", import.meta.url));
+    const script = `
+      import { createPinnedTlsFetch } from ${JSON.stringify(module)};
+      const endpoint = ${JSON.stringify(endpoint)};
+      await (await fetch(endpoint)).text();
+      const good = await createPinnedTlsFetch(endpoint, ${JSON.stringify(fingerprint)});
+      await (await good('/')).text();
+      const bad = await createPinnedTlsFetch(endpoint, '0'.repeat(64));
+      for (let i = 0; i < 2; i++) {
+        let rejected = false;
+        try { await bad('/', { method: 'POST', body: 'must never be sent' }); }
+        catch (error) { rejected = error.name === 'AttestationError'; }
+        if (!rejected) throw new Error('Wrong attested key accepted after pooled connection');
+      }
+    `;
+    try {
+      const process = Bun.spawn([Bun.which("bun")!, "--eval", script], { env: { ...globalThis.process.env, NODE_EXTRA_CA_CERTS: certPath }, stdout: "pipe", stderr: "pipe" });
+      const [exit, error] = await Promise.all([process.exited, new Response(process.stderr).text()]);
+      expect(error).toBe(""); expect(exit).toBe(0); expect(received).toBe(2);
+    } finally { server.closeAllConnections(); await new Promise<void>(resolve => server.close(() => resolve())); }
   });
 });

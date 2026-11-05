@@ -1,5 +1,7 @@
-import { Identity, Transport, PROTOCOL, type SessionRecoveryToken } from "ehbp";
-import { ConfigurationError, FetchError } from "./verifier.js";
+import { Identity, Transport, PROTOCOL, ProtocolError, DecryptionError, type SessionRecoveryToken } from "ehbp";
+import { BoundEHBPTransport } from "./bound-ehbp.js";
+import { ConfigurationError, NetworkError, AttestationError } from "./errors.js";
+import { boundRedirectFetch } from "./redirects.js";
 import { injectUserCacheSecretIntoRequestInit } from "./user-cache-secret.js";
 
 export type { SessionRecoveryToken } from "ehbp";
@@ -8,6 +10,7 @@ export { decryptResponseWithToken } from "ehbp";
 export interface SecureTransport {
   fetch: typeof fetch;
   getSessionRecoveryToken(): Promise<SessionRecoveryToken>;
+  initialize?(): Promise<void>;
 }
 
 /**
@@ -28,12 +31,12 @@ export async function getServerIdentity(enclaveURL: string): Promise<Identity> {
   const response = await fetch(keysURL.toString());
 
   if (!response.ok) {
-    throw new FetchError(`Failed to fetch HPKE public key from enclave: HTTP ${response.status}`);
+    throw new NetworkError(`Failed to fetch HPKE public key from enclave: HTTP ${response.status}`);
   }
 
   const contentType = response.headers.get('content-type');
   if (contentType !== PROTOCOL.KEYS_MEDIA_TYPE) {
-    throw new FetchError(`Invalid response from HPKE key endpoint: Expected content-type "${PROTOCOL.KEYS_MEDIA_TYPE}", got "${contentType}"`);
+    throw new NetworkError(`Invalid response from HPKE key endpoint: Expected content-type "${PROTOCOL.KEYS_MEDIA_TYPE}", got "${contentType}"`);
   }
 
   const keysData = new Uint8Array(await response.arrayBuffer());
@@ -94,29 +97,6 @@ function requestInitFromRequest(
   return derivedInit;
 }
 
-export async function encryptedBodyRequest(
-  input: RequestInfo | URL,
-  hpkePublicKey: string,
-  init?: RequestInit,
-  transportInstance?: Transport,
-): Promise<Response> {
-  const { url: requestUrl, init: requestInit } = normalizeEncryptedBodyRequestArgs(
-    input,
-    init,
-  );
-
-  let actualTransport: Transport;
-
-  if (transportInstance) {
-    actualTransport = transportInstance;
-  } else {
-    const u = new URL(requestUrl);
-    actualTransport = await getTransportForOrigin(u.origin, hpkePublicKey);
-  }
-
-  return actualTransport.request(requestUrl, requestInit);
-}
-
 const ENCLAVE_URL_HEADER = 'X-Tinfoil-Enclave-Url';
 
 export function createEncryptedBodyFetch(baseURL: string, hpkePublicKey: string, enclaveURL?: string, userCacheSecret: string = ""): SecureTransport {
@@ -128,20 +108,18 @@ export function createEncryptedBodyFetch(baseURL: string, hpkePublicKey: string,
   // seals the body, so request headers (which may carry the API key) travel in
   // plaintext; sending them to any other origin would leak them.
   const allowedOrigins = new Set<string>([baseOrigin]);
-  if (enclaveURL) {
-    allowedOrigins.add(new URL(enclaveURL).origin);
-  }
 
-  let transportPromise: Promise<Transport> | null = null;
+  let transportPromise: Promise<BoundEHBPTransport> | null = null;
 
-  const getOrCreateTransport = (): Promise<Transport> => {
+  const getOrCreateTransport = (): Promise<BoundEHBPTransport> => {
     if (!transportPromise) {
-      transportPromise = getTransportForOrigin(baseOrigin, hpkePublicKey);
+      transportPromise = createIdentityFromPublicKeyHex(hpkePublicKey).then(identity => new BoundEHBPTransport(identity));
     }
     return transportPromise;
   };
 
   return {
+    initialize: async () => { await getOrCreateTransport(); },
     fetch: async (input: RequestInfo | URL, init?: RequestInit) => {
       const normalized = normalizeEncryptedBodyRequestArgs(input, init);
       const targetUrl = new URL(normalized.url, baseURL);
@@ -165,7 +143,13 @@ export function createEncryptedBodyFetch(baseURL: string, hpkePublicKey: string,
       );
 
       const transportInstance = await getOrCreateTransport();
-      return transportInstance.request(targetUrl.toString(), initWithHeader!);
+      try {
+        const request = new Request(targetUrl, initWithHeader);
+        return await boundRedirectFetch(request, value => transportInstance.request(value));
+      } catch (cause) {
+        if (cause instanceof ProtocolError || cause instanceof DecryptionError) throw new AttestationError("EHBP response authentication failed", { cause });
+        throw cause;
+      }
     },
 
     async getSessionRecoveryToken(): Promise<SessionRecoveryToken> {
@@ -239,12 +223,6 @@ export function createUnverifiedEncryptedBodyFetch(baseURL: string, keyOrigin?: 
 
 async function getUnverifiedTransportForOrigin(origin: string, keyOrigin: string): Promise<Transport> {
   const serverIdentity = await getServerIdentity(keyOrigin);
-  const requestHost = new URL(origin).host;
-  return new Transport(serverIdentity, requestHost);
-}
-
-async function getTransportForOrigin(origin: string, hpkePublicKeyHex: string): Promise<Transport> {
-  const serverIdentity = await createIdentityFromPublicKeyHex(hpkePublicKeyHex);
   const requestHost = new URL(origin).host;
   return new Transport(serverIdentity, requestHost);
 }

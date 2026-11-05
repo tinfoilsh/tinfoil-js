@@ -1,88 +1,19 @@
 import { createOpenAICompatible } from "@ai-sdk/openai-compatible";
-import { SecureClient } from "./secure-client.js";
+import { Client, type ClientOptions } from "./client.js";
+import { Gateway, type GatewayOptions } from "./gateway.js";
 import { isRealBrowser } from "./env.js";
-import { ConfigurationError } from "./verifier.js";
-
-/**
- * Options for creating a Tinfoil AI SDK provider.
- */
-export interface CreateTinfoilAIOptions {
-  /**
-   * Override the base URL for API requests.
-   * Useful for proxying requests through your own backend.
-   */
-  baseURL?: string;
-
-  /** GitHub repo for code verification. */
-  configRepo?: string;
-
-  /** URL to fetch the attestation bundle from. */
-  attestationBundleURL?: string;
-
-  /**
-   * Secret scoping the router's prompt cache for this provider's requests.
-   * Defaults to the TINFOIL_USER_CACHE_SECRET environment variable, otherwise
-   * attempts to generate a secret persisted at `~/.tinfoil/user_cache_secret`
-   * in Node.js. Browsers cannot persist it and use a process-lifetime
-   * in-memory secret instead. Empty values are treated as unset.
-   */
-  userCacheSecret?: string;
+import { ConfigurationError } from "./errors.js";
+export interface CreateTinfoilAIOptions extends ClientOptions {
+  gateway?: GatewayOptions & { url: string };
 }
-
-/**
- * Create a Tinfoil provider for the Vercel AI SDK.
- * 
- * This performs enclave verification and returns an OpenAI-compatible provider
- * that can be used with Vercel AI SDK functions like `generateText` and `streamText`.
- * 
- * @param apiKey - Your Tinfoil API key. Falls back to TINFOIL_API_KEY env var if not provided.
- * @param options - Optional configuration
- * @returns An AI SDK provider for Tinfoil
- *
- * @example
- * ```typescript
- * import { createTinfoilAI } from "tinfoil";
- * import { generateText } from "ai";
- *
- * // Uses TINFOIL_API_KEY env var
- * const tinfoil = await createTinfoilAI();
- *
- * // Or pass API key explicitly
- * const tinfoil = await createTinfoilAI("your-api-key");
- *
- * const { text } = await generateText({
- *   model: tinfoil("llama3-3-70b"),
- *   prompt: "Hello!",
- * });
- * ```
- *
- * @see https://docs.tinfoil.sh/sdk/javascript-sdk
- * @see https://sdk.vercel.ai/ - Vercel AI SDK documentation
- */
+/** OpenAI-compatible AI SDK provider with native structured-output serialization. */
 export async function createTinfoilAI(apiKey?: string, options: CreateTinfoilAIOptions = {}) {
-  // Resolve API key: use provided value, or fall back to env var (non-browser only)
-  let resolvedApiKey = apiKey;
-  if (!resolvedApiKey && !isRealBrowser() && typeof process !== 'undefined' && process.env.TINFOIL_API_KEY) {
-    resolvedApiKey = process.env.TINFOIL_API_KEY;
-  }
-  if (!resolvedApiKey) {
-    throw new ConfigurationError("API key is required. Provide apiKey parameter or set TINFOIL_API_KEY environment variable.");
-  }
-
-  const secureClient = new SecureClient({
-    baseURL: options.baseURL,
-    configRepo: options.configRepo,
-    attestationBundleURL: options.attestationBundleURL,
-    userCacheSecret: options.userCacheSecret,
-  });
-
-  await secureClient.ready();
-
-  return createOpenAICompatible({
-    name: "tinfoil",
-    baseURL: secureClient.getBaseURL()!,
-    apiKey: resolvedApiKey,
-    fetch: secureClient.fetch,
-    supportsStructuredOutputs: true,
-  });
+  const resolved = apiKey || (!isRealBrowser() && typeof process !== "undefined" ? process.env.TINFOIL_API_KEY : undefined);
+  if (!resolved) throw new ConfigurationError("API key is required");
+  if (options.gateway && [options.enclaveURL, options.configRepo, options.baseURL, options.transport].some(value => value !== undefined)) throw new ConfigurationError("Gateway configuration owns endpoints, repositories and EHBP transport");
+  const secure = options.gateway
+    ? new Gateway(options.gateway.url, { verification: options.verification, acquisition: options.acquisition, userCacheSecret: options.userCacheSecret, ...options.gateway })
+    : new Client(options);
+  if (!options.gateway) await secure.ready();
+  return createOpenAICompatible({ name: "tinfoil", baseURL: secure.getBaseURL(), apiKey: resolved, fetch: secure.fetch, supportsStructuredOutputs: true });
 }

@@ -1,5 +1,6 @@
 import { isRealBrowser } from "./env.js";
-import { ConfigurationError } from "./verifier.js";
+import { ProtocolError } from "ehbp";
+import { ConfigurationError, AttestationError } from "./errors.js";
 import { createEncryptedBodyFetch, type SecureTransport } from "./encrypted-body-fetch.js";
 import { withUserCacheSecret } from "./user-cache-secret.js";
 
@@ -24,7 +25,12 @@ export async function createSecureFetch(
   userCacheSecret: string = ""
 ): Promise<SecureTransport> {
   if (hpkePublicKey) {
-    return createEncryptedBodyFetch(baseURL, hpkePublicKey, enclaveURL, userCacheSecret);
+    const transport = createEncryptedBodyFetch(baseURL, hpkePublicKey, enclaveURL, userCacheSecret);
+    try { await transport.initialize!(); } catch (cause) {
+      if (cause instanceof ProtocolError) throw new AttestationError("Attested HPKE key could not initialize a secure channel", { cause });
+      throw cause;
+    }
+    return transport;
   }
 
   if (isRealBrowser()) {

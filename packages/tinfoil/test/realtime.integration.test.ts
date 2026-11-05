@@ -9,7 +9,7 @@ describe("Realtime WebSocket Integration Tests", () => {
       const { TinfoilAI } = await import("../src/tinfoil-ai");
       const client = new TinfoilAI({ apiKey: process.env.TINFOIL_API_KEY });
 
-      const rt = await client.realtime({ model: "voxtral-mini-4b-realtime" });
+      const rt = await client.openRealtime({ model: "voxtral-mini-4b-realtime" });
 
       const firstEvent = await new Promise<any>((resolve, reject) => {
         const timeout = setTimeout(
@@ -36,7 +36,7 @@ describe("Realtime WebSocket Integration Tests", () => {
     "SecureClient.createWebSocket connects to the realtime endpoint",
     async () => {
       const { SecureClient } = await import("../src/secure-client");
-      const client = new SecureClient();
+      const client = new SecureClient({ enclaveURL: "https://inference.tinfoil.sh", configRepo: "tinfoilsh/confidential-model-router" });
 
       const socket = await client.createWebSocket(
         "/v1/realtime?model=voxtral-mini-4b-realtime",

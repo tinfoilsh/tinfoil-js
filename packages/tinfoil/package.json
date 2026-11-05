@@ -1,6 +1,6 @@
 {
   "name": "tinfoil",
-  "version": "1.3.0",
+  "version": "2.0.0",
   "description": "Tinfoil secure OpenAI client wrapper",
   "type": "module",
   "main": "dist/index.js",
@@ -29,7 +29,7 @@
     }
   },
   "scripts": {
-    "build": "node scripts/generate-version.mjs && tsc",
+    "build": "node scripts/build.mjs",
     "test": "node scripts/generate-version.mjs && vitest run",
     "test:integration": "RUN_TINFOIL_INTEGRATION=true npm test",
     "test:bun": "bun test --timeout 30000 ./test/bun-compat.bun.ts ./test/bun-ws-tls.bun.ts",
@@ -39,8 +39,6 @@
     "lint": "eslint src/**/*.ts",
     "check:es2020": "acorn --ecma2020 --module --silent dist/*.js",
     "clean": "rm -rf dist",
-    "prepack": "cp ../../README.md README.md",
-    "postpack": "rm README.md",
     "prepublishOnly": "npm run build"
   },
   "files": [
@@ -64,15 +62,15 @@
   },
   "dependencies": {
     "@ai-sdk/openai-compatible": "^3.0.7",
-    "@freedomofpress/sigstore-browser": "^0.1.14",
-    "@tinfoilsh/verifier": "1.3.0",
+    "@tinfoilsh/verifier": "2.0.0",
     "@types/ws": "^8.18.1",
     "ehbp": "^0.3.3",
     "openai": "^7.35.0",
-    "ws": "^8.21.0"
+    "ws": "^8.21.0",
+    "@types/json-schema": "^7.0.15"
   },
   "peerDependencies": {
-    "ai": "^6.0.168 || ^7.0.0"
+    "ai": "^7.0.0"
   },
   "peerDependenciesMeta": {
     "ai": {
@@ -95,6 +93,8 @@
     "ts-node": "^10.9.2",
     "typescript-eslint": "^8.63.0",
     "vite": "^8.1.4",
-    "vitest": "^4.1.11"
+    "vitest": "^4.1.11",
+    "hpke": "^1.0.1",
+    "@panva/hpke-noble": "^1.0.3"
   }
 }

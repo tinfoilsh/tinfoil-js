@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { TinfoilAI } from "../src/tinfoil-ai";
-import { SecureClient } from "../src/secure-client";
+import { Client } from "../src/client";
 import { TINFOIL_CONFIG } from "../src/config";
 
 describe("TinfoilAI - enclaveURL integration", () => {
@@ -14,13 +14,11 @@ describe("TinfoilAI - enclaveURL integration", () => {
 
     await client.ready();
 
-    const verificationDoc = await client.getVerificationDocument();
+    const verificationDoc = client.inspect()?.verification;
 
     expect(verificationDoc).toBeTruthy();
-    expect(verificationDoc.configRepo).toBe(TINFOIL_CONFIG.DEFAULT_ROUTER_REPO);
-    expect(verificationDoc.securityVerified).toBe(true);
-    expect(verificationDoc.enclaveHost).toBeTruthy();
-    expect(verificationDoc.enclaveMeasurement.tlsPublicKeyFingerprint).toBeTruthy();
+    expect(verificationDoc?.freshnessExpiresAt?.getTime()).toBeGreaterThan(Date.now());
+    expect(verificationDoc?.tlsPublicKeyFingerprint()).toBeTruthy();
   }, 60000);
 
   it("should verify enclave when only baseURL is set to inference.tinfoil.sh", async () => {
@@ -31,51 +29,45 @@ describe("TinfoilAI - enclaveURL integration", () => {
 
     await client.ready();
 
-    const verificationDoc = await client.getVerificationDocument();
+    const verificationDoc = client.inspect()?.verification;
 
     expect(verificationDoc).toBeTruthy();
-    expect(verificationDoc.configRepo).toBe(TINFOIL_CONFIG.DEFAULT_ROUTER_REPO);
-    expect(verificationDoc.securityVerified).toBe(true);
-    expect(verificationDoc.enclaveHost).toBeTruthy();
+    expect(verificationDoc?.freshnessExpiresAt?.getTime()).toBeGreaterThan(Date.now());
   }, 60000);
 });
 
-describe("SecureClient - enclaveURL integration", () => {
+describe("Client - enclaveURL integration", () => {
   const INFERENCE_URL = "https://inference.tinfoil.sh";
 
   it("should verify enclave when enclaveURL is set to inference.tinfoil.sh", async () => {
-    const client = new SecureClient({
+    const client = new Client({
       enclaveURL: INFERENCE_URL,
     });
 
     await client.ready();
 
-    const verificationDoc = await client.getVerificationDocument();
+    const verificationDoc = client.inspect()?.verification;
 
     expect(verificationDoc).toBeTruthy();
-    expect(verificationDoc.configRepo).toBe(TINFOIL_CONFIG.DEFAULT_ROUTER_REPO);
-    expect(verificationDoc.securityVerified).toBe(true);
-    expect(verificationDoc.enclaveHost).toBeTruthy();
-    expect(verificationDoc.enclaveMeasurement.tlsPublicKeyFingerprint).toBeTruthy();
+    expect(verificationDoc?.freshnessExpiresAt?.getTime()).toBeGreaterThan(Date.now());
+    expect(verificationDoc?.tlsPublicKeyFingerprint()).toBeTruthy();
   }, 60000);
 
   it("should verify enclave when baseURL is set to inference.tinfoil.sh", async () => {
-    const client = new SecureClient({
+    const client = new Client({
       baseURL: `${INFERENCE_URL}/v1/`,
     });
 
     await client.ready();
 
-    const verificationDoc = await client.getVerificationDocument();
+    const verificationDoc = client.inspect()?.verification;
 
     expect(verificationDoc).toBeTruthy();
-    expect(verificationDoc.configRepo).toBe(TINFOIL_CONFIG.DEFAULT_ROUTER_REPO);
-    expect(verificationDoc.securityVerified).toBe(true);
-    expect(verificationDoc.enclaveHost).toBeTruthy();
+    expect(verificationDoc?.freshnessExpiresAt?.getTime()).toBeGreaterThan(Date.now());
   }, 60000);
 
   it("should make successful fetch request when enclaveURL is set to inference.tinfoil.sh", async () => {
-    const client = new SecureClient({
+    const client = new Client({
       enclaveURL: INFERENCE_URL,
     });
 

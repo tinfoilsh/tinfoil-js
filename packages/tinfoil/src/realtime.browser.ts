@@ -6,7 +6,7 @@
  */
 import type * as WS from "ws";
 import type { OpenAIRealtimeWS } from "openai/realtime/ws";
-import { ConfigurationError } from "./verifier.js";
+import { ConfigurationError } from "./errors.js";
 
 export async function createPinnedRealtimeWS(
   _props: { model: string; options?: WS.ClientOptions },

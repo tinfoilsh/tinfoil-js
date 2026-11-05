@@ -1,0 +1,65 @@
+package endorsement_test
+
+import (
+ "context"
+ "crypto"
+ "crypto/x509"
+ "encoding/asn1"
+ "encoding/base64"
+ "encoding/hex"
+ "encoding/json"
+ "os"
+ "testing"
+ "github.com/sigstore/sigstore-go/pkg/root"
+ "github.com/sigstore/sigstore/pkg/signature"
+ "github.com/stretchr/testify/require"
+ config "github.com/tinfoilsh/tinfoil-go/endorsement/config"
+ "github.com/tinfoilsh/tinfoil-go/internal/sigstoretest"
+ "github.com/tinfoilsh/tinfoil-go/verify/internal/endorsement"
+ rekornote "github.com/sigstore/rekor-tiles/v2/pkg/note"
+ flog "github.com/transparency-dev/formats/log"
+ "golang.org/x/mod/sumdb/note"
+ protorekor "github.com/sigstore/protobuf-specs/gen/pb-go/rekor/v1"
+ "google.golang.org/protobuf/proto"
+)
+
+func TestGenerateJSApprovalBoundaries(t *testing.T) {
+ f:=sigstoretest.New(t)
+ rawConfig:=[]byte("name: approved test config\n")
+ statement,e:=config.NewStatement("/example/service/rev1",rawConfig);require.NoError(t,e)
+ input,e:=statement.TimestampInput();require.NoError(t,e)
+ payload,e:=statement.Complete(f.Timestamp(t,input,f.Now));require.NoError(t,e)
+ many:=f.Bundle(t,payload)
+ logs:=f.Trust.RekorLogs()
+ for len(many.VerificationMaterial.TlogEntries)<9 {
+  g:=sigstoretest.New(t);logs[hex.EncodeToString(g.Trust.Log.ID)]=g.Trust.Log
+  entry:=proto.Clone(many.VerificationMaterial.TlogEntries[0]).(*protorekor.TransparencyLogEntry)
+  entry.LogId.KeyId=g.Trust.Log.ID
+  signer,e:=signature.LoadECDSASignerVerifier(g.LogKey,crypto.SHA256);require.NoError(t,e)
+  ns,e:=rekornote.NewNoteSigner(context.Background(),"rekor.test.invalid",signer);require.NoError(t,e)
+  checkpoint:=flog.Checkpoint{Origin:"rekor.test.invalid",Size:1,Hash:entry.InclusionProof.RootHash}
+  signed,e:=note.Sign(&note.Note{Text:string(checkpoint.Marshal())},ns);require.NoError(t,e)
+  entry.InclusionProof.Checkpoint.Envelope=string(signed)
+  many.VerificationMaterial.TlogEntries=append(many.VerificationMaterial.TlogEntries,entry)
+ }
+ trusted,e:=root.NewTrustedRoot(root.TrustedRootMediaType01,nil,nil,f.Trust.TimestampingAuthorities(),logs);require.NoError(t,e)
+ verifier,e:=endorsement.NewConfigVerifier(trusted,[]crypto.PublicKey{f.Key.Public()});require.NoError(t,e)
+ policy:=endorsement.ConfigPolicy{Identity:"/example/service",Now:f.Now}
+ all:=many.VerificationMaterial.TlogEntries
+ many.VerificationMaterial.TlogEntries=all[:8]
+ eight:=sigstoretest.MarshalBundle(t,many)
+ _,e=verifier.Verify(rawConfig,eight,policy);require.NoError(t,e)
+ many.VerificationMaterial.TlogEntries=all
+ nine:=sigstoretest.MarshalBundle(t,many)
+ _,e=verifier.Verify(rawConfig,nine,policy);require.Error(t,e)
+ wrongTS:=f.TimestampWithPolicy(t,input,f.Now,asn1.ObjectIdentifier{1,3,6,1,4,1,57264,999})
+ _,e=f.Trust.TSA.Verify(wrongTS,input);require.NoError(t,e) // Cryptographically authentic, wrong profile.
+ wrongPayload,e:=statement.Complete(wrongTS);require.NoError(t,e)
+ wrong:=sigstoretest.MarshalBundle(t,f.Bundle(t,wrongPayload))
+ _,e=verifier.Verify(rawConfig,wrong,policy);require.Error(t,e)
+ rootJSON,e:=trusted.MarshalJSON();require.NoError(t,e)
+ key,e:=x509.MarshalPKIXPublicKey(f.Key.Public());require.NoError(t,e)
+ output:=map[string]any{"root":json.RawMessage(rootJSON),"key":base64.StdEncoding.EncodeToString(key),"config":base64.StdEncoding.EncodeToString(rawConfig),"now":f.Now.Unix(),"eight":json.RawMessage(eight),"nine":json.RawMessage(nine),"wrongPolicy":json.RawMessage(wrong)}
+ encoded,e:=json.MarshalIndent(output,"","  ");require.NoError(t,e)
+ require.NoError(t,os.WriteFile(os.Getenv("TINFOIL_JS_APPROVAL_FIXTURE"),append(encoded,'\n'),0644))
+}

@@ -1,10 +1,10 @@
 import { describe, it, expect } from 'vitest';
-import { SecureClient } from '../src/secure-client';
+import { Client } from '../src/client';
 
 /**
  * AI SDK Browser Integration Tests
  * 
- * These tests verify that SecureClient.fetch works correctly when used
+ * These tests verify that Client.fetch works correctly when used
  * in patterns similar to the Vercel AI SDK's DefaultChatTransport.
  * 
  * The tests simulate how the AI SDK would consume the fetch function:
@@ -13,9 +13,9 @@ import { SecureClient } from '../src/secure-client';
  * - Custom headers
  */
 describe('AI SDK Browser Transport Tests', () => {
-  describe('SecureClient.fetch as transport', () => {
+  describe('Client.fetch as transport', () => {
     it('should work when passed to a transport-like consumer', async () => {
-      const client = new SecureClient();
+      const client = new Client();
       await client.ready();
 
       // Simulate how DefaultChatTransport uses fetch
@@ -43,7 +43,7 @@ describe('AI SDK Browser Transport Tests', () => {
     }, 60000);
 
     it('should handle streaming responses like AI SDK transport', async () => {
-      const client = new SecureClient();
+      const client = new Client();
       await client.ready();
 
       // Simulate streaming request like DefaultChatTransport
@@ -88,7 +88,7 @@ describe('AI SDK Browser Transport Tests', () => {
     }, 60000);
 
     it('should preserve custom headers for proxy routing', async () => {
-      const client = new SecureClient();
+      const client = new Client();
       await client.ready();
 
       // Custom headers that a transport might add for proxy
@@ -112,7 +112,7 @@ describe('AI SDK Browser Transport Tests', () => {
     }, 60000);
 
     it('should handle AbortController for request cancellation', async () => {
-      const client = new SecureClient();
+      const client = new Client();
       await client.ready();
 
       const controller = new AbortController();
@@ -158,7 +158,7 @@ describe('AI SDK Browser Transport Tests', () => {
     }, 60000);
 
     it('should work with URL object input', async () => {
-      const client = new SecureClient();
+      const client = new Client();
       await client.ready();
 
       const baseURL = client.getBaseURL()!;
@@ -184,13 +184,13 @@ describe('AI SDK Browser Transport Tests', () => {
 
   describe('Initialization timing', () => {
     it('should throw or handle gracefully if fetch used before ready()', async () => {
-      const client = new SecureClient();
+      const client = new Client();
       
       // Don't await ready() - this simulates the common mistake
       // The fetch should either queue the request or throw a clear error
       
       // Note: The actual behavior depends on implementation.
-      // The SecureClient.fetch getter already handles this by awaiting ready()
+      // The Client.fetch getter already handles this by awaiting ready()
       // internally, so this should still work but will be slower.
       const response = await client.fetch('/v1/chat/completions', {
         method: 'POST',
@@ -210,16 +210,13 @@ describe('AI SDK Browser Transport Tests', () => {
     }, 60000);
 
     it('should verify attestation completes before making requests', async () => {
-      const client = new SecureClient();
+      const client = new Client();
       
       // ready() should complete verification
       await client.ready();
       
-      const doc = await client.getVerificationDocument();
-      expect(doc.securityVerified).toBe(true);
-      expect(doc.steps.verifyEnclave.status).toBe('success');
-      expect(doc.steps.verifyCode.status).toBe('success');
-      expect(doc.steps.compareMeasurements.status).toBe('success');
+      const doc = client.inspect()?.verification;
+      expect(doc?.freshnessExpiresAt?.getTime()).toBeGreaterThan(Date.now());
     }, 60000);
   });
 });

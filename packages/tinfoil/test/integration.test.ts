@@ -17,24 +17,24 @@ const TEST_USER_CACHE_SECRET = "javascript-live-integration-cache-secret";
 describe("Examples Integration Tests", () => {
   // Shared TinfoilAI client (default config) for chat, streaming, and audio tests
   let sharedTinfoilClient: any;
-  // Shared default SecureClient for direct fetch and default transport tests
-  let sharedSecureClient: any;
+  // Shared default Client for direct fetch and default transport tests
+  let sharedClient: any;
 
   beforeAll(async () => {
     if (!RUN_INTEGRATION) return;
     const { TinfoilAI } = await import("../src/tinfoil-ai");
-    const { SecureClient } = await import("../src/secure-client");
+    const { Client } = await import("../src/client");
 
     sharedTinfoilClient = new TinfoilAI({
       apiKey: process.env.TINFOIL_API_KEY,
       userCacheSecret: TEST_USER_CACHE_SECRET,
     });
-    sharedSecureClient = new SecureClient();
+    sharedClient = new Client();
 
     // Attest both in parallel
     await Promise.all([
       sharedTinfoilClient.ready(),
-      sharedSecureClient.ready(),
+      sharedClient.ready(),
     ]);
   });
 
@@ -57,8 +57,8 @@ describe("Examples Integration Tests", () => {
   });
 
   describe("Secure Client Example", () => {
-    it.skipIf(!RUN_INTEGRATION)("should create a SecureClient and make a direct fetch request", async () => {
-      const response = await sharedSecureClient.fetch("/v1/chat/completions", {
+    it.skipIf(!RUN_INTEGRATION)("should create a Client and make a direct fetch request", async () => {
+      const response = await sharedClient.fetch("/v1/chat/completions", {
         method: "POST",
         headers: { "Content-Type": "application/json", "Authorization": `Bearer ${process.env.TINFOIL_API_KEY}` },
         body: JSON.stringify({
@@ -136,14 +136,10 @@ describe("Examples Integration Tests", () => {
       expect(client.fetch).toBeTruthy();
     });
 
-    it("SecureClient should fail with invalid attestation bundle URL", async () => {
-      const { SecureClient } = await import("../src/secure-client");
+    it("Client rejects malformed application URLs before network work", async () => {
+      const { Client } = await import("../src/client");
 
-      const client = new SecureClient({
-        attestationBundleURL: "https://invalid-bundle-url.example.com/bundle",
-      });
-
-      await expect(client.ready()).rejects.toThrow();
+      expect(() => new Client({ baseURL: "not-a-url" })).toThrow();
     });
 
     it("should initialize correctly when baseURL is provided but keyOrigin is not", async () => {
@@ -161,41 +157,36 @@ describe("Examples Integration Tests", () => {
 
   });
 
-  describe("Custom Enclave (non-ATC) Path", () => {
-    const LOCAL_ATC = process.env.LOCAL_ATC_URL;
+  describe("Explicit enclave path", () => {
 
-    it.skipIf(!RUN_INTEGRATION)("should verify and fetch using enclaveURL (assembleAttestationBundle)", async () => {
-      const { SecureClient } = await import("../src/secure-client");
+    it.skipIf(!RUN_INTEGRATION)("should verify and fetch using enclaveURL (v3 document acquisition)", async () => {
+      const { Client } = await import("../src/client");
 
-      const client = new SecureClient({
+      const client = new Client({
         enclaveURL: "https://inference.tinfoil.sh",
-        ...(LOCAL_ATC && { attestationBundleURL: LOCAL_ATC }),
       });
 
       await client.ready();
 
-      const doc = await client.getVerificationDocument();
-      expect(doc.securityVerified).toBe(true);
-      expect(doc.enclaveHost).toBeTruthy();
+      const doc = client.inspect()?.verification;
+      expect(doc?.freshnessExpiresAt?.getTime()).toBeGreaterThan(Date.now());
 
       const response = await client.fetch("/v1/models", { method: "GET" });
       expect(response.status).toBe(200);
     });
 
     it.skipIf(!RUN_INTEGRATION)("should verify with enclaveURL and explicit configRepo", async () => {
-      const { SecureClient } = await import("../src/secure-client");
+      const { Client } = await import("../src/client");
 
-      const client = new SecureClient({
+      const client = new Client({
         enclaveURL: "https://inference.tinfoil.sh",
         configRepo: "tinfoilsh/confidential-model-router",
-        ...(LOCAL_ATC && { attestationBundleURL: LOCAL_ATC }),
       });
 
       await client.ready();
 
-      const doc = await client.getVerificationDocument();
-      expect(doc.securityVerified).toBe(true);
-      expect(doc.configRepo).toBe("tinfoilsh/confidential-model-router");
+      const doc = client.inspect()?.verification;
+      expect(doc?.freshnessExpiresAt?.getTime()).toBeGreaterThan(Date.now());
     });
   });
 
@@ -217,8 +208,8 @@ describe("Examples Integration Tests", () => {
 
   describe("Transport Mode Options", () => {
     it.skipIf(!RUN_INTEGRATION)("should work with default transport (ehbp)", async () => {
-      // Reuses the shared default SecureClient (which uses default ehbp transport)
-      const response = await sharedSecureClient.fetch("/v1/chat/completions", {
+      // Reuses the shared default Client (which uses default ehbp transport)
+      const response = await sharedClient.fetch("/v1/chat/completions", {
         method: "POST",
         headers: { "Content-Type": "application/json", "Authorization": `Bearer ${process.env.TINFOIL_API_KEY}` },
         body: JSON.stringify({
@@ -234,9 +225,9 @@ describe("Examples Integration Tests", () => {
     });
 
     it.skipIf(!RUN_INTEGRATION)("should work with transport: 'ehbp'", async () => {
-      const { SecureClient } = await import("../src/secure-client");
+      const { Client } = await import("../src/client");
 
-      const client = new SecureClient({ transport: 'ehbp' });
+      const client = new Client({ transport: 'ehbp' });
       await client.ready();
 
       const response = await client.fetch("/v1/chat/completions", {
@@ -255,9 +246,9 @@ describe("Examples Integration Tests", () => {
     });
 
     it.skipIf(!RUN_INTEGRATION)("should work with transport: 'tls'", async () => {
-      const { SecureClient } = await import("../src/secure-client");
+      const { Client } = await import("../src/client");
 
-      const client = new SecureClient({ transport: 'tls' });
+      const client = new Client({ transport: 'tls' });
       await client.ready();
 
       const response = await client.fetch("/v1/chat/completions", {

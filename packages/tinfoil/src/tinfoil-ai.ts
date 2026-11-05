@@ -1,311 +1,47 @@
-import OpenAI from "openai";
-import type {
-  Audio,
-  Beta,
-  Chat,
-  Decisions,
-  Embeddings,
-  Files,
-  FineTuning,
-  Images,
-  Models,
-  Moderations,
-  Responses,
-} from "openai/resources";
-import { SecureClient, type TransportMode } from "./secure-client.js";
-import { type VerificationDocument } from "./verifier.js";
-import { isRealBrowser } from "./env.js";
-import type * as WS from "ws";
+import OpenAI, { type ClientOptions as OpenAIClientOptions } from "openai";
 import type { OpenAIRealtimeWS } from "openai/realtime/ws";
+import type * as WS from "ws";
+import { Client, type ClientOptions } from "./client.js";
+import { Gateway, type GatewayOptions } from "./gateway.js";
+import { ConfigurationError } from "./errors.js";
+import type { VerificationSnapshot } from "./secure-client.js";
+import { isRealBrowser } from "./env.js";
 
-function createAsyncProxy<T extends object>(promise: Promise<T>): T {
-  return new Proxy({} as T, {
-    get(target, prop) {
-      return new Proxy(() => {}, {
-        get(_, nestedProp) {
-          return (...args: any[]) =>
-            promise.then((obj) => {
-              const value = (obj as any)[prop][nestedProp];
-              return typeof value === "function"
-                ? value.apply((obj as any)[prop], args)
-                : value;
-            });
-        },
-        apply(_, __, args) {
-          return promise.then((obj) => {
-            const value = (obj as any)[prop];
-            return typeof value === "function" ? value.apply(obj, args) : value;
-          });
-        },
-      });
-    },
-  });
-}
-
-/**
- * Configuration options for TinfoilAI client.
- * 
- * @example
- * ```typescript
- * // Server-side with API key
- * const client = new TinfoilAI({ apiKey: "your-api-key" });
- * 
- * // Browser with bearer token (from your auth system)
- * const client = new TinfoilAI({ bearerToken: "your-jwt-token" });
- * 
- * // With custom transport mode
- * const client = new TinfoilAI({ apiKey: "key", transport: "tls" });
- * ```
- */
-export interface TinfoilAIOptions {
-  /** 
-   * Tinfoil API key. Get one at https://docs.tinfoil.sh/get-api-key
-   * In Node.js, defaults to TINFOIL_API_KEY environment variable.
-   * Never use in browser code - use bearerToken instead.
-   */
-  apiKey?: string;
-  
-  /** 
-   * Bearer token for browser authentication (e.g., JWT from your auth system).
-   * Automatically enables browser usage without dangerouslyAllowBrowser.
-   */
+export type TinfoilAIOptions = Omit<OpenAIClientOptions, "fetch" | "baseURL"> & ClientOptions & {
   bearerToken?: string;
-  
-  /** 
-   * Override the base URL for API requests. 
-   * Useful for proxying requests through your own backend.
-   * @see https://docs.tinfoil.sh/guides/proxy-server
-   */
-  baseURL?: string;
+  gateway?: GatewayOptions & { url: string };
+};
 
-  /**
-   * Explicit enclave URL.
-   * Use this when connecting to a custom enclave rather than the default routers.
-   */
-  enclaveURL?: string;
-  
-  /** GitHub repo for code verification. Defaults to tinfoilsh/confidential-model-router. */
-  configRepo?: string;
-
-  /**
-   * Transport mode for secure communication.
-   * - 'ehbp': HPKE encryption via EHBP protocol (default)
-   * - 'tls': TLS certificate pinning
-   * @default 'ehbp'
-   */
-  transport?: TransportMode;
-
-  /** URL to fetch the attestation bundle from. */
-  attestationBundleURL?: string;
-
-  /**
-   * Secret scoping the router's prompt cache for this client's requests
-   * (e.g. one stable value per end user). Defaults to the
-   * TINFOIL_USER_CACHE_SECRET environment variable, otherwise attempts to
-   * generate a secret persisted at `~/.tinfoil/user_cache_secret` in Node.js.
-   * Browsers cannot persist it and use a process-lifetime in-memory secret
-   * instead. Empty values are treated as unset. A non-empty
-   * string field set in a request body wins; an empty per-request string is
-   * replaced with this value.
-   */
-  userCacheSecret?: string;
-
-  /** Additional OpenAI client options (passed through to underlying client) */
-  [key: string]: any;
-}
-
-/**
- * Secure OpenAI-compatible client for Tinfoil's verifiably private AI inference.
- * 
- * TinfoilAI automatically verifies you're connected to a genuine secure enclave
- * and encrypts all requests end-to-end. The API is fully compatible with OpenAI's client.
- * 
- * @example
- * ```typescript
- * import { TinfoilAI } from "tinfoil";
- * 
- * const client = new TinfoilAI({
- *   apiKey: "your-api-key", // or use TINFOIL_API_KEY env var
- * });
- * 
- * const completion = await client.chat.completions.create({
- *   messages: [{ role: "user", content: "Hello!" }],
- *   model: "llama3-3-70b",
- * });
- * ```
- * 
- * @see https://docs.tinfoil.sh/sdk/javascript-sdk - Full documentation
- * @see https://docs.tinfoil.sh/cc/how-it-works - How verification works
- */
-export class TinfoilAI {
-  private client?: OpenAI;
-  private secureClient: SecureClient;
-  private openAIOptions: Record<string, any>;
-
+/** Native OpenAI resources and APIPromises using the SDK's verified request hook. */
+export class TinfoilAI extends OpenAI {
+  readonly #secure: Client | Gateway;
   constructor(options: TinfoilAIOptions = {}) {
-    const openAIOptions: Record<string, any> = { ...options };
-
-    // In browser builds, never read secrets from process.env to avoid
-    // leaking credentials into client bundles. Require explicit apiKey or bearerToken.
-    if (options.bearerToken) {
-      openAIOptions.apiKey = options.bearerToken;
-      openAIOptions.dangerouslyAllowBrowser = true;
-    } else if (options.apiKey) {
-      openAIOptions.apiKey = options.apiKey;
-    } else if (!isRealBrowser() && typeof process !== 'undefined' && process.env.TINFOIL_API_KEY) {
-      openAIOptions.apiKey = process.env.TINFOIL_API_KEY;
-    }
-
-    if ((options as any).dangerouslyAllowBrowser === true) {
-      openAIOptions.dangerouslyAllowBrowser = true;
-    }
-
-    this.openAIOptions = openAIOptions;
-
-    this.secureClient = new SecureClient({
-      baseURL: options.baseURL,
-      enclaveURL: options.enclaveURL,
-      configRepo: options.configRepo,
-      transport: options.transport,
-      attestationBundleURL: options.attestationBundleURL,
-      userCacheSecret: options.userCacheSecret,
-    });
+    const { enclaveURL, configRepo, baseURL, transport, verification, acquisition, discoveryURL, userCacheSecret, bearerToken, gateway, ...provider } = options;
+    if (gateway && [enclaveURL, configRepo, baseURL, transport].some(value => value !== undefined)) throw new ConfigurationError("Gateway configuration owns endpoints, repositories and EHBP transport");
+    const secure = gateway
+      ? new Gateway(gateway.url, { verification, acquisition, userCacheSecret, ...gateway })
+      : new Client({ enclaveURL, configRepo, baseURL, transport, verification, acquisition, discoveryURL, userCacheSecret });
+    const apiKey = bearerToken || provider.apiKey || (!isRealBrowser() && typeof process !== "undefined" ? process.env.TINFOIL_API_KEY : undefined);
+    if (!apiKey) throw new ConfigurationError("API key is required; provide apiKey, bearerToken or TINFOIL_API_KEY");
+    super({ ...provider, maxRetries: provider.maxRetries ?? 0, apiKey, dangerouslyAllowBrowser: bearerToken ? true : provider.dangerouslyAllowBrowser, baseURL: secure.getBaseURL(), fetch: secure.fetch });
+    this.#secure = secure;
   }
-
-  /**
-   * Wait for the client to complete verification and be ready for requests.
-   * 
-   * All API methods (chat, audio, etc.) call this automatically — you only 
-   * need this for UI loading states during verification.
-   * 
-   * @example
-   * ```typescript
-   * const client = new TinfoilAI({ bearerToken: jwt });
-   * await client.ready(); // Show spinner while verifying
-   * ```
-   */
-  public async ready(): Promise<void> {
-    await this.ensureReady();
+  async ready(model?: string): Promise<void> {
+    if (this.#secure instanceof Gateway) await this.#secure.ready(model);
+    else await this.#secure.ready();
   }
-
-  private async ensureReady(): Promise<OpenAI> {
-    await this.secureClient.ready();
-    if (!this.client) {
-      this.client = new OpenAI({
-        ...this.openAIOptions,
-        baseURL: this.secureClient.getBaseURL(),
-        fetch: this.secureClient.fetch,
-      });
-    }
-    return this.client;
-  }
-
-  /**
-   * Get the verification document containing attestation details.
-   * 
-   * The document includes information about the enclave, code measurements,
-   * and the status of each verification step.
-   * 
-   * @returns The verification document with attestation results
-   * @throws Error if verification has not completed
-   * 
-   * @example
-   * ```typescript
-   * const doc = await client.getVerificationDocument();
-   * console.log(doc.securityVerified); // true if all checks passed
-   * console.log(doc.steps); // { fetchDigest, verifyCode, verifyEnclave, compareMeasurements }
-   * ```
-   * 
-   * @see https://docs.tinfoil.sh/verification/attestation-architecture
-   */
-  public async getVerificationDocument(): Promise<VerificationDocument> {
-    await this.ready();
-    return this.secureClient.getVerificationDocument();
-  }
-
-  /**
-   * Opens a realtime WebSocket session with the verified enclave.
-   *
-   * Returns an `OpenAIRealtimeWS` from the OpenAI SDK, connected to the
-   * enclave with the TLS connection pinned to the attested enclave key.
-   *
-   * Node.js only. Connections are made directly to the verified enclave.
-   *
-   * @example
-   * ```typescript
-   * const rt = await client.realtime({ model: "voxtral-mini-4b-realtime" });
-   * rt.on("session.created", (event) => { ... });
-   * rt.send({ type: "input_audio_buffer.append", audio: base64Chunk });
-   * ```
-   */
-  public async realtime(props: { model: string; options?: WS.ClientOptions }): Promise<OpenAIRealtimeWS> {
-    const pinnedOptions = await this.secureClient.getPinnedWebSocketOptions();
-    const client = await this.ensureReady();
+  inspect(): VerificationSnapshot | undefined { return this.#secure.inspect(); }
+  async getSessionRecoveryToken() { return this.#secure.getSessionRecoveryToken(); }
+  async openRealtime(props: { model: string; options?: WS.ClientOptions }): Promise<OpenAIRealtimeWS> {
+    if (this.#secure instanceof Gateway) throw new ConfigurationError("Realtime WebSockets require a direct enclave client");
+    const enclave = await this.#secure.selectedClient();
+    const pinned = await enclave.getPinnedWebSocketOptions();
     const { createPinnedRealtimeWS } = await import("./realtime.js");
-    return createPinnedRealtimeWS(
-      props,
-      { apiKey: client.apiKey as string, baseURL: this.secureClient.getEnclaveBaseURL()! },
-      pinnedOptions,
-    );
-  }
-
-  get chat(): Chat {
-    return createAsyncProxy(this.ensureReady().then((client) => client.chat));
-  }
-
-  get files(): Files {
-    return createAsyncProxy(this.ensureReady().then((client) => client.files));
-  }
-
-  get fineTuning(): FineTuning {
-    return createAsyncProxy(
-      this.ensureReady().then((client) => client.fineTuning),
-    );
-  }
-
-  get images(): Images {
-    return createAsyncProxy(this.ensureReady().then((client) => client.images));
-  }
-
-  get audio(): Audio {
-    return createAsyncProxy(this.ensureReady().then((client) => client.audio));
-  }
-
-  get responses(): Responses {
-    return createAsyncProxy(
-      this.ensureReady().then((client) => client.responses),
-    );
-  }
-
-  get decisions(): Decisions {
-    return createAsyncProxy(
-      this.ensureReady().then((client) => client.decisions),
-    );
-  }
-
-  get embeddings(): Embeddings {
-    return createAsyncProxy(
-      this.ensureReady().then((client) => client.embeddings),
-    );
-  }
-
-  get models(): Models {
-    return createAsyncProxy(this.ensureReady().then((client) => client.models));
-  }
-
-  get moderations(): Moderations {
-    return createAsyncProxy(
-      this.ensureReady().then((client) => client.moderations),
-    );
-  }
-
-  get beta(): Beta {
-    return createAsyncProxy(this.ensureReady().then((client) => client.beta));
+    return createPinnedRealtimeWS(props, { apiKey: this.apiKey as string, baseURL: enclave.getEnclaveBaseURL() }, pinned);
   }
 }
-
-// Namespace declaration merge to add OpenAI types to TinfoilAI
-// eslint-disable-next-line @typescript-eslint/no-namespace
+// Preserve OpenAI's consumer-facing resource type namespace.
+// eslint-disable-next-line @typescript-eslint/no-namespace -- OpenAI resource types merge with the client class.
 export namespace TinfoilAI {
   export import Chat = OpenAI.Chat;
   export import Audio = OpenAI.Audio;
