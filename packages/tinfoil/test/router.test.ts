@@ -23,11 +23,11 @@ function verifier(repos: string[] = []): Verifier {
       repos.push(repo);
       const material = [{ id: "tls", format: KEY_SPKI_FP_SHA256_V1_FORMAT, data: PIN }];
       return {
-        cryptoMaterial: () => material.map((m) => ({ ...m })),
-        tlsPublicKeyFP: () => PIN,
-        hpkePublicKey: () => undefined,
-        codeDigest: () => "11".repeat(32),
-        freshnessExpiresAt: () => new Date(Date.now() + 60_000),
+        cryptoMaterial: material.map((m) => ({ ...m })),
+        tlsPublicKeyFP: PIN,
+        hpkePublicKey: undefined,
+        codeDigest: "11".repeat(32),
+        freshnessExpiresAt: new Date(Date.now() + 60_000),
       } as unknown as Verification;
     },
   } as unknown as Verifier;
@@ -71,7 +71,7 @@ describe("discoverRouter", () => {
     expect(list.calls).toEqual([DEFAULT_ROUTER_URL]);
     expect(transport.enclave().host()).toBe("r2.example");
     expect(transport.enclave().repo()).toBe("tinfoilsh/confidential-model-router");
-    expect(transport.current()?.tlsPublicKeyFP()).toBe(PIN);
+    expect(transport.current()?.tlsPublicKeyFP).toBe(PIN);
     expect(docs.hosts.filter((h) => h !== "r1.example")).toEqual(["r2.example"]);
     expect(docs.hosts[0]).toBe("r1.example");
     expect(repos).toEqual(["tinfoilsh/confidential-model-router"]);

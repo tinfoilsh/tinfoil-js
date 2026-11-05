@@ -19,8 +19,8 @@ describe("RouterHTTPClient under Bun on the live router", () => {
     async () => {
       const http = await RouterHTTPClient.create();
       expect(http.repo()).toBe(LIVE_REPO);
-      expect(http.current()?.tlsPublicKeyFP()).toMatch(SHA256_HEX);
-      expect(http.current()?.hpkePublicKey()).toMatch(SHA256_HEX);
+      expect(http.current()?.tlsPublicKeyFP).toMatch(SHA256_HEX);
+      expect(http.current()?.hpkePublicKey).toMatch(SHA256_HEX);
     },
     180_000,
   );

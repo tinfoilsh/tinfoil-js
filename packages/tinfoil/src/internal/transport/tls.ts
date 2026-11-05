@@ -31,7 +31,7 @@ export function tlsMode(options: TLSOptions = {}): Mode {
       if (request.url.protocol !== "https:") throw new ConfigurationError("TLS transport mode requires an HTTPS request");
     },
     async bind(v: Verification) {
-      const key = v.tlsPublicKeyFP();
+      const key = v.tlsPublicKeyFP;
       if (key === undefined) throw new AttestationError('document endorses no "tls" key');
       return isBun() ? bunPinnedFetch(key, options) : nodePinnedFetch(key, options);
     },

@@ -20,7 +20,7 @@ describe("the browser build on the live router", () => {
     const router = ai.httpClient();
     expect(router).toBeInstanceOf(RouterHTTPClient);
     expect(router.repo()).toBe(LIVE_REPO);
-    expect(router.current()?.hpkePublicKey()).toMatch(SHA256_HEX);
+    expect(router.current()?.hpkePublicKey).toMatch(SHA256_HEX);
     expect(ai.baseURL).toBe(`https://${router.enclave()}/v1/`);
 
     const completed = await completeChat(ai);

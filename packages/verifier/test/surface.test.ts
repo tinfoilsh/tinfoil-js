@@ -48,22 +48,22 @@ const EXPORTS = [
 ].sort();
 
 const VERIFIER_METHODS = ["verifyV3", "verifyV3At", "checkRepoVerifiability", "callerAuthorizesConfig", "pinnedRegisters", "freshnessMaxAgeMs"].sort();
-const VERIFICATION_METHODS = [
+/** The facts a verification carries as own properties, in declaration order. */
+const VERIFICATION_PROPERTIES = [
   "codeDigest",
   "codeTag",
   "configRepo",
   "codeMeasurement",
   "enclaveMeasurement",
+  "cryptoMaterial",
   "config",
   "runtime",
   "platform",
-  "cryptoMaterial",
-  "cryptoMaterialData",
-  "tlsPublicKeyFP",
-  "hpkePublicKey",
   "freshnessExpiresAt",
   "metadata",
-].sort();
+];
+const VERIFICATION_GETTERS = ["tlsPublicKeyFP", "hpkePublicKey"].sort();
+const VERIFICATION_METHODS = ["cryptoMaterialData", "toJSON"].sort();
 
 /** The type-only exports, pinned under the test typecheck: a removed or renamed type fails compilation here. */
 type TypeExports = [
@@ -74,6 +74,10 @@ type TypeExports = [
   surface.ConfigVerification,
   surface.ArtifactVerification,
   surface.VerificationMetadata,
+  surface.VerificationJSON,
+  surface.MeasurementJSON,
+  surface.ConfigVerificationJSON,
+  surface.ArtifactVerificationJSON,
   surface.ReferenceSource,
   surface.ConfigEndorsement,
   surface.Layer,
@@ -90,10 +94,32 @@ type TypeExports = [
 const typeExports: TypeExports | undefined = undefined;
 void typeExports;
 
-const methodsOf = (cls: { prototype: object }): string[] =>
+const descriptorsOf = (cls: { prototype: object }): [string, PropertyDescriptor][] =>
   Object.getOwnPropertyNames(cls.prototype)
     .filter((n) => n !== "constructor")
+    .map((n) => [n, Object.getOwnPropertyDescriptor(cls.prototype, n)!]);
+const methodsOf = (cls: { prototype: object }): string[] =>
+  descriptorsOf(cls)
+    .filter(([, d]) => typeof d.value === "function")
+    .map(([n]) => n)
     .sort();
+const gettersOf = (cls: { prototype: object }): string[] =>
+  descriptorsOf(cls)
+    .filter(([, d]) => d.get !== undefined)
+    .map(([n]) => n)
+    .sort();
+
+/** A verification with the fewest facts, built through the verifier's internal constructor. */
+const verification = (): surface.Verification =>
+  new surface.Verification({
+    codeDigest: "",
+    codeTag: "",
+    configRepo: "",
+    codeMeasurement: { platform: "sev-snp" },
+    enclaveMeasurement: { platform: "sev-snp", launch: new Uint8Array(surface.REGISTER_SIZE) },
+    cryptoMaterial: [],
+    metadata: { verifier: { name: "", version: "" }, verifiedAt: new Date(0) },
+  });
 
 describe("public surface", () => {
   it("exports exactly the specified names", () => {
@@ -105,6 +131,8 @@ describe("public surface", () => {
     expect(Object.getOwnPropertyNames(surface.Verifier).filter((n) => !["length", "name", "prototype"].includes(n))).toEqual(["create"]);
     expect(methodsOf(surface.Verifier)).toEqual(VERIFIER_METHODS);
     expect(methodsOf(surface.Verification)).toEqual(VERIFICATION_METHODS);
+    expect(gettersOf(surface.Verification)).toEqual(VERIFICATION_GETTERS);
+    expect(Object.keys(verification())).toEqual(VERIFICATION_PROPERTIES);
     expect(surface.NONCE_SIZE).toBe(32);
     expect(surface.REGISTER_SIZE).toBe(48);
     expect(surface.randomNonce()).toHaveLength(32);

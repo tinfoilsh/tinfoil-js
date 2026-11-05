@@ -31,11 +31,11 @@ function verifier(keys: { tls?: string; hpke?: string }, authorizes = false): Ve
         ...(keys.hpke === undefined ? [] : [{ id: "hpke", format: KEY_X25519_HPKE_V1_FORMAT, data: keys.hpke }]),
       ];
       return {
-        cryptoMaterial: () => material.map((m) => ({ ...m })),
-        tlsPublicKeyFP: () => keys.tls,
-        hpkePublicKey: () => keys.hpke,
-        codeDigest: () => "11".repeat(32),
-        freshnessExpiresAt: () => new Date(Date.now() + 60_000),
+        cryptoMaterial: material.map((m) => ({ ...m })),
+        tlsPublicKeyFP: keys.tls,
+        hpkePublicKey: keys.hpke,
+        codeDigest: "11".repeat(32),
+        freshnessExpiresAt: new Date(Date.now() + 60_000),
       } as unknown as Verification;
     },
   } as unknown as Verifier;
@@ -100,7 +100,7 @@ describe("RouterHTTPClient.create", () => {
         verifier: verifier({ tls: TEST_PIN }),
         transportMode: "tls",
         verificationCheck: (v) => {
-          checked.push(v.tlsPublicKeyFP()!);
+          checked.push(v.tlsPublicKeyFP!);
           if (checked.length === 1) throw new Error("not this router");
         },
       },
@@ -149,7 +149,7 @@ describe("RouterHTTPClient over TLS", () => {
     expect(client.enclave()).toBe(tls.host);
     expect(client.repo()).toBe(ROUTER_REPO);
     expect(client.baseURL()).toBe(`https://${tls.host}/`);
-    expect(client.current()?.tlsPublicKeyFP()).toBe(TEST_PIN);
+    expect(client.current()?.tlsPublicKeyFP).toBe(TEST_PIN);
     expect(s.documentHosts.filter((h) => h === tls.host)).toHaveLength(1);
   });
 

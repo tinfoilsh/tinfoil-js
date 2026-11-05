@@ -155,7 +155,7 @@ export class Enclave {
   }
 
   #checkFreshness(v: Verification): void {
-    const expiresAt = v.freshnessExpiresAt();
+    const expiresAt = v.freshnessExpiresAt;
     if (expiresAt === undefined || !(this.#clock().getTime() < expiresAt.getTime())) {
       throw new AttestationError(FRESHNESS_EXPIRED);
     }
@@ -173,7 +173,7 @@ export class Enclave {
 
 /** Whether a verification valid at `now` is still inside its freshness window. */
 export function freshAt(v: Verification, now: Date): boolean {
-  const expiresAt = v.freshnessExpiresAt();
+  const expiresAt = v.freshnessExpiresAt;
   return expiresAt !== undefined && now.getTime() < expiresAt.getTime();
 }
 
@@ -192,13 +192,13 @@ export function fromVerify(err: unknown): TinfoilError {
 /** Requires the keys a transport binds traffic to: the TLS key, and the HPKE key when the document endorses one. */
 function validateTransportKeys(v: Verification): void {
   keyFormat(v, CRYPTO_MATERIAL_ID_TLS, KEY_SPKI_FP_SHA256_V1_FORMAT);
-  if (v.tlsPublicKeyFP() === undefined) throw new AttestationError(`document endorses no ${JSON.stringify(CRYPTO_MATERIAL_ID_TLS)} key`);
+  if (v.tlsPublicKeyFP === undefined) throw new AttestationError(`document endorses no ${JSON.stringify(CRYPTO_MATERIAL_ID_TLS)} key`);
   keyFormat(v, CRYPTO_MATERIAL_ID_HPKE, KEY_X25519_HPKE_V1_FORMAT);
 }
 
 /** Rejects an endorsed `id` key whose format is not `format`. */
 function keyFormat(v: Verification, id: string, format: string): void {
-  for (const item of v.cryptoMaterial()) {
+  for (const item of v.cryptoMaterial) {
     if (item.id === id && item.format !== format) {
       throw new AttestationError(`crypto_material item ${JSON.stringify(id)} has format ${JSON.stringify(item.format)}, want ${JSON.stringify(format)}`);
     }
