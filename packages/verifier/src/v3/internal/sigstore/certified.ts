@@ -10,30 +10,25 @@ import { sha256, toHex } from "../bytes.js";
 import type { Certificate } from "../x509/certificate.js";
 import { IN_TOTO_PAYLOAD_TYPE, type Bundle } from "./bundle.js";
 import { checkLayout, importP256, keyHint, statementNamesDigest, toBase64, verifyLogEntries, verifyP256 } from "./keyed.js";
-import { preAuthEncoding, verifyTimestamp } from "./timestamp.js";
+import { MAX_TIMESTAMP_SIZE, preAuthEncoding, verifyTimestamp } from "./timestamp.js";
 import type { TrustedRoot } from "./trusted-root.js";
 
 /**
- * The time the first verifying RFC 3161 timestamp in `bundle` states for the
- * DSSE signature, under a timestamp authority of `root`. A bundle with no
- * verifying timestamp rejects.
+ * The time the bundle's single bounded RFC 3161 timestamp states for the
+ * DSSE signature, under a timestamp authority of `root`.
  */
 export async function signedTimestamp(root: TrustedRoot, bundle: Bundle): Promise<Date> {
-  const failures: string[] = [];
-  for (let i = 0; i < bundle.rfc3161Timestamps.length; i++) {
-    try {
-      return await verifyTimestamp(root, bundle.rfc3161Timestamps[i], bundle.dsse.signature);
-    } catch (err) {
-      failures.push(`timestamp ${i}: ${err instanceof Error ? err.message : String(err)}`);
-    }
+  const timestamps = bundle.rfc3161Timestamps;
+  if (timestamps.length !== 1 || timestamps[0]!.length === 0 || timestamps[0]!.length > MAX_TIMESTAMP_SIZE) {
+    throw new Error("scoped endorsement requires one bounded signature timestamp");
   }
-  throw new Error(`no RFC 3161 timestamp over the signature verifies${failures.length === 0 ? "" : ` (${failures.join("; ")})`}`);
+  return verifyTimestamp(root, timestamps[0]!, bundle.dsse.signature);
 }
 
 /**
  * Verifies a certificate-signed DSSE bundle whose signing certificate the
  * caller has already authenticated as `leaf`: the layout (one to eight
- * hashedrekord 0.0.2 entries with proofs, at least one RFC 3161 timestamp),
+ * hashedrekord 0.0.2 entries with proofs and one RFC 3161 timestamp),
  * the certificate in the bundle being `leaf`, the DSSE signature under the
  * certificate's P-256 key, every log entry naming this envelope and
  * certificate, and the statement naming `digest`. Returns the hint of the
