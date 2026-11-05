@@ -3,15 +3,12 @@
  * signed statement that the artifact was recently published. The witness is
  * a certificate-signed bundle from the freshness-witness workflow; its time
  * is the transparency log's integration time of the bundle's first log
- * entry, which the log vouched for with an inclusion promise. That promise
- * is verified here, under the log's key from the trusted root, so the time
- * is the log's statement rather than the bundle's.
+ * entry, which the log vouched for with an inclusion promise. Bundle
+ * verification proves that promise under the log's key from the trusted
+ * root, so the time is the log's statement rather than the bundle's.
  */
 import { map, object, str, struct } from "../json/decode.js";
-import { canonicalize, JsonNumber, strictParse, type JsonValue } from "../json/index.js";
-import type { TlogEntry } from "../sigstore/bundle.js";
-import { toBase64, verifyLogSignature } from "../sigstore/keyed.js";
-import type { TrustedRoot } from "../sigstore/trusted-root.js";
+import { strictParse, type JsonValue } from "../json/index.js";
 import { FRESHNESS_WITNESS_IDENTITY, type ProvenanceClient } from "./provenance.js";
 import { validateAuthenticatedArtifact, type AuthenticatedArtifact } from "./reference.js";
 
@@ -78,35 +75,7 @@ export async function authenticateFreshness(
     throw new Error("freshness statement subject does not match authenticated artifact");
   }
   validateWitness(statement.endorses, expected);
-  return validateFreshnessTime(await witnessLogTime(client.root, verified.bundle.tlogEntries), now, maxAgeMs || MAX_FRESHNESS_AGE_MS);
-}
-
-/**
- * The integration time of the first log entry, proven by the log's inclusion
- * promise: a signature under the key of the log the entry names, listed in
- * `root` and valid at that time, over the canonical record of the entry's
- * body, integration time, index and log id. Undefined when the entry states
- * no time or carries no promise; a promise that does not verify rejects.
- */
-export async function witnessLogTime(root: TrustedRoot, entries: readonly TlogEntry[]): Promise<Date | undefined> {
-  const first = entries[0];
-  if (first === undefined || first.integratedTime === undefined || first.inclusionPromise === undefined) return undefined;
-  const log = root.transparencyLogs.find((l) => l.logId === first.logId);
-  if (log === undefined) throw new Error("freshness witness names a transparency log the trusted root does not list");
-  const at = new Date(Number(first.integratedTime) * 1000);
-  if (at.getTime() < log.validFrom.getTime() || (log.validTo !== undefined && at.getTime() > log.validTo.getTime())) {
-    throw new Error("freshness witness log time is outside the log key's validity");
-  }
-  const record = new Map<string, JsonValue>([
-    ["body", toBase64(first.canonicalizedBody)],
-    ["integratedTime", new JsonNumber(first.integratedTime.toString())],
-    ["logID", first.logId],
-    ["logIndex", new JsonNumber(first.logIndex.toString())],
-  ]);
-  if (!(await verifyLogSignature(log.publicKey, canonicalize(record), first.inclusionPromise))) {
-    throw new Error("freshness witness inclusion promise does not verify under the log key");
-  }
-  return at;
+  return validateFreshnessTime(verified.verifiedLogTime, now, maxAgeMs || MAX_FRESHNESS_AGE_MS);
 }
 
 /** `loggedAt` must exist, lie no more than five minutes after `now`, and no more than `maxAgeMs` before it; `now` must be finite and `maxAgeMs` finite and non-negative. */
