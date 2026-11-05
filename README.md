@@ -4,7 +4,7 @@
 [![NPM version](https://img.shields.io/npm/v/tinfoil.svg)](https://npmjs.org/package/tinfoil)
 [![Documentation](https://img.shields.io/badge/docs-tinfoil.sh-blue)](https://docs.tinfoil.sh/sdk/javascript-sdk)
 
-A TypeScript client for verifiably private AI inference with Tinfoil. It wraps the [OpenAI Node client](https://github.com/openai/openai-node) with the same API, and before sending any request it verifies the enclave's attestation and encrypts the request body to the attested key using [EHBP](https://docs.tinfoil.sh/resources/ehbp), so only the verified enclave can read it. Works in Node (22.23.4+, 24.22.1+, or 26.12.1+), browsers, Electron, and Bun, and supports the [Vercel AI SDK](https://sdk.vercel.ai/).
+A TypeScript client for verifiably private AI inference with Tinfoil. It wraps the [OpenAI Node client](https://github.com/openai/openai-node) with the same API. A client verifies the enclave's attestation before it is returned, and every request it sends is bound to the verified enclave: on Node and Bun the TLS connection is pinned to the attested key, and in browsers the request body is encrypted to the attested key with [EHBP](https://docs.tinfoil.sh/resources/ehbp), so only the verified enclave can read it. Works in Node (22.23.4+, 24.22.1+, or 26.12.1+), browsers, Electron, and Bun, and supports the [Vercel AI SDK](https://sdk.vercel.ai/).
 
 ## Installation
 
@@ -15,26 +15,28 @@ npm install tinfoil
 ## Quick Start
 
 ```typescript
-import { TinfoilAI } from "tinfoil";
+import { createClient } from "tinfoil";
 
-const client = new TinfoilAI({
-  apiKey: "<YOUR_API_KEY>", // or set TINFOIL_API_KEY
-});
+// Discovers Tinfoil's inference router and verifies it before returning.
+const client = await createClient({ apiKey: "<YOUR_API_KEY>" });
 
-// Enclave verification and encryption happen automatically.
 const completion = await client.chat.completions.create({
   messages: [{ role: "user", content: "Hello!" }],
   model: "gpt-oss-120b", // see https://docs.tinfoil.sh/models/chat
 });
 ```
 
-Never put `apiKey` in browser code: route browser requests through a [proxy server](https://docs.tinfoil.sh/guides/proxy-server) that adds the key, and authenticate the browser with `bearerToken`. Multi-user services must scope prompt caches to each end user with `userCacheSecret` or a per-request `user_cache_secret`; see [Prompt caching](https://docs.tinfoil.sh/sdk/prompt-caching).
+Every attested client is an async factory: one that exists has been verified, and it verifies again by itself when the verification expires or the enclave's key changes. `EnclaveOpenAIClient.create(host, repo)` targets one enclave instead of the discovered router, and `RouterHTTPClient.create()` / `EnclaveHTTPClient.create(host, repo)` give a verified `fetch` for any HTTP API.
+
+Never put `apiKey` in browser code: route browser requests through a [proxy server](https://docs.tinfoil.sh/guides/proxy-server) that adds the key (`baseURL`), and authenticate the browser with `bearerToken`. Multi-user services must scope prompt caches to each end user with `userCacheSecret` or a per-request `user_cache_secret`; see [Prompt caching](https://docs.tinfoil.sh/sdk/prompt-caching).
 
 ## Documentation
 
-- [JavaScript SDK documentation](https://docs.tinfoil.sh/sdk/javascript-sdk), including `SecureClient` and verification documents. Realtime transcription over WebSockets is covered in [Processing audio](https://docs.tinfoil.sh/guides/processing-audio).
-- [Examples](packages/tinfoil/examples/), including the Vercel AI SDK on the server and in React.
-- The resources `TinfoilAI` exposes, such as `chat`, `responses`, `embeddings`, and `audio`, keep the OpenAI methods and types; see the [OpenAI Node client documentation](https://github.com/openai/openai-node).
+- [JavaScript SDK documentation](https://docs.tinfoil.sh/sdk/javascript-sdk). Realtime transcription over WebSockets is covered in [Processing audio](https://docs.tinfoil.sh/guides/processing-audio): `createRealtimeWebSocket(client, { model })` opens a session over a WebSocket pinned to the attested key.
+- [Examples](packages/tinfoil/examples/), including the Vercel AI SDK provider (`createTinfoil` from `tinfoil/ai-sdk`) on the server and in React.
+- [Migrating from 1.x to 2.0](https://github.com/tinfoilsh/tinfoil-js/blob/main/MIGRATION.md).
+- The resources a client exposes, such as `chat`, `responses`, `embeddings`, and `audio`, keep the OpenAI methods and types; see the [OpenAI Node client documentation](https://github.com/openai/openai-node).
+- `tinfoil/unsafe` exports `UnverifiedClient`, which skips attestation: for development against a local server only, never for real data.
 
 ## Development
 

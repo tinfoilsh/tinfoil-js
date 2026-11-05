@@ -1,12 +1,12 @@
 /**
  * Tinfoil Transport Singleton
  *
- * This module provides a singleton pattern for initializing the Tinfoil SecureClient
- * and creating a transport for the Vercel AI SDK. The transport is initialized once
- * and reused across your application.
+ * This module provides a singleton pattern for creating the attested Tinfoil
+ * HTTP client and a transport for the Vercel AI SDK. The transport is
+ * initialized once and reused across your application.
  */
 
-import { SecureClient } from "tinfoil";
+import { EnclaveHTTPClient, RouterHTTPClient } from "tinfoil";
 import { DefaultChatTransport, UIMessage } from "ai";
 
 // Singleton promise - initialized once, reused everywhere
@@ -16,17 +16,17 @@ let transportPromise: Promise<DefaultChatTransport<UIMessage>> | null = null;
  * Get or create the Tinfoil transport singleton.
  *
  * This function:
- * 1. Creates a SecureClient (optionally routing through your proxy)
- * 2. Waits for attestation verification to complete
- * 3. Returns a DefaultChatTransport configured with the secure fetch
+ * 1. Creates a RouterHTTPClient routed through your proxy, which verifies
+ *    the enclave's attestation before the client is returned
+ * 2. Returns a DefaultChatTransport configured with the client's fetch
  *
  * The transport is cached and reused on subsequent calls.
- * 
+ *
  * @example
  * ```tsx
  * // In a React component
  * const [transport, setTransport] = useState<DefaultChatTransport | null>(null);
- * 
+ *
  * useEffect(() => {
  *   getTinfoilTransport().then(setTransport);
  * }, []);
@@ -43,7 +43,7 @@ async function initializeTransport(): Promise<DefaultChatTransport<UIMessage>> {
   // Get proxy URL from environment
   // In Next.js, use NEXT_PUBLIC_ prefix for client-side env vars
   const proxyUrl = process.env.NEXT_PUBLIC_PROXY_URL;
-  
+
   if (!proxyUrl) {
     throw new Error(
       "NEXT_PUBLIC_PROXY_URL environment variable is required. " +
@@ -51,20 +51,19 @@ async function initializeTransport(): Promise<DefaultChatTransport<UIMessage>> {
     );
   }
 
-  // Create SecureClient, optionally routing traffic through your proxy
-  const secureClient = new SecureClient({
+  // Create the client, routing requests through your proxy. The factory
+  // verifies the enclave and returns only once verification succeeds; in a
+  // browser, request bodies are encrypted end-to-end to the enclave, and the
+  // proxy forwards them to the host named by the X-Tinfoil-Enclave-Url header.
+  const client = await RouterHTTPClient.create({
     baseURL: proxyUrl,
   });
 
-  // CRITICAL: Wait for attestation verification to complete
-  // This verifies the enclave and exchanges encryption keys
-  await secureClient.ready();
-
-  // Create the transport with the secure fetch function
-  // All request bodies will be encrypted end-to-end to the enclave
+  // Create the transport with the client's fetch. Request URLs are absolute,
+  // so the API path is resolved against where the client's requests go.
   return new DefaultChatTransport({
-    api: "/v1/chat/completions",
-    fetch: secureClient.fetch,
+    api: new URL("/v1/chat/completions", client.baseURL()).href,
+    fetch: client.fetch,
     // Optional: If using a proxy, add custom headers for it to read.
     // These headers are visible to your proxy but the body remains encrypted.
     // headers: {
@@ -74,24 +73,22 @@ async function initializeTransport(): Promise<DefaultChatTransport<UIMessage>> {
 }
 
 /**
- * Alternative: Create transport with explicit URLs
- * 
+ * Alternative: Create transport for one named enclave
+ *
  * Use this when you need more control over the configuration,
- * such as when using a specific enclave or custom routing.
+ * such as when using a specific enclave rather than the discovered router.
  */
 export async function createTinfoilTransport(options: {
   proxyUrl: string;
-  enclaveUrl?: string;
+  enclaveHost: string;
+  repo: string;
 }): Promise<DefaultChatTransport<UIMessage>> {
-  const secureClient = new SecureClient({
+  const client = await EnclaveHTTPClient.create(options.enclaveHost, options.repo, {
     baseURL: options.proxyUrl,
-    enclaveURL: options.enclaveUrl,
   });
 
-  await secureClient.ready();
-
   return new DefaultChatTransport({
-    api: "/v1/chat/completions",
-    fetch: secureClient.fetch,
+    api: new URL("/v1/chat/completions", client.baseURL()).href,
+    fetch: client.fetch,
   });
 }

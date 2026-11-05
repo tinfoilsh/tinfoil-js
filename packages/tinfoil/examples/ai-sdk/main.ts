@@ -1,39 +1,39 @@
-import { createTinfoilAI } from "tinfoil";
+import { createTinfoil } from "tinfoil/ai-sdk";
 import { generateText, streamText } from "ai";
 
 /**
  * Vercel AI SDK Integration Example
- * 
+ *
  * Demonstrates how to use Tinfoil with the Vercel AI SDK for building AI applications.
  * This is useful for Next.js apps, React Server Components, and other Vercel AI SDK features.
- * 
+ *
  * Prerequisites:
  * - Export your API key: export TINFOIL_API_KEY="<YOUR_API_KEY>"
  * - Install the AI SDK: npm install ai
- * 
+ *
  * Related docs:
  * - Tool Calling: https://docs.tinfoil.sh/guides/tool-calling
  * - Structured Outputs: https://docs.tinfoil.sh/guides/structured-outputs
  */
 async function main() {
   try {
-    // Create a Tinfoil provider for the AI SDK
-    // This performs enclave verification automatically
-    const tinfoil = await createTinfoilAI(process.env.TINFOIL_API_KEY);
+    // Create a Tinfoil provider for the AI SDK. The provider's requests go
+    // through an attested client, verified before the provider is returned.
+    const tinfoil = await createTinfoil({ apiKey: process.env.TINFOIL_API_KEY ?? "" });
 
     // Example 1: Simple text generation
     console.log("=== Text Generation ===\n");
-    
+
     const { text } = await generateText({
       model: tinfoil("gpt-oss-120b"),
       prompt: "What is confidential computing in one sentence?",
     });
-    
+
     console.log("Response:", text);
 
     // Example 2: Streaming text generation
     console.log("\n=== Streaming Generation ===\n");
-    
+
     const stream = streamText({
       model: tinfoil("gpt-oss-120b"),
       prompt: "Write a haiku about data privacy.",
@@ -47,13 +47,13 @@ async function main() {
 
     // Example 3: Chat with system message
     console.log("=== Chat with System Message ===\n");
-    
+
     const { text: chatResponse } = await generateText({
       model: tinfoil("gpt-oss-120b"),
       system: "You are a helpful assistant that explains technical concepts simply.",
       prompt: "What is end-to-end encryption?",
     });
-    
+
     console.log("Response:", chatResponse);
 
   } catch (error) {
