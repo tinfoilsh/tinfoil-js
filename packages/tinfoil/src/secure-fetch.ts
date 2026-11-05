@@ -21,10 +21,15 @@ export async function createSecureFetch(
   hpkePublicKey?: string,
   tlsPublicKeyFingerprint?: string,
   enclaveURL?: string,
-  userCacheSecret: string = ""
+  userCacheSecret: string = "",
+  fetchImpl?: typeof fetch,
 ): Promise<SecureTransport> {
   if (hpkePublicKey) {
-    return createEncryptedBodyFetch(baseURL, hpkePublicKey, enclaveURL, userCacheSecret);
+    return createEncryptedBodyFetch(baseURL, hpkePublicKey, enclaveURL, userCacheSecret, fetchImpl);
+  }
+
+  if (fetchImpl) {
+    throw new ConfigurationError('Custom fetch requires an HPKE public key; TLS transport requires certificate pinning.');
   }
 
   if (isRealBrowser()) {

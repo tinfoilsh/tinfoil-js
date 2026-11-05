@@ -26,6 +26,7 @@ export { createTinfoilAI } from "./ai-sdk-provider.js";
 export type { CreateTinfoilAIOptions } from "./ai-sdk-provider.js";
 export {
   SecureClient,
+  type SecureClientOptions,
   type TransportMode,
   type SecureWebSocketOptions,
 } from "./secure-client.js";
