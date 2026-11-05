@@ -62,7 +62,7 @@
   },
   "dependencies": {
     "@ai-sdk/openai-compatible": "^3.0.7",
-    "@freedomofpress/sigstore-browser": "^0.1.14",
+    "@freedomofpress/sigstore-browser": "^0.3.1",
     "@tinfoilsh/verifier": "1.1.9",
     "@types/ws": "^8.18.1",
     "ehbp": "^0.2.5",

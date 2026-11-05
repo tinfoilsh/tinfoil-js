@@ -122,8 +122,8 @@ export function capabilities(): Capabilities {
       // tinfoil rejects the legacy v0.1/v0.2 x509CertificateChain layout
       // (verifySigstoreBundleWithPolicy); only v0.3 single-certificate. SPEC §5.2.
       legacy_bundle_format_supported: false,
-      // sigstore-browser 0.1.x only accepts hashedrekord entries for messageSignature bundles.
-      rekor_v2_supported: false,
+      // sigstore-browser >= 0.3.1 verifies Rekor v2 hashedrekord 0.0.2 entries over DSSE envelopes.
+      rekor_v2_supported: true,
       accepts_multi_tlog_entries: true,
       oidc_issuer_v2_preferred: true,
       scts_count_distinguish_missing_vs_duplicate: true,

@@ -50,9 +50,9 @@
     "dist"
   ],
   "dependencies": {
-    "@freedomofpress/crypto-browser": "^0.1.7",
-    "@freedomofpress/sigstore-browser": "^0.1.14",
-    "@freedomofpress/tuf-browser": "^0.1.11"
+    "@freedomofpress/crypto-browser": "^0.3.0",
+    "@freedomofpress/sigstore-browser": "^0.3.1",
+    "@freedomofpress/tuf-browser": "^0.3.0"
   },
   "engines": {
     "node": ">=20"

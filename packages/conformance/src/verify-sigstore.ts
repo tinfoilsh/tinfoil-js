@@ -232,20 +232,24 @@ function classifyError(raw: string): { code: string; spec_ref: string } {
     return { code: 'CERT_EXPIRED', spec_ref: '5.2' };
   if (/does not contain a DSSE envelope|No dsseEnvelope|Bundle does not contain/i.test(raw))
     return { code: 'BUNDLE_MALFORMED', spec_ref: '5.2' };
-  if (/(not enough tlog entries|tlog entries:\s*\d+|too many tlog entries|tlog count|Expected exactly \d+ tlog)/i.test(raw))
+  if (/(not enough tlog entries|tlog entries:\s*\d+|too many tlog entries|tlog count|Expected exactly \d+ tlog|Invalid bundle: tlogEntries)/i.test(raw))
     return { code: 'TLOG_COUNT_OUT_OF_RANGE', spec_ref: '5.2' };
   if (/duplicate (SCT|log)/i.test(raw))
     return { code: 'SCT_DUPLICATE_LOG', spec_ref: '5.2' };
-  if (/SCT|Signed Certificate Timestamp/i.test(raw))
+  if (/SCT|Signed Certificate Timestamp|Not enough verified CT log operators/i.test(raw))
     return { code: 'SCT_INSUFFICIENT', spec_ref: '5.2' };
   // Must precede the Rekor catch-all below: sigstore-browser's observer-timestamp
   // guard message ("Rekor v2 bundles require a timestamp for verification.")
   // contains "Rekor", but the failure is a missing observer timestamp, not an
   // inclusion-proof problem. Match the timestamp phrasing first (SPEC §5.2 #5).
-  if (/require[sd]? (a |an )?timestamp|observer timestamp|no verifiable timestamp|Timestamp could not be verified/i.test(raw))
+  if (/require[sd]? (a |an )?timestamp|observer timestamp|no verifiable timestamp|Timestamp could not be verified|Not enough verified TSA operators/i.test(raw))
     return { code: 'OBSERVER_TIMESTAMP_INSUFFICIENT', spec_ref: '5.2' };
-  if (/No.*Rekor key|Trusted log IDs|Unknown.*log/i.test(raw))
+  // sigstore-browser 0.3: the bundle's log entry matched no trusted log key.
+  if (/No.*Rekor key|Trusted log IDs|Unknown.*log|Not enough verified transparency logs/i.test(raw))
     return { code: 'REKOR_KEY_NOT_TRUSTED', spec_ref: '5.1' };
+  // sigstore-browser 0.3 reports a flipped DSSE signature at the tlog-body check, before the envelope check.
+  if (/signature mismatch between TLog entry/i.test(raw))
+    return { code: 'DSSE_SIGNATURE_INVALID', spec_ref: '5.2' };
   if (/Rekor|tlog|inclusion proof|inclusion promise|checkpoint/i.test(raw))
     return { code: 'REKOR_INCLUSION_INVALID', spec_ref: '5.2' };
   if (/\b(Fulcio|CAs?)\b|certificate chain|chain validation|No valid CAs/i.test(raw))

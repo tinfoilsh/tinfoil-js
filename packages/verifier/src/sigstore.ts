@@ -147,8 +147,12 @@ export async function verifySigstoreBundleWithPolicy(
     const { SigstoreVerifier, AllOf } = await import(
       '@freedomofpress/sigstore-browser'
     );
+    // Rekor v2 checkpoints are Ed25519; browsers without native Ed25519 need the fallback.
+    const { installEd25519Fallback, verifySignatureOverDigest } = await import('@freedomofpress/crypto-browser/noble');
+    await installEd25519Fallback();
 
-    const verifier = new SigstoreVerifier();
+    // SPEC §5.2 accepts only v0.3 bundles; sigstore-browser 0.3.x enforces that at the media type.
+    const verifier = new SigstoreVerifier({ verifyDigest: verifySignatureOverDigest, bundleVersions: ['0.3'] });
     await verifier.loadSigstoreRoot(trustRoot);
 
     const bundle = bundleJson as any;
