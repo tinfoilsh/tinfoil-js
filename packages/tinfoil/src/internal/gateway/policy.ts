@@ -58,10 +58,10 @@ export class GatewayPolicy {
         throw new ConfigurationError(`gateway verification options: ${messageOf(err)}`, { cause: err });
       }
     }
-    if (verifier.callerAuthorizesConfig()) throw new ConfigurationError(CALLER_AUTHORIZED);
+    if (verifier.callerAuthorizesConfig) throw new ConfigurationError(CALLER_AUTHORIZED);
     const resolved = new Map<string, ResolvedPin>();
     for (const [model, pin] of pins) {
-      if (pin.verifier?.callerAuthorizesConfig()) throw new ConfigurationError(`model ${JSON.stringify(model)}: ${CALLER_AUTHORIZED}`);
+      if (pin.verifier?.callerAuthorizesConfig) throw new ConfigurationError(`model ${JSON.stringify(model)}: ${CALLER_AUTHORIZED}`);
       if (model.trim() === "" || !pin.repo.startsWith(TRUSTED_REPO_OWNER)) {
         throw new ConfigurationError(`model pin ${JSON.stringify(model)} repository ${JSON.stringify(pin.repo)} must belong to ${TRUSTED_REPO_OWNER}`);
       }

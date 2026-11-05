@@ -64,9 +64,27 @@ const EXPORTS = [
   "UnprocessableEntityError",
 ].sort();
 
-const ATTESTED_CLIENT_METHODS = ["baseURL", "enclave", "repo", "current", "ensureVerified", "reverify"].sort();
-const GATEWAY_CLIENT_METHODS = ["baseURL", "models", "ensureVerified", "current"].sort();
-const OPENAI_CLIENT_METHODS = ["httpClient", "withOptions"];
+/**
+ * Every member of a client type and its kind: an own `property` fixed at
+ * construction, a prototype `getter` reflecting the client's state, or a
+ * `method`. The key set is pinned under the test typecheck, the kinds at
+ * runtime; the own properties of an instance are pinned in each client's
+ * tests, where one is built.
+ */
+type Members<T> = Record<keyof T, "property" | "getter" | "method">;
+const ATTESTED_CLIENT_MEMBERS: Members<surface.EnclaveHTTPClient> & Members<surface.RouterHTTPClient> = {
+  fetch: "property",
+  baseURL: "property",
+  enclave: "property",
+  repo: "property",
+  current: "getter",
+  ensureVerified: "method",
+  reverify: "method",
+};
+const GATEWAY_CLIENT_MEMBERS: Members<surface.GatewayHTTPClient> = { fetch: "property", baseURL: "property", current: "getter", models: "method", ensureVerified: "method" };
+const UNVERIFIED_CLIENT_MEMBERS: Members<unsafeEntry.UnverifiedClient> = { fetch: "property", baseURL: "property", keyOrigin: "property" };
+/** What the OpenAI subclasses add to the OpenAI client. */
+const OPENAI_CLIENT_MEMBERS = { httpClient: "property", withOptions: "method" } as const satisfies Pick<Members<surface.TinfoilClient>, "httpClient" | "withOptions">;
 
 /** The type-only exports, pinned under the test typecheck: a removed or renamed type fails compilation here. */
 type TypeExports = [
@@ -91,10 +109,32 @@ type TypeExports = [
 const typeExports: TypeExports | undefined = undefined;
 void typeExports;
 
-const methodsOf = (cls: { prototype: object }): string[] =>
+const descriptorsOf = (cls: { prototype: object }): [string, PropertyDescriptor][] =>
   Object.getOwnPropertyNames(cls.prototype)
     .filter((n) => n !== "constructor")
+    .map((n) => [n, Object.getOwnPropertyDescriptor(cls.prototype, n)!]);
+const methodsOf = (cls: { prototype: object }): string[] =>
+  descriptorsOf(cls)
+    .filter(([, d]) => typeof d.value === "function")
+    .map(([n]) => n)
     .sort();
+const gettersOf = (cls: { prototype: object }): string[] =>
+  descriptorsOf(cls)
+    .filter(([, d]) => d.get !== undefined)
+    .map(([n]) => n)
+    .sort();
+const named = (members: Record<string, string>, kind: string): string[] =>
+  Object.entries(members)
+    .filter(([, k]) => k === kind)
+    .map(([n]) => n)
+    .sort();
+
+/** The prototype of `cls` carries exactly the getters and methods of `members`; its properties are own, so absent from it. */
+function expectShape(cls: { prototype: object }, members: Record<string, string>): void {
+  expect(methodsOf(cls)).toEqual(named(members, "method"));
+  expect(gettersOf(cls)).toEqual(named(members, "getter"));
+  for (const property of named(members, "property")) expect(Object.prototype.hasOwnProperty.call(cls.prototype, property), property).toBe(false);
+}
 
 const staticsOf = (cls: object): string[] => Object.getOwnPropertyNames(cls).filter((n) => !["length", "name", "prototype"].includes(n));
 
@@ -164,26 +204,28 @@ describe("public surface", () => {
     expect(Object.keys(unsafeEntry).sort()).toEqual(["UNVERIFIED_WARNING", "UnverifiedClient"]);
     expect(unsafeEntry.UNVERIFIED_WARNING).toMatch(/insecure/i);
     expect(staticsOf(unsafeEntry.UnverifiedClient)).toEqual(["create"]);
-    expect(methodsOf(unsafeEntry.UnverifiedClient)).toEqual(["baseURL", "keyOrigin"]);
+    expectShape(unsafeEntry.UnverifiedClient, UNVERIFIED_CLIENT_MEMBERS);
     const options: unsafeEntry.UnverifiedOptions | undefined = undefined;
     void options;
   });
 
-  it("shapes the HTTP clients as specified: a `create` factory and the verification methods", () => {
+  it("shapes the HTTP clients as specified: a `create` factory, state as properties, and the verification methods", () => {
     for (const cls of [surface.EnclaveHTTPClient, surface.RouterHTTPClient]) {
       expect(staticsOf(cls)).toEqual(["create"]);
-      expect(methodsOf(cls)).toEqual(ATTESTED_CLIENT_METHODS);
+      expectShape(cls, ATTESTED_CLIENT_MEMBERS);
     }
     expect(staticsOf(surface.GatewayHTTPClient)).toEqual(["create"]);
-    expect(methodsOf(surface.GatewayHTTPClient)).toEqual(GATEWAY_CLIENT_METHODS);
+    expectShape(surface.GatewayHTTPClient, GATEWAY_CLIENT_MEMBERS);
   });
 
-  it("shapes the OpenAI clients as OpenAI subclasses with a `create` factory and `httpClient`", () => {
+  it("shapes the OpenAI clients as OpenAI subclasses with a `create` factory and an `httpClient` property", () => {
     for (const cls of [surface.TinfoilClient, surface.EnclaveOpenAIClient, surface.RouterOpenAIClient, surface.GatewayOpenAIClient]) {
       expect(Object.getPrototypeOf(cls)).toBe(OpenAI);
       expect(staticsOf(cls)).toEqual(["create"]);
-      expect(methodsOf(cls)).toEqual(OPENAI_CLIENT_METHODS);
+      expectShape(cls, OPENAI_CLIENT_MEMBERS);
     }
+    // The OpenAI client has no member of that name to collide with.
+    expect("httpClient" in OpenAI.prototype).toBe(false);
     expect(typeof surface.createClient).toBe("function");
     expect(typeof surface.fetchCatalog).toBe("function");
   });

@@ -32,7 +32,7 @@ function verifier(hpke: string | ((document: string) => string), authorizes = fa
     checkRepoVerifiability: (repo: string) => {
       if (repo === "") throw new UsageError("repo required");
     },
-    callerAuthorizesConfig: () => authorizes,
+    callerAuthorizesConfig: authorizes,
     verifyV3At: async (doc: Uint8Array, _nonce: Uint8Array, repo: string) => {
       seen.push(repo);
       const key = typeof hpke === "function" ? hpke(new TextDecoder().decode(doc)) : hpke;

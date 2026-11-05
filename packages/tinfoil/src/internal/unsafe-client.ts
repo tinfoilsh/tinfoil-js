@@ -163,15 +163,17 @@ export class UnverifiedClient {
    * {@link ConfigurationError}.
    */
   readonly fetch: Fetch;
-  readonly #baseURL: string;
-  readonly #keyOrigin: string;
+  /** Where requests go. */
+  readonly baseURL: string;
+  /** The origin the sealing key was fetched from. */
+  readonly keyOrigin: string;
 
   /** @internal Only {@link create} constructs a client; anything else is refused. */
   constructor(token: symbol, baseURL: string, keyOrigin: string, fetchImpl: Fetch) {
     if (token !== TOKEN) throw new ConfigurationError("UnverifiedClient is created with UnverifiedClient.create");
-    this.#baseURL = baseURL;
-    this.#keyOrigin = keyOrigin;
     this.fetch = fetchImpl;
+    this.baseURL = baseURL;
+    this.keyOrigin = keyOrigin;
   }
 
   /**
@@ -182,15 +184,5 @@ export class UnverifiedClient {
    */
   static create(options?: UnverifiedOptions): Promise<UnverifiedClient> {
     return createUnverifiedClient(options ?? {}, {});
-  }
-
-  /** Where requests go. */
-  baseURL(): string {
-    return this.#baseURL;
-  }
-
-  /** The origin the sealing key was fetched from. */
-  keyOrigin(): string {
-    return this.#keyOrigin;
   }
 }
