@@ -69,6 +69,8 @@ const VERIFICATION_METHODS = [
 type TypeExports = [
   surface.VerifierOptions,
   surface.EmbeddedReferences,
+  surface.EmbeddedConfigReference,
+  surface.RuntimeReference,
   surface.ConfigVerification,
   surface.ArtifactVerification,
   surface.VerificationMetadata,

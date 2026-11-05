@@ -17,9 +17,9 @@ import { decodeBase64 } from "../canonical.js";
 import { arr, object, str, struct } from "../json/decode.js";
 import { canonicalize, strictParse, type JsonValue } from "../json/index.js";
 import { bytesEqual, expectSequence, isUniversal } from "../x509/certificate.js";
-import { bitString, children, decode, DerError, ecdsaSignatureToRaw, oid, pemBlocks, TAG } from "../x509/der.js";
+import { bitString, decode, DerError, ecdsaSignatureToRaw, oid, pemBlocks, TAG } from "../x509/der.js";
 import { IN_TOTO_PAYLOAD_TYPE, type Bundle, type TlogEntry } from "./bundle.js";
-import { preAuthEncoding } from "./timestamp.js";
+import { MAX_TIMESTAMP_SIZE, preAuthEncoding } from "./timestamp.js";
 import type { KeyedAuthority, TrustedRoot } from "./trusted-root.js";
 
 export const MAX_LOG_RECEIPTS = 8;
@@ -113,10 +113,10 @@ export async function verifyKeyedBundle(root: TrustedRoot, bundle: Bundle, keys:
  * The entry rules above: a bounded count of hashedrekord 0.0.2 entries with
  * proofs only and no duplicates. `timestamps` says whether the bundle must
  * carry no RFC 3161 timestamp (a key-signed approval, whose time is inside
- * the statement) or at least one (a certificate-signed approval, whose
- * signing time the timestamp establishes).
+ * the statement) or exactly one bounded timestamp (a certificate-signed
+ * approval, whose signing time that timestamp establishes).
  */
-export function checkLayout(bundle: Bundle, timestamps: "none" | "required"): void {
+export function checkLayout(bundle: Bundle, timestamps: "none" | "one"): void {
   const entries = bundle.tlogEntries;
   if (entries.length === 0 || entries.length > MAX_LOG_RECEIPTS) {
     throw new Error(`approval requires between 1 and ${MAX_LOG_RECEIPTS} transparency log entries, got ${entries.length}`);
@@ -134,7 +134,19 @@ export function checkLayout(bundle: Bundle, timestamps: "none" | "required"): vo
     seen.add(id);
   });
   if (timestamps === "none" && bundle.rfc3161Timestamps.length !== 0) throw new Error("approval bundle must carry no RFC 3161 timestamps");
-  if (timestamps === "required" && bundle.rfc3161Timestamps.length === 0) throw new Error("approval bundle must carry an RFC 3161 timestamp");
+  if (timestamps === "one") signatureTimestamp(bundle);
+}
+
+/**
+ * The one RFC 3161 timestamp a certificate-signed bundle carries over its
+ * DSSE signature. Any other count, or an oversized timestamp, rejects.
+ */
+export function signatureTimestamp(bundle: Bundle): Uint8Array {
+  const timestamps = bundle.rfc3161Timestamps;
+  if (timestamps.length !== 1 || timestamps[0]!.length === 0 || timestamps[0]!.length > MAX_TIMESTAMP_SIZE) {
+    throw new Error("certified registry endorsement requires one bounded signature timestamp");
+  }
+  return timestamps[0]!;
 }
 
 // ---------------------------------------------------------------- log entries

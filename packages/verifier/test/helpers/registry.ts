@@ -1,7 +1,7 @@
 /**
  * A synthetic config registry for tests: a self-signed P-256 root whose key
- * is pinned as a registry root, and the short-lived scope certificates it
- * issues to approval signing keys. DER is built by hand; the verifier's own
+ * is pinned as a registry root, and the short-lived signing certificates it
+ * issues to approval signing keys, each naming a registry ID. DER is built by hand; the verifier's own
  * decoder is what checks it.
  */
 import { utf8 } from "../../src/internal/bytes.js";
@@ -24,7 +24,7 @@ export const uriName = (uri: string): Uint8Array => tlv(0x86, utf8(uri));
 export const dnsName = (host: string): Uint8Array => tlv(0x82, utf8(host));
 
 export interface Registry {
-  /** The root key; its PEM is pinned as a registry root and it signs the scope certificates. */
+  /** The root key; its PEM is pinned as a registry root and it signs the signing certificates. */
   readonly root: Signer;
   readonly rootName: Uint8Array;
   readonly rootDer: Uint8Array;
@@ -56,8 +56,8 @@ export async function newRegistry(now: Date): Promise<Registry> {
   return { root, rootName, rootDer, notBefore, notAfter };
 }
 
-export interface ScopeCertificateOptions {
-  readonly scope: string;
+export interface RegistryCertificateOptions {
+  readonly registryID: string;
   /** The leaf is valid from a minute before `now` to nine minutes after it. */
   readonly now: Date;
   readonly notBefore?: Date;
@@ -70,22 +70,22 @@ export interface ScopeCertificateOptions {
   readonly extendedKeyUsage?: readonly string[] | "none";
   /** Replace the subject (default: empty). */
   readonly subject?: Uint8Array;
-  /** Replace the SAN's GeneralNames (default: one URI naming the scope); "none" omits the extension. */
+  /** Replace the SAN's GeneralNames (default: one URI naming the registry ID); "none" omits the extension. */
   readonly subjectAltNames?: readonly Uint8Array[] | "none";
   readonly sanCritical?: boolean;
   /** Further extensions appended as is. */
   readonly extraExtensions?: readonly Uint8Array[];
 }
 
-/** A scope certificate over `spki`, issued by `registry`, fitting the signing profile unless an option departs from it. */
-export async function scopeCertificate(registry: Registry, spki: Uint8Array, opts: ScopeCertificateOptions): Promise<Uint8Array> {
+/** A registry signing certificate over `spki`, issued by `registry`, fitting the signing profile unless an option departs from it. */
+export async function registryCertificate(registry: Registry, spki: Uint8Array, opts: RegistryCertificateOptions): Promise<Uint8Array> {
   const extensions: Uint8Array[] = [
     extension(OID_BASIC_CONSTRAINTS, true, opts.basicConstraints ?? seq()),
     extension(OID_KEY_USAGE, true, opts.keyUsage ?? tlv(0x03, [0x07, 0x80])),
   ];
   const eku = opts.extendedKeyUsage ?? [OID_KP_CODE_SIGNING];
   if (eku !== "none") extensions.push(extension(OID_EXT_KEY_USAGE, false, seq(...eku.map(oid))));
-  const sans = opts.subjectAltNames ?? [uriName(opts.scope)];
+  const sans = opts.subjectAltNames ?? [uriName(opts.registryID)];
   if (sans !== "none") extensions.push(extension(OID_SUBJECT_ALT_NAME, opts.sanCritical ?? true, seq(...sans)));
   extensions.push(...(opts.extraExtensions ?? []));
   return certificate(
