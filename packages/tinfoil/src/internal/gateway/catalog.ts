@@ -21,7 +21,8 @@ export const TRUSTED_REPO_OWNER = "tinfoilsh/";
  * Reads the catalog of the gateway at `host` with `fetchImpl`, keeping only
  * models with replicas of a bare `tinfoilsh/` repository, without a tag or
  * digest. Anything but a 200 response, or a body over the size cap or not
- * a JSON object of entries, is a {@link NetworkError}.
+ * a JSON object of entries, is a {@link NetworkError}; a call `signal`
+ * aborts rejects with the signal's own reason.
  *
  * @experimental The gateway route is new; this API may change without a major version.
  */
@@ -32,7 +33,7 @@ export async function fetchCatalogWith(host: string, fetchImpl: Fetch, signal?: 
   try {
     response = await getFollowingRedirects(url, fetchImpl, signal, CATALOG_FETCH_TIMEOUT_MS);
   } catch (err) {
-    if (err instanceof TinfoilError) throw err;
+    if (err instanceof TinfoilError || signal?.aborted) throw err;
     throw new NetworkError(`fetching gateway catalog: ${messageOf(err)}`, { cause: err });
   }
   if (response.status !== 200) {
@@ -43,7 +44,7 @@ export async function fetchCatalogWith(host: string, fetchImpl: Fetch, signal?: 
   try {
     body = await readBounded(response, MAX_CATALOG_BYTES, "gateway catalog");
   } catch (err) {
-    if (err instanceof TinfoilError) throw err;
+    if (err instanceof TinfoilError || signal?.aborted) throw err;
     throw new NetworkError(`reading gateway catalog: ${messageOf(err)}`, { cause: err });
   }
   return parseCatalog(body);

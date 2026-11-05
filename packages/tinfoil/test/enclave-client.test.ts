@@ -164,10 +164,11 @@ describe("EnclaveHTTPClient over TLS", () => {
     expect(docs.calls).toHaveLength(2);
   });
 
-  it("stops a verification call waiting when its signal aborts, leaving the verification in place", async () => {
-    const signal = AbortSignal.abort(new Error("gave up"));
-    await expect(client.reverify({ signal })).rejects.toThrow(/gave up/);
-    await expect(client.ensureVerified({ signal })).rejects.toThrow(/gave up/);
+  it("stops a verification call waiting when its signal aborts, rejecting with the signal's own reason and leaving the verification in place", async () => {
+    const reason = new Error("gave up");
+    const signal = AbortSignal.abort(reason);
+    await expect(client.reverify({ signal })).rejects.toBe(reason);
+    await expect(client.ensureVerified({ signal })).rejects.toBe(reason);
     expect(client.current?.tlsPublicKeyFP).toBe(TEST_PIN);
     expect(docs.calls).toHaveLength(2);
   });

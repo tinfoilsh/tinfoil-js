@@ -227,9 +227,10 @@ describe("pinnedWebSocketOptions", () => {
     socket.close();
   });
 
-  it("stops waiting for the verification when the call's signal aborts", async () => {
+  it("stops waiting for the verification when the call's signal aborts, rejecting with the signal's own reason", async () => {
     const c = await client(() => TEST_PIN);
-    await expect(pinnedWebSocketOptions(c, { signal: AbortSignal.abort(new Error("gave up")) })).rejects.toThrow(/gave up/);
+    const reason = new Error("gave up");
+    await expect(pinnedWebSocketOptions(c, { signal: AbortSignal.abort(reason) })).rejects.toBe(reason);
   });
 
   it("fails a library's handshake when the certificate carries another key, reaches the server with nothing, and verifies again afterwards", async () => {

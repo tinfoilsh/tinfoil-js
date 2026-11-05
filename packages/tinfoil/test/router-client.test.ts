@@ -155,6 +155,16 @@ describe("RouterHTTPClient over TLS", () => {
     expect(s.documentHosts.filter((h) => h === tls.host)).toHaveLength(1);
   });
 
+  it("stops a verification call waiting when its signal aborts, rejecting with the signal's own reason and leaving the verification in place", async () => {
+    const reason = new Error("gave up");
+    const signal = AbortSignal.abort(reason);
+    const verified = s.documentHosts.length;
+    await expect(client.reverify({ signal })).rejects.toBe(reason);
+    await expect(client.ensureVerified({ signal })).rejects.toBe(reason);
+    expect(client.current?.tlsPublicKeyFP).toBe(TEST_PIN);
+    expect(s.documentHosts).toHaveLength(verified);
+  });
+
   it("splices the cache secret into the body over the pinned connection, preserving the caller's bytes", async () => {
     const res = await client.fetch(`${tls.origin}/v1/chat/completions`, { method: "POST", body: BODY, headers: { "x-raw": "1" } });
     expect(await res.text()).toBe(`${BODY.slice(0, -1)},"user_cache_secret":"resolved-secret"}`);

@@ -148,12 +148,13 @@ describe("GatewayHTTPClient", () => {
     expect((await client.ensureVerified("test-model")).hpkePublicKey).toBe(gateway.publicKeyHex);
   });
 
-  it("stops a call waiting when its signal aborts", async () => {
-    const signal = AbortSignal.abort(new Error("gave up"));
+  it("stops a call waiting when its signal aborts, rejecting with the signal's own reason", async () => {
+    const reason = new Error("gave up");
+    const signal = AbortSignal.abort(reason);
     const before = s.calls.length;
-    await expect(client.models({ signal })).rejects.toThrow(/gave up/);
-    await expect(client.ensureVerified("test-model", { signal })).rejects.toThrow(/gave up/);
-    await expect(fetchCatalog("gateway.example", { signal })).rejects.toThrow(/gave up/);
+    await expect(client.models({ signal })).rejects.toBe(reason);
+    await expect(client.ensureVerified("test-model", { signal })).rejects.toBe(reason);
+    await expect(fetchCatalog("gateway.example", { signal })).rejects.toBe(reason);
     expect(s.calls).toHaveLength(before);
   });
 
