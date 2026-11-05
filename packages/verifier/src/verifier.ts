@@ -162,6 +162,16 @@ interface Parts {
 
 /** Appraises v3 attestation documents against a fixed policy. Immutable once built. */
 export class Verifier {
+  /** The freshness window in milliseconds. */
+  readonly freshnessMaxAgeMs: number;
+  /**
+   * The caller's pinned registers, or undefined. A frozen copy taken when the
+   * verifier was built; its register bytes are shared across reads and must
+   * not be mutated.
+   */
+  readonly pinnedRegisters: Expected | undefined;
+  /** Whether the caller, rather than an endorsement, authorizes the config. */
+  readonly callerAuthorizesConfig: boolean;
   readonly #policy: Policy;
   readonly #prov: ProvenanceClient;
   readonly #configVerifier: ConfigVerifier;
@@ -176,6 +186,9 @@ export class Verifier {
     this.#configVerifier = parts.configVerifier;
     this.#freshnessVerifier = parts.freshnessVerifier;
     this.#roots = parts.roots;
+    this.freshnessMaxAgeMs = parts.policy.freshnessMaxAgeMs;
+    this.pinnedRegisters = parts.policy.pinnedRegisters === undefined ? undefined : Object.freeze(cloneExpected(parts.policy.pinnedRegisters));
+    this.callerAuthorizesConfig = parts.policy.embedded.configReference !== undefined || parts.policy.configAuthorizer !== undefined;
   }
 
   /**
@@ -185,21 +198,6 @@ export class Verifier {
    */
   static async create(options: VerifierOptions = {}): Promise<Verifier> {
     return build(options, {});
-  }
-
-  /** The freshness window in milliseconds. */
-  freshnessMaxAgeMs(): number {
-    return this.#policy.freshnessMaxAgeMs;
-  }
-
-  /** The caller's pinned registers, or undefined. */
-  pinnedRegisters(): Expected | undefined {
-    return this.#policy.pinnedRegisters === undefined ? undefined : cloneExpected(this.#policy.pinnedRegisters);
-  }
-
-  /** Whether the caller, rather than an endorsement, authorizes the config. */
-  callerAuthorizesConfig(): boolean {
-    return this.#policy.embedded.configReference !== undefined || this.#policy.configAuthorizer !== undefined;
   }
 
   /** Throws UsageError when `repo` cannot be verified under this verifier's policy. */
