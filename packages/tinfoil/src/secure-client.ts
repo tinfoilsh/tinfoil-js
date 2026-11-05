@@ -58,7 +58,8 @@ export interface SecureClientOptions {
 
   /**
    * Network fetch implementation for EHBP API requests. Receives requests after
-   * body encryption; responses are decrypted by the SDK. Headers remain visible.
+   * body encryption; responses are decrypted by the SDK. Headers remain visible;
+   * use HTTPS for remote endpoints and relay connections to protect them in transit.
    * Useful for native HTTP bridges and trusted relays. Does not replace the
    * fetch used for attestation, and cannot be used with TLS transport.
    * Defaults to global fetch.

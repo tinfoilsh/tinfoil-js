@@ -57,7 +57,9 @@ with `transport: "tls"` throws rather than bypassing certificate pinning.
 The adapter must return a standard `Response` and honor cancellation and redirect
 policy. If it routes requests through a relay, it must preserve encrypted bodies
 and protocol headers. Only use trusted relays: EHBP encrypts bodies, not headers
-such as authorization. Bodyless requests retain existing EHBP behavior.
+such as authorization. Use HTTPS for remote endpoints and relay connections to
+protect those headers in transit; the SDK retains its existing HTTP(S) URL
+policy. Bodyless requests retain existing EHBP behavior.
 
 ## Documentation
 
