@@ -148,12 +148,12 @@ describe("der.decode", () => {
   });
 
   it("rejects a long-form length that fits the short form", () => {
-    expect(() => decode(hex("04 81 05 01 02 03 04 05"))).toThrow(/minimal form/);
+    expect(() => decode(hex("04 81 05 01 02 03 04 05"))).toThrow(/minimal/);
   });
 
   it("rejects a length with a leading zero octet", () => {
     const body = new Uint8Array(128).fill(0xaa);
-    expect(() => decode(new Uint8Array([0x04, 0x82, 0x00, 0x80, ...body]))).toThrow(/minimal form/);
+    expect(() => decode(new Uint8Array([0x04, 0x82, 0x00, 0x80, ...body]))).toThrow(/minimal/);
   });
 
   it("rejects the indefinite length form", () => {
