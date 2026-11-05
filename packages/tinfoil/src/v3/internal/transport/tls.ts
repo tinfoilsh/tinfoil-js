@@ -9,7 +9,7 @@
  * pin through its fetch's TLS options. This module is for Node and Bun
  * only; the browser entry maps it to a stub.
  */
-import type { Verification } from "@tinfoilsh/verifier/v3";
+import type { Verification } from "@tinfoilsh/verifier";
 import { isBun } from "../../../env.js";
 import { AttestationError, ConfigurationError, messageOf, NetworkError } from "../../errors.js";
 import type { Fetch } from "../../options.js";

@@ -5,7 +5,7 @@
  *
  * @experimental The gateway route is new; this API may change without a major version.
  */
-import { parseReference, Verifier } from "@tinfoilsh/verifier/v3";
+import { parseReference, Verifier } from "@tinfoilsh/verifier";
 import { AttestationError, ConfigurationError, messageOf } from "../../errors.js";
 import type { Catalog, ModelPin } from "../../options.js";
 import { TRUSTED_REPO_OWNER, trusted } from "./catalog.js";

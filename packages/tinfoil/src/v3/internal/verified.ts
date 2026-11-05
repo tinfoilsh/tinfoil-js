@@ -7,7 +7,7 @@
  * including its failure. No network I/O happens until the first request or
  * `ensureVerified`.
  */
-import type { Verification } from "@tinfoilsh/verifier/v3";
+import type { Verification } from "@tinfoilsh/verifier";
 import { AttestationError } from "../errors.js";
 import { Enclave, FRESHNESS_EXPIRED, freshAt } from "./enclave.js";
 

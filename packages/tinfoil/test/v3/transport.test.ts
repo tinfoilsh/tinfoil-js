@@ -12,7 +12,7 @@ import { allowedOrigins, normalizedOrigin, originOf, requestURL, withOriginRestr
 import { withReplay } from "../../src/v3/internal/transport/replay.js";
 import { isKeyRejection, KeyedTransport, KeyRejectionError, PeerLacksKeyError, type Mode } from "../../src/v3/internal/transport/transport.js";
 import type { Fetch } from "../../src/v3/options.js";
-import { KEY_SPKI_FP_SHA256_V1_FORMAT, type Verification, type Verifier } from "../../../verifier/src/v3/index.js";
+import { KEY_SPKI_FP_SHA256_V1_FORMAT, type Verification, type Verifier } from "../../../verifier/src/index.js";
 
 const HOST = "enclave.example";
 

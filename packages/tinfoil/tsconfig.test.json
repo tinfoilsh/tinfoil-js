@@ -8,9 +8,9 @@
     "declarationMap": false,
     "sourceMap": false,
     "paths": {
-      "@tinfoilsh/verifier/v3": ["../verifier/src/v3/index.ts"]
+      "@tinfoilsh/verifier": ["../verifier/src/index.ts"]
     }
   },
-  "include": ["src/v3/**/*", "src/version.ts", "test/v3/**/*"],
+  "include": ["src/**/*", "test/**/*"],
   "exclude": ["node_modules", "dist"]
 }

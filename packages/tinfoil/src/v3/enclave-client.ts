@@ -4,7 +4,7 @@
  * when the verification expires or is rejected, and refuses requests to any
  * origin other than the one it is bound to.
  */
-import type { Verification } from "@tinfoilsh/verifier/v3";
+import type { Verification } from "@tinfoilsh/verifier";
 import { ConfigurationError } from "./errors.js";
 import { withCacheSecret } from "./internal/cachesecret.js";
 import { Enclave, type EnclaveConfig } from "./internal/enclave.js";

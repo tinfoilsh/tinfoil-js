@@ -9,7 +9,7 @@ import { readFileSync } from "node:fs";
 import { ConfigurationError } from "../../src/v3/errors.js";
 import { tlsMode } from "../../src/v3/internal/transport/tls.js";
 import { PeerLacksKeyError } from "../../src/v3/internal/transport/transport.js";
-import type { Verification } from "@tinfoilsh/verifier/v3";
+import type { Verification } from "@tinfoilsh/verifier";
 
 const cert = readFileSync(new URL("../fixtures/ws-test-cert.pem", import.meta.url), "utf8");
 const key = readFileSync(new URL("../fixtures/ws-test-key.pem", import.meta.url), "utf8");
