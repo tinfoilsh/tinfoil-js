@@ -8,7 +8,7 @@ import { beforeAll, describe, expect, it } from "vitest";
 import { expectedOf, measurementOf } from "../conformance/adapter.js";
 import { CONFIG_ENDORSEMENT_V2_FORMAT, CONFIG_ID, FORMAT_V3, ROLE_REFERENCE_VALUES } from "../src/document/collateral/collateral.js";
 import type { RuntimeReference } from "../src/document/collateral/runtime.js";
-import { NONCE_SIZE, SEV_SNP_REPORT_V1_FORMAT } from "../src/document/document.js";
+import { KEY_SPKI_FP_SHA256_V1_FORMAT, KEY_X25519_HPKE_V1_FORMAT, NONCE_SIZE, SEV_SNP_REPORT_V1_FORMAT } from "../src/document/document.js";
 import { UsageError, VerificationError, type Layer } from "../src/errors.js";
 import { sha256, toHex } from "../src/internal/bytes.js";
 import { CONFIG_ENDORSEMENT_PREDICATE_TYPE_V2, IN_TOTO_STATEMENT_V1, PUBLIC_REGISTRY_ID, REGISTRY_ID_PREFIX } from "../src/internal/endorsement/approval.js";
@@ -16,6 +16,7 @@ import { ARTIFACT_FORMAT, ARTIFACT_FORMAT_V2 } from "../src/internal/policy/arti
 import { endorsementReference, timestampInput } from "../src/internal/sigstore/timestamp.js";
 import type { Expected } from "../src/measurement.js";
 import { dangerousTestOnlyVerifier, Verifier, type EmbeddedConfigReference, type VerifierOptions } from "../src/verifier.js";
+import { VERIFIER_NAME, VERIFIER_VERSION } from "../src/version.js";
 import { buildDocument } from "./helpers/builder.js";
 import { conformanceAvailable, inputBytes, loadFixture, loadFixtures, repoOf, vectorsTitle, type ConformanceFixture } from "./helpers/conformance.js";
 import { b64, build, newLog, newSigner, rootJson, toJson } from "./helpers/keyed.js";
@@ -77,7 +78,7 @@ describe.skipIf(withoutVectors)(vectorsTitle("verifyV3At on the full-verify vect
           // keys; the adapter's full stage, like every real client, then
           // rejects it at the envelope layer.
           expect(expected.code).toBe("ENVELOPE_REJECTED");
-          expect(outcome.verified.tlsPublicKeyFP() === undefined || outcome.verified.hpkePublicKey() === undefined).toBe(true);
+          expect(outcome.verified.tlsPublicKeyFP === undefined || outcome.verified.hpkePublicKey === undefined).toBe(true);
           return;
         }
         expect(outcome.err).toBeInstanceOf(VerificationError);
@@ -85,26 +86,49 @@ describe.skipIf(withoutVectors)(vectorsTitle("verifyV3At on the full-verify vect
         return;
       }
       const v = await run;
-      if (expected.tls_public_key_fp) expect(v.tlsPublicKeyFP()).toBe(expected.tls_public_key_fp);
-      if (expected.hpke_public_key) expect(v.hpkePublicKey()).toBe(expected.hpke_public_key);
-      if (expected.code_digest) expect(v.codeDigest()).toBe(expected.code_digest);
-      if (expected.code_measurement) expect(expectedOf(v.codeMeasurement())).toEqual(expected.code_measurement);
-      if (expected.enclave_measurement) expect(measurementOf(v.enclaveMeasurement())).toEqual(expected.enclave_measurement);
+      if (expected.tls_public_key_fp) expect(v.tlsPublicKeyFP).toBe(expected.tls_public_key_fp);
+      if (expected.hpke_public_key) expect(v.hpkePublicKey).toBe(expected.hpke_public_key);
+      if (expected.code_digest) expect(v.codeDigest).toBe(expected.code_digest);
+      if (expected.code_measurement) expect(expectedOf(v.codeMeasurement)).toEqual(expected.code_measurement);
+      if (expected.enclave_measurement) expect(measurementOf(v.enclaveMeasurement)).toEqual(expected.enclave_measurement);
       // A code release carries no config, runtime or platform facts, and its
       // witnesses bound the freshness window around the appraisal clock.
-      expect(v.configRepo()).toBe(c.repo.split("@")[0]);
-      expect(v.codeTag()).not.toBe("");
-      expect(v.config()).toBeUndefined();
-      expect(v.runtime()).toBeUndefined();
-      expect(v.platform()).toBeUndefined();
-      expect(v.metadata().verifiedAt).toEqual(c.at);
-      expect(v.metadata().verifier.name).toBe("@tinfoilsh/verifier");
-      const expires = v.freshnessExpiresAt();
+      expect(v.configRepo).toBe(c.repo.split("@")[0]);
+      expect(v.codeTag).not.toBe("");
+      expect(v.config).toBeUndefined();
+      expect(v.runtime).toBeUndefined();
+      expect(v.platform).toBeUndefined();
+      expect(v.metadata.verifiedAt).toEqual(c.at);
+      expect(v.metadata.verifier.name).toBe("@tinfoilsh/verifier");
+      const expires = v.freshnessExpiresAt;
       expect(expires).toBeDefined();
       expect(expires!.getTime()).toBeGreaterThanOrEqual(c.at.getTime());
       expect(expires!.getTime()).toBeLessThanOrEqual(c.at.getTime() + c.verifier.freshnessMaxAgeMs() + 5 * 60 * 1000);
     });
   }
+});
+
+describe.skipIf(withoutVectors)(vectorsTitle("the JSON form of a verification"), () => {
+  it("pins the shape of the golden vector's facts", async () => {
+    const c = await caseOf(loadFixture("golden/golden-happy.json"));
+    const v = await c.verifier.verifyV3At(c.doc, c.nonce, c.repo, c.at);
+    const launch = "11".repeat(48);
+    const json = {
+      codeDigest: "3b29117bcc96bb282879514cc03c32f3f7eb8a7bd031b829dd3864c591b87c50",
+      codeTag: "v1.0.0",
+      configRepo: "tinfoilsh/confidential-inference-proxy",
+      codeMeasurement: { platform: "sev-snp", launch },
+      enclaveMeasurement: { platform: "sev-snp", launch },
+      cryptoMaterial: [
+        { id: "tls", format: KEY_SPKI_FP_SHA256_V1_FORMAT, data: "d1a3788930750184f2fe268a222b5c65bab974069573c4afbf656454f066b6e3" },
+        { id: "hpke", format: KEY_X25519_HPKE_V1_FORMAT, data: "58c9b3756d738466ace1e27f83a7fe21b3356ec362694aef1506c5f35c766a01" },
+      ],
+      freshnessExpiresAt: "2025-01-08T00:00:01.000Z",
+      metadata: { verifier: { name: VERIFIER_NAME, version: VERIFIER_VERSION }, verifiedAt: "2025-01-01T00:00:01.000Z" },
+    };
+    expect(v.toJSON()).toStrictEqual(json);
+    expect(JSON.parse(JSON.stringify(v))).toStrictEqual(json);
+  });
 });
 
 describe.skipIf(withoutVectors)(vectorsTitle("verifyV3At caller mistakes"), () => {
@@ -150,7 +174,7 @@ describe.skipIf(withoutVectors)(vectorsTitle("verifyV3At caller mistakes"), () =
 
   it("applies pinned registers: a matching pin passes, a conflicting or foreign one rejects at the policy layer", async () => {
     const v = await c.verifier.verifyV3At(c.doc, c.nonce, c.repo, c.at);
-    const launch = v.enclaveMeasurement();
+    const launch = v.enclaveMeasurement;
     if (launch.platform !== "sev-snp") throw new Error("golden-happy is an SEV-SNP document");
     const matching = await dangerousTestOnlyVerifier(rootsOf(c.fixture), { pinnedRegisters: { platform: "sev-snp", launch: launch.launch } });
     await expect(matching.verifyV3At(c.doc, c.nonce, c.repo, c.at)).resolves.toBeDefined();

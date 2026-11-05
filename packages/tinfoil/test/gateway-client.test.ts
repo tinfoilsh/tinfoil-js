@@ -28,11 +28,11 @@ function verifier(hpke: string, authorizes = false): Verifier {
         { id: "hpke", format: KEY_X25519_HPKE_V1_FORMAT, data: hpke },
       ];
       return {
-        cryptoMaterial: () => material.map((m) => ({ ...m })),
-        tlsPublicKeyFP: () => "ab".repeat(32),
-        hpkePublicKey: () => hpke,
-        codeDigest: () => "11".repeat(32),
-        freshnessExpiresAt: () => new Date(Date.now() + 60_000),
+        cryptoMaterial: material.map((m) => ({ ...m })),
+        tlsPublicKeyFP: "ab".repeat(32),
+        hpkePublicKey: hpke,
+        codeDigest: "11".repeat(32),
+        freshnessExpiresAt: new Date(Date.now() + 60_000),
       } as unknown as Verification;
     },
   } as unknown as Verifier;
@@ -142,8 +142,8 @@ describe("GatewayHTTPClient", () => {
     const current = client.current();
     expect(current).toHaveLength(1);
     expect(current[0]).toMatchObject({ reference: "tinfoilsh/test", pinnedModel: "test-model", models: ["test-model"] });
-    expect(current[0]!.verification.hpkePublicKey()).toBe(gateway.publicKeyHex);
-    expect((await client.ensureVerified("test-model")).hpkePublicKey()).toBe(gateway.publicKeyHex);
+    expect(current[0]!.verification.hpkePublicKey).toBe(gateway.publicKeyHex);
+    expect((await client.ensureVerified("test-model")).hpkePublicKey).toBe(gateway.publicKeyHex);
   });
 
   it("refuses other origins, upgrades, and models the policy doesn't serve", async () => {
@@ -165,7 +165,7 @@ describe("GatewayHTTPClient", () => {
         verifier: verifier(gateway.publicKeyHex),
         url: GATEWAY_URL,
         verificationCheck: (v) => {
-          checked.push(v.hpkePublicKey()!);
+          checked.push(v.hpkePublicKey!);
           if (checked.length === 1) throw new Error("not this replica");
         },
       },
@@ -186,7 +186,7 @@ describe("GatewayHTTPClient", () => {
         return enclave === "replica-a.example" ? new Response("no", { status: 503 }) : toLocal()(input, init);
       },
     });
-    const c = await createGatewayHTTPClient({ verifier: verifier(gateway.publicKeyHex), url: GATEWAY_URL, verificationCheck: (v) => void checked.push(v.hpkePublicKey()!) }, failing);
+    const c = await createGatewayHTTPClient({ verifier: verifier(gateway.publicKeyHex), url: GATEWAY_URL, verificationCheck: (v) => void checked.push(v.hpkePublicKey!) }, failing);
     const res = await c.fetch(`${GATEWAY_URL}chat/completions`, { method: "POST", body: '{"model":"test-model"}', headers: { "content-type": "application/json", "x-raw": "1" } });
     expect(res.status).toBe(200);
     expect(c.current().map((r) => r.host)).toEqual(["replica-b.example"]);

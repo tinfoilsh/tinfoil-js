@@ -148,11 +148,11 @@ describe("KeyedTransport", () => {
       verifyV3At: async () => {
         const key = keys();
         return {
-          cryptoMaterial: () => [{ id: "tls", format: KEY_SPKI_FP_SHA256_V1_FORMAT, data: key }],
+          cryptoMaterial: [{ id: "tls", format: KEY_SPKI_FP_SHA256_V1_FORMAT, data: key }],
           cryptoMaterialData: (id: string) => (id === "tls" ? key : undefined),
-          tlsPublicKeyFP: () => key,
-          hpkePublicKey: () => undefined,
-          freshnessExpiresAt: () => new Date(expiresAt.getTime()),
+          tlsPublicKeyFP: key,
+          hpkePublicKey: undefined,
+          freshnessExpiresAt: new Date(expiresAt.getTime()),
         } as unknown as Verification;
       },
     } as unknown as Verifier;
@@ -166,7 +166,7 @@ describe("KeyedTransport", () => {
         if (request.url.protocol !== "https:") throw new ConfigurationError("needs https");
       },
       bind(v) {
-        const key = v.tlsPublicKeyFP()!;
+        const key = v.tlsPublicKeyFP!;
         return {
           fetch: async () => {
             if (peerKey() !== key) throw new PeerLacksKeyError("peer changed key");
@@ -201,8 +201,8 @@ describe("KeyedTransport", () => {
     await expect(t.fetch(`http://${HOST}/`)).rejects.toThrow(ConfigurationError);
     expect(t.current()).toBeUndefined();
     expect(await (await t.fetch(`https://${HOST}/v1/models`)).text()).toBe("k1");
-    expect(t.current()?.tlsPublicKeyFP()).toBe("k1");
-    expect((await t.ensureVerified()).tlsPublicKeyFP()).toBe("k1");
+    expect(t.current()?.tlsPublicKeyFP).toBe("k1");
+    expect((await t.ensureVerified()).tlsPublicKeyFP).toBe("k1");
   });
 
   it("turns a peer's key rejection into a replayable rejection after invalidating the verification, so the replay goes out under a fresh one", async () => {
@@ -225,7 +225,7 @@ describe("KeyedTransport", () => {
     expect(await (await replayed(`https://${HOST}/v1/chat`)).text()).toBe("k2");
     expect(verified).toBe(2);
     expect(closed).toEqual(["k1"]);
-    expect((await t.reverify()).tlsPublicKeyFP()).toBe("k2");
+    expect((await t.reverify()).tlsPublicKeyFP).toBe("k2");
     expect(closed).toEqual(["k1", "k2"]);
   });
 

@@ -19,7 +19,7 @@ describe("createTinfoil against the live router", () => {
     "verifies the router, generates and streams text, aborts, and honours a system message",
     async () => {
       tinfoil = await createTinfoil({ apiKey });
-      expect(tinfoil.httpClient().current()?.tlsPublicKeyFP()).toMatch(/^[0-9a-f]{64}$/);
+      expect(tinfoil.httpClient().current()?.tlsPublicKeyFP).toMatch(/^[0-9a-f]{64}$/);
 
       const generated = await generateText({ model: tinfoil(MODEL), prompt: "Say the single word: pong", maxOutputTokens: 512 });
       expect(["stop", "length"]).toContain(generated.finishReason);

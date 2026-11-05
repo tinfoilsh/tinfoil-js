@@ -17,10 +17,10 @@ const PIN = createHash("sha256").update(new X509Certificate(cert).publicKey.expo
 
 function verification(fp: string): Verification {
   return {
-    cryptoMaterial: () => [{ id: "tls", format: "https://tinfoil.sh/key/spki-fp-sha256/v1", data: fp }],
-    tlsPublicKeyFP: () => fp,
-    hpkePublicKey: () => undefined,
-    freshnessExpiresAt: () => new Date(Date.now() + 60_000),
+    cryptoMaterial: [{ id: "tls", format: "https://tinfoil.sh/key/spki-fp-sha256/v1", data: fp }],
+    tlsPublicKeyFP: fp,
+    hpkePublicKey: undefined,
+    freshnessExpiresAt: new Date(Date.now() + 60_000),
   } as unknown as Verification;
 }
 

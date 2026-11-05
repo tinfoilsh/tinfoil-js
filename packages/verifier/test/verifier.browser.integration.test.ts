@@ -37,8 +37,8 @@ describe("the verifier in a browser against the live service", () => {
     const doc = await fetchDocument(nonce);
     const verifier = await Verifier.create();
     const verified = await verifier.verifyV3(doc, nonce, REPO);
-    expect(verified.codeDigest()).toMatch(SHA256_HEX);
-    expect(verified.tlsPublicKeyFP()).toMatch(SHA256_HEX);
-    expect(verified.hpkePublicKey()).toMatch(SHA256_HEX);
+    expect(verified.codeDigest).toMatch(SHA256_HEX);
+    expect(verified.tlsPublicKeyFP).toMatch(SHA256_HEX);
+    expect(verified.hpkePublicKey).toMatch(SHA256_HEX);
   });
 });

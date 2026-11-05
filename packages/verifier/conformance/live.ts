@@ -49,8 +49,8 @@ export async function liveVerify(req: LiveRequest, log: (line: string) => void =
     if (mapped === undefined) throw err;
     return { output: { stage: STAGE_LIVE, accepted: false, rejection: { code: mapped.code } }, exitCode: mapped.exitCode };
   }
-  const tlsFP = verified.tlsPublicKeyFP();
-  const hpke = verified.hpkePublicKey();
+  const tlsFP = verified.tlsPublicKeyFP;
+  const hpke = verified.hpkePublicKey;
   if (tlsFP === undefined || hpke === undefined) {
     log("endorsed keys: the document endorses no TLS fingerprint or no HPKE key in the expected formats");
     return reject("ENVELOPE_REJECTED");
@@ -66,9 +66,9 @@ export async function liveVerify(req: LiveRequest, log: (line: string) => void =
     stage: STAGE_LIVE,
     accepted: true,
     outputs: {
-      code_digest: verified.codeDigest(),
-      code_measurement: expectedOf(verified.codeMeasurement()),
-      enclave_measurement: measurementOf(verified.enclaveMeasurement()),
+      code_digest: verified.codeDigest,
+      code_measurement: expectedOf(verified.codeMeasurement),
+      enclave_measurement: measurementOf(verified.enclaveMeasurement),
       tls_public_key_fp: tlsFP,
       hpke_public_key: hpke,
       channel_binding: "tls-spki",

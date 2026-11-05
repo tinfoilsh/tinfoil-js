@@ -18,10 +18,10 @@ let server: EhbpServer;
 
 function verification(hpke: string): Verification {
   return {
-    cryptoMaterial: () => [{ id: "hpke", format: KEY_X25519_HPKE_V1_FORMAT, data: hpke }],
-    tlsPublicKeyFP: () => "ab".repeat(32),
-    hpkePublicKey: () => hpke,
-    freshnessExpiresAt: () => new Date(Date.now() + 60_000),
+    cryptoMaterial: [{ id: "hpke", format: KEY_X25519_HPKE_V1_FORMAT, data: hpke }],
+    tlsPublicKeyFP: "ab".repeat(32),
+    hpkePublicKey: hpke,
+    freshnessExpiresAt: new Date(Date.now() + 60_000),
   } as unknown as Verification;
 }
 

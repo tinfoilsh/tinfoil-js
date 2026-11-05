@@ -30,11 +30,11 @@ let sseEnded = false;
 
 function verification(fp: string): Verification {
   return {
-    cryptoMaterial: () => [{ id: "tls", format: KEY_SPKI_FP_SHA256_V1_FORMAT, data: fp }],
+    cryptoMaterial: [{ id: "tls", format: KEY_SPKI_FP_SHA256_V1_FORMAT, data: fp }],
     cryptoMaterialData: (id: string) => (id === "tls" ? fp : undefined),
-    tlsPublicKeyFP: () => fp,
-    hpkePublicKey: () => undefined,
-    freshnessExpiresAt: () => new Date(Date.now() + 60_000),
+    tlsPublicKeyFP: fp,
+    hpkePublicKey: undefined,
+    freshnessExpiresAt: new Date(Date.now() + 60_000),
   } as unknown as Verification;
 }
 
@@ -90,7 +90,7 @@ describe("tlsMode", () => {
   it("refuses plaintext before any network I/O and requires a TLS key to bind", async () => {
     expect(() => mode.validateRequest(shapeOf("http://localhost/"))).toThrow(ConfigurationError);
     expect(() => mode.validateRequest(shapeOf("https://localhost/"))).not.toThrow();
-    await expect(mode.bind({ ...verification(PIN), tlsPublicKeyFP: () => undefined } as Verification)).rejects.toThrow(/endorses no "tls" key/);
+    await expect(mode.bind({ ...verification(PIN), tlsPublicKeyFP: undefined } as Verification)).rejects.toThrow(/endorses no "tls" key/);
     const bound = await mode.bind(verification(PIN));
     await expect(bound.fetch("http://localhost/")).rejects.toThrow(ConfigurationError);
     bound.close?.();
@@ -221,7 +221,7 @@ describe("KeyedTransport over TLS", () => {
     const replayed = withReplay(t.fetch, isKeyRejection);
     expect(await (await replayed(`${origin}/plain`)).text()).toBe("hello");
     expect(verified).toBe(2);
-    expect(t.current()?.tlsPublicKeyFP()).toBe(PIN);
+    expect(t.current()?.tlsPublicKeyFP).toBe(PIN);
     await expect(t.fetch(`http://localhost:1/`)).rejects.toThrow(ConfigurationError);
     const state = await t.state();
     (state.bound as BoundFetch).close?.();

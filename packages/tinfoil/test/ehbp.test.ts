@@ -23,10 +23,10 @@ let sseEnded = false;
 
 function verification(hpke: string | undefined): Verification {
   return {
-    cryptoMaterial: () => (hpke === undefined ? [] : [{ id: "hpke", format: KEY_X25519_HPKE_V1_FORMAT, data: hpke }]),
-    tlsPublicKeyFP: () => "ab".repeat(32),
-    hpkePublicKey: () => hpke,
-    freshnessExpiresAt: () => new Date(Date.now() + 60_000),
+    cryptoMaterial: (hpke === undefined ? [] : [{ id: "hpke", format: KEY_X25519_HPKE_V1_FORMAT, data: hpke }]),
+    tlsPublicKeyFP: "ab".repeat(32),
+    hpkePublicKey: hpke,
+    freshnessExpiresAt: new Date(Date.now() + 60_000),
   } as unknown as Verification;
 }
 

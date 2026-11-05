@@ -300,15 +300,15 @@ async function verifyFull(
   }
   // A document that verifies but endorses no usable channel keys is useless
   // to every real client, so the full stage requires both.
-  const tlsFP = verified.tlsPublicKeyFP();
-  const hpke = verified.hpkePublicKey();
+  const tlsFP = verified.tlsPublicKeyFP;
+  const hpke = verified.hpkePublicKey;
   if (tlsFP === undefined || hpke === undefined) {
     return reject(stage, "ENVELOPE_REJECTED");
   }
   return accept(stage, {
-    code_digest: verified.codeDigest(),
-    code_measurement: expectedOf(verified.codeMeasurement()),
-    enclave_measurement: measurementOf(verified.enclaveMeasurement()),
+    code_digest: verified.codeDigest,
+    code_measurement: expectedOf(verified.codeMeasurement),
+    enclave_measurement: measurementOf(verified.enclaveMeasurement),
     tls_public_key_fp: tlsFP,
     hpke_public_key: hpke,
   });

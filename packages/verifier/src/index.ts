@@ -11,7 +11,18 @@ import { parseCertificate, spkiFingerprint, X509Error } from "./internal/x509/ce
 import { DerError } from "./internal/x509/der.js";
 
 export { Verifier, type EmbeddedConfigReference, type EmbeddedReferences, type VerifierOptions } from "./verifier.js";
-export { cryptoMaterialData, Verification, type ArtifactVerification, type ConfigVerification, type ReferenceSource, type VerificationMetadata } from "./verification.js";
+export {
+  cryptoMaterialData,
+  Verification,
+  type ArtifactVerification,
+  type ArtifactVerificationJSON,
+  type ConfigVerification,
+  type ConfigVerificationJSON,
+  type MeasurementJSON,
+  type ReferenceSource,
+  type VerificationJSON,
+  type VerificationMetadata,
+} from "./verification.js";
 export type { ConfigEndorsement } from "./document/collateral/config.js";
 export type { RuntimeReference } from "./document/collateral/runtime.js";
 export { UsageError, VerificationError, VerifyError, type Layer } from "./errors.js";

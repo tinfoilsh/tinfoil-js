@@ -26,14 +26,14 @@ function verifier(hpke: string): Verifier {
     callerAuthorizesConfig: () => false,
     verifyV3At: async () =>
       ({
-        cryptoMaterial: () => [
+        cryptoMaterial: [
           { id: "tls", format: KEY_SPKI_FP_SHA256_V1_FORMAT, data: "ab".repeat(32) },
           { id: "hpke", format: KEY_X25519_HPKE_V1_FORMAT, data: hpke },
         ],
-        tlsPublicKeyFP: () => "ab".repeat(32),
-        hpkePublicKey: () => hpke,
-        codeDigest: () => "11".repeat(32),
-        freshnessExpiresAt: () => new Date(Date.now() + 60_000),
+        tlsPublicKeyFP: "ab".repeat(32),
+        hpkePublicKey: hpke,
+        codeDigest: "11".repeat(32),
+        freshnessExpiresAt: new Date(Date.now() + 60_000),
       }) as unknown as Verification,
   } as unknown as Verifier;
 }
