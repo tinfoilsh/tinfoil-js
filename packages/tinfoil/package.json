@@ -39,7 +39,7 @@
     "test:bun": "node scripts/generate-version.mjs && bun test --timeout 30000 ./test/surface.bun.ts ./test/tls.bun.ts ./test/ws.bun.ts",
     "test:bun:integration": "node scripts/generate-version.mjs && RUN_TINFOIL_INTEGRATION=true bun test --timeout 180000 ./test/integration.bun.ts",
     "test:browser": "vitest run --config vite.config.browser.ts",
-    "test:browser:integration": "RUN_TINFOIL_INTEGRATION=true vitest run --config vite.config.browser.integration.ts",
+    "test:browser:integration": "node scripts/generate-version.mjs && RUN_TINFOIL_INTEGRATION=true vitest run --config vite.config.browser.integration.ts",
     "lint": "eslint src/**/*.ts",
     "check:es2020": "test -n \"$(find dist -name '*.js')\" && find dist -name '*.js' -exec acorn --ecma2020 --module --silent {} +",
     "clean": "rm -rf dist",

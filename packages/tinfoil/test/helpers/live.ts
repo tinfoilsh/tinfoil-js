@@ -53,7 +53,7 @@ export async function streamChat(ai: OpenAI, model = LIVE_MODEL): Promise<{ delt
   for await (const chunk of stream) {
     check(finishReason === undefined, "a chunk arrived after the finish reason");
     const delta = chunk.choices[0]?.delta as ReplyMessage | undefined;
-    if (delta?.content || delta?.reasoning) deltas++;
+    if (delta?.content || delta?.reasoning || delta?.reasoning_content) deltas++;
     const reason = chunk.choices[0]?.finish_reason;
     if (reason) finishReason = reason;
   }
