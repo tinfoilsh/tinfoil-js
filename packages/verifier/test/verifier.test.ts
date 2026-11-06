@@ -276,13 +276,18 @@ describe("Verifier.create options", () => {
     const unnamed = await Verifier.create({ embeddedReferences: { config: { digest, runtime } } });
     expect(() => unnamed.checkRepoVerifiability(`org/project@sha256:${digest}`)).toThrow(/embedded config does not match/);
     expect(() => unnamed.checkRepoVerifiability("")).not.toThrow();
-    // An embedded config is its bytes or its reference: untyped code giving both, neither or
-    // something other than an object is refused before anything else is checked.
+    // An embedded config is its bytes or its reference, never both: each form excludes the
+    // other's fields, so the combined object fails to compile under the test typecheck.
     const bytes = utf8(`cvm-version: v1.2.3@sha256:${runtime.digest}\n`);
-    for (const both of [{ bytes, ...reference }, { name: "/org/project/r1" }, {}, "config", null]) {
-      await expect(Verifier.create({ embeddedReferences: { config: both as unknown as EmbeddedConfigReference } })).rejects.toThrow(UsageError);
+    // @ts-expect-error The bytes form excludes digest and runtime, and the reference form excludes bytes.
+    const combined: VerifierOptions = { embeddedReferences: { config: { bytes, ...reference } } };
+    void combined;
+    // Untyped code giving both, neither or something other than an object is refused before anything else is checked.
+    for (const bad of [{ bytes, ...reference }, { name: "/org/project/r1" }, {}, "config", null]) {
+      await expect(Verifier.create({ embeddedReferences: { config: bad as unknown as EmbeddedConfigReference } })).rejects.toThrow(UsageError);
     }
-    await expect(Verifier.create({ embeddedReferences: { config: { bytes, ...reference } } })).rejects.toThrow(/not both or neither/);
+    const both = { bytes, ...reference } as unknown as EmbeddedConfigReference;
+    await expect(Verifier.create({ embeddedReferences: { config: both } })).rejects.toThrow(/not both or neither/);
     await expect(Verifier.create({ embeddedReferences: { config: { bytes: "config" as unknown as Uint8Array } } })).rejects.toThrow(/must be a Uint8Array/);
     // The reference is validated like one derived from config bytes, and the embedded manifest must be the one it pins.
     for (const bad of [

@@ -50,19 +50,25 @@ import { verificationOf, type ArtifactVerification, type ConfigVerification, typ
 
 /**
  * An exact config the caller trusts, as its bytes, optionally with its name.
- * The digest and the runtime pin are taken from the bytes.
+ * The digest and the runtime pin are taken from the bytes, so the fields of
+ * the reference form are excluded: an object carrying both forms is refused
+ * at compile time, not just at runtime.
  */
 export interface EmbeddedConfigBytes {
   /** The /org/project/revision name; absent or "" leaves the name unpinned. */
   readonly name?: string;
   /** The config bytes. */
   readonly bytes: Uint8Array;
+  readonly digest?: never;
+  readonly runtime?: never;
 }
 
 /**
  * An exact config the caller trusts without holding its bytes: its digest
  * and the runtime release it pins, optionally with its name. The document's
  * config endorsement is not consulted; the quote must still bind the digest.
+ * The bytes form's field is excluded, so an object carrying both forms is
+ * refused at compile time.
  */
 export interface EmbeddedConfigReference {
   /** The /org/project/revision name; absent or "" leaves the name unpinned. */
@@ -71,6 +77,7 @@ export interface EmbeddedConfigReference {
   readonly digest: string;
   /** The runtime release the config pins (its `cvm-version`). */
   readonly runtime: RuntimeReference;
+  readonly bytes?: never;
 }
 
 /** Caller-trusted reference values that replace endorsement checks for the components supplied. */
