@@ -2,7 +2,7 @@
  * Retrieves raw attestation documents from enclaves. Nothing is parsed here;
  * verification belongs to the verifier.
  */
-import { NONCE_SIZE } from "@tinfoilsh/verifier";
+import { NONCE_SIZE, toHex } from "@tinfoilsh/verifier";
 import { SDK_NAME, SDK_VERSION } from "../version.js";
 import { ConfigurationError, messageOf, NetworkError, TinfoilError } from "../errors.js";
 import type { Fetch } from "../options.js";
@@ -27,7 +27,7 @@ export function attestationURL(host: string, relay: string | undefined, nonce: U
       throw new ConfigurationError(`invalid host ${JSON.stringify(authority)}: want a host with an optional port`);
     }
   }
-  const hex = Array.from(nonce, (b) => b.toString(16).padStart(2, "0")).join("");
+  const hex = toHex(nonce);
   if (relay === undefined || relay === "") return `https://${host}${ATTESTATION_ENDPOINT}?nonce=${hex}`;
   return `https://${relay}${ATTESTATION_ENDPOINT}?nonce=${hex}&enclave=${encodeURIComponent(host)}`;
 }

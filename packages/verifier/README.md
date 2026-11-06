@@ -13,15 +13,15 @@ npm install @tinfoilsh/verifier
 ## Quick Start
 
 ```typescript
-import { Verifier, randomNonce } from "@tinfoilsh/verifier";
+import { Verifier, randomNonce, toHex } from "@tinfoilsh/verifier";
 
 // Embedded production trust roots and signing keys, 7-day freshness bound.
 const verifier = await Verifier.create();
 
-// The enclave serves its document for a nonce you choose.
+// The enclave serves its document for a nonce you choose, which the
+// attestation endpoint takes as lowercase hex in the query string.
 const nonce = randomNonce();
-const hex = Array.from(nonce, (b) => b.toString(16).padStart(2, "0")).join("");
-const response = await fetch(`https://inference.tinfoil.sh/.well-known/tinfoil-attestation?nonce=${hex}`);
+const response = await fetch(`https://inference.tinfoil.sh/.well-known/tinfoil-attestation?nonce=${toHex(nonce)}`);
 const document = new Uint8Array(await response.arrayBuffer());
 
 const verification = await verifier.verifyV3(document, nonce, "tinfoilsh/confidential-model-router");
@@ -41,7 +41,7 @@ A `Verification` is a frozen object of `readonly` properties: `codeDigest`, `cod
 
 ### Errors
 
-Every error is a `VerifyError`. A `UsageError` means the verifier was built or called with invalid inputs, so retrying won't help. A `VerificationError` means the document must not be trusted; its `layer` names the check that failed: `envelope` (document shape and nonce binding), `provenance` (code, config and platform endorsements and their freshness), `quote` (the hardware quote) or `policy` (the measurements against the release). Those are the layers today; a later version may add one, so treat a `layer` you don't recognize as a rejection at a stage you have no name for. The verifier fails closed: an internal failure inside a layer (a bug, an exhausted resource) is reported as a `VerificationError` at that layer with the underlying error as `cause`, so an unfamiliar message at a layer may be the verifier itself failing rather than the document; inspect `cause` before treating it as a verdict on the document.
+Every error is a `VerifyError`, except from the hex helpers: `fromHex` verifies nothing, so it throws a plain `Error` for anything but lowercase hex of even length, the form `toHex` writes. A `UsageError` means the verifier was built or called with invalid inputs, so retrying won't help. A `VerificationError` means the document must not be trusted; its `layer` names the check that failed: `envelope` (document shape and nonce binding), `provenance` (code, config and platform endorsements and their freshness), `quote` (the hardware quote) or `policy` (the measurements against the release). Those are the layers today; a later version may add one, so treat a `layer` you don't recognize as a rejection at a stage you have no name for. The verifier fails closed: an internal failure inside a layer (a bug, an exhausted resource) is reported as a `VerificationError` at that layer with the underlying error as `cause`, so an unfamiliar message at a layer may be the verifier itself failing rather than the document; inspect `cause` before treating it as a verdict on the document.
 
 ### Pinning
 

@@ -1,10 +1,22 @@
 /** Small byte helpers shared across the verifier. WebCrypto only; no node: imports. */
 
-/** Lowercase hex encoding. */
+/** `b` as lowercase hex, two digits per byte. */
 export function toHex(b: Uint8Array): string {
   let s = "";
   for (const x of b) s += x.toString(16).padStart(2, "0");
   return s;
+}
+
+/**
+ * The bytes that `s` spells in lowercase hex: the form {@link toHex}
+ * writes. Only lowercase digits of even length are accepted; anything else
+ * throws a plain `Error`.
+ */
+export function fromHex(s: string): Uint8Array {
+  if (s.length % 2 !== 0 || !/^[0-9a-f]*$/.test(s)) throw new Error(`not lowercase hex of even length: ${JSON.stringify(s)}`);
+  const out = new Uint8Array(s.length / 2);
+  for (let i = 0; i < out.length; i++) out[i] = parseInt(s.slice(2 * i, 2 * i + 2), 16);
+  return out;
 }
 
 export function concat(...parts: Uint8Array[]): Uint8Array {

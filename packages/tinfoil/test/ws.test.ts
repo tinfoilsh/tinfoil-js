@@ -6,6 +6,7 @@
  * are refused before any I/O, and the `ws` settings a library needs pin its
  * own connection the same way.
  */
+import { getEventListeners } from "node:events";
 import { createServer, type Server } from "node:https";
 import type { AddressInfo } from "node:net";
 import { Identity } from "ehbp";
@@ -124,7 +125,7 @@ describe("webSocketURL", () => {
   });
 
   it("drops the ws settings that would change the peer or its certificate check", () => {
-    expect(allowedWsOptions({ agent: 1, createConnection: 2, checkServerIdentity: 3, rejectUnauthorized: false, ca: "x", headers: {}, perMessageDeflate: false, maxPayload: 7 })).toEqual({
+    expect(allowedWsOptions({ agent: 1, createConnection: 2, checkServerIdentity: 3, rejectUnauthorized: false, ca: "x", headers: {}, origin: "o", finishRequest: 4, perMessageDeflate: false, maxPayload: 7 })).toEqual({
       perMessageDeflate: false,
       maxPayload: 7,
     });
@@ -155,6 +156,35 @@ describe("createWebSocket", () => {
     const reply = nextMessage(socket);
     socket.send("ping");
     expect(await reply).toBe("echo:ping");
+    socket.close();
+  });
+
+  it("removes a listener when its signal aborts, adds none for a signal that already has, and keeps once and removal working", async () => {
+    const c = await client(() => TEST_PIN);
+    const socket = await createWebSocket(c, "/x");
+    await opened(socket);
+    const seen: string[] = [];
+    const controller = new AbortController();
+    socket.addEventListener("message", (event) => seen.push(`live:${String(event.data)}`), { signal: controller.signal });
+    socket.addEventListener("message", (event) => seen.push(`dead:${String(event.data)}`), { signal: AbortSignal.abort() });
+    socket.addEventListener("message", (event) => seen.push(`once:${String(event.data)}`), { once: true, signal: controller.signal });
+    const removed = (event: { readonly data: unknown }): number => seen.push(`removed:${String(event.data)}`);
+    socket.addEventListener("message", removed, { signal: controller.signal });
+    expect(getEventListeners(controller.signal, "abort")).toHaveLength(3);
+    socket.removeEventListener("message", removed);
+    // The signal holds a hook only while the listener is registered.
+    expect(getEventListeners(controller.signal, "abort")).toHaveLength(2);
+    const first = nextMessage(socket);
+    socket.send("one");
+    await first;
+    expect(seen).toEqual(["live:echo:one", "once:echo:one"]);
+    expect(getEventListeners(controller.signal, "abort")).toHaveLength(1);
+    controller.abort();
+    expect(getEventListeners(controller.signal, "abort")).toHaveLength(0);
+    const second = nextMessage(socket);
+    socket.send("two");
+    await second;
+    expect(seen).toEqual(["live:echo:one", "once:echo:one"]);
     socket.close();
   });
 
