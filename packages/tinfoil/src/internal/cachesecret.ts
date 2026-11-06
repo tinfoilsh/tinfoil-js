@@ -122,8 +122,9 @@ export function withCacheSecret(next: Fetch, secret: string): Fetch {
   if (secret === "") return next;
   return async (input, init) => {
     if (!pathEligible(shapeOf(input, init))) return next(input, init);
-    // A Request carries a signal of its own; the init's takes precedence, as fetch has it.
-    const signal = init?.signal ?? (input instanceof Request ? input.signal : undefined);
+    // A Request carries a signal of its own, which the init's replaces, as
+    // fetch has it: an explicit null leaves the request without one.
+    const signal = init?.signal === null ? undefined : (init?.signal ?? (input instanceof Request ? input.signal : undefined));
     const body = await readBody(input, init, signal);
     if (body === undefined) return next(input, init);
     const injected = body.text === undefined ? null : injectUserCacheSecret(body.text, secret);

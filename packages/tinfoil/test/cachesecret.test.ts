@@ -151,6 +151,12 @@ describe("withCacheSecret", () => {
     gone.abort(new Error("gone"));
     await expect(waiting).rejects.toThrow(/gone/);
     expect(captured).toHaveLength(sent);
+    // An init whose signal is null leaves the request without one, as fetch has it, however the Request's own stands.
+    const stale = new AbortController();
+    stale.abort(new Error("stale"));
+    const detached = new Request(url, { method: "POST", body: '{"seed":1}', signal: stale.signal });
+    await send(detached, { method: "POST", signal: null });
+    expect(last().body).toBe(`{"seed":1,${FIELD}}`);
   });
 });
 
