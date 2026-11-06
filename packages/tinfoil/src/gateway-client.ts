@@ -131,8 +131,9 @@ export class GatewayHTTPClient {
    * a {@link ConfigurationError} afterwards, and no replica is verified
    * again; `current` still reports the replicas' last verifications.
    * Requests are sealed and sent through the runtime's fetch, so the client
-   * holds no connections of its own to release, and a request in flight
-   * completes. Closing again does nothing.
+   * holds no connections of its own to release; a sealed exchange already
+   * under way completes, while a request still preparing, verifying or
+   * rerouting rejects as closed. Closing again does nothing.
    */
   async close(): Promise<void> {
     this.#transport.close();
