@@ -36,15 +36,32 @@ jobs:
       - name: Test
         run: npm test
 
+      # A prerelease tag (v2.0.0-rc.1) is published under the `next` dist-tag so that `npm install tinfoil` keeps resolving to the latest stable release.
+      - name: Choose the npm dist-tag
+        id: dist
+        run: |
+          if [[ "$GITHUB_REF_NAME" == *-* ]]; then
+            echo "tag=next" >> "$GITHUB_OUTPUT"
+            echo "prerelease=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "tag=latest" >> "$GITHUB_OUTPUT"
+            echo "prerelease=false" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Publish @tinfoilsh/verifier to npm
-        run: npm publish --access public --provenance
+        env:
+          DIST_TAG: ${{ steps.dist.outputs.tag }}
+        run: npm publish --access public --provenance --tag "$DIST_TAG"
         working-directory: packages/verifier
 
       - name: Publish tinfoil to npm
-        run: npm publish --access public --provenance
+        env:
+          DIST_TAG: ${{ steps.dist.outputs.tag }}
+        run: npm publish --access public --provenance --tag "$DIST_TAG"
         working-directory: packages/tinfoil
 
       - name: Create Release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: gh release create "$GITHUB_REF_NAME" --generate-notes
+          PRERELEASE: ${{ steps.dist.outputs.prerelease }}
+        run: gh release create "$GITHUB_REF_NAME" --generate-notes --prerelease="$PRERELEASE"
