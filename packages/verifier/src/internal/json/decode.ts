@@ -1,7 +1,8 @@
 /**
  * Helpers for hand-written record decoders over strictParse output. Member
  * names match case-sensitively; a missing member decodes to its type's
- * empty value (empty string, false, 0, no entries), and so does `null`; a
+ * empty value (empty string, false, an empty object or map) or, for the
+ * number and array helpers, to `undefined`; `null` decodes the same way; a
  * member of the wrong JSON type is an error.
  */
 import { JsonError, JsonNumber, type JsonObject, type JsonValue } from "./index.js";
