@@ -4,24 +4,20 @@
  *
  * These tests require:
  * - RUN_TINFOIL_INTEGRATION=true environment variable
- * - TINFOIL_API_KEY for the TinfoilAI tests (skipped when unset, e.g. on fork
- *   PRs, which do not receive repository secrets)
  */
 import { describe, it, expect, beforeAll } from "bun:test";
 
 const RUN_INTEGRATION = process.env.RUN_TINFOIL_INTEGRATION === "true";
 const isBun = typeof process !== "undefined" && (process as any).versions?.bun;
-const HAS_API_KEY = !!process.env.TINFOIL_API_KEY;
 
 describe("Bun Integration", () => {
   beforeAll(() => {
     if (!isBun) console.log("Skipping - not running in Bun");
     if (!RUN_INTEGRATION) console.log("Skipping - RUN_TINFOIL_INTEGRATION not set");
-    else if (!HAS_API_KEY) console.log("Skipping TinfoilAI tests - TINFOIL_API_KEY not set");
   });
 
   it("should create TinfoilAI client with EHBP transport (default)", async () => {
-    if (!isBun || !RUN_INTEGRATION || !HAS_API_KEY) return;
+    if (!isBun || !RUN_INTEGRATION) return;
 
     const { TinfoilAI } = await import("../src/index.js");
     const client = new TinfoilAI({
@@ -35,7 +31,7 @@ describe("Bun Integration", () => {
   });
 
   it("should make chat completion via EHBP transport (default)", async () => {
-    if (!isBun || !RUN_INTEGRATION || !HAS_API_KEY) return;
+    if (!isBun || !RUN_INTEGRATION) return;
 
     const { TinfoilAI } = await import("../src/index.js");
     const client = new TinfoilAI({
@@ -51,7 +47,7 @@ describe("Bun Integration", () => {
   });
 
   it("should create TinfoilAI client with TLS transport", async () => {
-    if (!isBun || !RUN_INTEGRATION || !HAS_API_KEY) return;
+    if (!isBun || !RUN_INTEGRATION) return;
 
     const { TinfoilAI } = await import("../src/index.js");
     const client = new TinfoilAI({
@@ -65,7 +61,7 @@ describe("Bun Integration", () => {
   });
 
   it("should make chat completion via TLS transport", async () => {
-    if (!isBun || !RUN_INTEGRATION || !HAS_API_KEY) return;
+    if (!isBun || !RUN_INTEGRATION) return;
 
     const { TinfoilAI } = await import("../src/index.js");
     const client = new TinfoilAI({
