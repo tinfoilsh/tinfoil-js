@@ -1,4 +1,5 @@
 import { decodeBase64, decodeLowerHex } from "../../internal/canonical.js";
+import type { Reference } from "../../internal/endorsement/reference.js";
 import { raw, str } from "../../internal/json/decode.js";
 import type { JsonValue } from "../../internal/json/index.js";
 import * as semver from "../../internal/semver.js";
@@ -9,12 +10,8 @@ export const RUNTIME_ID = "runtime";
 export const RUNTIME_V1_FORMAT = "https://tinfoil.sh/collateral/igvm-runtime/v1";
 export const PLATFORM_ID = "platform";
 
-/** A runtime pin. */
-export interface RuntimeReference {
-  readonly repo: string;
-  readonly tag: string;
-  readonly digest: string;
-}
+/** A runtime release pin: a runtime release is named the same way as a code release. */
+export type RuntimeReference = Reference;
 
 /** Repo must be cvmimage, tag a full semver, digest 32-byte lowercase hex. */
 export function validateRuntimeReference(r: RuntimeReference): void {
