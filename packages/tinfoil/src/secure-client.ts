@@ -56,6 +56,16 @@ export interface SecureClientOptions {
    */
   transport?: TransportMode;
 
+  /**
+   * Network fetch implementation for EHBP API requests. Receives requests after
+   * body encryption; responses are decrypted by the SDK. Headers remain visible;
+   * use HTTPS for remote endpoints and relay connections to protect them in transit.
+   * Useful for native HTTP bridges and trusted relays. Does not replace the
+   * fetch used for attestation, and cannot be used with TLS transport.
+   * Defaults to global fetch.
+   */
+  fetch?: typeof fetch;
+
   /** URL to fetch the attestation bundle from. */
   attestationBundleURL?: string;
 
@@ -148,6 +158,7 @@ export class SecureClient {
     readonly enclaveURL?: string;
     readonly configRepo: string;
     readonly transport: TransportMode;
+    readonly fetch?: typeof fetch;
     readonly attestationBundleURL?: string;
     readonly userCacheSecret?: string;
   };
@@ -161,6 +172,9 @@ export class SecureClient {
   private attestedTlsPublicKeyFingerprint?: string;
 
   constructor(options: SecureClientOptions = {}) {
+    if (options.fetch && options.transport === 'tls') {
+      throw new ConfigurationError('Custom fetch is only supported with EHBP transport; TLS transport requires certificate pinning.');
+    }
     // Validate provided URLs, including the empty string: URL resolution
     // keeps "" (via ??) rather than falling back, so an unguarded empty value
     // would surface later as a confusing "Invalid URL" instead of a clear error.
@@ -194,6 +208,7 @@ export class SecureClient {
       enclaveURL: options.enclaveURL,
       configRepo: options.configRepo ?? TINFOIL_CONFIG.DEFAULT_ROUTER_REPO,
       transport: options.transport || 'ehbp',
+      fetch: options.fetch,
       attestationBundleURL: options.attestationBundleURL,
       userCacheSecret: options.userCacheSecret,
     };
@@ -345,7 +360,7 @@ export class SecureClient {
       return await createSecureFetch(this.resolvedBaseURL!, undefined, tlsPublicKeyFingerprint, this.resolvedEnclaveURL, userCacheSecret);
     }
 
-    return await createSecureFetch(this.resolvedBaseURL!, hpkePublicKey, undefined, this.resolvedEnclaveURL, userCacheSecret);
+    return await createSecureFetch(this.resolvedBaseURL!, hpkePublicKey, undefined, this.resolvedEnclaveURL, userCacheSecret, this.config.fetch);
   }
 
   /**

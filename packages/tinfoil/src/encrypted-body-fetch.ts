@@ -132,7 +132,7 @@ function atOrigin(url: URL, origin: string): URL {
   return moved;
 }
 
-export function createEncryptedBodyFetch(baseURL: string, hpkePublicKey: string, enclaveURL?: string, userCacheSecret: string = ""): SecureTransport {
+export function createEncryptedBodyFetch(baseURL: string, hpkePublicKey: string, enclaveURL?: string, userCacheSecret: string = "", fetchImpl?: typeof fetch): SecureTransport {
   const base = new URL(baseURL);
   const baseOrigin = base.origin;
   const needsEnclaveHeader = !!enclaveURL && new URL(enclaveURL).origin !== baseOrigin;
@@ -149,7 +149,7 @@ export function createEncryptedBodyFetch(baseURL: string, hpkePublicKey: string,
 
   const getOrCreateTransport = (): Promise<Transport> => {
     if (!transportPromise) {
-      transportPromise = getTransportForOrigin(baseOrigin, hpkePublicKey);
+      transportPromise = getTransportForOrigin(baseOrigin, hpkePublicKey, fetchImpl);
     }
     return transportPromise;
   };
@@ -261,8 +261,8 @@ async function getUnverifiedTransportForOrigin(origin: string, keyOrigin: string
   return new Transport(serverIdentity, requestHost);
 }
 
-async function getTransportForOrigin(origin: string, hpkePublicKeyHex: string): Promise<Transport> {
+async function getTransportForOrigin(origin: string, hpkePublicKeyHex: string, fetchImpl?: typeof fetch): Promise<Transport> {
   const serverIdentity = await createIdentityFromPublicKeyHex(hpkePublicKeyHex);
   const requestHost = new URL(origin).host;
-  return new Transport(serverIdentity, requestHost);
+  return new Transport(serverIdentity, requestHost, { fetch: fetchImpl });
 }

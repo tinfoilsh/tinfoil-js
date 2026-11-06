@@ -45,6 +45,7 @@ const createSecureFetchMock = vi.fn<
     tlsPublicKeyFingerprint?: string,
     enclaveURL?: string,
     userCacheSecret?: string,
+    fetchImpl?: typeof fetch,
   ) => Promise<SecureTransport>
 >(async () => ({
   fetch: mockFetch as typeof fetch,
@@ -135,7 +136,31 @@ describe("SecureClient", () => {
       undefined,
       "https://test-router.tinfoil.sh",
       "test-secret",
+      undefined,
     );
+  });
+
+  it("preserves custom network fetch through reset and re-verification", async () => {
+    const { SecureClient } = await import("../src/secure-client");
+    const fetchImpl = vi.fn(async () => new Response());
+    const client = new SecureClient({ fetch: fetchImpl });
+    await client.ready();
+    client.reset();
+    await client.ready();
+    expect(verifyMock).toHaveBeenCalledTimes(2);
+    expect(createSecureFetchMock).toHaveBeenCalledTimes(2);
+    for (const call of createSecureFetchMock.mock.calls) {
+      expect(call[1]).toBe("mock-hpke-public-key");
+      expect(call[5]).toBe(fetchImpl);
+    }
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
+  it("rejects custom fetch with TLS transport before verification", async () => {
+    const { SecureClient } = await import("../src/secure-client");
+    expect(() => new SecureClient({ transport: "tls", fetch: globalThis.fetch }))
+      .toThrow("Custom fetch is only supported with EHBP transport");
+    expect(verifyMock).not.toHaveBeenCalled();
   });
 
   it("should provide a fetch function that works correctly", async () => {
@@ -572,6 +597,7 @@ describe("SecureClient", () => {
         undefined,
         "https://test-router.tinfoil.sh",
         "option-secret",
+        undefined,
       );
     });
 
@@ -587,6 +613,7 @@ describe("SecureClient", () => {
         undefined,
         "https://test-router.tinfoil.sh",
         "test-secret",
+        undefined,
       );
     });
   });
@@ -766,6 +793,7 @@ describe("SecureClient", () => {
         undefined,
         "https://test-router.tinfoil.sh",
         "test-secret",
+        undefined,
       );
     });
 
@@ -786,6 +814,7 @@ describe("SecureClient", () => {
         undefined,
         "https://test-router.tinfoil.sh",
         "test-secret",
+        undefined,
       );
     });
 
@@ -806,6 +835,7 @@ describe("SecureClient", () => {
         undefined,
         "https://my-enclave.example.com",
         "test-secret",
+        undefined,
       );
     });
 
@@ -827,6 +857,7 @@ describe("SecureClient", () => {
         undefined,
         "https://my-enclave.example.com",
         "test-secret",
+        undefined,
       );
     });
 
