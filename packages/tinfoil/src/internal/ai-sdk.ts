@@ -27,9 +27,11 @@ export interface TinfoilProviderEnclave {
  * Configures {@link createTinfoil}. Exactly one credential is given: an
  * `apiKey` on a server, or a `bearerToken` a browser page may hold. The
  * remaining options configure the attested client: the router client's when
- * `enclave` is unset, otherwise the enclave client's.
+ * `enclave` is unset, otherwise the enclave client's. `fetch` is the network
+ * implementation that carries the client's sealed requests in the `"ehbp"`
+ * transport mode, as for the clients, and is refused with `"tls"`.
  */
-export interface TinfoilProviderOptions extends Pick<RouterOptions & EnclaveOptions, "transportMode" | "baseURL" | "verifier" | "verificationCheck" | "userCacheSecret" | "signal"> {
+export interface TinfoilProviderOptions extends Pick<RouterOptions & EnclaveOptions, "transportMode" | "baseURL" | "verifier" | "verificationCheck" | "userCacheSecret" | "signal" | "fetch"> {
   /** A long-lived API key, sent as the bearer credential. It belongs on a server, never in a page. */
   readonly apiKey?: string;
   /** A credential a browser page may hold, such as a short-lived token from the application's own sign-in. */
@@ -78,6 +80,7 @@ export async function createTinfoilProvider(options: TinfoilProviderOptions, sea
     verificationCheck: options.verificationCheck,
     userCacheSecret: options.userCacheSecret,
     signal: options.signal,
+    fetch: options.fetch,
   };
   const client = options.enclave === undefined ? await createRouterHTTPClient(clientOptions, seams) : await createEnclaveHTTPClient(options.enclave.host, options.enclave.repo, clientOptions, seams);
   const provider = createOpenAICompatible({

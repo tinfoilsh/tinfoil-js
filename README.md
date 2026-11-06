@@ -44,7 +44,7 @@ The request body is still encrypted to the verified enclave's key; the proxy onl
 
 ### Custom network transport
 
-`RouterHTTPClient.create`, `EnclaveHTTPClient.create` and `GatewayHTTPClient.create`, and the route options of the OpenAI clients over them (`RouterOpenAIClient.create(routerOptions, openaiOptions)` and the enclave and gateway equivalents), take a `fetch` option: a fetch-compatible network implementation that carries their requests in the EHBP transport mode, for a native HTTP bridge (such as Tauri's) or a trusted relay. `createClient` takes only the OpenAI options, so it doesn't take it.
+`RouterHTTPClient.create`, `EnclaveHTTPClient.create` and `GatewayHTTPClient.create`, and the route options of the OpenAI clients over them (`RouterOpenAIClient.create(routerOptions, openaiOptions)` and the enclave and gateway equivalents), take a `fetch` option: a fetch-compatible network implementation that carries their requests in the EHBP transport mode, for a native HTTP bridge (such as Tauri's) or a trusted relay. The AI SDK provider's `createTinfoil` takes it too. `createClient` takes only the OpenAI options, so it doesn't take it.
 
 ```typescript
 import { RouterHTTPClient } from "tinfoil";
