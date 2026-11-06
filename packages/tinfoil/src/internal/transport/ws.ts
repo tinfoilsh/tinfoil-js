@@ -10,9 +10,9 @@
  * entry maps this module to a stub.
  */
 import type * as WS from "ws";
-import { isBun } from "../../env.js";
 import { ConfigurationError } from "../../errors.js";
 import type { PinnedWebSocket, WebSocketOptions } from "../../options.js";
+import { isBun } from "../platform.js";
 import { identityCheck, type IdentityCheck } from "./pin.js";
 import type { TLSOptions } from "./tls.js";
 import { PeerLacksKeyError } from "./transport.js";

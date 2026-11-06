@@ -10,9 +10,9 @@
  * only; the browser entry maps it to a stub.
  */
 import type { Verification } from "@tinfoilsh/verifier";
-import { isBun } from "../../env.js";
 import { AttestationError, ConfigurationError, messageOf, NetworkError } from "../../errors.js";
 import type { Fetch } from "../../options.js";
+import { isBun } from "../platform.js";
 import { CERT_MISMATCH, isCertificateError } from "./pin-errors.js";
 import { identityCheck } from "./pin.js";
 import { PeerLacksKeyError, type BoundFetch, type Mode } from "./transport.js";
