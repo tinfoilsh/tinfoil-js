@@ -45,12 +45,13 @@ export function integer(n: number | bigint): Uint8Array {
   return tlv(0x02, bytes);
 }
 
+/** An OBJECT IDENTIFIER: the first two arcs combine into one sub-identifier, and every sub-identifier is base-128 encoded. */
 export function oid(dotted: string): Uint8Array {
   const arcs = dotted.split(".").map(Number);
-  const body: number[] = [40 * arcs[0]! + arcs[1]!];
-  for (const arc of arcs.slice(2)) {
+  const body: number[] = [];
+  for (const sub of [40 * arcs[0]! + arcs[1]!, ...arcs.slice(2)]) {
     const groups: number[] = [];
-    let v = arc;
+    let v = sub;
     do {
       groups.unshift(v & 0x7f);
       v = Math.floor(v / 128);
@@ -74,6 +75,12 @@ export function utcTime(d: Date): Uint8Array {
 export function generalizedTime(d: Date): Uint8Array {
   const s = d.toISOString();
   return tlv(0x18, utf8(`${s.slice(0, 4)}${s.slice(5, 7)}${s.slice(8, 10)}${s.slice(11, 13)}${s.slice(14, 16)}${s.slice(17, 19)}Z`));
+}
+
+/** The certificate Time choice: UTCTime for 1950 through 2049, which is all that its two-digit year can name, GeneralizedTime otherwise. */
+export function validityTime(d: Date): Uint8Array {
+  const year = d.getUTCFullYear();
+  return year >= 1950 && year <= 2049 ? utcTime(d) : generalizedTime(d);
 }
 
 /** A Name of one commonName and one organizationName RDN. */
@@ -124,7 +131,7 @@ export async function certificate(spec: CertificateSpec, issuerKey: CryptoKey): 
     integer(spec.serial),
     ecdsaWithSha256(),
     spec.issuer,
-    seq(utcTime(spec.notBefore), utcTime(spec.notAfter)),
+    seq(validityTime(spec.notBefore), validityTime(spec.notAfter)),
     spec.subject,
     spec.spki,
     explicit(3, seq(...spec.extensions)),
