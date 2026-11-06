@@ -4,6 +4,8 @@
  * before the final one. The catalog and verification tests need only the
  * integration lane; completions need a Tinfoil API key too. The requests and
  * their checks are the live helpers shared with the browser and Bun lanes.
+ * Each client is closed at the end of its test, so a test leaves no pooled
+ * connections behind.
  */
 import { describe, expect, it } from "vitest";
 import { EnclaveHTTPClient } from "../src/enclave-client.js";
@@ -20,11 +22,11 @@ describe.each<TransportMode>(["tls", "ehbp"])("EnclaveHTTPClient against %s on a
   it.skipIf(!RUN_INTEGRATION || apiKey === "")(
     "verifies, completes a chat, and streams a completion chunk by chunk",
     async () => {
-      const http = await EnclaveHTTPClient.create(HOST, REPO, { transportMode });
+      await using http = await EnclaveHTTPClient.create(HOST, REPO, { transportMode });
       expect(http.enclave).toBe(HOST);
       expect(http.current?.tlsPublicKeyFP).toMatch(SHA256_HEX);
 
-      const ai = await EnclaveOpenAIClient.create(HOST, REPO, { transportMode }, { apiKey });
+      await using ai = await EnclaveOpenAIClient.create(HOST, REPO, { transportMode }, { apiKey });
       expect(ai.baseURL).toBe(`https://${HOST}/v1/`);
       await completeChat(ai);
       await streamChat(ai);
@@ -37,7 +39,7 @@ describe.each<TransportMode>(["tls", "ehbp"])("RouterOpenAIClient against %s on 
   it.skipIf(!RUN_INTEGRATION || apiKey === "")(
     "discovers and verifies a router and completes a chat through it",
     async () => {
-      const ai = await RouterOpenAIClient.create({ transportMode }, { apiKey });
+      await using ai = await RouterOpenAIClient.create({ transportMode }, { apiKey });
       const router = ai.httpClient;
       expect(router.repo).toBe(REPO);
       expect(router.current?.tlsPublicKeyFP).toMatch(SHA256_HEX);
@@ -52,7 +54,8 @@ describe("createClient on the live router", () => {
   it.skipIf(!RUN_INTEGRATION || apiKey === "")(
     "completes a chat through the recommended route",
     async () => {
-      await completeChat(await createClient({ apiKey }));
+      await using ai = await createClient({ apiKey });
+      await completeChat(ai);
     },
     180_000,
   );
@@ -64,7 +67,7 @@ describe("GatewayHTTPClient on the live gateway", () => {
     async () => {
       const catalog = await fetchCatalog(GATEWAY_HOST);
       expect(catalog.size).toBeGreaterThan(0);
-      const http = await GatewayHTTPClient.create();
+      await using http = await GatewayHTTPClient.create();
       const models = await http.models();
       expect(models).toEqual([...catalog.keys()].sort());
       const verification = await http.ensureVerified(models[0]!);
@@ -77,7 +80,7 @@ describe("GatewayHTTPClient on the live gateway", () => {
   it.skipIf(!RUN_INTEGRATION || apiKey === "")(
     "completes a chat through the gateway",
     async () => {
-      const ai = await GatewayOpenAIClient.create({}, { apiKey });
+      await using ai = await GatewayOpenAIClient.create({}, { apiKey });
       await completeChat(ai, (await ai.httpClient.models())[0]!);
       expect(ai.httpClient.current.length).toBeGreaterThan(0);
     },
