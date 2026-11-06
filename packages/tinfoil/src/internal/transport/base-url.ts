@@ -11,7 +11,8 @@ import { originOf } from "./origin.js";
  * the enclave or proxy: HTTPS, or HTTP to a loopback host, whose traffic
  * never leaves the machine. A query string or fragment is refused, since a
  * path resolved against the base would drop it; so are credentials, which
- * a request can't be built from, and which the error doesn't repeat.
+ * a request can't be built from, and which no error repeats: they are
+ * refused before any error that names the URL.
  */
 export function validateBaseURL(baseURL: string): void {
   let origin: string;
@@ -20,12 +21,12 @@ export function validateBaseURL(baseURL: string): void {
   } catch (err) {
     throw new ConfigurationError(`invalid base URL: ${(err as Error).message}`, { cause: err });
   }
-  if (baseURL.includes("?") || baseURL.includes("#")) {
-    throw new ConfigurationError(`invalid base URL: a query string or fragment can't be part of a base URL: ${JSON.stringify(baseURL)}`);
-  }
   const url = new URL(baseURL);
   if (url.username !== "" || url.password !== "") {
     throw new ConfigurationError("invalid base URL: a username or password can't be part of a base URL");
+  }
+  if (baseURL.includes("?") || baseURL.includes("#")) {
+    throw new ConfigurationError(`invalid base URL: a query string or fragment can't be part of a base URL: ${JSON.stringify(baseURL)}`);
   }
   if (origin.startsWith("https://")) return;
   if (!isLoopback(url.hostname)) {

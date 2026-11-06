@@ -305,6 +305,17 @@ describe("base URL rules", () => {
     })();
     expect(credentials.message).toMatch(/a username or password can't be part of a base URL/);
     expect(credentials.message).not.toContain("hunter2");
+    // Credentials are refused before a query string or fragment is, whose error repeats the URL.
+    const credentialsAndQuery = ((): Error => {
+      try {
+        validateBaseURL("https://user:hunter2@proxy.example/v1/?k=1");
+      } catch (err) {
+        return err as Error;
+      }
+      throw new Error("accepted");
+    })();
+    expect(credentialsAndQuery.message).toMatch(/a username or password can't be part of a base URL/);
+    expect(credentialsAndQuery.message).not.toContain("hunter2");
     expect(isLoopback("LOCALHOST")).toBe(true);
     expect(isLoopback("[::1]")).toBe(true);
     expect(isLoopback("127.0.0.1")).toBe(true);
