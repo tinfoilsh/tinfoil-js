@@ -13,7 +13,7 @@ import { parseRfc3339 } from "../rfc3339.js";
 export const TRUSTED_ROOT_MEDIA_TYPE = "application/vnd.dev.sigstore.trustedroot+json;version=0.1";
 
 export interface KeyedAuthority {
-  /** Lowercase hex SHA-256 of the DER public key, the id log entries name. */
+  /** The id that the trusted root states for the log, as lowercase hex: the one that its entries carry, however the log derived it. */
   readonly logId: string;
   readonly publicKey: CryptoKey;
   readonly validFrom: Date;
