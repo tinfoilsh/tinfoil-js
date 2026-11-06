@@ -419,7 +419,7 @@ export class Verifier {
       try {
         await authorizer({ ...material, config: config.slice(), ...(material.issuer === undefined ? {} : { issuer: material.issuer.slice() }) });
       } catch (err) {
-        throw new VerificationError("provenance", `authorizing config: ${message(err)}`, { cause: err });
+        throw new VerificationError(`authorizing config: ${message(err)}`, { layer: "provenance", cause: err });
       }
       const digest = toHex(await sha256(config));
       return { expected: configRuntime(config), config: { source: "policy", name: "", digest, reference: "", signingKeyHint: "", registryID: "" } };
@@ -604,7 +604,7 @@ async function at<T>(layer: Layer, step: () => Promise<T>): Promise<T> {
     return await step();
   } catch (err) {
     if (err instanceof VerifyError) throw err;
-    throw new VerificationError(layer, message(err), { cause: err });
+    throw new VerificationError(message(err), { layer, cause: err });
   }
 }
 

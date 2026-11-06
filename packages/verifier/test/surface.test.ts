@@ -174,7 +174,7 @@ describe("public surface", () => {
 
   it("classifies errors under one supertype", () => {
     const usage = new surface.UsageError("bad");
-    const rejected = new surface.VerificationError("quote", "bad");
+    const rejected = new surface.VerificationError("bad", { layer: "quote" });
     expect(usage).toBeInstanceOf(surface.VerifyError);
     expect(rejected).toBeInstanceOf(surface.VerifyError);
     expect(rejected.layer).toBe("quote");
