@@ -130,7 +130,16 @@ export async function createEnclaveHTTPClient(host: string, repo: string, option
     attestedFetch(transport, host, baseURL, options.userCacheSecret ?? ""),
   );
   registerWebSocketAccess(client, transport, seams.tls ?? {});
-  await client.ensureVerified({ signal: options.signal });
+  // A verification that the signal cuts short goes on inside the transport,
+  // so the transport is closed when the client isn't returned: what that
+  // verification binds when it finishes is then released instead of kept
+  // by a client no one holds.
+  try {
+    await client.ensureVerified({ signal: options.signal });
+  } catch (err) {
+    await client.close();
+    throw err;
+  }
   return client;
 }
 

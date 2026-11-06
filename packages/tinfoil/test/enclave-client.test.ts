@@ -4,6 +4,7 @@
  * proxy in front, the verification facts, the replay after a key rotation,
  * and the OpenAI client bound to the attested fetch.
  */
+import { Agent } from "node:https";
 import { Identity, PROTOCOL } from "ehbp";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { checkEnclaveOptions, createEnclaveHTTPClient, EnclaveHTTPClient, resolveTransportMode, type EnclaveClientSeams } from "../src/enclave-client.js";
@@ -164,6 +165,38 @@ describe("EnclaveHTTPClient.create", () => {
     const pending = createEnclaveHTTPClient(tls.host, "tinfoilsh/repo", { verifier: verifier(() => ({})), transportMode: "tls" }, { documentFetch: docs.fetch, sleep: async () => {} });
     await expect(pending).rejects.toBeInstanceOf(AttestationError);
     expect(docs.calls.length).toBe(2);
+  });
+
+  it("closes the transport when the signal cuts the verification short, so what that verification binds is released when it finishes", async () => {
+    const destroyed = vi.spyOn(Agent.prototype, "destroy");
+    try {
+      let begun!: () => void;
+      let serve!: () => void;
+      const started = new Promise<void>((resolve) => (begun = resolve));
+      const held = new Promise<void>((resolve) => (serve = resolve));
+      const documentFetch: Fetch = async () => {
+        begun();
+        await held;
+        return new Response(new Uint8Array([1]));
+      };
+      const controller = new AbortController();
+      const pending = createEnclaveHTTPClient(
+        tls.host,
+        "tinfoilsh/repo",
+        { verifier: verifier(() => ({ tls: TEST_PIN })), transportMode: "tls", signal: controller.signal },
+        { documentFetch, tls: { ca: TEST_CERT } },
+      );
+      await started;
+      const reason = new Error("gave up");
+      controller.abort(reason);
+      await expect(pending).rejects.toBe(reason);
+      expect(destroyed).not.toHaveBeenCalled();
+      // The verification finishes after the factory rejected; the pool it binds is destroyed rather than kept.
+      serve();
+      await vi.waitFor(() => expect(destroyed).toHaveBeenCalledTimes(1));
+    } finally {
+      destroyed.mockRestore();
+    }
   });
 });
 

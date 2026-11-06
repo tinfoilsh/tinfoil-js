@@ -4,9 +4,10 @@
  * cache secret spliced into the request body, the failure categories when
  * the route can't be verified, and the recommended client's wiring.
  */
+import { Agent } from "node:https";
 import { PROTOCOL } from "ehbp";
 import { APIConnectionError } from "openai";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { AttestationError, ConfigurationError, NetworkError, TinfoilError } from "../src/errors.js";
 import type { RuntimeGlobals } from "../src/internal/platform.js";
 import { createRouterOpenAIClient, createTinfoilClient, RouterOpenAIClient, TinfoilClient } from "../src/openai-client.js";
@@ -120,6 +121,35 @@ describe("RouterHTTPClient.create", () => {
     expect(client.enclave).toBe(tls.host);
     expect(s.documentHosts).toEqual(["first.example", tls.host]);
     expect(checked).toHaveLength(2);
+  });
+
+  it("closes the transport when the signal cuts the fallback's verification short, so what that verification binds is released when it finishes", async () => {
+    const destroyed = vi.spyOn(Agent.prototype, "destroy");
+    try {
+      let begun!: () => void;
+      let serve!: () => void;
+      const started = new Promise<void>((resolve) => (begun = resolve));
+      const held = new Promise<void>((resolve) => (serve = resolve));
+      const s = seams([], {
+        documentFetch: async () => {
+          begun();
+          await held;
+          return new Response(new Uint8Array([1]));
+        },
+      });
+      const controller = new AbortController();
+      const pending = createRouterHTTPClient({ verifier: verifier({ tls: TEST_PIN }), transportMode: "tls", signal: controller.signal }, s);
+      await started;
+      const reason = new Error("gave up");
+      controller.abort(reason);
+      await expect(pending).rejects.toBe(reason);
+      expect(destroyed).not.toHaveBeenCalled();
+      // The verification finishes after the factory rejected; the pool it binds is destroyed rather than kept.
+      serve();
+      await vi.waitFor(() => expect(destroyed).toHaveBeenCalledTimes(1));
+    } finally {
+      destroyed.mockRestore();
+    }
   });
 
   it("verifies the fallback before returning and reports its failure by category", async () => {
