@@ -258,7 +258,9 @@ describe("ehbpMode", () => {
         return response;
       },
     }).bind(verification(server.publicKeyHex));
-    await expect(hidden.fetch(`${server.origin}/plain`)).rejects.toThrow(/redirected the request, which a sealed request does not follow/);
+    const hiddenErr = await hidden.fetch(`${server.origin}/plain`).catch((e: unknown) => e);
+    expect(hiddenErr).toBeInstanceOf(NetworkError);
+    expect((hiddenErr as Error).message).toMatch(/redirected the request, which a sealed request does not follow/);
 
     const reason = new Error("caller gave up");
     const aborting = await ehbpMode({
