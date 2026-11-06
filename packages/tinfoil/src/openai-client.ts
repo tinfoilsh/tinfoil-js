@@ -16,7 +16,7 @@ import OpenAI, { type ClientOptions } from "openai";
 import { createEnclaveHTTPClient, EnclaveHTTPClient, openAIURLOf, type EnclaveClientSeams } from "./enclave-client.js";
 import { ConfigurationError } from "./errors.js";
 import { createGatewayHTTPClient, GatewayHTTPClient, type GatewayClientSeams } from "./gateway-client.js";
-import { checkAPIKeyRuntime } from "./internal/credential.js";
+import { checkAPIKeyRuntime, registerCredential, type CredentialResolver } from "./internal/credential.js";
 import { asyncDispose } from "./internal/dispose.js";
 import type { EnclaveOptions, GatewayOptions, RouterOptions } from "./options.js";
 import { createRouterHTTPClient, RouterHTTPClient, type RouterClientSeams } from "./router-client.js";
@@ -56,17 +56,36 @@ const givenOptions = new WeakMap<OpenAI, OpenAIOptions>();
 type AttestedHTTPClient = EnclaveHTTPClient | RouterHTTPClient | GatewayHTTPClient;
 
 /**
- * Fixes `fetch`, `baseURL` and `httpClient` on a constructed client, so none
- * can be reassigned, and keeps the options it was given for its clones. The
- * OpenAI constructor sets `fetch` and `baseURL` as plain properties, so they
- * are redefined here rather than declared as fields.
+ * How a connection the client doesn't send through its request loop, such
+ * as a realtime session, gets the client's credential: an `apiKey` given as
+ * a function is called when the connection is opened, as it is for a
+ * request, and must return a non-empty string; otherwise the key the client
+ * holds, a bearer token or an `apiKey` string, or `null` when it has neither.
  */
-function attest(client: OpenAI, httpClient: AttestedHTTPClient, baseURL: string, options: OpenAIOptions): void {
+function credentialResolver(client: OpenAI, apiKey: ClientOptions["apiKey"]): CredentialResolver {
+  if (typeof apiKey !== "function") return () => client.apiKey;
+  return async () => {
+    const token = await apiKey();
+    if (typeof token !== "string" || token === "") throw new ConfigurationError(`the apiKey function must return a non-empty string, got ${typeof token}`);
+    return token;
+  };
+}
+
+/**
+ * Fixes `fetch`, `baseURL` and `httpClient` on a constructed client, so none
+ * can be reassigned, keeps the options it was given for its clones, and
+ * records how it resolves its credential (`apiKey` as the options applied
+ * it) for connections opened outside its request loop. The OpenAI
+ * constructor sets `fetch` and `baseURL` as plain properties, so they are
+ * redefined here rather than declared as fields.
+ */
+function attest(client: OpenAI, httpClient: AttestedHTTPClient, baseURL: string, options: OpenAIOptions, apiKey: ClientOptions["apiKey"]): void {
   const fixed = { writable: false, configurable: false, enumerable: true };
   Object.defineProperty(client, "fetch", { ...fixed, value: httpClient.fetch });
   Object.defineProperty(client, "baseURL", { ...fixed, value: baseURL });
   Object.defineProperty(client, "httpClient", { ...fixed, value: httpClient });
   givenOptions.set(client, { ...options });
+  registerCredential(client, credentialResolver(client, apiKey));
 }
 
 /**
@@ -131,8 +150,9 @@ export class TinfoilClient extends OpenAI {
 
   private constructor(token: typeof TOKEN, httpClient: RouterHTTPClient, options: OpenAIOptions) {
     if (token !== TOKEN) throw new ConfigurationError("TinfoilClient is created with createClient");
-    super({ ...openAIClientOptions(options), fetch: httpClient.fetch, baseURL: openAIURLOf(httpClient) });
-    attest(this, httpClient, openAIURLOf(httpClient), options);
+    const clientOptions = openAIClientOptions(options);
+    super({ ...clientOptions, fetch: httpClient.fetch, baseURL: openAIURLOf(httpClient) });
+    attest(this, httpClient, openAIURLOf(httpClient), options, clientOptions.apiKey);
   }
 
   static {
@@ -200,8 +220,9 @@ export class EnclaveOpenAIClient extends OpenAI {
   private constructor(token: typeof TOKEN, httpClient: EnclaveHTTPClient, options: OpenAIOptions) {
     if (token !== TOKEN) throw new ConfigurationError("EnclaveOpenAIClient is created with EnclaveOpenAIClient.create");
     // The transport and base URL come last, so the caller's options can't replace them.
-    super({ ...openAIClientOptions(options), fetch: httpClient.fetch, baseURL: openAIURLOf(httpClient) });
-    attest(this, httpClient, openAIURLOf(httpClient), options);
+    const clientOptions = openAIClientOptions(options);
+    super({ ...clientOptions, fetch: httpClient.fetch, baseURL: openAIURLOf(httpClient) });
+    attest(this, httpClient, openAIURLOf(httpClient), options, clientOptions.apiKey);
   }
 
   static {
@@ -246,8 +267,9 @@ export class RouterOpenAIClient extends OpenAI {
 
   private constructor(token: typeof TOKEN, httpClient: RouterHTTPClient, options: OpenAIOptions) {
     if (token !== TOKEN) throw new ConfigurationError("RouterOpenAIClient is created with RouterOpenAIClient.create");
-    super({ ...openAIClientOptions(options), fetch: httpClient.fetch, baseURL: openAIURLOf(httpClient) });
-    attest(this, httpClient, openAIURLOf(httpClient), options);
+    const clientOptions = openAIClientOptions(options);
+    super({ ...clientOptions, fetch: httpClient.fetch, baseURL: openAIURLOf(httpClient) });
+    attest(this, httpClient, openAIURLOf(httpClient), options, clientOptions.apiKey);
   }
 
   static {
@@ -293,8 +315,9 @@ export class GatewayOpenAIClient extends OpenAI {
 
   private constructor(token: typeof TOKEN, httpClient: GatewayHTTPClient, options: OpenAIOptions) {
     if (token !== TOKEN) throw new ConfigurationError("GatewayOpenAIClient is created with GatewayOpenAIClient.create");
-    super({ ...openAIClientOptions(options), fetch: httpClient.fetch, baseURL: httpClient.baseURL });
-    attest(this, httpClient, httpClient.baseURL, options);
+    const clientOptions = openAIClientOptions(options);
+    super({ ...clientOptions, fetch: httpClient.fetch, baseURL: httpClient.baseURL });
+    attest(this, httpClient, httpClient.baseURL, options, clientOptions.apiKey);
   }
 
   static {
