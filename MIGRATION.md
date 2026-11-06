@@ -6,7 +6,7 @@
 
 | 1.x | 2.0 |
 |---|---|
-| `new TinfoilAI({ apiKey })`, lazy with `await client.ready()` | `await createClient({ apiKey })`: a `TinfoilClient` (an `OpenAI` subclass) verified before it is returned. A browser page passes `bearerToken` instead of `apiKey`. |
+| `new TinfoilAI({ apiKey })`, lazy with `await client.ready()` | `await createClient({ apiKey })`: a `TinfoilClient` (an `OpenAI` subclass) verified before it is returned. A browser page passes `bearerToken` instead of `apiKey`: an `apiKey` is refused outside Node and Bun, `dangerouslyAllowBrowser` or not, by the OpenAI clients and the AI SDK provider alike. |
 | `new SecureClient(options)` with `ready()`, `fetch`, `reset()`, `getBaseURL()`, `getEnclaveURL()` | `await RouterHTTPClient.create(options)` (the discovered router) or `await EnclaveHTTPClient.create(host, repo, options)` (one enclave), with `fetch` (absolute URLs), the `baseURL`, `enclave`, `repo` and `current` properties, `ensureVerified()` and `reverify()`. `RouterOpenAIClient.create(options, openaiOptions)` and `EnclaveOpenAIClient.create(host, repo, options, openaiOptions)` wrap them as OpenAI clients. |
 | `enclaveURL` and `configRepo` options | `EnclaveHTTPClient.create(host, repo)` / `EnclaveOpenAIClient.create(host, repo)`: the enclave is named up front, not chosen later |
 | `transport` option (default `"ehbp"` everywhere) | `transportMode`: `"tls"` by default on Node and Bun (the connection is pinned to the attested key), `"ehbp"` by default and alone in browsers. Pass `transportMode: "ehbp"` to keep sealed request bodies on Node. |
@@ -17,6 +17,7 @@
 | `getVerificationDocument()`, `VerificationDocument`, `VerificationStepState` | `ensureVerified()` returns a currently valid `Verification` with every fact, verifying again if needed; the `current` property is only the last successful one, unchecked, and may be undefined or expired. A verification failure is an `AttestationError` wrapping a `VerificationError` whose `layer` names the failed check |
 | `Verifier`, `assembleAttestationBundle` and the attestation types re-exported from `tinfoil` | import the verifier from `@tinfoilsh/verifier`; pass a `Verifier` through the `verifier` option to change the policy |
 | `FetchError` | `NetworkError`. `TinfoilError`, `ConfigurationError` and `AttestationError` keep their names. |
+| a verification failure thrown by `await client.ready()`, or by the first request as an `APIConnectionError` wrapping it | the factory rejects with the error itself. A request through the OpenAI API surface whose enclave fails to verify again rejects with `APIConnectionError` with the error as `cause`, after the OpenAI client's `maxRetries` retries (2 by default) |
 | `client.realtime({ model, options })` | `await createRealtimeWebSocket(client, { model, wsOptions })` (Node only) |
 | `secureClient.createWebSocket(path, options)`, `getPinnedWebSocketOptions()` | `await createWebSocket(client, path, options)`, `await pinnedWebSocketOptions(client)` |
 | `new UnverifiedClient()` from `tinfoil/unsafe`, discovering a router | `await UnverifiedClient.create({ baseURL \| keyOrigin })` from `tinfoil/unsafe`: it never discovers a server, and is for development against a local server only |
