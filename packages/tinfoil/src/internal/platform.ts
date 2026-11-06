@@ -61,18 +61,26 @@ export function isBun(globals: RuntimeGlobals = globalThis as RuntimeGlobals): b
  * The version of the Bun that `globals` describe when it is older than
  * `floor`; undefined on a Bun at least that new, and on any other runtime.
  * Versions compare as major.minor.patch; what follows the patch (a canary
- * tag) is ignored, and a version that doesn't parse counts as older.
+ * tag) is ignored, and a version that doesn't parse as three numbers
+ * counts as older.
  */
 export function bunOlderThan(floor: string, globals: RuntimeGlobals = globalThis as RuntimeGlobals): string | undefined {
   const version = globals.process?.versions?.bun;
   if (version === undefined || version === "") return undefined;
-  const parse = (v: string): number[] => v.split(".", 3).map((part) => Number.parseInt(part, 10) || 0);
-  const [have, want] = [parse(version), parse(floor)];
+  const have = parseVersion(version);
+  if (have === undefined) return version;
+  const want = parseVersion(floor);
+  if (want === undefined) throw new Error(`not a version: ${JSON.stringify(floor)}`);
   for (let i = 0; i < 3; i++) {
-    const [a, b] = [have[i] ?? 0, want[i] ?? 0];
-    if (a !== b) return a < b ? version : undefined;
+    if (have[i] !== want[i]) return have[i]! < want[i]! ? version : undefined;
   }
   return undefined;
+}
+
+/** The major, minor and patch of `v`, or undefined unless each is a decimal number; a tag after the patch is ignored. */
+function parseVersion(v: string): readonly [number, number, number] | undefined {
+  const match = /^(\d+)\.(\d+)\.(\d+)(?:[-+].*)?$/.exec(v);
+  return match === null ? undefined : [Number(match[1]), Number(match[2]), Number(match[3])];
 }
 
 /** TLS pinning where the runtime checks a connection before it sends over it (Node, or Bun from {@link MIN_BUN_FOR_TLS_MODE}); EHBP anywhere else. */

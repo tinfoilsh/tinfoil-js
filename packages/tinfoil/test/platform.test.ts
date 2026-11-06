@@ -19,6 +19,10 @@ describe("Bun version floors", () => {
     expect(bunOlderThan("1.4.4", bun("1.4.5-canary.20+abc"))).toBeUndefined();
     expect(bunOlderThan("1.4.4", bun("2.0.0"))).toBeUndefined();
     expect(bunOlderThan("1.4.0", bun("unknown"))).toBe("unknown");
+    // A version with an unreadable or missing part is not read as its readable parts.
+    expect(bunOlderThan("1.4.0", bun("1.4.bad"))).toBe("1.4.bad");
+    expect(bunOlderThan("1.4.0", bun("1.4"))).toBe("1.4");
+    expect(bunOlderThan("1.4.0", bun("1.4.0.1"))).toBe("1.4.0.1");
     expect(bunOlderThan("1.4.0", node)).toBeUndefined();
     expect(bunOlderThan("1.4.0", {})).toBeUndefined();
   });
