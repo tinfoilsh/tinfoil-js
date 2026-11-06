@@ -528,6 +528,14 @@ describe("GatewayTransport", () => {
     await expect(t.ensureVerified("other", aborted.signal)).rejects.toThrow(/stop/);
   });
 
+  it("rejects a model listing still waiting on the catalog when the transport closes", async () => {
+    const t = transport({ policy: await GatewayPolicy.create(undefined, false, perHost()), gatewayFetch: gateway().fetch });
+    const pending = t.models();
+    t.close();
+    await expect(pending).rejects.toThrow(/closed/);
+    await expect(t.models()).rejects.toThrow(/closed/);
+  });
+
   it("replays once after a replica rotates its key, naming the replica on every attempt", async () => {
     const stale = await (await Identity.generate()).getPublicKeyHex();
     let verifications = 0;

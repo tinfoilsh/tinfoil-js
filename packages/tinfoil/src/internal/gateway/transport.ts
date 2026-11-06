@@ -84,6 +84,8 @@ export class GatewayTransport {
     if (this.#closed) throw closedError();
     signal?.throwIfAborted();
     const catalog = await this.#catalog(signal);
+    // A close while the catalog was read makes this listing reject like the rest.
+    if (this.#closed) throw closedError();
     return [...catalog.keys()].filter((model) => this.#config.policy.serves(model, catalog)).sort();
   }
 
@@ -100,7 +102,10 @@ export class GatewayTransport {
     for (const host of await rank(hosts, model, undefined)) {
       signal?.throwIfAborted();
       try {
-        return (await this.#verified({ ...replica, host }, signal)).keyed.current()!;
+        // The verification that was checked valid, not the replica's current
+        // one, which a concurrent refresh can have replaced since.
+        const rt = await this.#replica({ ...replica, host });
+        return await rt.keyed.ensureVerified(signal);
       } catch (err) {
         failure = err;
       }
