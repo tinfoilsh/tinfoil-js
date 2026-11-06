@@ -7,6 +7,7 @@ import { describe, expect, it } from "vitest";
 import * as surface from "../src/index.js";
 import { INTEL_SGX_ROOT_CA_PEM } from "../src/trust/intel-sgx-root.js";
 import { pemBlocks } from "../src/internal/x509/der.js";
+import { verificationOf } from "../src/verification.js";
 
 /** Every runtime export, sorted. Type-only exports are checked by compiling this file. */
 const EXPORTS = [
@@ -111,9 +112,23 @@ const gettersOf = (cls: { prototype: object }): string[] =>
     .map(([n]) => n)
     .sort();
 
-/** A verification with the fewest facts, built through the verifier's internal constructor. */
+/**
+ * Only the verifier builds these: the constructors are private, so a caller
+ * who tries fails to compile. Never called; the directives pin the errors
+ * under the test typecheck. Untyped construction is refused at runtime,
+ * which the surface test checks.
+ */
+function privateConstructors(): void {
+  // @ts-expect-error The constructor is private; a verification comes from a verifier.
+  new surface.Verification({} as never);
+  // @ts-expect-error The constructor is private; a verifier comes from Verifier.create.
+  new surface.Verifier({} as never);
+}
+void privateConstructors;
+
+/** A verification with the fewest facts, built through the verifier's internal seam. */
 const verification = (): surface.Verification =>
-  new surface.Verification({
+  verificationOf({
     codeDigest: "",
     codeTag: "",
     configRepo: "",
@@ -143,6 +158,13 @@ describe("public surface", () => {
     expect(surface.CRYPTO_MATERIAL_ID_HPKE).toBe("hpke");
   });
 
+  it("refuses untyped construction of a verifier or a verification", () => {
+    expect(() => new (surface.Verifier as any)({ serverURL: "https://x", configRepo: "org/repo" })).toThrow(surface.UsageError);
+    expect(() => new (surface.Verifier as any)({})).toThrow(/Verifier.create/);
+    expect(() => new (surface.Verification as any)(verification())).toThrow(surface.UsageError);
+    expect(() => new (surface.Verification as any)({})).toThrow(/comes from a verifier/);
+  });
+
   it("builds a default verifier through the public entry", async () => {
     const v = await surface.Verifier.create();
     expect(v).toBeInstanceOf(surface.Verifier);
@@ -159,6 +181,34 @@ describe("public surface", () => {
     expect(rejected.layer).toBe("quote");
     expect(usage.name).toBe("UsageError");
     expect(rejected.name).toBe("VerificationError");
+  });
+
+  it("parses measurements and reports a bad register as a usage error carrying the original", () => {
+    const hex = "ab".repeat(surface.REGISTER_SIZE);
+    expect(surface.registerHex(surface.parseRegister(hex.toUpperCase()))).toBe(hex);
+    expect(surface.parseExpectedSevSnp("")).toEqual({ platform: "sev-snp", launch: undefined });
+    expect(surface.parseExpectedTdx(hex, "", "", "", "")).toEqual({ platform: "tdx", mrtd: surface.parseRegister(hex), rtmr0: undefined, rtmr1: undefined, rtmr2: undefined, rtmr3: undefined });
+    const failures: [() => unknown, string][] = [
+      [() => surface.parseRegister("zz"), `register must be ${2 * surface.REGISTER_SIZE} hex characters, got 2`],
+      [() => surface.parseRegister("g".repeat(2 * surface.REGISTER_SIZE)), "register is not hex"],
+      [() => surface.parseExpectedSevSnp("zz"), `Launch: register must be ${2 * surface.REGISTER_SIZE} hex characters, got 2`],
+      [() => surface.parseExpectedTdx(hex, "", "zz", "", ""), `RTMR1: register must be ${2 * surface.REGISTER_SIZE} hex characters, got 2`],
+    ];
+    for (const [parse, message] of failures) {
+      let thrown: unknown;
+      try {
+        parse();
+      } catch (err) {
+        thrown = err;
+      }
+      expect(thrown).toBeInstanceOf(surface.UsageError);
+      expect(thrown).toBeInstanceOf(surface.VerifyError);
+      const usage = thrown as surface.UsageError;
+      expect(usage.message).toBe(`usage error: ${message}`);
+      expect(usage.cause).toBeInstanceOf(Error);
+      expect((usage.cause as Error).message).toBe(message);
+      expect(usage.cause).not.toBeInstanceOf(surface.VerifyError);
+    }
   });
 
   it("parses references and reports a bad one as a usage error", () => {

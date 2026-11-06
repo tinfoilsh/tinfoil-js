@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { KEY_SPKI_FP_SHA256_V1_FORMAT, KEY_X25519_HPKE_V1_FORMAT } from "../src/document/document.js";
 import type { ExpectedTdx, SevSnpMeasurement } from "../src/measurement.js";
-import { cryptoMaterialData, Verification, type VerificationFields } from "../src/verification.js";
+import { cryptoMaterialData, verificationOf, type Verification, type VerificationFields } from "../src/verification.js";
 
 const reg = (fill: number) => new Uint8Array(48).fill(fill);
 const AT = new Date("2026-01-02T03:04:05Z");
@@ -33,7 +33,7 @@ function fields(): { fields: VerificationFields; launch: Uint8Array; rtmr1: Uint
 
 function makeVerification() {
   const f = fields();
-  return { v: new Verification(f.fields), launch: f.launch, rtmr1: f.rtmr1 };
+  return { v: verificationOf(f.fields), launch: f.launch, rtmr1: f.rtmr1 };
 }
 
 describe("Verification", () => {
@@ -122,14 +122,14 @@ describe("Verification", () => {
     expect(v.cryptoMaterialData("tls", "https://example.invalid/none")).toBeUndefined();
     expect(cryptoMaterialData([], "tls", KEY_SPKI_FP_SHA256_V1_FORMAT)).toBeUndefined();
     const f = fields().fields;
-    const none = new Verification({ ...f, cryptoMaterial: [{ id: "tls", format: "https://example.invalid/other", data: "x" }] });
+    const none = verificationOf({ ...f, cryptoMaterial: [{ id: "tls", format: "https://example.invalid/other", data: "x" }] });
     expect(none.tlsPublicKeyFP).toBeUndefined();
     expect(none.hpkePublicKey).toBeUndefined();
   });
 
   it("leaves optional facts undefined when not established", () => {
     const f = fields().fields;
-    const v = new Verification({ ...f, config: undefined, runtime: undefined, freshnessExpiresAt: undefined });
+    const v = verificationOf({ ...f, config: undefined, runtime: undefined, freshnessExpiresAt: undefined });
     expect(v.config).toBeUndefined();
     expect(v.runtime).toBeUndefined();
     expect(v.freshnessExpiresAt).toBeUndefined();
@@ -161,7 +161,7 @@ describe("Verification", () => {
     expect(JSON.parse(JSON.stringify(v))).toStrictEqual(json);
     expect(Object.keys(v.toJSON())).toEqual(Object.keys(v).filter((k) => v[k as keyof Verification] !== undefined));
 
-    const sparse = new Verification({ ...fields().fields, config: undefined, runtime: undefined, freshnessExpiresAt: undefined });
+    const sparse = verificationOf({ ...fields().fields, config: undefined, runtime: undefined, freshnessExpiresAt: undefined });
     expect(sparse.toJSON()).toStrictEqual(established);
     expect(JSON.parse(JSON.stringify(sparse))).toStrictEqual(established);
   });

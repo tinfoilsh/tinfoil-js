@@ -44,8 +44,8 @@ export function decodeRuntime(entry: Entry): RuntimeCollateral {
   }));
   const { ref, bundle } = c;
   validateRuntimeReference(ref);
-  // An empty manifest is accepted here, as in the reference; it fails the
-  // manifest digest check when the runtime is authenticated.
+  // An empty manifest is accepted here: decoding checks shape only, and it
+  // fails the manifest digest check when the runtime is authenticated.
   const manifest = decodeBase64("manifest_base64", c.manifestBase64);
   if (!(bundle instanceof Map)) throw new Error("sigstore_bundle must be an object");
   return { ...ref, manifest, bundle };

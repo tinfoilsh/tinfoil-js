@@ -12,7 +12,7 @@
  */
 import { readFileSync } from "node:fs";
 import { beforeAll, describe, expect, it } from "vitest";
-import { dangerousTestOnlyDecode } from "../src/document/document.js";
+import { dangerousTestOnlyDecode } from "../conformance/testing.js";
 import { toHex } from "../src/internal/bytes.js";
 import { decodeHex, parse as parseArtifact, policyFor } from "../src/internal/policy/artifact.js";
 import type { SevSnpPolicy } from "../src/internal/policy/sev.js";

@@ -46,7 +46,7 @@ import { decodeManifest, parseManifest, type Manifest, type Measurements } from 
 import * as semver from "./internal/semver.js";
 import { pinnedKeys, type PinnedKey } from "./internal/sigstore/keyed.js";
 import { cloneExpected, REGISTER_SIZE, type Expected } from "./measurement.js";
-import { Verification, type ArtifactVerification, type ConfigVerification } from "./verification.js";
+import { verificationOf, type ArtifactVerification, type ConfigVerification, type Verification } from "./verification.js";
 
 /**
  * An exact config the caller trusts without holding its bytes: its digest
@@ -105,11 +105,12 @@ export interface VerifierOptions {
 }
 
 /**
- * Trust roots that replace the embedded production anchors. Only the
- * conformance adapter passes these, through {@link dangerousTestOnlyVerifier};
- * this module's export is not re-exported from the package entry.
+ * @internal Trust roots that replace the embedded production anchors, for
+ * verifying test vectors signed under their own roots. {@link Verifier.create}
+ * injects none; only {@link buildVerifier} takes them, and the package entry
+ * exports neither.
  */
-export interface DangerousTestOnlyRoots extends quote.VendorRoots {
+export interface InjectedRoots extends quote.VendorRoots {
   /** Sigstore trusted-root JSON. */
   readonly sigstore?: Uint8Array;
   /** PEM-encoded P-256 registry root keys, replacing the public signing keys as config approval and registry roots. */
@@ -148,10 +149,6 @@ interface References {
   readonly freshnessExpiresAt?: Date;
 }
 
-/** Only this module holds the token the constructor requires, so a verifier comes from {@link Verifier.create}. */
-const BUILT_HERE: unique symbol = Symbol("verifier");
-type BuiltHere = typeof BUILT_HERE;
-
 /** The parts a built verifier is made of. */
 interface Parts {
   readonly policy: Policy;
@@ -161,7 +158,18 @@ interface Parts {
   readonly roots: quote.VendorRoots;
 }
 
-/** Appraises v3 attestation documents against a fixed policy. Immutable once built. */
+/** Only this module holds the token the constructor requires, so untyped code that calls it is refused. */
+const BUILT_HERE: unique symbol = Symbol("Verifier");
+
+/** Calls the private constructor; the class assigns it, as the only place the constructor can be called. */
+let construct: (parts: Parts) => Verifier;
+
+/**
+ * Appraises v3 attestation documents against a fixed policy. Immutable once
+ * built, and built only by {@link Verifier.create}: the constructor is
+ * private, so type-checked code cannot call it, and a call from untyped
+ * code is refused at runtime.
+ */
 export class Verifier {
   /** The freshness window in milliseconds. */
   readonly freshnessMaxAgeMs: number;
@@ -179,8 +187,7 @@ export class Verifier {
   readonly #freshnessVerifier: FreshnessVerifier;
   readonly #roots: quote.VendorRoots;
 
-  /** @internal Not callable from outside this module: use {@link Verifier.create}. */
-  constructor(token: BuiltHere, parts: Parts) {
+  private constructor(token: typeof BUILT_HERE, parts: Parts) {
     if (token !== BUILT_HERE) throw new UsageError("verifier must be built with Verifier.create");
     this.#policy = parts.policy;
     this.#prov = parts.prov;
@@ -194,13 +201,17 @@ export class Verifier {
     Object.freeze(this);
   }
 
+  static {
+    construct = (parts) => new Verifier(BUILT_HERE, parts);
+  }
+
   /**
    * Builds a verifier. Defaults use the embedded production trust roots,
    * Tinfoil's public signing keys, and a seven-day freshness bound.
    * Throws UsageError for invalid options.
    */
   static async create(options: VerifierOptions = {}): Promise<Verifier> {
-    return build(options, {});
+    return buildVerifier(options, {});
   }
 
   /** Throws UsageError when `repo` cannot be verified under this verifier's policy. */
@@ -250,7 +261,7 @@ export class Verifier {
     const assembled = await at("policy", () => quote.assemble(doc, refs.quote, this.#policy.pinnedRegisters, authenticated));
     await at("policy", () => quote.validate(assembled));
 
-    return new Verification({
+    return verificationOf({
       configRepo: refs.artifact.repo,
       codeDigest: refs.artifact.digest,
       codeTag: refs.artifact.tag,
@@ -290,7 +301,7 @@ export class Verifier {
     try {
       endorsements = await this.#prov.authenticatePlatformEndorsements(platformRef.bundle, platformRef.repo, platformRef.tag, platformRef.digest, ARTIFACT_FORMAT);
     } catch (err) {
-      throw new Error(`verifying platform endorsements: ${message(err)}`);
+      throw caused(`verifying platform endorsements: ${message(err)}`, err);
     }
     const codeWitnessedAt = await this.#witnessedAt(doc, FRESHNESS_ID_CODE, "code", code, now);
     const platformWitnessedAt = await this.#witnessedAt(doc, FRESHNESS_ID_PLATFORM, "platform", endorsements, now);
@@ -310,7 +321,7 @@ export class Verifier {
       }
       return await authenticateFreshness(this.#prov, freshness.bundle, artifact, now, this.#policy.freshnessMaxAgeMs);
     } catch (err) {
-      throw new Error(`verifying ${what} freshness: ${message(err)}`);
+      throw caused(`verifying ${what} freshness: ${message(err)}`, err);
     }
   }
 
@@ -414,7 +425,7 @@ export class Verifier {
           ? await this.#configVerifier.verifyCertified(material.config, bundle, material.issuer, policy)
           : await this.#configVerifier.verify(material.config, bundle, policy);
     } catch (err) {
-      throw new Error(`verifying config approval: ${message(err)}`);
+      throw caused(`verifying config approval: ${message(err)}`, err);
     }
     if (material.reference !== approved.reference) throw new Error("config endorsement reference does not match the verified approval");
     let expected: RuntimeReference;
@@ -482,18 +493,13 @@ export class Verifier {
       });
       return approved.approvalTime;
     } catch (err) {
-      throw new Error(`verifying ${what} freshness: ${message(err)}`);
+      throw caused(`verifying ${what} freshness: ${message(err)}`, err);
     }
   }
 }
 
-/** Builds a verifier that trusts the injected roots instead of the embedded ones. */
-export function dangerousTestOnlyVerifier(roots: DangerousTestOnlyRoots, options: VerifierOptions = {}): Promise<Verifier> {
-  return build(options, roots);
-}
-
 /** Validates every option, resolves the trust material and assembles the verifier. */
-async function assemble(options: VerifierOptions, roots: DangerousTestOnlyRoots): Promise<Verifier> {
+async function assemble(options: VerifierOptions, roots: InjectedRoots): Promise<Verifier> {
   const prov = roots.sigstore ? await ProvenanceClient.fromJSON(roots.sigstore) : await ProvenanceClient.default();
   const pinnedRegisters = options.pinnedRegisters === undefined ? undefined : validPins(options.pinnedRegisters);
   const freshnessMaxAgeMs = freshnessBound(options.freshnessMaxAgeMs);
@@ -534,11 +540,16 @@ async function assemble(options: VerifierOptions, roots: DangerousTestOnlyRoots)
     configKeysPinned: configKeys !== undefined,
     freshnessKeysPinned: freshnessKeys !== undefined,
   };
-  return new Verifier(BUILT_HERE, { policy, prov, configVerifier, freshnessVerifier, roots: { amd: roots.amd, intel: roots.intel } });
+  return construct({ policy, prov, configVerifier, freshnessVerifier, roots: { amd: roots.amd, intel: roots.intel } });
 }
 
-/** Validates the options and assembles the verifier; any failure is a UsageError. */
-async function build(options: VerifierOptions, roots: DangerousTestOnlyRoots): Promise<Verifier> {
+/**
+ * @internal Validates the options and assembles the verifier under `roots`,
+ * where an absent root selects the embedded production anchor; any failure
+ * is a UsageError. {@link Verifier.create} is this with no roots injected.
+ * Not exported from the package entry.
+ */
+export async function buildVerifier(options: VerifierOptions, roots: InjectedRoots): Promise<Verifier> {
   try {
     return await assemble(options, roots);
   } catch (err) {
@@ -583,7 +594,12 @@ function additionalRegistryIDsOf(registryIDs: readonly string[]): readonly strin
   return registryIDsOf([PUBLIC_REGISTRY_ID, ...registryIDs]);
 }
 
-/** Runs one pipeline step; an error that is not already classified is attributed to `layer`. */
+/**
+ * Runs one pipeline step; an error that is not already classified is
+ * attributed to `layer`. That includes the verifier's own failures inside
+ * the step, so the pipeline fails closed: a document is rejected rather
+ * than accepted by an error, and the underlying error stays as `cause`.
+ */
 async function at<T>(layer: Layer, step: () => Promise<T>): Promise<T> {
   try {
     return await step();
@@ -710,4 +726,11 @@ function configReferenceOf(ref: EmbeddedConfigReference): ConfigReference {
 
 function message(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
+}
+
+/** A plain error with `message` whose `cause` is `err`, for a step that rewords a failure and must not lose it. */
+function caused(message: string, err: unknown): Error {
+  const wrapped = new Error(message);
+  (wrapped as { cause?: unknown }).cause = err;
+  return wrapped;
 }

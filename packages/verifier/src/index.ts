@@ -9,6 +9,14 @@ import { UsageError } from "./errors.js";
 import { parseReference as parseReferenceInternal, type Reference } from "./internal/endorsement/reference.js";
 import { parseCertificate, spkiFingerprint, X509Error } from "./internal/x509/certificate.js";
 import { DerError } from "./internal/x509/der.js";
+import {
+  parseExpectedSevSnp as parseExpectedSevSnpInternal,
+  parseExpectedTdx as parseExpectedTdxInternal,
+  parseRegister as parseRegisterInternal,
+  type ExpectedSevSnp,
+  type ExpectedTdx,
+  type Register,
+} from "./measurement.js";
 
 export { Verifier, type EmbeddedConfigReference, type EmbeddedReferences, type VerifierOptions } from "./verifier.js";
 export {
@@ -43,16 +51,52 @@ export {
   TDX_QUOTE_V1_FORMAT,
   type CryptoMaterialItem,
 } from "./document/document.js";
-export * from "./measurement.js";
+// The measurement module's parse functions throw bare errors for the
+// pipeline to classify; the entry exports versions that throw UsageError.
+export {
+  cloneExpected,
+  cloneMeasurement,
+  expectedOf,
+  formatMeasurement,
+  REGISTER_SIZE,
+  registerHex,
+  type Expected,
+  type ExpectedSevSnp,
+  type ExpectedTdx,
+  type Measurement,
+  type Register,
+  type SevSnpMeasurement,
+  type TdxMeasurement,
+} from "./measurement.js";
 export type { Reference };
 
-/** Validates `owner/name[@tag][@sha256:digest]` and returns its parts, "" for an absent part. Throws UsageError. */
-export function parseReference(ref: string): Reference {
+/** Runs a check on caller input; its failure is a UsageError with the original error as `cause`. */
+function usage<T>(check: () => T): T {
   try {
-    return parseReferenceInternal(ref);
+    return check();
   } catch (err) {
     throw new UsageError(err instanceof Error ? err.message : String(err), { cause: err });
   }
+}
+
+/** Validates `owner/name[@tag][@sha256:digest]` and returns its parts, "" for an absent part. Throws UsageError. */
+export function parseReference(ref: string): Reference {
+  return usage(() => parseReferenceInternal(ref));
+}
+
+/** Decodes a register from hex in either case. Throws UsageError for bad hex or length. */
+export function parseRegister(s: string): Register {
+  return usage(() => parseRegisterInternal(s));
+}
+
+/** Parses an SEV-SNP expectation; "" leaves the launch register unconstrained. Throws UsageError for a bad register. */
+export function parseExpectedSevSnp(launch: string): ExpectedSevSnp {
+  return usage(() => parseExpectedSevSnpInternal(launch));
+}
+
+/** Parses a TDX expectation; "" leaves that register unconstrained. Throws UsageError for a bad register. */
+export function parseExpectedTdx(mrtd: string, rtmr0: string, rtmr1: string, rtmr2: string, rtmr3: string): ExpectedTdx {
+  return usage(() => parseExpectedTdxInternal(mrtd, rtmr0, rtmr1, rtmr2, rtmr3));
 }
 
 /**

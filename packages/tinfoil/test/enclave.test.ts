@@ -10,11 +10,11 @@ import { AttestationError, ConfigurationError, NetworkError } from "../src/error
 import { Enclave, fromVerify, RejectedError, VERIFICATION_RETRY_DELAY_MS, type EnclaveConfig } from "../src/internal/enclave.js";
 import { VerifiedEnclave } from "../src/internal/verified.js";
 import type { Fetch } from "../src/options.js";
-import { dangerousTestOnlyVerifier } from "../../verifier/src/verifier.js";
+import { dangerousTestOnlyVerifier } from "../../verifier/conformance/testing.js";
 import { KEY_SPKI_FP_SHA256_V1_FORMAT, KEY_X25519_HPKE_V1_FORMAT, UsageError, VerificationError, type Verification, type Verifier } from "../../verifier/src/index.js";
 import { conformanceAvailable, inputBytes, loadFixture, vectorsTitle, type ConformanceFixture } from "../../verifier/test/helpers/conformance.js";
 import { clockOf, rootsOf } from "../../verifier/test/helpers/verify.js";
-import { beforeAll, describe, expect, it } from "vitest";
+import { beforeAll, describe, expect, it, vi } from "vitest";
 
 const RUN_INTEGRATION = process.env.RUN_TINFOIL_INTEGRATION === "true";
 const HOST = "enclave.example";
@@ -94,6 +94,22 @@ describe("fromVerify", () => {
     expect(rejected).toBeInstanceOf(AttestationError);
     expect(rejected.message).toBe("attestation error: verification error: quote: bad report");
     expect(fromVerify(new NetworkError("down"))).toBeInstanceOf(NetworkError);
+  });
+
+  it("classifies a usage error from another loaded copy of the verifier package", async () => {
+    // A duplicate install evaluates the verifier's modules a second time, so its classes are different objects.
+    vi.resetModules();
+    const other = await import("../../verifier/src/errors.js");
+    expect(other.UsageError).not.toBe(UsageError);
+    const usage = fromVerify(new other.UsageError("bad pin"));
+    expect(usage).toBeInstanceOf(ConfigurationError);
+    expect(usage.message).toBe("configuration error: usage error: bad pin");
+    expect(usage.cause).toBeInstanceOf(other.UsageError);
+    expect(fromVerify(new other.VerificationError("quote", "bad report"))).toBeInstanceOf(AttestationError);
+    // A copy old enough to carry no brand is recognized by the error's name.
+    const unbranded = Object.assign(new Error("usage error: bad pin"), { name: "UsageError" });
+    expect(fromVerify(unbranded)).toBeInstanceOf(ConfigurationError);
+    expect(fromVerify(Object.assign(new Error("verification error: quote: bad report"), { name: "VerificationError" }))).toBeInstanceOf(AttestationError);
   });
 });
 

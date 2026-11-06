@@ -1,5 +1,5 @@
 /** Test-time plumbing from a full-verify vector's input to the verifier's arguments. */
-import type { DangerousTestOnlyRoots } from "../../src/verifier.js";
+import type { DangerousTestOnlyRoots } from "../../conformance/testing.js";
 import { inputBytes, type ConformanceFixture } from "./conformance.js";
 
 const utf8 = (s: string): Uint8Array => new TextEncoder().encode(s);
