@@ -10,6 +10,8 @@ import { createServer, type Server } from "node:https";
 import type { AddressInfo } from "node:net";
 import { Identity } from "ehbp";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import OpenAI from "openai";
+import type { OpenAIRealtimeWS } from "openai/realtime/ws";
 import { WebSocket as WsWebSocket, WebSocketServer } from "ws";
 import { createEnclaveHTTPClient, type EnclaveHTTPClient } from "../src/enclave-client.js";
 import { AttestationError, ConfigurationError } from "../src/errors.js";
@@ -17,7 +19,9 @@ import { PeerLacksKeyError } from "../src/internal/transport/transport.js";
 import { isCertificateError } from "../src/internal/transport/pin-errors.js";
 import { allowedWsOptions } from "../src/internal/transport/ws.js";
 import { checkWebSocketCapability, webSocketURL } from "../src/internal/websocket.js";
+import { createEnclaveOpenAIClient, type EnclaveOpenAIClient, type OpenAIOptions, type TinfoilClient } from "../src/openai-client.js";
 import type { Fetch, PinnedWebSocket } from "../src/options.js";
+import { createRealtimeWebSocket } from "../src/realtime.js";
 import { createWebSocket, pinnedWebSocketOptions } from "../src/websocket.js";
 import { KEY_SPKI_FP_SHA256_V1_FORMAT, KEY_X25519_HPKE_V1_FORMAT, UsageError, type Verification, type Verifier } from "../../verifier/src/index.js";
 import { TEST_CERT, TEST_KEY, TEST_PIN } from "./helpers/tls-server.js";
@@ -247,5 +251,61 @@ describe("pinnedWebSocketOptions", () => {
     expect(docs.calls).toBe(1);
     await pinnedWebSocketOptions(c);
     expect(docs.calls).toBe(2);
+  });
+});
+
+describe("createRealtimeWebSocket", () => {
+  async function openAIClient(openaiOptions: OpenAIOptions): Promise<EnclaveOpenAIClient> {
+    return createEnclaveOpenAIClient(host, "tinfoilsh/repo", { verifier: verifier(() => TEST_PIN), transportMode: "tls" }, openaiOptions, { documentFetch: documents().fetch, tls: { ca: TEST_CERT } });
+  }
+
+  /** Resolves when the session's socket opens, or rejects with its error. */
+  function sessionOpened(session: OpenAIRealtimeWS): Promise<void> {
+    return new Promise((resolve, reject) => {
+      session.socket.once("open", () => resolve());
+      session.socket.once("error", reject);
+    });
+  }
+
+  /** The credential the server saw on the connection a session just opened. */
+  async function authorizationOf(session: OpenAIRealtimeWS): Promise<string | string[] | undefined> {
+    await sessionOpened(session);
+    const last = connections[connections.length - 1]!;
+    expect(last.path).toBe("/v1/realtime?model=m");
+    session.close();
+    return last.headers.authorization;
+  }
+
+  it("opens a session on the pinned connection, authenticated with the client's key", async () => {
+    const ai = await openAIClient({ apiKey: "k" });
+    expect(await authorizationOf(await createRealtimeWebSocket(ai, { model: "m" }))).toBe("Bearer k");
+  });
+
+  it("authenticates a withOptions clone with the clone's bearer token, and the original with its own key", async () => {
+    const ai = await openAIClient({ apiKey: "k" });
+    const clone = ai.withOptions({ bearerToken: "jwt" });
+    expect(await authorizationOf(await createRealtimeWebSocket(clone, { model: "m" }))).toBe("Bearer jwt");
+    expect(await authorizationOf(await createRealtimeWebSocket(ai, { model: "m" }))).toBe("Bearer k");
+  });
+
+  it("calls an apiKey function for each session, and refuses a token that isn't a non-empty string before connecting", async () => {
+    let calls = 0;
+    const ai = await openAIClient({ apiKey: async () => `token-${++calls}` });
+    expect(await authorizationOf(await createRealtimeWebSocket(ai, { model: "m" }))).toBe("Bearer token-1");
+    expect(await authorizationOf(await createRealtimeWebSocket(ai, { model: "m" }))).toBe("Bearer token-2");
+    // The function's declared type returns a string; untyped code can return anything, and only a non-empty string is a credential.
+    for (const result of ["", undefined, null, 42]) {
+      const bad = await openAIClient({ apiKey: (async () => result) as () => Promise<string> });
+      const before = connections.length;
+      await expect(createRealtimeWebSocket(bad, { model: "m" })).rejects.toBeInstanceOf(ConfigurationError);
+      expect(connections.length).toBe(before);
+    }
+  });
+
+  it("refuses a client no factory made, before any connection", async () => {
+    const before = connections.length;
+    const foreign = new OpenAI({ apiKey: "k" });
+    await expect(createRealtimeWebSocket(foreign as TinfoilClient, { model: "m" })).rejects.toThrow(/not created by its factory/);
+    expect(connections.length).toBe(before);
   });
 });
