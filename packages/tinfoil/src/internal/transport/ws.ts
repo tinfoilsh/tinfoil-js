@@ -4,15 +4,15 @@
  * enclave over TLS with the peer's certificate checked against the attested
  * key in the handshake, exactly as the TLS transport mode checks it. Node
  * connects through the `ws` client; Bun through its own WebSocket, whose
- * TLS settings take the same check. On either, nothing is sent before the
- * check passes, and a connection the runtime opened without running the
- * check is closed before it is handed out. Node and Bun only: the browser
- * entry maps this module to a stub.
+ * TLS settings take the same check, on a Bun new enough to run it. On
+ * either, nothing is sent before the check passes, and a connection the
+ * runtime opened without running the check is closed before it is handed
+ * out. Node and Bun only: the browser entry maps this module to a stub.
  */
 import type * as WS from "ws";
 import { ConfigurationError } from "../../errors.js";
 import type { PinnedWebSocket, ReservedWsOption, WebSocketListenerOptions, WebSocketOptions } from "../../options.js";
-import { isBun } from "../platform.js";
+import { bunOlderThan, isBun, MIN_BUN_FOR_PINNED_WEBSOCKETS, webSocketsUnavailableOnBun } from "../platform.js";
 import { identityCheck, type IdentityCheck } from "./pin.js";
 import type { TLSOptions } from "./tls.js";
 import { PeerLacksKeyError } from "./transport.js";
@@ -178,6 +178,9 @@ interface BunWebSocketInit {
 
 /** Opens through Bun's own WebSocket, an EventTarget whose `addEventListener` takes `once` and `signal` itself. */
 async function openOnBun(url: URL, key: string, protocols: string[] | undefined, options: WebSocketOptions, tls: TLSOptions, onRejected: OnRejected | undefined): Promise<PinnedWebSocket> {
+  // An older Bun never runs the check: the upgrade request, headers and all, would go out unpinned.
+  const old = bunOlderThan(MIN_BUN_FOR_PINNED_WEBSOCKETS);
+  if (old !== undefined) throw new ConfigurationError(webSocketsUnavailableOnBun(old));
   const check = await reportingIdentityCheck(key, onRejected);
   let checked = false;
   let rejection: Error | undefined;
@@ -208,7 +211,8 @@ async function openOnBun(url: URL, key: string, protocols: string[] | undefined,
   socket.addEventListener("close", reportRejection);
   // A runtime that opened the connection without consulting the check never
   // pinned it: close it before it is handed out. The handshake, with its
-  // headers, has already been sent by then.
+  // headers, has already been sent by then, which is why the versions known
+  // to skip the check are refused above; this is the backstop for any other.
   socket.addEventListener(
     "open",
     () => {

@@ -14,7 +14,7 @@
 import type { Verification } from "@tinfoilsh/verifier";
 import { AttestationError, ConfigurationError, messageOf, NetworkError } from "../../errors.js";
 import type { Fetch } from "../../options.js";
-import { isBun } from "../platform.js";
+import { bunOlderThan, isBun, MIN_BUN_FOR_TLS_MODE, tlsUnavailableOnBun } from "../platform.js";
 import { CERT_MISMATCH, isCertificateError } from "./pin-errors.js";
 import { identityCheck } from "./pin.js";
 import { noFollow, PeerLacksKeyError, shapeOf, signalOf, type BoundFetch, type Mode, type RequestShape } from "./transport.js";
@@ -160,6 +160,9 @@ async function requestBody(body: BodyInit | Request | null | undefined, headers:
 // ---------------------------------------------------------------- Bun
 
 async function bunPinnedFetch(key: string, options: TLSOptions): Promise<BoundFetch> {
+  // An older Bun writes the request before the check runs, so a peer without the key would receive it.
+  const old = bunOlderThan(MIN_BUN_FOR_TLS_MODE);
+  if (old !== undefined) throw new ConfigurationError(tlsUnavailableOnBun(old));
   const checkServerIdentity = await identityCheck(key);
   const fetchImpl: Fetch = async (input, init) => {
     // The transport validates this too, but the bound fetch can be used alone.
