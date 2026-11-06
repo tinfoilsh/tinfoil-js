@@ -4,7 +4,7 @@
  * validity window.
  */
 import { SIGSTORE_TRUSTED_ROOT_JSON } from "../../trust/sigstore-trusted-root.js";
-import { sha256, toHex, utf8 } from "../bytes.js";
+import { toHex, utf8 } from "../bytes.js";
 import { decodeBase64 } from "../canonical.js";
 import { arr, object, optStruct, str, struct } from "../json/decode.js";
 import { strictParse, type JsonObject, type JsonValue } from "../json/index.js";
@@ -134,12 +134,14 @@ async function keyedAuthority(o: JsonObject): Promise<KeyedAuthority> {
   } catch (err) {
     throw new Error(`importing transparency log key: ${(err as Error).message}`);
   }
-  // The log id is SHA-256 of the key for every log that leaves it implicit; a
-  // log that states one (some newer logs derive it differently) is named by
-  // what it states, since that is what its entries carry.
+  // A log is named by the id it states, since that is what its entries
+  // carry; logs derive it differently (SHA-256 of the key for most, another
+  // form for some newer ones), so a root that states none is rejected
+  // rather than guessed at.
   const stated = optStruct(o, "logId", LOG_ID_MEMBERS);
   const keyId = stated === undefined ? "" : str(stated, "keyId");
-  const logId = keyId === "" ? toHex(await sha256(spki)) : toHex(decodeBase64("logId keyId", keyId));
+  if (keyId === "") throw new Error("transparency log states no log id");
+  const logId = toHex(decodeBase64("logId keyId", keyId));
   if (logId.length !== 64) throw new Error("transparency log id is not 32 bytes");
   return { logId, publicKey, ...validity(key) };
 }

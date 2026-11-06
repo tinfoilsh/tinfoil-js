@@ -199,11 +199,12 @@ describe("trusted root", () => {
       expect(root.transparencyLogs[0]!.validTo).toBeUndefined();
     });
 
-    it("derives the log id from the key when the root states none", async () => {
+    it("rejects a log that states no id rather than deriving one from the key", async () => {
       const wire = structuredClone(golden.trusted_root) as Record<string, any>;
       delete wire.tlogs[0].logId;
-      const root = await parseTrustedRoot(utf8(JSON.stringify(wire)));
-      expect(root.transparencyLogs[0]!.logId).toBe(toHex(await sha256(decode(wire.tlogs[0].publicKey.rawBytes))));
+      await rejects(parseTrustedRoot(utf8(JSON.stringify(wire))), /states no log id/);
+      wire.tlogs[0].logId = { keyId: "" };
+      await rejects(parseTrustedRoot(utf8(JSON.stringify(wire))), /states no log id/);
     });
 
     const withRoot = (mutate: (r: Record<string, any>) => void): Uint8Array => {
