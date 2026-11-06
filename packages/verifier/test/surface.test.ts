@@ -7,6 +7,7 @@ import { describe, expect, it } from "vitest";
 import * as surface from "../src/index.js";
 import { INTEL_SGX_ROOT_CA_PEM } from "../src/trust/intel-sgx-root.js";
 import { pemBlocks } from "../src/internal/x509/der.js";
+import { verificationOf } from "../src/verification.js";
 
 /** Every runtime export, sorted. Type-only exports are checked by compiling this file. */
 const EXPORTS = [
@@ -111,9 +112,22 @@ const gettersOf = (cls: { prototype: object }): string[] =>
     .map(([n]) => n)
     .sort();
 
-/** A verification with the fewest facts, built through the verifier's internal constructor. */
+/**
+ * Only the verifier builds these: the constructors are private, so a caller
+ * who tries fails to compile. Never called; the directives pin the errors
+ * under the test typecheck.
+ */
+function privateConstructors(): void {
+  // @ts-expect-error The constructor is private; a verification comes from a verifier.
+  new surface.Verification({} as never);
+  // @ts-expect-error The constructor is private; a verifier comes from Verifier.create.
+  new surface.Verifier({} as never);
+}
+void privateConstructors;
+
+/** A verification with the fewest facts, built through the verifier's internal seam. */
 const verification = (): surface.Verification =>
-  new surface.Verification({
+  verificationOf({
     codeDigest: "",
     codeTag: "",
     configRepo: "",

@@ -7,6 +7,7 @@
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
+import { dangerousTestOnlyDecode } from "../conformance/testing.js";
 import {
   AMD_CRL_V1_FORMAT,
   AMD_VCEK_V1_FORMAT,
@@ -32,7 +33,6 @@ import {
   computeReportData,
   CRYPTO_MATERIAL_ID_HPKE,
   CRYPTO_MATERIAL_ID_TLS,
-  dangerousTestOnlyDecode,
   Document,
   InvalidInputError,
   KEY_SPKI_FP_SHA256_V1_FORMAT,

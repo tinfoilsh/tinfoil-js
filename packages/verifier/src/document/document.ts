@@ -90,7 +90,7 @@ export interface DeviceEvidenceItem {
 export class Document {
   readonly #d: DecodedDocument;
 
-  /** @internal Build with {@link parse} or {@link dangerousTestOnlyDecode}. */
+  /** @internal Build with {@link parse}, which binds the document to a nonce; only the tests take an unbound one. */
   constructor(fields: DecodedDocument) {
     this.#d = fields;
   }
@@ -240,14 +240,6 @@ export async function parse(docBytes: Uint8Array, expectedNonce: Uint8Array): Pr
   // Snapshot the caller's buffer: bind awaits between the nonce comparison and
   // the REPORT_DATA derivation, and both must see the same bytes.
   return new Document(await bind(decode(docBytes), expectedNonce.slice()));
-}
-
-/**
- * Decodes a document without binding it to a nonce, so the conformance
- * adapter can drive a single layer. Not exported from the package entry.
- */
-export async function dangerousTestOnlyDecode(docBytes: Uint8Array): Promise<Document> {
-  return new Document(decode(docBytes));
 }
 
 /**

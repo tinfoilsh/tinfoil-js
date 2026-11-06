@@ -5,7 +5,7 @@
  * quote-tdx vector, and the expectations a policy turns into.
  */
 import { beforeAll, describe, expect, it } from "vitest";
-import * as document from "../src/document/document.js";
+import { dangerousTestOnlyDecode } from "../conformance/testing.js";
 import type { PcsResponse } from "../src/document/collateral/tdx.js";
 import { toHex } from "../src/internal/bytes.js";
 import type { TdxPolicy } from "../src/internal/policy/tdx.js";
@@ -428,7 +428,7 @@ describe.skipIf(withoutVectors)(vectorsTitle("quote.authenticate over the quote-
   for (const fixture of withoutVectors ? [] : loadFixtures("quote-tdx")) {
     const { expected } = fixture;
     it(`${fixture.id}: ${expected.accepted ? "accepts" : "rejects"}`, async () => {
-      const doc = await document.dangerousTestOnlyDecode(inputBytes(fixture, "document_b64"));
+      const doc = await dangerousTestOnlyDecode(inputBytes(fixture, "document_b64"));
       const run = quote.authenticate(doc.cpuEvidence(), doc.cpuEndorsements(), clockOf(fixture), { dangerousTestOnlyRoots: { intel: rootOf(fixture) } });
       if (expected.accepted) {
         const q = await run;

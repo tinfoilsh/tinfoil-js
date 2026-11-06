@@ -10,7 +10,7 @@ import { AttestationError, ConfigurationError, NetworkError } from "../src/error
 import { Enclave, fromVerify, RejectedError, VERIFICATION_RETRY_DELAY_MS, type EnclaveConfig } from "../src/internal/enclave.js";
 import { VerifiedEnclave } from "../src/internal/verified.js";
 import type { Fetch } from "../src/options.js";
-import { dangerousTestOnlyVerifier } from "../../verifier/src/verifier.js";
+import { dangerousTestOnlyVerifier } from "../../verifier/conformance/testing.js";
 import { KEY_SPKI_FP_SHA256_V1_FORMAT, KEY_X25519_HPKE_V1_FORMAT, UsageError, VerificationError, type Verification, type Verifier } from "../../verifier/src/index.js";
 import { conformanceAvailable, inputBytes, loadFixture, vectorsTitle, type ConformanceFixture } from "../../verifier/test/helpers/conformance.js";
 import { clockOf, rootsOf } from "../../verifier/test/helpers/verify.js";

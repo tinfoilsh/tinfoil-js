@@ -89,14 +89,19 @@ export interface VerificationJSON {
   readonly metadata: { readonly verifier: VerificationMetadata["verifier"]; readonly verifiedAt: string };
 }
 
+/** Calls the private constructor; the class assigns it, as the only place the constructor can be called. */
+let construct: (fields: VerificationFields) => Verification;
+
 /**
  * The facts proven by verifying an attestation document. Only the verifier
- * creates one. Every fact is a `readonly` property whose value is fixed at
- * construction: the instance and every nested object and array are frozen,
- * so a property always yields the same reference and nothing on it can be
- * reassigned. Register bytes (`Uint8Array`) and `Date` values have no frozen
- * form in the language; they are shared as stored and must not be mutated.
- * `toJSON()` gives a plain, serializable copy for logging or persisting.
+ * creates one: the constructor is private, so there is no way to make a
+ * verification that no verifier proved. Every fact is a `readonly` property
+ * whose value is fixed at construction: the instance and every nested
+ * object and array are frozen, so a property always yields the same
+ * reference and nothing on it can be reassigned. Register bytes
+ * (`Uint8Array`) and `Date` values have no frozen form in the language; they
+ * are shared as stored and must not be mutated. `toJSON()` gives a plain,
+ * serializable copy for logging or persisting.
  */
 export class Verification {
   /** Digest of the verified code or runtime artifact. */
@@ -122,8 +127,7 @@ export class Verification {
   /** The verifier's name and version, and when it ran. */
   readonly metadata: VerificationMetadata;
 
-  /** @internal */
-  constructor(fields: VerificationFields) {
+  private constructor(fields: VerificationFields) {
     this.codeDigest = fields.codeDigest;
     this.codeTag = fields.codeTag;
     this.configRepo = fields.configRepo;
@@ -136,6 +140,10 @@ export class Verification {
     this.freshnessExpiresAt = copyDate(fields.freshnessExpiresAt);
     this.metadata = freezeDeep({ verifier: { ...fields.metadata.verifier }, verifiedAt: new Date(fields.metadata.verifiedAt.getTime()) });
     Object.freeze(this);
+  }
+
+  static {
+    construct = (fields) => new Verification(fields);
   }
 
   /** The data of the endorsed item with the given id and format, or undefined. */
@@ -169,6 +177,11 @@ export class Verification {
       metadata: { verifier: { ...this.metadata.verifier }, verifiedAt: this.metadata.verifiedAt.toISOString() },
     };
   }
+}
+
+/** @internal The verification of the facts the verifier proved; the verifier is its only caller. */
+export function verificationOf(fields: VerificationFields): Verification {
+  return construct(fields);
 }
 
 /** The data of the first item with the given id and format, or undefined. */

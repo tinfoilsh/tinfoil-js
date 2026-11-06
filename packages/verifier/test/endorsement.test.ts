@@ -12,6 +12,7 @@
  * runtime release has no vector yet, so only its pure checks run.
  */
 import { beforeAll, describe, expect, it } from "vitest";
+import { dangerousTestOnlyDecode } from "../conformance/testing.js";
 import * as document from "../src/document/document.js";
 import { utf8 } from "../src/internal/bytes.js";
 import {
@@ -123,7 +124,7 @@ async function clientOf(fixture: ConformanceFixture): Promise<ProvenanceClient> 
   return rootBytes === undefined ? ProvenanceClient.default() : ProvenanceClient.fromJSON(rootBytes);
 }
 
-const documentOf = (fixture: ConformanceFixture): Promise<document.Document> => document.dangerousTestOnlyDecode(inputBytes(fixture, "document_b64"));
+const documentOf = (fixture: ConformanceFixture): Promise<document.Document> => dangerousTestOnlyDecode(inputBytes(fixture, "document_b64"));
 const clockOf = (fixture: ConformanceFixture): Date => {
   const unix = verificationTime(fixture);
   return unix === undefined ? new Date() : new Date(unix * 1000);

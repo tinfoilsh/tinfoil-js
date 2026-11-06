@@ -19,12 +19,12 @@ import { ARTIFACT_FORMAT } from "../src/internal/policy/artifact.js";
 import * as quote from "../src/internal/quote/quote.js";
 import { registerHex, type Expected, type Measurement as V3Measurement, type Register } from "../src/measurement.js";
 import { Verifier } from "../src/index.js";
-import { dangerousTestOnlyVerifier, type DangerousTestOnlyRoots } from "../src/verifier.js";
 import { checkTime, newTimePolicy } from "../src/internal/endorsement/time.js";
 import { parseBundleBytes } from "../src/internal/sigstore/bundle.js";
 import { pinnedKeys, verifyKeyedBundle } from "../src/internal/sigstore/keyed.js";
 import { verifyTimestamp } from "../src/internal/sigstore/timestamp.js";
 import { embeddedTrustedRoot, parseTrustedRoot, type TrustedRoot } from "../src/internal/sigstore/trusted-root.js";
+import { dangerousTestOnlyDecode, dangerousTestOnlyVerifier, type DangerousTestOnlyRoots } from "./testing.js";
 
 export const SCHEMA_VERSION = "1";
 export const SDK_NAME = "tinfoil-js";
@@ -343,7 +343,7 @@ async function layer(stage: string, code: RejectionCode, body: () => Promise<Res
 
 async function decodeOrUndefined(doc: Uint8Array): Promise<document.Document | undefined> {
   try {
-    return await document.dangerousTestOnlyDecode(doc);
+    return await dangerousTestOnlyDecode(doc);
   } catch {
     return undefined;
   }
