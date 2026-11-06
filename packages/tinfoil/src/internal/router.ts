@@ -66,8 +66,9 @@ export async function discoverRouter(config: DiscoveryConfig): Promise<KeyedTran
     // The deadline can pass before the budget's timer fires.
     if (probing.aborted || clock().getTime() >= deadline) break;
     if (!isAuthority(router)) continue;
+    let candidate: KeyedTransport | undefined;
     try {
-      const candidate = new KeyedTransport(await enclaveFor(router), config.mode, config.clock);
+      candidate = new KeyedTransport(await enclaveFor(router), config.mode, config.clock);
       // The candidate keeps its verification, so the client doesn't repeat
       // it, and a router whose keys the mode can't use is skipped. When the
       // budget ends, discovery stops waiting; the fetch runs out on its own
@@ -75,6 +76,11 @@ export async function discoverRouter(config: DiscoveryConfig): Promise<KeyedTran
       await candidate.verifyOnce(probing);
       return candidate;
     } catch {
+      // A probe that the budget or the caller's signal cut short goes on
+      // inside the candidate. Closing the candidate releases what that
+      // verification binds once it finishes, instead of leaving it to a
+      // transport that nobody holds.
+      candidate?.close();
       continue;
     }
   }
