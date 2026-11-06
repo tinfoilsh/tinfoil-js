@@ -87,15 +87,17 @@ export class UsageError extends VerifyError {
  * VerifyError, such as a bug or an exhausted resource, is reported as a
  * rejection at that layer with the underlying error as `cause`. An
  * unfamiliar message at a layer may therefore be the verifier failing
- * rather than the document, and `cause` says which.
+ * rather than the document, and `cause` says which. The message reads
+ * `verification error: <layer>: <message>`; the layer is given in the
+ * options, with the cause.
  */
 export class VerificationError extends VerifyError {
   readonly layer: Layer;
 
-  constructor(layer: Layer, message: string, options?: { cause?: unknown }) {
-    super(`verification error: ${layer}: ${message}`, options);
+  constructor(message: string, options: { layer: Layer; cause?: unknown }) {
+    super(`verification error: ${options.layer}: ${message}`, options);
     this.name = "VerificationError";
-    this.layer = layer;
+    this.layer = options.layer;
     stamp(this, "VerificationError");
   }
 

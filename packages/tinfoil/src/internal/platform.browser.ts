@@ -23,6 +23,11 @@ export function isServerRuntime(_globals: RuntimeGlobals = globalThis as Runtime
   return false;
 }
 
+/** Never Bun in the browser build; the transports that tell Bun from Node are mapped to stubs here. */
+export function isBun(_globals: RuntimeGlobals = globalThis as RuntimeGlobals): boolean {
+  return false;
+}
+
 export function defaultTransportMode(): TransportMode {
   return "ehbp";
 }

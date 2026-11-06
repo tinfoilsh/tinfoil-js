@@ -26,6 +26,11 @@ export function isServerRuntime(globals: RuntimeGlobals = globalThis as RuntimeG
   return Boolean(versions?.node) || Boolean(versions?.bun) || globals.Bun !== undefined;
 }
 
+/** Whether `globals` belong to Bun, which pins TLS connections through its own fetch and WebSocket rather than Node's. */
+export function isBun(globals: RuntimeGlobals = globalThis as RuntimeGlobals): boolean {
+  return Boolean(globals.process?.versions?.bun);
+}
+
 export function defaultTransportMode(globals: RuntimeGlobals = globalThis as RuntimeGlobals): TransportMode {
   return isServerRuntime(globals) ? "tls" : "ehbp";
 }

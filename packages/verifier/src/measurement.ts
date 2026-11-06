@@ -52,7 +52,11 @@ export function registerHex(r: Register): string {
 const copy = (r: Register): Register => r.slice();
 const copyOpt = (r: Register | undefined): Register | undefined => r?.slice();
 
-/** A deep copy sharing no register buffers with the original. */
+/**
+ * @internal A deep copy sharing no register buffers with the original and
+ * carrying only the registers; the verifier copies its inputs and the facts
+ * it hands out this way. Not exported from the package entry.
+ */
 export function cloneMeasurement<M extends Measurement>(m: M): M {
   switch (m.platform) {
     case "sev-snp":
@@ -69,7 +73,7 @@ export function cloneMeasurement<M extends Measurement>(m: M): M {
   }
 }
 
-/** A deep copy sharing no register buffers with the original; unset registers stay unset. */
+/** @internal A deep copy sharing no register buffers with the original; unset registers stay unset. Not exported from the package entry. */
 export function cloneExpected<E extends Expected>(e: E): E {
   switch (e.platform) {
     case "sev-snp":
@@ -118,11 +122,6 @@ export function parseExpectedSevSnp(launch: string): ExpectedSevSnp {
 export function parseExpectedTdx(mrtd: string, rtmr0: string, rtmr1: string, rtmr2: string, rtmr3: string): ExpectedTdx {
   const [m, r0, r1, r2, r3] = [mrtd, rtmr0, rtmr1, rtmr2, rtmr3].map((v, i) => parseExpectedRegister(TDX_LABELS[i], v));
   return { platform: "tdx", mrtd: m, rtmr0: r0, rtmr1: r1, rtmr2: r2, rtmr3: r3 };
-}
-
-/** Expectations that pin every register of `m`. */
-export function expectedOf(m: Measurement): Expected {
-  return cloneMeasurement(m);
 }
 
 /** Human-readable form: the platform name, then one labeled register per line, "any" if unset. */

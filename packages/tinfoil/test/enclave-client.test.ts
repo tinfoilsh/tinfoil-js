@@ -7,7 +7,7 @@
 import { Identity } from "ehbp";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { createEnclaveHTTPClient, EnclaveHTTPClient, resolveTransportMode, type EnclaveClientSeams } from "../src/enclave-client.js";
-import { checkTransportMode, defaultTransportMode, isServerRuntime } from "../src/internal/platform.js";
+import { checkTransportMode, defaultTransportMode, isBun, isServerRuntime } from "../src/internal/platform.js";
 import { AttestationError, ConfigurationError } from "../src/errors.js";
 import { createEnclaveOpenAIClient, EnclaveOpenAIClient } from "../src/openai-client.js";
 import type { EnclaveOptions, Fetch } from "../src/options.js";
@@ -109,6 +109,14 @@ describe("EnclaveHTTPClient.create", () => {
     expect(() => checkTransportMode("tls", worker)).toThrow(/browsers don't expose/);
     expect(() => checkTransportMode("ehbp", worker)).not.toThrow();
     expect(isServerRuntime({ process: { versions: {} } })).toBe(false);
+  });
+
+  it("tells Bun from Node by the version Bun reports, and from a runtime with no process at all", () => {
+    expect(isBun({ process: { versions: { bun: "1.2.0" } } })).toBe(true);
+    expect(isBun({ process: { versions: { node: "22.0.0" } } })).toBe(false);
+    expect(isBun({ process: { versions: {} } })).toBe(false);
+    expect(isBun({})).toBe(false);
+    expect(isBun()).toBe(Boolean(process.versions.bun));
   });
 
   it("checks its options before fetching anything", async () => {

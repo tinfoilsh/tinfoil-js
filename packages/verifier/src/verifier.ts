@@ -110,6 +110,20 @@ export interface VerifierOptions {
    * Must be non-empty, canonical and without repeats.
    */
   readonly configRegistryIDs?: readonly string[];
+  /**
+   * Caller-trusted reference values, each replacing the document's
+   * endorsement of that component: `config` pins the exact config, as
+   * `{ bytes, name? }` (the digest and runtime pin are taken from the bytes)
+   * or `{ digest, runtime, name? }`; `runtime` pins the exact runtime
+   * manifest, which on its own must be the release the document's config
+   * endorsement names, and with an embedded config must be the one that
+   * config pins; `platform` pins a platform-endorsements/v2 policy
+   * artifact. At least one must be present.
+   * An embedded config selects its own trust source, so it conflicts with
+   * `configSigningKeys`, `configAuthorizer` and `configRegistryIDs`; with
+   * both `runtime` and `platform` embedded, `freshnessSigningKeys` has no
+   * endorsed artifact to verify and is refused.
+   */
   readonly embeddedReferences?: EmbeddedReferences;
 }
 
@@ -407,7 +421,7 @@ export class Verifier {
       try {
         await authorizer({ ...material, config: config.slice(), ...(material.issuer === undefined ? {} : { issuer: material.issuer.slice() }) });
       } catch (err) {
-        throw new VerificationError("provenance", `authorizing config: ${message(err)}`, { cause: err });
+        throw new VerificationError(`authorizing config: ${message(err)}`, { layer: "provenance", cause: err });
       }
       const digest = toHex(await sha256(config));
       return { expected: configRuntime(config), config: { source: "policy", name: "", digest, reference: "", signingKeyHint: "", registryID: "" } };
@@ -592,7 +606,7 @@ async function at<T>(layer: Layer, step: () => Promise<T>): Promise<T> {
     return await step();
   } catch (err) {
     if (err instanceof VerifyError) throw err;
-    throw new VerificationError(layer, message(err), { cause: err });
+    throw new VerificationError(message(err), { layer, cause: err });
   }
 }
 
