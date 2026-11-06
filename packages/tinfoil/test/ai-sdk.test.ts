@@ -13,6 +13,7 @@ import { createTinfoil, createTinfoilProvider, type TinfoilProviderOptions, type
 import { EnclaveHTTPClient } from "../src/enclave-client.js";
 import { ConfigurationError } from "../src/errors.js";
 import type { RuntimeGlobals } from "../src/internal/platform.js";
+import { createTinfoilClient } from "../src/openai-client.js";
 import type { Fetch } from "../src/options.js";
 import { RouterHTTPClient } from "../src/router-client.js";
 import { KEY_SPKI_FP_SHA256_V1_FORMAT, KEY_X25519_HPKE_V1_FORMAT, UsageError, type Verification, type Verifier } from "../../verifier/src/index.js";
@@ -146,6 +147,18 @@ describe("createTinfoil's option checks", () => {
     expect(sealed.httpClient).toBeInstanceOf(EnclaveHTTPClient);
     const node = { process: { versions: { node: "22.0.0" } } } as RuntimeGlobals;
     await expect(createTinfoilProvider({ apiKey: "k", transportMode: "tls", verifier: verifier({ tls: TEST_PIN }) }, { ...s, globals: node })).resolves.toBeDefined();
+  });
+
+  it("refuses an API key outside a server with the same error as the OpenAI client", async () => {
+    const worker = { self: {} } as unknown as RuntimeGlobals;
+    const s = seams([tls.host]);
+    const rejection = (p: Promise<unknown>): Promise<Error> => p.then(() => Promise.reject(new Error("resolved")), (e: unknown) => e as Error);
+    const provider = await rejection(createTinfoilProvider({ apiKey: "k" }, { ...s, globals: worker }));
+    const client = await rejection(createTinfoilClient({ apiKey: "k" }, { ...s, globals: worker }));
+    expect(provider).toBeInstanceOf(ConfigurationError);
+    expect(client).toBeInstanceOf(ConfigurationError);
+    expect(client.message).toBe(provider.message);
+    expect(s.documentFetches).toBe(0);
   });
 
   it("is reachable from the public surface with the same checks", async () => {
