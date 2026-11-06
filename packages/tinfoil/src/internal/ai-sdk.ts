@@ -11,7 +11,8 @@
 import { createOpenAICompatible, type OpenAICompatibleProvider } from "@ai-sdk/openai-compatible";
 import { createEnclaveHTTPClient, EnclaveHTTPClient, openAIURLOf, type EnclaveClientSeams } from "../enclave-client.js";
 import { ConfigurationError } from "../errors.js";
-import { isServerRuntime, type RuntimeGlobals } from "./platform.js";
+import { checkAPIKeyRuntime } from "./credential.js";
+import type { RuntimeGlobals } from "./platform.js";
 import type { EnclaveOptions, RouterOptions } from "../options.js";
 import { createRouterHTTPClient, RouterHTTPClient, type RouterClientSeams } from "../router-client.js";
 
@@ -54,17 +55,15 @@ export type TinfoilProviderSeams = RouterClientSeams & EnclaveClientSeams;
 /**
  * The one credential the options carry, or a {@link ConfigurationError} when
  * there is none or more than one. A long-lived API key is refused where the
- * runtime isn't a server, as the OpenAI clients refuse it: a page or a worker
- * holds a `bearerToken` instead.
+ * runtime isn't a server, with the same error the OpenAI clients give: a
+ * page or a worker holds a `bearerToken` instead.
  */
 function credentialOf(options: TinfoilProviderOptions, globals: RuntimeGlobals | undefined): string {
   const apiKey = options.apiKey ?? "";
   const bearerToken = options.bearerToken ?? "";
   if (apiKey !== "" && bearerToken !== "") throw new ConfigurationError("give either apiKey or bearerToken, not both");
   if (apiKey === "" && bearerToken === "") throw new ConfigurationError("a credential is required: apiKey on a server, or bearerToken in a browser");
-  if (apiKey !== "" && !isServerRuntime(globals)) {
-    throw new ConfigurationError("an apiKey is a long-lived credential that belongs on a server; in a browser, give a bearerToken such as a short-lived token from the application's own sign-in");
-  }
+  checkAPIKeyRuntime(apiKey, globals);
   return apiKey !== "" ? apiKey : bearerToken;
 }
 

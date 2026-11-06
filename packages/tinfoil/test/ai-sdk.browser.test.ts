@@ -72,10 +72,15 @@ describe("createTinfoil in a browser", () => {
     await expect(createTinfoil({ bearerToken: "t", transportMode: "tls" })).rejects.toBeInstanceOf(ConfigurationError);
   });
 
-  it("refuses a long-lived API key in a page and names the bearer token as the credential", async () => {
+  it("refuses a long-lived API key in a page and names the bearer token as the credential, as the OpenAI client does", async () => {
     const failure = createTinfoil({ apiKey: "long-lived" });
     await expect(failure).rejects.toBeInstanceOf(ConfigurationError);
     await expect(failure).rejects.toThrow(/bearerToken/);
+    const rejection = (p: Promise<unknown>): Promise<Error> => p.then(() => Promise.reject(new Error("resolved")), (e: unknown) => e as Error);
+    const provider = await rejection(failure);
+    const client = await rejection(browserEntry.createClient({ apiKey: "long-lived" }));
+    expect(client).toBeInstanceOf(ConfigurationError);
+    expect(client.message).toBe(provider.message);
   });
 
   it("generates text through sealed requests carrying the bearer token", async () => {

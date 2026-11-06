@@ -6,7 +6,7 @@
 
 | 1.x | 2.0 |
 |---|---|
-| `new TinfoilAI({ apiKey })`, lazy with `await client.ready()` | `await createClient({ apiKey })`: a `TinfoilClient` (an `OpenAI` subclass) verified before it is returned. A browser page passes `bearerToken` instead of `apiKey`. |
+| `new TinfoilAI({ apiKey })`, lazy with `await client.ready()` | `await createClient({ apiKey })`: a `TinfoilClient` (an `OpenAI` subclass) verified before it is returned. A browser page passes `bearerToken` instead of `apiKey`: an `apiKey` is refused outside Node and Bun, `dangerouslyAllowBrowser` or not, by the OpenAI clients and the AI SDK provider alike. |
 | `new SecureClient(options)` with `ready()`, `fetch`, `reset()`, `getBaseURL()`, `getEnclaveURL()` | `await RouterHTTPClient.create(options)` (the discovered router) or `await EnclaveHTTPClient.create(host, repo, options)` (one enclave), with `fetch` (absolute URLs), the `baseURL`, `enclave`, `repo` and `current` properties, `ensureVerified()` and `reverify()`. `RouterOpenAIClient.create(options, openaiOptions)` and `EnclaveOpenAIClient.create(host, repo, options, openaiOptions)` wrap them as OpenAI clients. |
 | `enclaveURL` and `configRepo` options | `EnclaveHTTPClient.create(host, repo)` / `EnclaveOpenAIClient.create(host, repo)`: the enclave is named up front, not chosen later |
 | `transport` option (default `"ehbp"` everywhere) | `transportMode`: `"tls"` by default on Node and Bun (the connection is pinned to the attested key), `"ehbp"` by default and alone in browsers. Pass `transportMode: "ehbp"` to keep sealed request bodies on Node. |

@@ -16,11 +16,17 @@ import OpenAI, { type ClientOptions } from "openai";
 import { createEnclaveHTTPClient, EnclaveHTTPClient, openAIURLOf, type EnclaveClientSeams } from "./enclave-client.js";
 import { ConfigurationError } from "./errors.js";
 import { createGatewayHTTPClient, GatewayHTTPClient, type GatewayClientSeams } from "./gateway-client.js";
+import { checkAPIKeyRuntime } from "./internal/credential.js";
 import { asyncDispose } from "./internal/dispose.js";
 import type { EnclaveOptions, GatewayOptions, RouterOptions } from "./options.js";
 import { createRouterHTTPClient, RouterHTTPClient, type RouterClientSeams } from "./router-client.js";
 
-/** The OpenAI options a client takes: everything but the transport it is bound to. */
+/**
+ * The OpenAI options a client takes: everything but the transport it is
+ * bound to. An `apiKey` is accepted only where the runtime is a server (Node
+ * or Bun); anywhere else, `dangerouslyAllowBrowser` included, it is a
+ * {@link ConfigurationError} naming `bearerToken` as the credential to give.
+ */
 export type OpenAIOptions = Omit<ClientOptions, "fetch" | "baseURL"> & {
   /**
    * A credential a browser page may hold, such as a short-lived token from
@@ -31,9 +37,14 @@ export type OpenAIOptions = Omit<ClientOptions, "fetch" | "baseURL"> & {
   readonly bearerToken?: string;
 };
 
-/** The options as the OpenAI client takes them, with a bearer token applied. */
+/**
+ * The options as the OpenAI client takes them, with a bearer token applied.
+ * An `apiKey` outside a server is refused here too, so a clone made with
+ * `withOptions` applies the rule as the factories do.
+ */
 function openAIClientOptions(options: OpenAIOptions): Omit<ClientOptions, "fetch" | "baseURL"> {
   const { bearerToken, ...rest } = options;
+  checkAPIKeyRuntime(rest.apiKey);
   if (bearerToken === undefined || bearerToken === "") return rest;
   return { ...rest, apiKey: bearerToken, dangerouslyAllowBrowser: true };
 }
@@ -119,6 +130,8 @@ export class TinfoilClient extends OpenAI {
  * this with the default router options and no seams.
  */
 export async function createTinfoilClient(openaiOptions: OpenAIOptions, seams: RouterClientSeams, routerOptions: RouterOptions = {}): Promise<TinfoilClient> {
+  // The credential is checked first, so a client with the wrong one fails before any network I/O.
+  checkAPIKeyRuntime(openaiOptions.apiKey, seams.globals);
   const httpClient = await createRouterHTTPClient(routerOptions, seams);
   return new TinfoilClient(TOKEN, httpClient, openaiOptions);
 }
@@ -140,6 +153,7 @@ export async function createEnclaveOpenAIClient(
   openaiOptions: OpenAIOptions,
   seams: EnclaveClientSeams,
 ): Promise<EnclaveOpenAIClient> {
+  checkAPIKeyRuntime(openaiOptions.apiKey, seams.globals);
   const httpClient = await createEnclaveHTTPClient(host, repo, options, seams);
   return new EnclaveOpenAIClient(TOKEN, httpClient, openaiOptions);
 }
@@ -178,6 +192,7 @@ export class EnclaveOpenAIClient extends OpenAI {
  */
 /** The router OpenAI factory with its test seams; {@link RouterOpenAIClient.create} is this without them. */
 export async function createRouterOpenAIClient(options: RouterOptions, openaiOptions: OpenAIOptions, seams: RouterClientSeams): Promise<RouterOpenAIClient> {
+  checkAPIKeyRuntime(openaiOptions.apiKey, seams.globals);
   const httpClient = await createRouterHTTPClient(options, seams);
   return new RouterOpenAIClient(TOKEN, httpClient, openaiOptions);
 }
@@ -215,6 +230,7 @@ export class RouterOpenAIClient extends OpenAI {
  * @experimental The gateway route is new; this API may change without a major version.
  */
 export async function createGatewayOpenAIClient(options: GatewayOptions, openaiOptions: OpenAIOptions, seams: GatewayClientSeams): Promise<GatewayOpenAIClient> {
+  checkAPIKeyRuntime(openaiOptions.apiKey, seams.globals);
   const httpClient = await createGatewayHTTPClient(options, seams);
   return new GatewayOpenAIClient(TOKEN, httpClient, openaiOptions);
 }

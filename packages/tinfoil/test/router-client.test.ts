@@ -6,6 +6,7 @@
  */
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { AttestationError, ConfigurationError, NetworkError, TinfoilError } from "../src/errors.js";
+import type { RuntimeGlobals } from "../src/internal/platform.js";
 import { createRouterOpenAIClient, createTinfoilClient, RouterOpenAIClient, TinfoilClient } from "../src/openai-client.js";
 import type { Fetch, RouterOptions } from "../src/options.js";
 import { createRouterHTTPClient, RouterHTTPClient, type RouterClientSeams } from "../src/router-client.js";
@@ -272,5 +273,30 @@ describe("createClient", () => {
     expect(reply.choices[0]!.message.content).toBe("pinned");
     expect(JSON.parse(new TextDecoder().decode(tls.seen[tls.seen.length - 1]!.body)).user_cache_secret).toBe("resolved-secret");
     expect(() => new (TinfoilClient as unknown as new (...a: unknown[]) => unknown)(Symbol("x"), ai.httpClient, {})).toThrow(ConfigurationError);
+  });
+
+  it("accepts an API key on a server and refuses one anywhere else before fetching anything", async () => {
+    const server = await createTinfoilClient({ apiKey: "k", dangerouslyAllowBrowser: true }, seams([tls.host]), { verifier: verifier({ tls: TEST_PIN }) });
+    expect(server.apiKey).toBe("k");
+    expect(server.withOptions({ apiKey: "k2" }).apiKey).toBe("k2");
+    const worker = { self: {} } as unknown as RuntimeGlobals;
+    const s = seams([tls.host]);
+    for (const factory of [
+      () => createTinfoilClient({ apiKey: "k" }, { ...s, globals: worker }, { verifier: verifier({ tls: TEST_PIN }) }),
+      () => createRouterOpenAIClient({ verifier: verifier({ tls: TEST_PIN }) }, { apiKey: "k", dangerouslyAllowBrowser: true }, { ...s, globals: worker }),
+    ]) {
+      const failure = factory();
+      await expect(failure).rejects.toBeInstanceOf(ConfigurationError);
+      await expect(failure).rejects.toThrow(/belongs on a server; in a browser, give a bearerToken/);
+    }
+    expect(s.listCalls).toBe(0);
+    expect(s.documentHosts).toEqual([]);
+    // A bearer token is the credential a worker holds; it is accepted there over sealed bodies.
+    const tokened = await createTinfoilClient(
+      { bearerToken: "t" },
+      { ...seams(["router.example"]), globals: worker },
+      { verifier: verifier({ tls: "ab".repeat(32), hpke: ehbp.publicKeyHex }), baseURL: `${ehbp.origin}/` },
+    );
+    expect(tokened.apiKey).toBe("t");
   });
 });
