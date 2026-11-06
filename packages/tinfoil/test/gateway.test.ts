@@ -292,6 +292,12 @@ describe("prepare", () => {
     await expect(prepare(shapeOf(url, { method: "POST", body: big }), json(), new Response(big).body, "s", 64)).rejects.toThrow(/exceeds 64 bytes/);
     const form = ['--b', 'Content-Disposition: form-data; name="model"', "", "w".repeat(80), "--b--", ""].join("\r\n");
     await expect(prepare(shapeOf(url, { method: "POST", body: form }), new Headers({ "content-type": "multipart/form-data; boundary=b" }), form, "s", 64)).rejects.toThrow(/multipart upload: body exceeds 64 bytes/);
+    // A source whose cancel fails does not hide the size error.
+    const stubborn = new ReadableStream<Uint8Array>({
+      start: (c) => c.enqueue(utf8("x".repeat(65))),
+      cancel: () => Promise.reject(new Error("cancel failed")),
+    });
+    await expect(prepare(shapeOf(url, { method: "POST", body: stubborn }), json(), stubborn, "s", 64)).rejects.toThrow(/exceeds 64 bytes/);
     const small = '{"model":"m"}';
     expect((await prepare(shapeOf(url, { method: "POST", body: small }), json(), small, "", 64)).headers.get(MODEL_HEADER)).toBe("m");
   });

@@ -44,7 +44,8 @@ export async function readAll(body: BodyInit, limit: number, what: string, signa
       if (done) break;
       total += value.length;
       if (total > limit) {
-        await reader.cancel();
+        // Not awaited: a source whose cancel stalls or fails must not hide the size error.
+        void reader.cancel().catch(() => {});
         throw new ConfigurationError(`reading ${what}: body exceeds ${limit} bytes`);
       }
       chunks.push(value);
