@@ -158,6 +158,30 @@ describe("createWebSocket", () => {
     socket.close();
   });
 
+  it("removes a listener when its signal aborts, adds none for a signal that already has, and keeps once and removal working", async () => {
+    const c = await client(() => TEST_PIN);
+    const socket = await createWebSocket(c, "/x");
+    await opened(socket);
+    const seen: string[] = [];
+    const controller = new AbortController();
+    socket.addEventListener("message", (event) => seen.push(`live:${String(event.data)}`), { signal: controller.signal });
+    socket.addEventListener("message", (event) => seen.push(`dead:${String(event.data)}`), { signal: AbortSignal.abort() });
+    socket.addEventListener("message", (event) => seen.push(`once:${String(event.data)}`), { once: true, signal: controller.signal });
+    const removed = (event: { readonly data: unknown }): number => seen.push(`removed:${String(event.data)}`);
+    socket.addEventListener("message", removed, { signal: controller.signal });
+    socket.removeEventListener("message", removed);
+    const first = nextMessage(socket);
+    socket.send("one");
+    await first;
+    expect(seen).toEqual(["live:echo:one", "once:echo:one"]);
+    controller.abort();
+    const second = nextMessage(socket);
+    socket.send("two");
+    await second;
+    expect(seen).toEqual(["live:echo:one", "once:echo:one"]);
+    socket.close();
+  });
+
   it("fails in the handshake when the certificate carries another key, reaches the server with nothing, and verifies again afterwards", async () => {
     const docs = documents();
     const c = await client(() => OTHER_PIN, docs);

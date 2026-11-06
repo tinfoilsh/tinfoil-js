@@ -11,7 +11,7 @@
  */
 import type * as WS from "ws";
 import { ConfigurationError } from "../../errors.js";
-import type { PinnedWebSocket, WebSocketOptions } from "../../options.js";
+import type { PinnedWebSocket, ReservedWsOption, WebSocketListenerOptions, WebSocketOptions } from "../../options.js";
 import { isBun } from "../platform.js";
 import { identityCheck, type IdentityCheck } from "./pin.js";
 import type { TLSOptions } from "./tls.js";
@@ -20,10 +20,32 @@ import { PeerLacksKeyError } from "./transport.js";
 /** Which build this module belongs to; the browser build's bundling is checked against it. */
 export const WS_PLATFORM: "node" | "browser" = "node";
 
-/** The `ws` settings that would change which peer is connected to, or how its certificate is checked; a caller's values are dropped. */
-const RESERVED_WS_OPTIONS = ["agent", "createConnection", "followRedirects", "session", "socket", "servername", "pskCallback", "checkServerIdentity", "rejectUnauthorized", "ca", "headers", "protocol"] as const;
+/**
+ * The `ws` settings that would change which peer is connected to, how its
+ * certificate is checked, or the handshake's headers and subprotocol; a
+ * caller's values are dropped. The record keeps the list and the
+ * {@link ReservedWsOption} type in step: a key missing from either fails to
+ * compile.
+ */
+const RESERVED_WS_OPTIONS: readonly string[] = Object.keys({
+  agent: true,
+  createConnection: true,
+  followRedirects: true,
+  session: true,
+  socket: true,
+  servername: true,
+  pskCallback: true,
+  checkServerIdentity: true,
+  rejectUnauthorized: true,
+  ca: true,
+  headers: true,
+  protocol: true,
+} satisfies Record<ReservedWsOption, true>);
 
-/** `wsOptions` without the reserved settings. */
+/**
+ * `wsOptions` without the reserved settings. It takes any object, since a
+ * caller without types can still pass a reserved key, which is dropped here.
+ */
 export function allowedWsOptions(wsOptions: Readonly<Record<string, unknown>> | undefined): Record<string, unknown> {
   const allowed: Record<string, unknown> = { ...wsOptions };
   for (const key of RESERVED_WS_OPTIONS) delete allowed[key];
@@ -77,8 +99,34 @@ export async function openPinnedWebSocket(url: URL, key: string, options: WebSoc
   return isBun() ? openOnBun(url, key, protocols, options, tls, onRejected) : openOnNode(url, key, protocols, options, tls, onRejected);
 }
 
+/**
+ * The `ws` client with `addEventListener` taking a `signal`, which the
+ * library's own ignores: the listener is removed when the signal aborts, and
+ * a signal that has already aborted adds none, as on an EventTarget. Defined
+ * once the library is loaded.
+ */
+let NodeWebSocket: typeof WS.WebSocket | undefined;
+
+/** The parameters of the `ws` client's own `addEventListener`. */
+type AddListenerParameters = Parameters<WS.WebSocket["addEventListener"]>;
+
+async function nodeWebSocket(): Promise<typeof WS.WebSocket> {
+  if (NodeWebSocket !== undefined) return NodeWebSocket;
+  const { WebSocket } = await import("ws");
+  NodeWebSocket = class extends WebSocket {
+    override addEventListener(type: AddListenerParameters[0], listener: AddListenerParameters[1], options?: WebSocketListenerOptions): void {
+      const signal = options?.signal;
+      if (signal?.aborted) return;
+      super.addEventListener(type, listener, options);
+      // Removing a listener `once` has already taken off is a no-op.
+      signal?.addEventListener("abort", () => this.removeEventListener(type, listener), { once: true });
+    }
+  };
+  return NodeWebSocket;
+}
+
 async function openOnNode(url: URL, key: string, protocols: string[] | undefined, options: WebSocketOptions, tls: TLSOptions, onRejected: OnRejected | undefined): Promise<PinnedWebSocket> {
-  const [{ WebSocket }, pinned] = await Promise.all([import("ws"), pinnedWsClientOptions(key, tls, onRejected)]);
+  const [WebSocket, pinned] = await Promise.all([nodeWebSocket(), pinnedWsClientOptions(key, tls, onRejected)]);
   const socket = new WebSocket(url, protocols, {
     ...allowedWsOptions(options.wsOptions),
     headers: { ...options.headers },
@@ -94,6 +142,7 @@ interface BunWebSocketInit {
   readonly tls?: { readonly ca?: string | Uint8Array; readonly checkServerIdentity?: IdentityCheck };
 }
 
+/** Opens through Bun's own WebSocket, an EventTarget whose `addEventListener` takes `once` and `signal` itself. */
 async function openOnBun(url: URL, key: string, protocols: string[] | undefined, options: WebSocketOptions, tls: TLSOptions, onRejected: OnRejected | undefined): Promise<PinnedWebSocket> {
   const check = await reportingIdentityCheck(key, onRejected);
   let checked = false;
