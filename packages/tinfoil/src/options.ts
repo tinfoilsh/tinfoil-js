@@ -4,12 +4,16 @@
  * client fails at creation rather than on its first request.
  */
 import type { Verification, Verifier } from "@tinfoilsh/verifier";
+import type { ClientOptions as WsClientOptions } from "ws";
 
 /**
- * A client's `fetch`: the standard signature, bound to the client's attested
- * transport, so it can be handed to any library that takes a `fetch`.
+ * A client's `fetch`: the call signature of the global `fetch`, bound to the
+ * client's attested transport, so it can be handed to any library that takes
+ * a `fetch`. It is declared from the global so it follows the `fetch` of the
+ * caller's own typings; a function with this signature is assignable to
+ * `typeof fetch` wherever that is a plain function type.
  */
-export type Fetch = (input: string | URL | Request, init?: RequestInit) => Promise<Response>;
+export type Fetch = (...args: Parameters<typeof globalThis.fetch>) => ReturnType<typeof globalThis.fetch>;
 
 /**
  * How a client protects its traffic to an enclave.
@@ -47,6 +51,16 @@ export interface CallOptions {
   readonly signal?: AbortSignal;
 }
 
+/**
+ * The `ws` client settings a pinned connection owns, so a caller's values
+ * for them are dropped: those that choose the peer, check its certificate,
+ * or carry the handshake's headers and subprotocol.
+ */
+export type ReservedWsOption = "agent" | "createConnection" | "followRedirects" | "session" | "socket" | "servername" | "pskCallback" | "checkServerIdentity" | "rejectUnauthorized" | "ca" | "headers" | "protocol";
+
+/** The `ws` client settings a caller may set: the library's own, less the {@link ReservedWsOption}s. */
+export type WsOptions = Readonly<Omit<WsClientOptions, ReservedWsOption>>;
+
 /** Configures a WebSocket opened by {@link createWebSocket}. */
 export interface WebSocketOptions {
   /** The subprotocols offered in the handshake. */
@@ -60,7 +74,7 @@ export interface WebSocketOptions {
    * are ignored; the handshake's headers come from the top-level `headers`.
    * Bun's WebSocket takes no such settings, so they are ignored there.
    */
-  readonly wsOptions?: Readonly<Record<string, unknown>>;
+  readonly wsOptions?: WsOptions;
   /** Aborts the verification the call performs before connecting. */
   readonly signal?: AbortSignal;
 }
@@ -70,8 +84,19 @@ export interface RealtimeOptions {
   /** The realtime model to start a session with. */
   readonly model: string;
   /** As {@link WebSocketOptions.wsOptions}. */
-  readonly wsOptions?: Readonly<Record<string, unknown>>;
+  readonly wsOptions?: WsOptions;
   /** Aborts the verification the call performs before connecting. */
+  readonly signal?: AbortSignal;
+}
+
+/** How long a listener added to a {@link PinnedWebSocket} stays. */
+export interface WebSocketListenerOptions {
+  /** Removes the listener after its first call. */
+  readonly once?: boolean;
+  /**
+   * Removes the listener when the signal aborts. A signal that has already
+   * aborted adds no listener at all.
+   */
   readonly signal?: AbortSignal;
 }
 
@@ -81,8 +106,9 @@ export interface RealtimeOptions {
  * event whose error is an {@link AttestationError}; a failure of the
  * runtime's own certificate check surfaces as that runtime's error. Either
  * makes the client verify again before its next connection. The socket
- * supports the standard event-target API; on Node it is a `ws` WebSocket
- * and also supports that library's `on` listeners.
+ * supports the standard event-target API, with the `once` and `signal`
+ * listener options on every runtime; on Node it is a `ws` WebSocket and
+ * also supports that library's `on` listeners.
  */
 export interface PinnedWebSocket {
   readonly readyState: number;
@@ -90,10 +116,10 @@ export interface PinnedWebSocket {
   readonly protocol: string;
   send(data: string | ArrayBufferLike | ArrayBufferView): void;
   close(code?: number, reason?: string): void;
-  addEventListener(type: "open", listener: (event: unknown) => void, options?: { once?: boolean }): void;
-  addEventListener(type: "message", listener: (event: { readonly data: unknown }) => void, options?: { once?: boolean }): void;
-  addEventListener(type: "error", listener: (event: { readonly error?: unknown; readonly message?: string }) => void, options?: { once?: boolean }): void;
-  addEventListener(type: "close", listener: (event: { readonly code: number; readonly reason: string }) => void, options?: { once?: boolean }): void;
+  addEventListener(type: "open", listener: (event: unknown) => void, options?: WebSocketListenerOptions): void;
+  addEventListener(type: "message", listener: (event: { readonly data: unknown }) => void, options?: WebSocketListenerOptions): void;
+  addEventListener(type: "error", listener: (event: { readonly error?: unknown; readonly message?: string }) => void, options?: WebSocketListenerOptions): void;
+  addEventListener(type: "close", listener: (event: { readonly code: number; readonly reason: string }) => void, options?: WebSocketListenerOptions): void;
   removeEventListener(type: "open", listener: (event: unknown) => void): void;
   removeEventListener(type: "message", listener: (event: { readonly data: unknown }) => void): void;
   removeEventListener(type: "error", listener: (event: { readonly error?: unknown; readonly message?: string }) => void): void;

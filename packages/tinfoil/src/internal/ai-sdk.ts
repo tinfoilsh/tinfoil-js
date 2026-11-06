@@ -85,6 +85,8 @@ export async function createTinfoilProvider(options: TinfoilProviderOptions, sea
     baseURL: openAIURLOf(client),
     apiKey: credential,
     ...(options.headers === undefined ? {} : { headers: { ...options.headers } }),
+    // The client's fetch has the global fetch's call signature, which is all a DOM or Node `typeof fetch` is. Bun's
+    // typings merge a `preconnect` function onto the global, so under them a wrapped fetch is never `typeof fetch`.
     fetch: client.fetch as typeof globalThis.fetch,
     supportsStructuredOutputs: true,
   });
