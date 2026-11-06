@@ -589,7 +589,12 @@ function additionalRegistryIDsOf(registryIDs: readonly string[]): readonly strin
   return registryIDsOf([PUBLIC_REGISTRY_ID, ...registryIDs]);
 }
 
-/** Runs one pipeline step; an error that is not already classified is attributed to `layer`. */
+/**
+ * Runs one pipeline step; an error that is not already classified is
+ * attributed to `layer`. That includes the verifier's own failures inside
+ * the step, so the pipeline fails closed: a document is rejected rather
+ * than accepted by an error, and the underlying error stays as `cause`.
+ */
 async function at<T>(layer: Layer, step: () => Promise<T>): Promise<T> {
   try {
     return await step();

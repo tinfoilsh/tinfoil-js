@@ -79,7 +79,14 @@ export class UsageError extends VerifyError {
   }
 }
 
-/** A document that must not be trusted, and the layer that rejected it. */
+/**
+ * A document that must not be trusted, and the layer that rejected it. The
+ * verifier fails closed: a failure inside a layer that is not itself a
+ * VerifyError, such as a bug or an exhausted resource, is reported as a
+ * rejection at that layer with the underlying error as `cause`. An
+ * unfamiliar message at a layer may therefore be the verifier failing
+ * rather than the document, and `cause` says which.
+ */
 export class VerificationError extends VerifyError {
   readonly layer: Layer;
 
