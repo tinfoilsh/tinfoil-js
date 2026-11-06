@@ -55,9 +55,6 @@ export {
 // The measurement module's parse functions throw bare errors for the
 // pipeline to classify; the entry exports versions that throw UsageError.
 export {
-  cloneExpected,
-  cloneMeasurement,
-  expectedOf,
   formatMeasurement,
   REGISTER_SIZE,
   registerHex,

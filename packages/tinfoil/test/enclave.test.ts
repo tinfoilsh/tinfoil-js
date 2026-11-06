@@ -90,7 +90,7 @@ describe("fromVerify", () => {
     const usage = fromVerify(new UsageError("bad pin"));
     expect(usage).toBeInstanceOf(ConfigurationError);
     expect(usage.cause).toBeInstanceOf(UsageError);
-    const rejected = fromVerify(new VerificationError("quote", "bad report"));
+    const rejected = fromVerify(new VerificationError("bad report", { layer: "quote" }));
     expect(rejected).toBeInstanceOf(AttestationError);
     expect(rejected.message).toBe("attestation error: verification error: quote: bad report");
     expect(fromVerify(new NetworkError("down"))).toBeInstanceOf(NetworkError);
@@ -105,7 +105,7 @@ describe("fromVerify", () => {
     expect(usage).toBeInstanceOf(ConfigurationError);
     expect(usage.message).toBe("configuration error: usage error: bad pin");
     expect(usage.cause).toBeInstanceOf(other.UsageError);
-    expect(fromVerify(new other.VerificationError("quote", "bad report"))).toBeInstanceOf(AttestationError);
+    expect(fromVerify(new other.VerificationError("bad report", { layer: "quote" }))).toBeInstanceOf(AttestationError);
     // A copy old enough to carry no brand is recognized by the error's name.
     const unbranded = Object.assign(new Error("usage error: bad pin"), { name: "UsageError" });
     expect(fromVerify(unbranded)).toBeInstanceOf(ConfigurationError);
