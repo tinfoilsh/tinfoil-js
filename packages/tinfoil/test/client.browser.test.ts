@@ -136,6 +136,20 @@ describe("EnclaveHTTPClient in a browser", () => {
     await expect(client.fetch("https://other.example/echo")).rejects.toThrow(/client is bound to enclave/);
   });
 
+  it("closes, refusing further use while keeping the last verification, and disposes with the async-dispose symbol", async () => {
+    const client = await createEnclaveHTTPClient(ENCLAVE, "tinfoilsh/repo", { verifier: verifier(peer.publicKeyHex) }, seams());
+    await client.close();
+    await client.close();
+    expect(client.current?.hpkePublicKey).toBe(peer.publicKeyHex);
+    await expect(client.fetch(`https://${ENCLAVE}/echo`, { method: "POST", body: "x" })).rejects.toThrow(/client is closed/);
+    await expect(client.ensureVerified()).rejects.toBeInstanceOf(ConfigurationError);
+    const disposed = await createEnclaveHTTPClient(ENCLAVE, "tinfoilsh/repo", { verifier: verifier(peer.publicKeyHex) }, seams());
+    const dispose = (disposed as unknown as Record<symbol, () => Promise<void>>)[Symbol.asyncDispose ?? Symbol.for("Symbol.asyncDispose")];
+    expect(typeof dispose).toBe("function");
+    await dispose.call(disposed);
+    await expect(disposed.reverify()).rejects.toThrow(/client is closed/);
+  });
+
   it("reports an enclave without an EHBP key as an attestation failure", async () => {
     await expect(createEnclaveHTTPClient(ENCLAVE, "tinfoilsh/repo", { verifier: verifier(undefined) }, seams())).rejects.toBeInstanceOf(browserEntry.AttestationError);
   });

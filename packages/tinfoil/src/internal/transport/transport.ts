@@ -167,4 +167,14 @@ export class KeyedTransport {
   invalidate(state: State<BoundFetch>): void {
     this.#cache.invalidate(state);
   }
+
+  /**
+   * Releases what the current binding holds (the mode's pooled connections,
+   * if any) and refuses further use: requests and verification calls reject
+   * as closed, while {@link current} still reports the last verification.
+   * Closing again does nothing.
+   */
+  close(): void {
+    this.#cache.close();
+  }
 }

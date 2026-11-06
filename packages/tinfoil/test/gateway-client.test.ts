@@ -158,6 +158,20 @@ describe("GatewayHTTPClient", () => {
     expect(s.calls).toHaveLength(before);
   });
 
+  it("closes: refuses further use, keeps the replicas' last verifications, and closes again without effect", async () => {
+    const own = seams();
+    const c = await createGatewayHTTPClient({ verifier: verifier(gateway.publicKeyHex), url: GATEWAY_URL }, own);
+    await c.ensureVerified("test-model");
+    const fetched = own.calls.length;
+    await c.close();
+    await c.close();
+    expect(c.current).toHaveLength(1);
+    await expect(c.models()).rejects.toThrow(/client is closed/);
+    await expect(c.ensureVerified("test-model")).rejects.toBeInstanceOf(ConfigurationError);
+    await expect(c.fetch(`${GATEWAY_URL}chat/completions`, { method: "POST", body: '{"model":"test-model"}', headers: { "content-type": "application/json" } })).rejects.toThrow(/client is closed/);
+    expect(own.calls).toHaveLength(fetched);
+  });
+
   it("refuses other origins, upgrades, and models the policy doesn't serve", async () => {
     await expect(client.fetch("https://other.example/v1/models")).rejects.toThrow(/client is bound/);
     await expect(client.fetch(`${GATEWAY_URL}realtime`, { headers: { upgrade: "websocket" } })).rejects.toThrow(/protocol upgrade/);

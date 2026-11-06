@@ -229,6 +229,51 @@ describe("KeyedTransport", () => {
     expect(closed).toEqual(["k1", "k2"]);
   });
 
+  it("closes: releases the current binding, refuses further use, keeps the last verification, and closes again without effect", async () => {
+    const closed: string[] = [];
+    const t = await transport(
+      () => "k1",
+      () => "k1",
+      closed,
+    );
+    expect(await (await t.fetch(`https://${HOST}/v1/models`)).text()).toBe("k1");
+    t.close();
+    t.close();
+    expect(closed).toEqual(["k1"]);
+    expect(t.current()?.tlsPublicKeyFP).toBe("k1");
+    for (const call of [t.fetch(`https://${HOST}/v1/models`), t.ensureVerified(), t.reverify(), t.verifyOnce(), t.state()]) {
+      await expect(call).rejects.toBeInstanceOf(ConfigurationError);
+      await expect(call).rejects.toThrow(/client is closed/);
+    }
+    // A request the mode can't carry is still refused as such.
+    await expect(t.fetch(`http://${HOST}/`)).rejects.toThrow(/needs https/);
+  });
+
+  it("releases the binding of a verification that was in flight when it closed, and reports the close to its callers", async () => {
+    const closed: string[] = [];
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => (release = resolve));
+    const now = new Date("2026-01-01T00:00:00Z");
+    const enclave = await Enclave.create({
+      host: HOST,
+      repo: "",
+      verifier: keyedVerifier(() => "k1", new Date(now.getTime() + 60_000)),
+      fetch: async () => {
+        await gate;
+        return new Response(new Uint8Array([1]));
+      },
+      clock: () => now,
+      sleep: async () => {},
+    });
+    const t = new KeyedTransport(enclave, fakeMode(() => "k1", closed), () => now);
+    const waiting = t.ensureVerified();
+    t.close();
+    release();
+    await expect(waiting).rejects.toThrow(/client is closed/);
+    expect(closed).toEqual(["k1"]);
+    expect(t.current()).toBeUndefined();
+  });
+
   it("reports a key rejection it cannot replay, because the body is a stream, as an attestation error that is no longer replayable", async () => {
     const t = await transport(
       () => "k1",

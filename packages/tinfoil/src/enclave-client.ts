@@ -7,6 +7,7 @@
 import type { Verification } from "@tinfoilsh/verifier";
 import { ConfigurationError } from "./errors.js";
 import { withCacheSecret } from "./internal/cachesecret.js";
+import { asyncDispose } from "./internal/dispose.js";
 import { Enclave, type EnclaveConfig } from "./internal/enclave.js";
 import { validateBaseURL, validateTLSBaseURL } from "./internal/transport/base-url.js";
 import { ehbpMode, type EHBPOptions } from "./internal/transport/ehbp.js";
@@ -167,5 +168,25 @@ export class EnclaveHTTPClient {
   /** Verifies again even if the cached verification is still valid. */
   reverify(options?: CallOptions): Promise<Verification> {
     return this.#transport.reverify(options?.signal);
+  }
+
+  /**
+   * Releases what the client holds and refuses further use. On Node, the
+   * `"tls"` transport's pooled connections are closed, which also ends any
+   * request still in flight on them with a {@link NetworkError}; the
+   * `"ehbp"` transport sends through the runtime's fetch and holds no
+   * connections of its own, so a request in flight completes. No
+   * verification runs again. Afterwards `fetch`, `ensureVerified`,
+   * `reverify` and the WebSocket functions reject with a
+   * {@link ConfigurationError}; `current` still reports the last
+   * verification. Closing again does nothing.
+   */
+  async close(): Promise<void> {
+    this.#transport.close();
+  }
+
+  /** Closes the client at the end of an `await using` block; see {@link close}. */
+  [asyncDispose](): Promise<void> {
+    return this.close();
   }
 }

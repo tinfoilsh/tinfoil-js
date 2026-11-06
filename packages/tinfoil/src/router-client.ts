@@ -8,6 +8,7 @@ import type { Verification } from "@tinfoilsh/verifier";
 import { attestedFetch, modeFor, resolveTransportMode, setOpenAIURL, type EnclaveClientSeams } from "./enclave-client.js";
 import { ConfigurationError } from "./errors.js";
 import { resolveUserCacheSecret } from "./internal/cachesecret.js";
+import { asyncDispose } from "./internal/dispose.js";
 import { discoverRouter } from "./internal/router.js";
 import { validateBaseURL } from "./internal/transport/base-url.js";
 import type { KeyedTransport } from "./internal/transport/transport.js";
@@ -110,5 +111,15 @@ export class RouterHTTPClient {
   /** Verifies again even if the cached verification is still valid. */
   reverify(options?: CallOptions): Promise<Verification> {
     return this.#transport.reverify(options?.signal);
+  }
+
+  /** Releases what the client holds and refuses further use, as {@link EnclaveHTTPClient.close} does. */
+  async close(): Promise<void> {
+    this.#transport.close();
+  }
+
+  /** Closes the client at the end of an `await using` block; see {@link close}. */
+  [asyncDispose](): Promise<void> {
+    return this.close();
   }
 }
