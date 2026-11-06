@@ -2,9 +2,9 @@
 export function specifiersOf(source: string): string[];
 /** Every declaration file reachable from `entries`, entries included, as absolute paths. */
 export function reachableDeclarations(entries: readonly string[]): Set<string>;
-/** Every `.d.ts` under `dir`, as absolute paths; symbolic links are skipped. */
+/** Every regular `.d.ts` file under `dir`, as absolute paths; symbolic links and other non-regular files are skipped. */
 export function declarationsUnder(dir: string): string[];
-/** Removes the declaration files `entries` don't reach (unless `dryRun`) and reports what was kept, removed and still carries `@internal`. */
+/** Removes the declaration files `entries` don't reach (unless `dryRun`) and reports what was kept, removed and still carries `@internal`; refuses a `dist` that is a symbolic link. */
 export function pruneDeclarations(
   dist: string,
   entries: readonly string[],

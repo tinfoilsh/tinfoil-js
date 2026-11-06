@@ -43,30 +43,37 @@ export function reachableDeclarations(entries) {
 }
 
 /**
- * Every `.d.ts` under `dir`, as absolute paths. Symbolic links are not
- * followed and not listed: a link under the output directory must never
- * lead a prune to a file outside it.
+ * Every regular `.d.ts` file under `dir`, as absolute paths. Symbolic links
+ * are not followed and not listed, so that a link under the output
+ * directory never leads a prune to a file outside it, and anything else
+ * that is not a regular file (a pipe, a socket, a device) is not listed
+ * either.
  */
 export function declarationsUnder(dir) {
   const out = [];
   for (const name of readdirSync(dir)) {
     const path = join(dir, name);
     const stat = lstatSync(path);
-    if (stat.isSymbolicLink()) continue;
     if (stat.isDirectory()) out.push(...declarationsUnder(path));
-    else if (name.endsWith(".d.ts")) out.push(path);
+    else if (stat.isFile() && name.endsWith(".d.ts")) out.push(path);
   }
   return out;
 }
+
+/** Whether `path` names a regular file itself, not through a link. */
+const isRegularFile = (path) => existsSync(path) && lstatSync(path).isFile();
 
 /**
  * Removes every `.d.ts` (and its `.d.ts.map`) under `dist` that `entries`
  * don't reach, and reports the kept files that still carry an `@internal`
  * tag. With `dryRun`, nothing is deleted. Only a regular file strictly
- * inside `dist` is ever unlinked. Paths in the result are absolute.
+ * inside `dist` is ever unlinked, and `dist` itself must not be a symbolic
+ * link, which would lead the prune into the directory that it points at.
+ * Paths in the result are absolute.
  */
 export function pruneDeclarations(dist, entries, { dryRun = false } = {}) {
   const root = resolve(dist);
+  if (lstatSync(root).isSymbolicLink()) throw new Error(`refusing to prune ${root}: the output directory is a symbolic link`);
   const keep = reachableDeclarations(entries);
   const removed = [];
   for (const file of declarationsUnder(root)) {
@@ -74,7 +81,7 @@ export function pruneDeclarations(dist, entries, { dryRun = false } = {}) {
     if (!file.startsWith(root + sep)) throw new Error(`refusing to remove ${file}: outside ${root}`);
     if (!dryRun) {
       unlinkSync(file);
-      if (existsSync(`${file}.map`) && !lstatSync(`${file}.map`).isSymbolicLink()) unlinkSync(`${file}.map`);
+      if (isRegularFile(`${file}.map`)) unlinkSync(`${file}.map`);
     }
     removed.push(file);
   }

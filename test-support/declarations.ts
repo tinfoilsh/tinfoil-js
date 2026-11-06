@@ -5,6 +5,7 @@
  * that must have a private constructor. Skipped until the package has been
  * built. Also the test of the prune itself, on a tree built for the purpose.
  */
+import { execFileSync } from "node:child_process";
 import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -102,6 +103,42 @@ export function describeDeclarationPrune(): void {
         expect(lstatSync(join(dist, "linked.d.ts")).isSymbolicLink()).toBe(true);
         expect(existsSync(outside)).toBe(true);
         expect(declarationsUnder(dist).sort()).toEqual(pruned.kept.sort());
+      } finally {
+        rmSync(tmp, { recursive: true, force: true });
+      }
+    });
+
+    it("refuses an output directory that is a symbolic link, so that it never prunes the directory behind it", () => {
+      const tmp = mkdtempSync(join(tmpdir(), "declarations-"));
+      try {
+        const real = join(tmp, "real");
+        const dist = join(tmp, "dist");
+        mkdirSync(real);
+        writeFileSync(join(real, "index.d.ts"), "export {};\n");
+        writeFileSync(join(real, "unreachable.d.ts"), "export {};\n");
+        symlinkSync(real, dist);
+        expect(() => pruneDeclarations(dist, [join(dist, "index.d.ts")])).toThrow(/symbolic link/);
+        expect(existsSync(join(real, "unreachable.d.ts"))).toBe(true);
+      } finally {
+        rmSync(tmp, { recursive: true, force: true });
+      }
+    });
+
+    it.skipIf(process.platform === "win32")("unlinks nothing but a regular file: a pipe named like a declaration or its map stays", () => {
+      const tmp = mkdtempSync(join(tmpdir(), "declarations-"));
+      try {
+        const dist = join(tmp, "dist");
+        mkdirSync(dist);
+        writeFileSync(join(dist, "index.d.ts"), "export {};\n");
+        writeFileSync(join(dist, "unreachable.d.ts"), "export {};\n");
+        execFileSync("mkfifo", [join(dist, "unreachable.d.ts.map"), join(dist, "pipe.d.ts")]);
+        expect(declarationsUnder(dist).sort()).toEqual([join(dist, "index.d.ts"), join(dist, "unreachable.d.ts")]);
+
+        const pruned = pruneDeclarations(dist, [join(dist, "index.d.ts")]);
+        expect(pruned.removed).toEqual([join(dist, "unreachable.d.ts")]);
+        expect(existsSync(join(dist, "unreachable.d.ts"))).toBe(false);
+        expect(lstatSync(join(dist, "unreachable.d.ts.map")).isFIFO()).toBe(true);
+        expect(lstatSync(join(dist, "pipe.d.ts")).isFIFO()).toBe(true);
       } finally {
         rmSync(tmp, { recursive: true, force: true });
       }
