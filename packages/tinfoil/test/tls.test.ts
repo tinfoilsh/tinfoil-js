@@ -27,6 +27,8 @@ const seen: { path: string; method: string; bodyLength: number; headers: Record<
 let server: Server;
 let origin: string;
 let sseEnded = false;
+/** Called with each piece of a request body to `/echo` as the server receives it. */
+let onEchoData: ((chunk: Buffer) => void) | undefined;
 
 function verification(fp: string): Verification {
   return {
@@ -41,7 +43,10 @@ function verification(fp: string): Verification {
 beforeAll(async () => {
   server = createServer({ key, cert }, (req, res) => {
     const chunks: Buffer[] = [];
-    req.on("data", (c: Buffer) => chunks.push(c));
+    req.on("data", (c: Buffer) => {
+      chunks.push(c);
+      if (req.url === "/echo") onEchoData?.(c);
+    });
     req.on("end", () => {
       const body = Buffer.concat(chunks);
       seen.push({ path: req.url ?? "", method: req.method ?? "", bodyLength: body.length, headers: req.headers });
@@ -151,22 +156,47 @@ describe("tlsMode", () => {
 
   it("streams a request body as it is produced", async () => {
     const bound = await mode.bind(verification(PIN));
-    let pulled = 0;
     const chunk = new Uint8Array(64 * 1024).fill(7);
+    let pulled = 0;
+    let received = 0;
+    let receivedBeforeSecond = 0;
+    let firstArrived!: () => void;
+    const arrival = new Promise<void>((resolve) => (firstArrived = resolve));
+    onEchoData = (c) => {
+      received += c.length;
+      firstArrived();
+    };
     const body = new ReadableStream<Uint8Array>({
-      pull(controller) {
+      async pull(controller) {
         if (pulled === 8) {
           controller.close();
           return;
+        }
+        // The second chunk is produced only once the server holds part of
+        // the first, which a body sent only after the stream closes never
+        // reaches; the wait is bounded so that case fails instead of hanging.
+        if (pulled === 1) {
+          let timer: NodeJS.Timeout | undefined;
+          const bounded = new Promise<never>((_resolve, reject) => {
+            timer = setTimeout(() => reject(new Error("the server received nothing before the second chunk was due")), 5_000);
+          });
+          await Promise.race([arrival, bounded]).finally(() => clearTimeout(timer));
+          receivedBeforeSecond = received;
         }
         pulled++;
         controller.enqueue(chunk);
       },
     });
-    const res = await bound.fetch(`${origin}/echo`, { method: "POST", body, headers: { "content-type": "application/octet-stream" } });
-    expect(await res.json()).toEqual({ length: 8 * chunk.length, contentType: "application/octet-stream" });
+    try {
+      const res = await bound.fetch(`${origin}/echo`, { method: "POST", body, headers: { "content-type": "application/octet-stream" } });
+      expect(await res.json()).toEqual({ length: 8 * chunk.length, contentType: "application/octet-stream" });
+    } finally {
+      onEchoData = undefined;
+      bound.close?.();
+    }
     expect(pulled).toBe(8);
-    bound.close?.();
+    expect(receivedBeforeSecond).toBeGreaterThan(0);
+    expect(receivedBeforeSecond).toBeLessThanOrEqual(chunk.length);
   });
 
   it("sends strings, bytes, blobs and form data with their content type", async () => {
