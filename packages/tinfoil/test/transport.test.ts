@@ -279,6 +279,46 @@ describe("KeyedTransport", () => {
     expect(closed).toEqual(["k1", "k2"]);
   });
 
+  it("retires a binding a newer verification replaces, so a request still in flight on it finishes, and closes bindings only when it closes", async () => {
+    const released: string[] = [];
+    let verified = 0;
+    const now = new Date("2026-01-01T00:00:00Z");
+    const enclave = await Enclave.create({
+      host: HOST,
+      repo: "",
+      verifier: keyedVerifier(() => `k${++verified}`, new Date(now.getTime() + 60_000)),
+      fetch: async () => new Response(new Uint8Array([1])),
+      clock: () => now,
+      sleep: async () => {},
+    });
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => (release = resolve));
+    const mode: Mode = {
+      name: "tls",
+      validateRequest: () => {},
+      bind(v) {
+        const key = v.tlsPublicKeyFP!;
+        return {
+          fetch: async () => {
+            await gate;
+            return new Response(key);
+          },
+          close: () => void released.push(`closed ${key}`),
+          retire: () => void released.push(`retired ${key}`),
+        };
+      },
+    };
+    const t = new KeyedTransport(enclave, mode, () => now);
+    const inFlight = t.fetch(`https://${HOST}/v1/chat`);
+    await t.ensureVerified();
+    await t.reverify();
+    expect(released).toEqual(["retired k1"]);
+    release();
+    expect(await (await inFlight).text()).toBe("k1");
+    t.close();
+    expect(released).toEqual(["retired k1", "closed k2"]);
+  });
+
   it("closes: releases the current binding, refuses further use, keeps the last verification, and closes again without effect", async () => {
     const closed: string[] = [];
     const t = await transport(

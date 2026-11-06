@@ -132,7 +132,20 @@ async function nodePinnedFetch(key: string, options: TLSOptions): Promise<BoundF
     });
   };
 
-  return { fetch: fetchImpl, close: () => agent.destroy() };
+  /**
+   * Retires the binding: idle connections are closed and none is pooled from
+   * now on, while a request in flight finishes on its connection, which is
+   * closed once it is freed. A binding is replaced while requests that
+   * received its state may still be using it, so those are left alone.
+   */
+  const retire = (): void => {
+    // The agent pools a freed connection only while this field, which its typings leave out, is set.
+    (agent as unknown as { keepAlive: boolean }).keepAlive = false;
+    for (const sockets of Object.values(agent.freeSockets)) {
+      for (const socket of [...(sockets ?? [])]) socket.destroy();
+    }
+  };
+  return { fetch: fetchImpl, close: () => agent.destroy(), retire };
 }
 
 /**

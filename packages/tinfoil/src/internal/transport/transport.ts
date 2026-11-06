@@ -15,10 +15,18 @@ import type { Enclave } from "../enclave.js";
 import { VerifiedEnclave, type State } from "../verified.js";
 import { requestURL } from "./origin.js";
 
-/** A fetch tied to one verification's keys, and how to release what it holds (connections) when replaced. */
+/** A fetch tied to one verification's keys, and how to release what it holds (connections). */
 export interface BoundFetch {
   readonly fetch: Fetch;
+  /** Releases everything the binding holds, ending a request still in flight on it: the client is closing. */
   readonly close?: () => void;
+  /**
+   * Retires the binding once a newer verification replaces it: what it
+   * holds idle is released and nothing more is kept, while a request in
+   * flight on it, sent under the keys it checked, finishes. Defaults to
+   * {@link close}.
+   */
+  readonly retire?: () => void;
 }
 
 /** What a mode inspects about a request before any network I/O. */
@@ -127,13 +135,25 @@ export function isKeyRejection(err: unknown): boolean {
 export class KeyedTransport {
   readonly #mode: Mode;
   readonly #cache: VerifiedEnclave<BoundFetch>;
+  #closed = false;
   /** Sends a request over a fetch tied to the current verification's keys, verifying first if needed. */
   readonly fetch: Fetch;
 
   constructor(enclave: Enclave, mode: Mode, clock: () => Date = () => new Date()) {
     this.#mode = mode;
-    this.#cache = new VerifiedEnclave<BoundFetch>(enclave, (v) => mode.bind(v), clock, (bound) => bound.close?.());
+    this.#cache = new VerifiedEnclave<BoundFetch>(enclave, (v) => mode.bind(v), clock, (bound) => this.#release(bound));
     this.fetch = (input, init) => this.#send(input, init);
+  }
+
+  /**
+   * Releases a binding the cache lets go of. A binding replaced while the
+   * transport is open is retired: a request that received its state may
+   * still be in flight on it. Once the transport closes, every binding is
+   * closed outright.
+   */
+  #release(bound: BoundFetch): void {
+    if (this.#closed) bound.close?.();
+    else (bound.retire ?? bound.close)?.();
   }
 
   async #send(input: string | URL | Request, init?: RequestInit): Promise<Response> {
@@ -191,11 +211,12 @@ export class KeyedTransport {
 
   /**
    * Releases what the current binding holds (the mode's pooled connections,
-   * if any) and refuses further use: requests and verification calls reject
-   * as closed, while {@link current} still reports the last verification.
-   * Closing again does nothing.
+   * if any, requests in flight on them included) and refuses further use:
+   * requests and verification calls reject as closed, while {@link current}
+   * still reports the last verification. Closing again does nothing.
    */
   close(): void {
+    this.#closed = true;
     this.#cache.close();
   }
 }

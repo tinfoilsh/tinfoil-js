@@ -29,6 +29,17 @@ const seen: { path: string; method: string; bodyLength: number; headers: Record<
 let server: Server;
 let origin: string;
 let sseEnded = false;
+/** The TLS connections open right now, pooled ones included. */
+let open = 0;
+
+/** Resolves once `cond` holds, polling; fails after `ms`. */
+async function until(cond: () => boolean, ms = 5_000): Promise<void> {
+  const deadline = Date.now() + ms;
+  while (!cond()) {
+    if (Date.now() > deadline) throw new Error("condition not met in time");
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+}
 
 function verification(fp: string): Verification {
   return {
@@ -80,6 +91,10 @@ beforeAll(async () => {
           res.end("hello");
       }
     });
+  });
+  server.on("secureConnection", (socket) => {
+    open++;
+    socket.once("close", () => open--);
   });
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   origin = `https://localhost:${(server.address() as AddressInfo).port}`;
@@ -232,6 +247,45 @@ describe("tlsMode", () => {
     await res.text();
     expect(seen.slice(before).map((s) => s.path)).toEqual(["/redirect"]);
     bound.close?.();
+  });
+
+  it("retires a binding without cutting a request in flight, closing its idle connections and pooling no more", async () => {
+    await until(() => open === 0);
+    const idle = await mode.bind(verification(PIN));
+    expect(await (await idle.fetch(`${origin}/plain`)).text()).toBe("hello");
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(open).toBe(1);
+    idle.retire?.();
+    await until(() => open === 0);
+
+    const busy = await mode.bind(verification(PIN));
+    const res = await busy.fetch(`${origin}/sse`);
+    const reader = res.body!.getReader();
+    const decoder = new TextDecoder();
+    let text = decoder.decode((await reader.read()).value);
+    expect(open).toBe(1);
+    busy.retire?.();
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      text += decoder.decode(value);
+    }
+    expect(text).toBe("data: chunk 1\n\ndata: chunk 2\n\ndata: chunk 3\n\n");
+    // The connection the request used is closed once it is freed, not pooled.
+    await until(() => open === 0);
+    // A request sent to a retired binding still goes out, on a connection that isn't kept.
+    expect(await (await busy.fetch(`${origin}/plain`)).text()).toBe("hello");
+    await until(() => open === 0);
+  });
+
+  it("closes a binding ending a request still in flight on it", async () => {
+    await until(() => open === 0);
+    const bound = await mode.bind(verification(PIN));
+    const reader = (await bound.fetch(`${origin}/sse`)).body!.getReader();
+    expect(new TextDecoder().decode((await reader.read()).value)).toBe("data: chunk 1\n\n");
+    bound.close?.();
+    await expect(reader.read()).rejects.toThrow();
+    await until(() => open === 0);
   });
 });
 
