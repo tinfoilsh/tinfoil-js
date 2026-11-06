@@ -30,6 +30,7 @@ export const CERTIFICATE_CLOCK_SKEW_MS = 60 * 1000;
 const OID_SUBJECT_ALT_NAME = "2.5.29.17";
 const OID_EXT_KEY_USAGE = "2.5.29.37";
 const OID_KP_CODE_SIGNING = "1.3.6.1.5.5.7.3.3";
+const OID_KP_ANY = "2.5.29.37.0";
 /** Fulcio's OIDC issuer extensions; a registry certificate carries neither. */
 const OID_FULCIO_ISSUER_V1 = "1.3.6.1.4.1.57264.1.1";
 const OID_FULCIO_ISSUER_V2 = "1.3.6.1.4.1.57264.1.8";
@@ -52,8 +53,9 @@ export interface RegistryCertificate {
  * signing, signed with ECDSA P-256 over SHA-256, valid for at most ten
  * minutes inside the issuer's window, with an empty subject and exactly one
  * critical URI SAN naming a canonical registry ID), its key is not a root
- * key, and it chains to the issuer at `at`. `validateRegistryID` is applied
- * to the registry ID.
+ * key, and it chains to the issuer at `at`, an authority whose extended key
+ * usage, when it carries one, allows code signing. `validateRegistryID` is
+ * applied to the registry ID.
  */
 export async function verifySigningCertificate(
   certificateDer: Uint8Array,
@@ -102,6 +104,7 @@ export async function verifySigningCertificate(
   const unsupported = unsupportedCriticalExtension(certificate);
   if (unsupported !== undefined) throw new Error(`config signing certificate carries unsupported critical extension ${unsupported}`);
   if (!canIssueCertificates(issuer)) throw new Error("registry root is not a certificate authority");
+  if (!allowsCodeSigning(issuer)) throw new Error("registry root's extended key usage does not allow code signing");
   try {
     await verifyChain([certificate, issuer], [issuer], at);
   } catch (err) {
@@ -110,17 +113,33 @@ export async function verifySigningCertificate(
   return { certificate, issuer, registryID };
 }
 
-/** Whether the extended key usage names exactly code signing. */
-function codeSigningOnly(cert: Certificate): boolean {
+/** The extended key usage purposes, or undefined when the extension is absent or malformed. */
+function extendedKeyUsage(cert: Certificate): string[] | undefined {
   const ext = extension(cert, OID_EXT_KEY_USAGE);
-  if (ext === undefined) return false;
+  if (ext === undefined) return undefined;
   try {
-    const purposes = expectSequence(decode(ext.value), "ExtKeyUsage").map(oid);
-    return purposes.length === 1 && purposes[0] === OID_KP_CODE_SIGNING;
+    return expectSequence(decode(ext.value), "ExtKeyUsage").map(oid);
   } catch (err) {
-    if (err instanceof DerError || err instanceof X509Error) return false;
+    if (err instanceof DerError || err instanceof X509Error) return undefined;
     throw err;
   }
+}
+
+/** Whether the extended key usage names exactly code signing. */
+function codeSigningOnly(cert: Certificate): boolean {
+  const purposes = extendedKeyUsage(cert);
+  return purposes !== undefined && purposes.length === 1 && purposes[0] === OID_KP_CODE_SIGNING;
+}
+
+/**
+ * Whether an issuer may stand above a code-signing certificate: it carries
+ * no extended key usage, or one naming code signing or any purpose. A
+ * malformed extension permits nothing.
+ */
+function allowsCodeSigning(cert: Certificate): boolean {
+  if (extension(cert, OID_EXT_KEY_USAGE) === undefined) return true;
+  const purposes = extendedKeyUsage(cert);
+  return purposes !== undefined && purposes.some((p) => p === OID_KP_CODE_SIGNING || p === OID_KP_ANY);
 }
 
 /**
