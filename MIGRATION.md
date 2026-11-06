@@ -22,6 +22,7 @@
 | `secureClient.createWebSocket(path, options)`, `getPinnedWebSocketOptions()` | `await createWebSocket(client, path, options)`, `await pinnedWebSocketOptions(client)` |
 | `new UnverifiedClient()` from `tinfoil/unsafe`, discovering a router | `await UnverifiedClient.create({ baseURL \| keyOrigin })` from `tinfoil/unsafe`: it never discovers a server, and is for development against a local server only |
 | `createUnverifiedEncryptedBodyFetch` | removed: `UnverifiedClient.fetch` |
+| a relative request URL passed to a client's `fetch` | every client's `fetch` takes an absolute URL; `client.baseURL` (always slash-terminated) is the base to resolve a path against, `new URL(path, client.baseURL)` |
 | `tinfoil/v3`, `tinfoil/v3/ai-sdk`, `tinfoil/v3/unsafe` (pre-release entries) | `tinfoil`, `tinfoil/ai-sdk`, `tinfoil/unsafe` |
 
 Unchanged: `userCacheSecret` and the per-request `user_cache_secret` field, their resolution from `TINFOIL_USER_CACHE_SECRET` and `~/.tinfoil/user_cache_secret` for the router, the session recovery helpers (`sessionRecoveryToken(response)` replaces reading the token off a response), and the OpenAI types and errors re-exported from the root.

@@ -1,8 +1,8 @@
 /**
  * The unverified client on a local EHBP server: it warns on creation,
  * fetches the key from the server's well-known path and nothing else, seals
- * bodies to it, resolves relative URLs against the base URL, refuses other
- * origins, names the key origin to a proxy, and reports a bad key response
+ * bodies to it, takes only absolute request URLs, refuses other origins,
+ * names the key origin to a proxy, and reports a bad key response
  * as a network error. The entry exports only this client.
  */
 import { PROTOCOL } from "ehbp";
@@ -78,7 +78,7 @@ describe("UnverifiedClient", () => {
     expect(c.baseURL).toBe(`${server.origin}/v1/`);
     expect(c.keyOrigin).toBe(server.origin);
 
-    const response = await c.fetch("/v1/chat/completions", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ hi: 1 }) });
+    const response = await c.fetch(`${server.origin}/v1/chat/completions`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ hi: 1 }) });
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({ path: "/v1/chat/completions", sealed: true, text: '{"hi":1}', enclave: null });
     expect(server.seen[server.seen.length - 1]?.sealed).toBe(true);
@@ -91,13 +91,13 @@ describe("UnverifiedClient", () => {
     expect(fromKey.client.baseURL).toBe(`${server.origin}/v1/`);
     const fromBase = await client({ baseURL: `${server.origin}/api/` });
     expect(fromBase.client.keyOrigin).toBe(server.origin);
-    const response = await fromBase.client.fetch("models");
+    const response = await fromBase.client.fetch(new URL("models", fromBase.client.baseURL));
     expect(await response.json()).toMatchObject({ path: "/api/models", sealed: false });
     const bare = await client({ baseURL: `${server.origin}/api` });
     expect(bare.client.baseURL).toBe(`${server.origin}/api/`);
     const padded = await client({ baseURL: `  ${server.origin}/api  ` });
     expect(padded.client.baseURL).toBe(`${server.origin}/api/`);
-    expect(await (await bare.client.fetch("models")).json()).toMatchObject({ path: "/api/models" });
+    expect(await (await bare.client.fetch(new URL("models", bare.client.baseURL))).json()).toMatchObject({ path: "/api/models" });
     await expect(bare.client.fetch("https://other.example/api/models")).rejects.toThrow(/client is bound/);
     for (const bad of [`${server.origin}/api/?key=1`, `${server.origin}/api/#frag`]) {
       await expect(client({ baseURL: bad }), bad).rejects.toBeInstanceOf(ConfigurationError);
@@ -108,15 +108,21 @@ describe("UnverifiedClient", () => {
     // The server stands in for the proxy; the key origin is spelled differently so the origins differ.
     const keyOrigin = server.origin.replace("127.0.0.1", "localhost");
     const { client: c } = await client({ baseURL: `${server.origin}/v1/`, keyOrigin });
-    const response = await c.fetch("/v1/echo", { method: "POST", body: "x" });
+    const response = await c.fetch(`${server.origin}/v1/echo`, { method: "POST", body: "x" });
     expect(await response.json()).toMatchObject({ sealed: true, enclave: keyOrigin });
     await expect(c.fetch(`${keyOrigin}/v1/echo`)).rejects.toThrow(ConfigurationError);
   });
 
-  it("refuses requests to any other origin and absolute requests off the base origin", async () => {
-    const { client: c } = await client({ baseURL: `${server.origin}/v1/` });
+  it("requires an absolute request URL and refuses any other origin", async () => {
+    const { client: c, requested } = await client({ baseURL: `${server.origin}/v1/` });
+    for (const relative of ["/v1/x", "chat/completions"]) {
+      await expect(c.fetch(relative), relative).rejects.toThrow(ConfigurationError);
+      await expect(c.fetch(relative), relative).rejects.toThrow(/request URL must be absolute/);
+    }
     await expect(c.fetch("https://other.example/v1/x")).rejects.toThrow(/refusing to send request/);
     await expect(c.fetch(new Request("https://other.example/v1/x"))).rejects.toThrow(ConfigurationError);
+    // Neither a relative URL nor a foreign origin reaches the network.
+    expect(requested.filter((u) => !u.endsWith(PROTOCOL.KEYS_PATH))).toEqual([]);
   });
 
   it("checks its options before any network I/O", async () => {
@@ -158,7 +164,7 @@ describe("UnverifiedClient", () => {
 
   it("follows no redirect, so a sealed body never leaves the origin it was addressed to", async () => {
     const { client: c, requested } = await client({ baseURL: `${server.origin}/v1/` });
-    const attempt = c.fetch("/v1/elsewhere", { method: "POST", body: "secret" });
+    const attempt = c.fetch(`${server.origin}/v1/elsewhere`, { method: "POST", body: "secret" });
     await expect(attempt).rejects.toThrow(NetworkError);
     await expect(attempt).rejects.not.toThrow(/left the server/);
     expect(server.seen.filter((s) => s.path === "/v1/elsewhere")).toHaveLength(1);
@@ -170,7 +176,7 @@ describe("UnverifiedClient", () => {
     const { client: c } = await client({ baseURL: `${server.origin}/v1/` });
     const reason = new Error("caller gave up");
     const aborted = AbortSignal.abort(reason);
-    await expect(c.fetch("/v1/echo", { method: "POST", body: "x", signal: aborted })).rejects.toBe(reason);
+    await expect(c.fetch(`${server.origin}/v1/echo`, { method: "POST", body: "x", signal: aborted })).rejects.toBe(reason);
     await expect(c.fetch(new Request(`${server.origin}/v1/echo`, { method: "POST", body: "x", signal: aborted }))).rejects.toBe(reason);
   });
 

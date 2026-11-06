@@ -27,9 +27,9 @@ import type { Fetch } from "../options.js";
 /** Configures an {@link UnverifiedClient}. At least one of `baseURL` and `keyOrigin` is required. */
 export interface UnverifiedOptions {
   /**
-   * Where requests go. Defaults to the key origin's `/v1/`. A relative request
-   * URL is resolved against it, so it is made to end with `/`. HTTPS, or HTTP
-   * only to localhost or a loopback IP address.
+   * Where requests go. Defaults to the key origin's `/v1/`. It is made to end
+   * with `/`, so a path resolves under it with `new URL(path, client.baseURL)`.
+   * HTTPS, or HTTP only to localhost or a loopback IP address.
    */
   readonly baseURL?: string;
   /**
@@ -91,7 +91,7 @@ export async function createUnverifiedClient(options: UnverifiedOptions, seams: 
   const baseOrigin = originOf(baseURL);
   const proxied = baseOrigin !== keyOrigin;
   const fetchImpl: Fetch = async (input, init) => {
-    const url = input instanceof Request ? requestURL(input) : new URL(input instanceof URL ? input.href : input, baseURL);
+    const url = requestURL(input);
     const origin = normalizedOrigin(url);
     if (origin !== baseOrigin) {
       throw new ConfigurationError(`refusing to send request to ${JSON.stringify(origin)}: client is bound to ${JSON.stringify(baseOrigin)}`);
@@ -163,9 +163,9 @@ async function fetchUnverifiedKey(keyOrigin: string, send: Fetch, signal: AbortS
  */
 export class UnverifiedClient {
   /**
-   * Sends a request with its body sealed to the fetched key. A relative URL
-   * is resolved against the base URL; a request to another origin is a
-   * {@link ConfigurationError}.
+   * Sends a request with its body sealed to the fetched key. The URL must be
+   * absolute (resolve a path with `new URL(path, client.baseURL)`); a relative
+   * URL or a request to another origin is a {@link ConfigurationError}.
    */
   readonly fetch: Fetch;
   /** Where requests go; always ends with `/`. */

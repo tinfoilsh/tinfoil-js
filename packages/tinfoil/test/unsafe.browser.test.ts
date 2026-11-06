@@ -28,8 +28,9 @@ describe("UnverifiedClient in a browser", () => {
     const client = await createUnverifiedClient({ baseURL: `${ORIGIN}/v1/` }, { fetch: fetchOf(peer), warn: (m) => warnings.push(m) });
     expect(warnings).toEqual([UNVERIFIED_WARNING]);
     expect(peer.seen.map((s) => s.path)).toEqual([PROTOCOL.KEYS_PATH]);
-    const response = await client.fetch("/v1/echo", { method: "POST", body: "hello" });
+    const response = await client.fetch(new URL("echo", client.baseURL), { method: "POST", body: "hello" });
     expect(await response.json()).toEqual({ path: "/v1/echo", sealed: true, text: "hello" });
+    await expect(client.fetch("/v1/echo")).rejects.toThrow(ConfigurationError);
     await expect(client.fetch("https://other.example/v1/echo")).rejects.toThrow(ConfigurationError);
   });
 });
