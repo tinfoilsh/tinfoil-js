@@ -161,17 +161,18 @@ function endpointOf(authority: string): { hostname: string; port: number } | und
   } catch {
     return undefined;
   }
-  // A URL drops the default port, so rebuild the authority to compare it with what was given.
+  // A URL drops the default port and lowercases the host, so rebuild the
+  // authority to compare it with what was given; host names are case-insensitive.
   const port = u.port === "" ? 443 : Number(u.port);
   const rebuilt = u.port === "" ? (authority.endsWith(":443") ? `${u.hostname}:443` : u.hostname) : `${u.hostname}:${u.port}`;
-  if (rebuilt !== authority || u.pathname !== "/" || u.username !== "" || u.password !== "" || u.search !== "" || u.hash !== "") {
+  if (rebuilt !== authority.toLowerCase() || u.pathname !== "/" || u.username !== "" || u.password !== "" || u.search !== "" || u.hash !== "") {
     return undefined;
   }
   const hostname = u.hostname.startsWith("[") && u.hostname.endsWith("]") ? u.hostname.slice(1, -1) : u.hostname;
   return { hostname, port };
 }
 
-/** Whether `s` is exactly the host (with optional port) of an HTTPS URL. */
+/** Whether `s` is exactly the host (in either case, with optional port) of an HTTPS URL. */
 export function isAuthority(s: string): boolean {
   return endpointOf(s) !== undefined;
 }
