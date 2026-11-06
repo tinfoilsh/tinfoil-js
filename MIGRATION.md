@@ -15,7 +15,7 @@
 | `TINFOIL_API_KEY` read when `apiKey` was omitted | no environment defaults: pass the credential |
 | `attestationBundleURL`, `fetchAttestationBundle`, `fetchRouter` | removed: the document comes from the enclave itself, and router discovery is built into the router clients (the first router that verifies, falling back to `inference.tinfoil.sh`) |
 | `getVerificationDocument()`, `VerificationDocument`, `VerificationStepState` | `ensureVerified()` returns a currently valid `Verification` with every fact, verifying again if needed; the `current` property is only the last successful one, unchecked, and may be undefined or expired. A verification failure is an `AttestationError` wrapping a `VerificationError` whose `layer` names the failed check |
-| `Verifier`, `assembleAttestationBundle` and the attestation types re-exported from `tinfoil` | import the verifier from `@tinfoilsh/verifier`; pass a `Verifier` through the `verifier` option to change the policy |
+| `Verifier`, `assembleAttestationBundle` and the attestation types re-exported from `tinfoil` | import the verifier from `@tinfoilsh/verifier`; pass a `Verifier` built with the policy options described under `@tinfoilsh/verifier` below through the `verifier` option to change the policy |
 | `FetchError` | `NetworkError`. `TinfoilError`, `ConfigurationError` and `AttestationError` keep their names. |
 | a verification failure thrown by `await client.ready()`, or by the first request as an `APIConnectionError` wrapping it | the factory rejects with the error itself. A request through the OpenAI API surface whose enclave fails to verify again rejects with `APIConnectionError` with the error as `cause`, after the OpenAI client's `maxRetries` retries (2 by default) |
 | `client.realtime({ model, options })` | `await createRealtimeWebSocket(client, { model, wsOptions })` (Node only) |
@@ -39,3 +39,5 @@ Unchanged: `userCacheSecret` and the per-request `user_cache_secret` field, thei
 | `TinfoilError`, `ConfigurationError`, `FetchError`, `AttestationError` | `VerifyError` with `UsageError` (invalid inputs) and `VerificationError` (the document must not be trusted); the `tinfoil` package keeps its own error classes |
 | `VERIFIER_NAME`, `VERIFIER_VERSION` | `verification.metadata.verifier.name` and `verification.metadata.verifier.version` |
 | `@tinfoilsh/verifier/v3` (pre-release entry) | the package root |
+
+The policy options of `Verifier.create` are new in 2.0, and each trust choice is one option with one shape: `configRegistryIDs` is the exact set of registries whose certified config approvals are accepted, so a policy that keeps the public registry alongside its own lists it, `[PUBLIC_REGISTRY_ID, ...mine]`; `embeddedReferences.config` is either the config's bytes (`{ bytes, name? }`) or its digest and runtime pin (`{ digest, runtime, name? }`) when the bytes are not disclosed.

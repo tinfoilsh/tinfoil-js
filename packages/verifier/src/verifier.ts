@@ -49,6 +49,17 @@ import { cloneExpected, REGISTER_SIZE, type Expected } from "./measurement.js";
 import { verificationOf, type ArtifactVerification, type ConfigVerification, type Verification } from "./verification.js";
 
 /**
+ * An exact config the caller trusts, as its bytes, optionally with its name.
+ * The digest and the runtime pin are taken from the bytes.
+ */
+export interface EmbeddedConfigBytes {
+  /** The /org/project/revision name; absent or "" leaves the name unpinned. */
+  readonly name?: string;
+  /** The config bytes. */
+  readonly bytes: Uint8Array;
+}
+
+/**
  * An exact config the caller trusts without holding its bytes: its digest
  * and the runtime release it pins, optionally with its name. The document's
  * config endorsement is not consulted; the quote must still bind the digest.
@@ -64,10 +75,8 @@ export interface EmbeddedConfigReference {
 
 /** Caller-trusted reference values that replace endorsement checks for the components supplied. */
 export interface EmbeddedReferences {
-  /** Exact config bytes, optionally with their /org/project/revision name. Exclusive with `configReference`. */
-  readonly config?: { readonly name?: string; readonly bytes: Uint8Array };
-  /** The config's digest and runtime pin, when the bytes themselves are not disclosed. Exclusive with `config`. */
-  readonly configReference?: EmbeddedConfigReference;
+  /** The exact config: its bytes, or its digest and runtime pin when the bytes themselves are not disclosed. */
+  readonly config?: EmbeddedConfigBytes | EmbeddedConfigReference;
   /** The exact runtime manifest the config pins. */
   readonly runtime?: Uint8Array;
   /** A platform-endorsements/v2 policy artifact. */
@@ -86,21 +95,14 @@ export interface VerifierOptions {
   /** Authorizes an unsigned config; throwing rejects the document at the provenance layer. */
   readonly configAuthorizer?: (endorsement: ConfigEndorsement) => void | Promise<void>;
   /**
-   * The registry IDs a config approval may be accepted under, replacing
-   * public-only trust: an approval certified for another registry rejects.
-   * Needs registry trust, so it conflicts with config signing keys, an
-   * embedded config and a config authorizer. Must be non-empty without
-   * repeats.
+   * The exact registry IDs a config approval may be accepted under, replacing
+   * public-only trust: an approval certified for any other registry rejects.
+   * To accept the public registry alongside others, list it:
+   * `[PUBLIC_REGISTRY_ID, ...mine]`. Needs registry trust, so it conflicts
+   * with config signing keys, an embedded config and a config authorizer.
+   * Must be non-empty, canonical and without repeats.
    */
   readonly configRegistryIDs?: readonly string[];
-  /**
-   * Registry IDs accepted alongside the public registry: the accepted set
-   * is the public registry ID followed by these. Validated and in conflict
-   * like `configRegistryIDs`, which it cannot be combined with. Must be
-   * non-empty, canonical and without repeats, the public registry ID
-   * included.
-   */
-  readonly additionalConfigRegistryIDs?: readonly string[];
   readonly embeddedReferences?: EmbeddedReferences;
 }
 
@@ -515,7 +517,7 @@ async function assemble(options: VerifierOptions, roots: InjectedRoots): Promise
   if (options.configAuthorizer !== undefined && (embedded.configReference !== undefined || configKeys !== undefined)) {
     throw new UsageError("config authorizer conflicts with embedded config or config signing keys");
   }
-  const configRegistryIDs = registryPolicyOf(options);
+  const configRegistryIDs = options.configRegistryIDs === undefined ? undefined : usage(() => registryIDsOf(options.configRegistryIDs!));
   if (configRegistryIDs !== undefined && (embedded.configReference !== undefined || options.configAuthorizer !== undefined)) {
     throw new UsageError("config authority pins require endorsement verification");
   }
@@ -565,33 +567,11 @@ interface ConfigPins {
   readonly registryIDs?: readonly string[];
 }
 
-/**
- * The accepted registry IDs the options pin, or undefined for the default:
- * the caller's exact list, or the public registry plus the additional ones.
- * Giving both is a usage error.
- */
-function registryPolicyOf(options: VerifierOptions): readonly string[] | undefined {
-  const exact = options.configRegistryIDs === undefined ? undefined : usage(() => registryIDsOf(options.configRegistryIDs!));
-  if (options.additionalConfigRegistryIDs === undefined) return exact;
-  const additional = usage(() => additionalRegistryIDsOf(options.additionalConfigRegistryIDs!));
-  if (exact !== undefined) throw new UsageError("config registry IDs must be supplied once");
-  return additional;
-}
-
-/** Validates and copies the caller's registry ID list. */
+/** Validates and copies the caller's registry ID list: the exact accepted set. */
 function registryIDsOf(registryIDs: readonly string[]): readonly string[] {
   if (!Array.isArray(registryIDs) || registryIDs.some((s) => typeof s !== "string")) throw new Error("config registry IDs must be a list of strings");
   validateRegistryIDs(registryIDs);
   return [...registryIDs];
-}
-
-/** The public registry ID followed by the caller's additional registry IDs, validated as one list. */
-function additionalRegistryIDsOf(registryIDs: readonly string[]): readonly string[] {
-  if (!Array.isArray(registryIDs) || registryIDs.some((s) => typeof s !== "string")) {
-    throw new Error("additional config registry IDs must be a list of strings");
-  }
-  if (registryIDs.length === 0) throw new Error("additional config registry IDs must not be empty");
-  return registryIDsOf([PUBLIC_REGISTRY_ID, ...registryIDs]);
 }
 
 /**
@@ -674,20 +654,10 @@ async function keysOf(what: string, pems: readonly string[]): Promise<PinnedKey[
  * here rather than at verification.
  */
 async function embeddedOf(refs: EmbeddedReferences): Promise<Embedded> {
-  if (refs.config === undefined && refs.configReference === undefined && refs.runtime === undefined && refs.platform === undefined) {
+  if (refs.config === undefined && refs.runtime === undefined && refs.platform === undefined) {
     throw new UsageError("embedded references must contain at least one component");
   }
-  if (refs.config !== undefined && refs.configReference !== undefined) {
-    throw new UsageError("embedded config bytes and reference are mutually exclusive");
-  }
-  let configReference: ConfigReference | undefined;
-  if (refs.config !== undefined) {
-    // Copied once so the digest and the runtime pin come from the same bytes, whatever the caller does to its buffer meanwhile.
-    const bytes = refs.config.bytes.slice();
-    configReference = { name: refs.config.name ?? "", digest: toHex(await sha256(bytes)), runtime: usage(() => configRuntime(bytes)) };
-  } else if (refs.configReference !== undefined) {
-    configReference = usage(() => configReferenceOf(refs.configReference!));
-  }
+  const configReference = refs.config === undefined ? undefined : await configReferenceOf(refs.config);
   if (configReference !== undefined) {
     const reference = configReference;
     if (reference.name !== "") usage(() => parseConfigName(reference.name));
@@ -706,8 +676,29 @@ async function embeddedOf(refs: EmbeddedReferences): Promise<Embedded> {
   };
 }
 
+/**
+ * The config reference an embedded config settles to: derived from its
+ * bytes, or a copy of the caller's digest and runtime pin. The type admits
+ * one form or the other; an object from untyped code that has both or
+ * neither is refused.
+ */
+async function configReferenceOf(config: EmbeddedConfigBytes | EmbeddedConfigReference): Promise<ConfigReference> {
+  if (typeof config !== "object" || config === null) throw new UsageError("embedded config must be an object");
+  const hasBytes = (config as Partial<EmbeddedConfigBytes>).bytes !== undefined;
+  const hasDigest = (config as Partial<EmbeddedConfigReference>).digest !== undefined;
+  if (hasBytes === hasDigest) throw new UsageError("embedded config is either its bytes or its digest and runtime pin, not both or neither");
+  if (hasBytes) {
+    const { name, bytes } = config as EmbeddedConfigBytes;
+    if (!(bytes instanceof Uint8Array)) throw new UsageError("embedded config bytes must be a Uint8Array");
+    // Copied once so the digest and the runtime pin come from the same bytes, whatever the caller does to its buffer meanwhile.
+    const copy = bytes.slice();
+    return { name: name ?? "", digest: toHex(await sha256(copy)), runtime: usage(() => configRuntime(copy)) };
+  }
+  return usage(() => referenceCopyOf(config as EmbeddedConfigReference));
+}
+
 /** A copy of the caller's config reference with every field a string; validation follows. */
-function configReferenceOf(ref: EmbeddedConfigReference): ConfigReference {
+function referenceCopyOf(ref: EmbeddedConfigReference): ConfigReference {
   const name = ref.name ?? "";
   const runtime = ref.runtime as Partial<RuntimeReference> | undefined;
   if (

@@ -6,6 +6,7 @@
  * supported for direct use.
  */
 import { UsageError } from "./errors.js";
+import { PUBLIC_REGISTRY_ID as PUBLIC_REGISTRY_ID_INTERNAL } from "./internal/endorsement/approval.js";
 import { parseReference as parseReferenceInternal, type Reference } from "./internal/endorsement/reference.js";
 import { parseCertificate, spkiFingerprint, X509Error } from "./internal/x509/certificate.js";
 import { DerError } from "./internal/x509/der.js";
@@ -18,7 +19,7 @@ import {
   type Register,
 } from "./measurement.js";
 
-export { Verifier, type EmbeddedConfigReference, type EmbeddedReferences, type VerifierOptions } from "./verifier.js";
+export { Verifier, type EmbeddedConfigBytes, type EmbeddedConfigReference, type EmbeddedReferences, type VerifierOptions } from "./verifier.js";
 export {
   cryptoMaterialData,
   Verification,
@@ -69,6 +70,13 @@ export {
   type TdxMeasurement,
 } from "./measurement.js";
 export type { Reference };
+
+/**
+ * The public registry's ID, the one accepted by default. `configRegistryIDs`
+ * names the exact accepted set, so a policy that accepts the public registry
+ * alongside others lists it: `[PUBLIC_REGISTRY_ID, ...mine]`.
+ */
+export const PUBLIC_REGISTRY_ID: string = PUBLIC_REGISTRY_ID_INTERNAL;
 
 /** Runs a check on caller input; its failure is a UsageError with the original error as `cause`. */
 function usage<T>(check: () => T): T {
