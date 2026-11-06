@@ -385,10 +385,16 @@ describe("EnclaveHTTPClient.close over TLS", () => {
 describe("EnclaveHTTPClient over EHBP", () => {
   it("seals requests to the enclave's key and reaches the enclave through a proxy with the enclave header", async () => {
     const docs = documents();
+    // The network reaches the proxy and nothing else, so a request to the enclave's own origin is seen leaving and refused here, not sent anywhere.
+    const network = recordingFetch(async (input, init) => {
+      const url = new URL(String(input));
+      if (url.origin === ehbp.origin) return runtimeFetch(input, init);
+      throw new TypeError(`no route to ${url.host}`);
+    });
     const proxied = await createEnclaveHTTPClient(
       "enclave.example",
       "",
-      { verifier: verifier(() => ({ tls: "ab".repeat(32), hpke: ehbp.publicKeyHex })), transportMode: "ehbp", baseURL: `${ehbp.origin}/` },
+      { verifier: verifier(() => ({ tls: "ab".repeat(32), hpke: ehbp.publicKeyHex })), transportMode: "ehbp", baseURL: `${ehbp.origin}/`, fetch: network.fetch },
       { documentFetch: docs.fetch },
     );
     expect(proxied.baseURL).toBe(`${ehbp.origin}/`);
@@ -398,8 +404,13 @@ describe("EnclaveHTTPClient over EHBP", () => {
     expect(await res.json()).toEqual({ path: "/echo", sealed: true, enclave: "https://enclave.example", text: "prompt" });
     const bodiless = await (await proxied.fetch(`${ehbp.origin}/echo`)).json();
     expect(bodiless.sealed).toBe(false);
-    await expect(proxied.fetch("https://enclave.example/echo", { method: "POST", body: "x" })).rejects.toThrow();
+    // The enclave's own origin is allowed beside the proxy's: the request leaves sealed, and fails only where the network has no route to it.
+    await expect(proxied.fetch("https://enclave.example/echo", { method: "POST", body: "x" })).rejects.toThrow(/no route to enclave\.example/);
+    expect(network.seen.map((s) => s.url)).toEqual([`${ehbp.origin}/echo`, `${ehbp.origin}/echo`, "https://enclave.example/echo"]);
+    expect(network.seen[2]!.headers.has(PROTOCOL.ENCAPSULATED_KEY_HEADER)).toBe(true);
+    expect(network.seen[2]!.body).not.toContain("x");
     await expect(proxied.fetch("https://other.example/echo")).rejects.toThrow(/client is bound to enclave/);
+    expect(network.seen).toHaveLength(3);
   });
 
   it("sends sealed requests through the fetch option and opens their responses, while attestation documents keep the runtime's fetch", async () => {

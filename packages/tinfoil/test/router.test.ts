@@ -92,6 +92,14 @@ describe("discoverRouter", () => {
     expect(transport.enclave().host()).toBe("r2.example");
   });
 
+  it("skips a list entry that is not a host and tries the hosts after it", async () => {
+    const docs = documents();
+    const list = routerList(["https://r1.example/routers", "r1.example/path", "", "r2.example"]);
+    const transport = await discoverRouter(config({ routersFetch: list.fetch, documentFetch: docs.fetch }));
+    expect(transport.enclave().host()).toBe("r2.example");
+    expect(docs.hosts).toEqual(["r2.example"]);
+  });
+
   it("falls back to the default router, unverified, when no router verifies", async () => {
     const docs = documents(["r1.example", "r2.example"]);
     const transport = await discoverRouter(config({ routersFetch: routerList(["r1.example", "r2.example"]).fetch, documentFetch: docs.fetch }));

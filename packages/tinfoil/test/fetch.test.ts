@@ -126,14 +126,37 @@ describe("fetchDocument", () => {
   });
 
   it("passes a caller's signal through and rejects once it aborts", async () => {
-    const controller = new AbortController();
-    controller.abort(new Error("caller gave up"));
+    // A signal aborted before the call stops it before any request is sent.
+    const early = new AbortController();
+    early.abort(new Error("caller gave up"));
     const { fetch, calls } = routed({ [endpoint]: () => new Response(new Uint8Array([1])) });
     const guarded: Fetch = async (input, init) => {
       init?.signal?.throwIfAborted();
       return fetch(input, init);
     };
-    await expect(fetchDocument("enclave.example", undefined, nonce, guarded, controller.signal)).rejects.toThrow(/caller gave up/);
+    await expect(fetchDocument("enclave.example", undefined, nonce, guarded, early.signal)).rejects.toThrow(/caller gave up/);
     expect(calls).toHaveLength(0);
+
+    // A signal aborted while the request is pending ends it: the fetch
+    // waits, as a network fetch does, until the signal it was given aborts.
+    const controller = new AbortController();
+    const given: AbortSignal[] = [];
+    const waiting: Fetch = (_input, init) =>
+      new Promise((_resolve, reject) => {
+        const signal = init?.signal;
+        if (signal === null || signal === undefined) throw new Error("no signal given");
+        given.push(signal);
+        signal.addEventListener("abort", () => reject(signal.reason), { once: true });
+      });
+    const pending = fetchDocument("enclave.example", undefined, nonce, waiting, controller.signal);
+    expect(given).toHaveLength(1);
+    expect(given[0]!.aborted).toBe(false);
+    const reason = new Error("caller gave up");
+    controller.abort(reason);
+    const err = await pending.catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(NetworkError);
+    expect((err as Error).message).toMatch(/caller gave up/);
+    expect((err as Error).cause).toBe(reason);
+    expect(given[0]!.aborted).toBe(true);
   });
 });
