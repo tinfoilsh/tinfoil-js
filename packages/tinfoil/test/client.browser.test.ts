@@ -6,7 +6,7 @@
  * fetch, since a page can't start a server.
  */
 import { KEY_SPKI_FP_SHA256_V1_FORMAT, KEY_X25519_HPKE_V1_FORMAT, UsageError, type Verification, type Verifier } from "@tinfoilsh/verifier";
-import { Identity } from "ehbp";
+import { Identity, PROTOCOL } from "ehbp";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { createEnclaveHTTPClient, EnclaveHTTPClient, resolveTransportMode, type EnclaveClientSeams } from "../src/enclave-client.js";
 import { ConfigurationError } from "../src/errors.js";
@@ -25,6 +25,7 @@ import * as browserEntry from "../src/index.browser.js";
 import { createRealtimeWebSocket } from "../src/realtime.js";
 import { createWebSocket, pinnedWebSocketOptions } from "../src/websocket.js";
 import { createEhbpPeer, fetchOf, paced, type EhbpPeer } from "./helpers/ehbp-peer.js";
+import { recordingFetch } from "./helpers/network.js";
 
 const ENCLAVE = "enclave.example";
 let peer: EhbpPeer;
@@ -134,6 +135,33 @@ describe("EnclaveHTTPClient in a browser", () => {
     const res = await client.fetch(`https://${ENCLAVE}/echo`, { method: "POST", body: "prompt" });
     expect(await res.json()).toEqual({ path: "/echo", sealed: true, text: "prompt" });
     await expect(client.fetch("https://other.example/echo")).rejects.toThrow(/client is bound to enclave/);
+  });
+
+  it("sends sealed requests through the fetch option under the default mode, and refuses it with the TLS mode before any I/O", async () => {
+    const network = recordingFetch(fetchOf(peer));
+    const documents = { count: 0 };
+    const counting: Fetch = async () => {
+      documents.count++;
+      return new Response(new Uint8Array([1]));
+    };
+    const client = await createEnclaveHTTPClient(ENCLAVE, "tinfoilsh/repo", { verifier: verifier(peer.publicKeyHex), fetch: network.fetch }, { documentFetch: counting, sleep: async () => {} });
+    expect(documents.count).toBe(1);
+    expect(network.seen).toHaveLength(0);
+    const res = await client.fetch(`https://${ENCLAVE}/echo`, { method: "POST", body: "prompt", headers: { authorization: "Bearer t" } });
+    expect(await res.json()).toEqual({ path: "/echo", sealed: true, text: "prompt" });
+    expect(network.seen).toHaveLength(1);
+    expect(network.seen[0]!.headers.has(PROTOCOL.ENCAPSULATED_KEY_HEADER)).toBe(true);
+    expect(network.seen[0]!.headers.get("authorization")).toBe("Bearer t");
+    expect(network.seen[0]!.body).not.toContain("prompt");
+    const bodiless = await (await client.fetch(`https://${ENCLAVE}/echo`)).json();
+    expect(bodiless).toEqual({ path: "/echo", sealed: false, text: "" });
+    expect(network.seen).toHaveLength(2);
+    expect(documents.count).toBe(1);
+
+    const before = peer.seen.length;
+    await expect(createEnclaveHTTPClient(ENCLAVE, "tinfoilsh/repo", { verifier: verifier(peer.publicKeyHex), fetch: network.fetch, transportMode: "tls" }, { documentFetch: counting })).rejects.toBeInstanceOf(ConfigurationError);
+    expect(documents.count).toBe(1);
+    expect(peer.seen.length).toBe(before);
   });
 
   it("closes, refusing further use while keeping the last verification, and disposes with the async-dispose symbol", async () => {

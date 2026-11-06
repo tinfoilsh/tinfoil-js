@@ -57,9 +57,25 @@ export function resolveTransportMode(mode: TransportMode | undefined, globals?: 
   return mode;
 }
 
-/** @internal The transport mode's settings, from the seams. */
-export function modeFor(mode: TransportMode, seams: EnclaveClientSeams): Mode {
-  return mode === "tls" ? tlsMode(seams.tls) : ehbpMode(seams.ehbp);
+/**
+ * @internal The EHBP mode's settings: the caller's `fetch` option carries the
+ * sealed requests when given; otherwise the seam's fetch does, standing in
+ * for the runtime's, so a test of the option runs the same path as a caller.
+ */
+export function ehbpOptionsFor(fetchImpl: Fetch | undefined, seams: Pick<EnclaveClientSeams, "ehbp">): EHBPOptions {
+  return { ...seams.ehbp, fetch: fetchImpl ?? seams.ehbp?.fetch };
+}
+
+/** @internal The transport mode's settings: the caller's `fetch` option for the EHBP mode, and the seams. */
+export function modeFor(mode: TransportMode, fetchImpl: Fetch | undefined, seams: EnclaveClientSeams): Mode {
+  return mode === "tls" ? tlsMode(seams.tls) : ehbpMode(ehbpOptionsFor(fetchImpl, seams));
+}
+
+/** @internal Rejects the `fetch` option under the `"tls"` mode, which pins its own connections and sends nothing through a caller's fetch. */
+export function checkNetworkFetch(mode: TransportMode, fetchImpl: Fetch | undefined): void {
+  if (mode === "tls" && fetchImpl !== undefined) {
+    throw new ConfigurationError('the fetch option carries sealed requests, which requires transportMode "ehbp"; the "tls" transport mode pins its own connections');
+  }
 }
 
 /**
@@ -80,6 +96,7 @@ export function attestedFetch(transport: KeyedTransport, host: string, baseURL: 
 export function checkEnclaveOptions(host: string, options: EnclaveOptions, globals?: RuntimeGlobals): { mode: TransportMode; baseURL: string } {
   if (host === "") throw new ConfigurationError("enclave host is required");
   const mode = resolveTransportMode(options.transportMode, globals);
+  checkNetworkFetch(mode, options.fetch);
   const baseURL = options.baseURL ?? "";
   if (baseURL !== "") validateBaseURL(baseURL);
   if (mode === "tls") validateTLSBaseURL(baseURL, host);
@@ -105,7 +122,7 @@ export async function createEnclaveHTTPClient(host: string, repo: string, option
     nonce: seams.nonce,
     sleep: seams.sleep,
   });
-  const transport = new KeyedTransport(enclave, modeFor(mode, seams), seams.clock);
+  const transport = new KeyedTransport(enclave, modeFor(mode, options.fetch, seams), seams.clock);
   const client = construct(
     transport,
     baseURL !== "" ? baseURL : `https://${host}/`,
@@ -188,9 +205,9 @@ export class EnclaveHTTPClient {
    * Releases what the client holds and refuses further use. On Node, the
    * `"tls"` transport's pooled connections are closed, which also ends any
    * request still in flight on them with a {@link NetworkError}; the
-   * `"ehbp"` transport sends through the runtime's fetch and holds no
-   * connections of its own, so a request in flight completes. No
-   * verification runs again. Afterwards `fetch`, `ensureVerified`,
+   * `"ehbp"` transport sends through the runtime's fetch, or the `fetch`
+   * option, and holds no connections of its own, so a request in flight
+   * completes. No verification runs again. Afterwards `fetch`, `ensureVerified`,
    * `reverify` and the WebSocket functions reject with a
    * {@link ConfigurationError}; `current` still reports the last
    * verification. Closing again does nothing.

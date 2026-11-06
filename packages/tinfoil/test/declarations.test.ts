@@ -24,7 +24,7 @@ describePublishedDeclarations({
     /createTinfoilClient/,
     /create(Enclave|Router|Gateway)OpenAIClient/,
     /createTinfoilProvider/,
-    /openAIURLOf|setOpenAIURL|attestedFetch|checkEnclaveOptions|checkUnverifiedOptions|modeFor|resolveTransportMode/,
+    /openAIURLOf|setOpenAIURL|attestedFetch|checkEnclaveOptions|checkNetworkFetch|checkUnverifiedOptions|ehbpOptionsFor|modeFor|resolveTransportMode/,
   ],
   privatelyConstructed: {
     EnclaveHTTPClient: "enclave-client.d.ts",

@@ -5,7 +5,7 @@
  * created and tries routers for at most 30 seconds before falling back.
  */
 import type { Verification } from "@tinfoilsh/verifier";
-import { attestedFetch, modeFor, resolveTransportMode, setOpenAIURL, type EnclaveClientSeams } from "./enclave-client.js";
+import { attestedFetch, checkNetworkFetch, modeFor, resolveTransportMode, setOpenAIURL, type EnclaveClientSeams } from "./enclave-client.js";
 import { ConfigurationError } from "./errors.js";
 import { resolveUserCacheSecret } from "./internal/cachesecret.js";
 import { asyncDispose } from "./internal/dispose.js";
@@ -31,6 +31,7 @@ let construct: (transport: KeyedTransport, baseURL: string, openAIURL: string, f
 /** @internal The factory with its test seams; {@link RouterHTTPClient.create} is this without them. */
 export async function createRouterHTTPClient(options: RouterOptions, seams: RouterClientSeams): Promise<RouterHTTPClient> {
   const mode = resolveTransportMode(options.transportMode, seams.globals);
+  checkNetworkFetch(mode, options.fetch);
   let baseURL = options.baseURL ?? "";
   if (baseURL !== "") {
     validateBaseURL(baseURL);
@@ -45,7 +46,7 @@ export async function createRouterHTTPClient(options: RouterOptions, seams: Rout
   const transport = await discoverRouter({
     verifier: options.verifier,
     verificationCheck: options.verificationCheck,
-    mode: modeFor(mode, seams),
+    mode: modeFor(mode, options.fetch, seams),
     signal: options.signal,
     routersFetch: seams.routersFetch,
     documentFetch: seams.documentFetch,

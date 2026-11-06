@@ -314,6 +314,10 @@ describe("public surface", () => {
     await expect(createEnclaveOpenAIClient("enclave.example", "tinfoilsh/repo", { baseURL: "http://proxy.example/" }, {}, { documentFetch: fetches.fetch })).rejects.toBeInstanceOf(
       surface.ConfigurationError,
     );
+    // The fetch option carries sealed requests, so it is refused with the TLS mode before either fetch is called.
+    await expect(createEnclaveHTTPClient("enclave.example", "tinfoilsh/repo", { transportMode: "tls", fetch: fetches.fetch }, { documentFetch: fetches.fetch })).rejects.toBeInstanceOf(
+      surface.ConfigurationError,
+    );
     expect(fetches.calls).toBe(0);
   });
 
@@ -337,6 +341,7 @@ describe("public surface", () => {
     const seams = { routersFetch: fetches.fetch, documentFetch: fetches.fetch };
     await expect(createRouterHTTPClient({ transportMode: "tls", baseURL: "https://proxy.example/" }, seams)).rejects.toBeInstanceOf(surface.ConfigurationError);
     await expect(createRouterOpenAIClient({ baseURL: "http://proxy.example/" }, {}, seams)).rejects.toBeInstanceOf(surface.ConfigurationError);
+    await expect(createRouterOpenAIClient({ transportMode: "tls", fetch: fetches.fetch }, {}, seams)).rejects.toBeInstanceOf(surface.ConfigurationError);
     expect(fetches.calls).toBe(0);
   });
 });

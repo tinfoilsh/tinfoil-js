@@ -11,6 +11,7 @@ import { createGatewayOpenAIClient, GatewayOpenAIClient } from "../src/openai-cl
 import type { Catalog, Fetch, GatewayOptions } from "../src/options.js";
 import { KEY_SPKI_FP_SHA256_V1_FORMAT, KEY_X25519_HPKE_V1_FORMAT, UsageError, type Verification, type Verifier } from "../../verifier/src/index.js";
 import { startEhbpServer, type EhbpServer } from "./helpers/ehbp-server.js";
+import { recordingFetch } from "./helpers/network.js";
 
 const GATEWAY_URL = "https://gateway.example/v1/";
 const CATALOG = { "test-model": { repo: "tinfoilsh/test", hosts: ["replica-a.example", "replica-b.example"] }, other: { repo: "tinfoilsh/other", hosts: ["o.example"] } };
@@ -225,6 +226,27 @@ describe("GatewayHTTPClient", () => {
     expect(c.current.map((r) => r.host)).toEqual(["replica-b.example"]);
     expect(checked).toEqual([gateway.publicKeyHex]);
     expect(() => new (GatewayHTTPClient as any)(Symbol("x"))).toThrow(ConfigurationError);
+  });
+});
+
+describe("GatewayHTTPClient with a network fetch", () => {
+  it("sends sealed requests through the fetch option, while the catalog and attestation documents keep their own fetches", async () => {
+    const network = recordingFetch(toLocal());
+    const s = seams({ ehbp: undefined });
+    const client = await createGatewayHTTPClient({ verifier: verifier(gateway.publicKeyHex), url: GATEWAY_URL, fetch: network.fetch }, s);
+    expect(s.calls).toEqual(["https://gateway.example/catalog"]);
+    expect(network.seen).toHaveLength(0);
+
+    const res = await client.fetch(`${GATEWAY_URL}chat/completions`, { method: "POST", body: '{"model":"test-model","messages":[{"role":"user","content":"hi"}]}', headers: { "content-type": "application/json", "x-raw": "1", authorization: "Bearer k" } });
+    expect(JSON.parse(await res.text())).toMatchObject({ model: "test-model", cache_salt: expect.stringMatching(/^[A-Za-z0-9_-]{43}$/) });
+    expect(s.calls.filter((c) => c.includes("tinfoil-attestation"))).toHaveLength(1);
+    expect(network.seen).toHaveLength(1);
+    const sealed = network.seen[0]!;
+    expect(sealed.url).toBe(`${GATEWAY_URL}chat/completions`);
+    expect(sealed.headers.get("x-tinfoil-model")).toBe("test-model");
+    expect(sealed.headers.get("authorization")).toBe("Bearer k");
+    expect(sealed.body).not.toContain("messages");
+    expect(gateway.seen[gateway.seen.length - 1]!.sealed).toBe(true);
   });
 });
 

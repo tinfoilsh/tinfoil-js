@@ -4,9 +4,9 @@
  * proxy in front, the verification facts, the replay after a key rotation,
  * and the OpenAI client bound to the attested fetch.
  */
-import { Identity } from "ehbp";
+import { Identity, PROTOCOL } from "ehbp";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
-import { createEnclaveHTTPClient, EnclaveHTTPClient, resolveTransportMode, type EnclaveClientSeams } from "../src/enclave-client.js";
+import { checkEnclaveOptions, createEnclaveHTTPClient, EnclaveHTTPClient, resolveTransportMode, type EnclaveClientSeams } from "../src/enclave-client.js";
 import { checkTransportMode, defaultTransportMode, isBun, isServerRuntime } from "../src/internal/platform.js";
 import { AttestationError, ConfigurationError } from "../src/errors.js";
 import { createEnclaveOpenAIClient, EnclaveOpenAIClient } from "../src/openai-client.js";
@@ -14,11 +14,14 @@ import type { EnclaveOptions, Fetch } from "../src/options.js";
 import { KEY_SPKI_FP_SHA256_V1_FORMAT, KEY_X25519_HPKE_V1_FORMAT, UsageError, type Verification, type Verifier } from "../../verifier/src/index.js";
 import { createWebSocket, pinnedWebSocketOptions } from "../src/websocket.js";
 import { startEhbpServer, type EhbpServer } from "./helpers/ehbp-server.js";
+import { recordingFetch } from "./helpers/network.js";
 import { paced, startTlsServer, TEST_CERT, TEST_PIN, type TlsServer } from "./helpers/tls-server.js";
 
 let tls: TlsServer;
 let ehbp: EhbpServer;
 let sseEnded = false;
+/** The runtime's fetch as it was before any test replaces the global, for a network fetch to forward over. */
+const runtimeFetch: Fetch = globalThis.fetch.bind(globalThis);
 
 /** A verifier whose verifications carry the given keys; `keys` is read per verification so a test can rotate them. */
 function verifier(keys: () => { tls?: string; hpke?: string }): Verifier {
@@ -121,6 +124,7 @@ describe("EnclaveHTTPClient.create", () => {
 
   it("checks its options before fetching anything", async () => {
     const docs = documents();
+    const network = recordingFetch(runtimeFetch);
     const seams: EnclaveClientSeams = { documentFetch: docs.fetch };
     const v = verifier(() => ({ tls: TEST_PIN }));
     const cases: [string, string, EnclaveOptions][] = [
@@ -131,12 +135,28 @@ describe("EnclaveHTTPClient.create", () => {
       ["enclave.example", "tinfoilsh/repo", { verifier: v, transportMode: "tls", baseURL: "https://proxy.example/" }],
       ["enclave.example", "tinfoilsh/repo", { verifier: v, transportMode: "ehbp", baseURL: "https://proxy.example/v1/?key=1" }],
       ["enclave.example", "tinfoilsh/repo", { verifier: v, transportMode: "ehbp", baseURL: "https://proxy.example/v1/#frag" }],
+      ["enclave.example", "tinfoilsh/repo", { verifier: v, transportMode: "tls", fetch: network.fetch }],
+      ["enclave.example", "tinfoilsh/repo", { verifier: v, fetch: network.fetch }],
       ["enclave.example", "bad repo", { verifier: v }],
     ];
     for (const [host, repo, options] of cases) {
       await expect(createEnclaveHTTPClient(host, repo, options, seams), `${host} ${repo}`).rejects.toBeInstanceOf(ConfigurationError);
     }
     expect(docs.calls).toHaveLength(0);
+    expect(network.seen).toHaveLength(0);
+  });
+
+  it("refuses the fetch option under the TLS transport mode, naming the EHBP mode, and accepts it where EHBP is the default", () => {
+    const network = recordingFetch(runtimeFetch);
+    const refused = /fetch option .* requires transportMode "ehbp"/;
+    expect(() => checkEnclaveOptions("enclave.example", { fetch: network.fetch, transportMode: "tls" })).toThrow(refused);
+    expect(() => checkEnclaveOptions("enclave.example", { fetch: network.fetch }, { process: { versions: { node: "22.0.0" } } })).toThrow(refused);
+    expect(checkEnclaveOptions("enclave.example", { fetch: network.fetch, transportMode: "ehbp" })).toEqual({ mode: "ehbp", baseURL: "" });
+    // A browser resolves no mode to EHBP, so the option needs no mode there; the TLS mode is refused for the browser's own reason.
+    const worker = { self: {} } as unknown as Parameters<typeof checkEnclaveOptions>[2];
+    expect(checkEnclaveOptions("enclave.example", { fetch: network.fetch }, worker)).toEqual({ mode: "ehbp", baseURL: "" });
+    expect(() => checkEnclaveOptions("enclave.example", { fetch: network.fetch, transportMode: "tls" }, worker)).toThrow(/browsers don't expose/);
+    expect(network.seen).toHaveLength(0);
   });
 
   it("verifies before returning and reports a failed verification without constructing the client", async () => {
@@ -347,6 +367,49 @@ describe("EnclaveHTTPClient over EHBP", () => {
     expect(bodiless.sealed).toBe(false);
     await expect(proxied.fetch("https://enclave.example/echo", { method: "POST", body: "x" })).rejects.toThrow();
     await expect(proxied.fetch("https://other.example/echo")).rejects.toThrow(/client is bound to enclave/);
+  });
+
+  it("sends sealed requests through the fetch option and opens their responses, while attestation documents keep the runtime's fetch", async () => {
+    const network = recordingFetch(runtimeFetch);
+    // The runtime's fetch answers attestation requests and nothing else; sealed requests must not reach it.
+    const runtime = vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+      const url = input instanceof Request ? input.url : String(input);
+      if (url.includes("/.well-known/tinfoil-attestation")) return new Response(new Uint8Array([1]));
+      return runtimeFetch(input, init);
+    });
+    try {
+      const client = await createEnclaveHTTPClient(
+        "enclave.example",
+        "",
+        { verifier: verifier(() => ({ tls: "ab".repeat(32), hpke: ehbp.publicKeyHex })), transportMode: "ehbp", baseURL: `${ehbp.origin}/`, fetch: network.fetch },
+        {},
+      );
+      expect(runtime.mock.calls.map(([input]) => String(input instanceof Request ? input.url : input))).toEqual([expect.stringMatching(/^https:\/\/enclave\.example\/\.well-known\/tinfoil-attestation\?nonce=/)]);
+      expect(network.seen).toHaveLength(0);
+
+      const res = await client.fetch(`${ehbp.origin}/echo`, { method: "POST", body: "prompt", headers: { authorization: "Bearer k" } });
+      expect(await res.json()).toEqual({ path: "/echo", sealed: true, enclave: "https://enclave.example", text: "prompt" });
+      expect(network.seen).toHaveLength(1);
+      const sealed = network.seen[0]!;
+      expect(sealed.url).toBe(`${ehbp.origin}/echo`);
+      expect(sealed.headers.has(PROTOCOL.ENCAPSULATED_KEY_HEADER)).toBe(true);
+      expect(sealed.headers.get("x-tinfoil-enclave-url")).toBe("https://enclave.example");
+      expect(sealed.headers.get("authorization")).toBe("Bearer k");
+      expect(sealed.body).not.toContain("prompt");
+      expect(sealed.body.length).toBeGreaterThan("prompt".length);
+
+      const bodiless = await (await client.fetch(`${ehbp.origin}/echo`, { headers: { authorization: "Bearer k" } })).json();
+      expect(bodiless).toMatchObject({ path: "/echo", sealed: false });
+      expect(network.seen).toHaveLength(2);
+      expect(network.seen[1]!.headers.has(PROTOCOL.ENCAPSULATED_KEY_HEADER)).toBe(false);
+      expect(network.seen[1]!.headers.get("authorization")).toBe("Bearer k");
+      expect(network.seen[1]!.body).toBe("");
+
+      // Nothing but the attestation document went through the runtime's fetch.
+      expect(runtime).toHaveBeenCalledTimes(1);
+    } finally {
+      runtime.mockRestore();
+    }
   });
 
   it("ends the base URL with a slash, keeps requests on its origin, and gives an OpenAI client the same paths either way", async () => {

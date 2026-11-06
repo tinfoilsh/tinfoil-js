@@ -7,7 +7,7 @@
  * @experimental The gateway route is new; this API may change without a major version.
  */
 import type { Verification } from "@tinfoilsh/verifier";
-import type { EnclaveClientSeams } from "./enclave-client.js";
+import { ehbpOptionsFor, type EnclaveClientSeams } from "./enclave-client.js";
 import { ConfigurationError } from "./errors.js";
 import { resolveUserCacheSecret } from "./internal/cachesecret.js";
 import { asyncDispose } from "./internal/dispose.js";
@@ -66,7 +66,7 @@ export async function createGatewayHTTPClient(options: GatewayOptions, seams: Ga
     clock: seams.clock,
     nonce: seams.nonce,
     sleep: seams.sleep,
-    ehbp: seams.ehbp,
+    ehbp: ehbpOptionsFor(options.fetch, seams),
   });
   const client = construct(transport, baseURL, withOriginRestriction(transport.fetch, "", baseURL));
   // An unreachable gateway fails here rather than on the first request.
@@ -135,8 +135,8 @@ export class GatewayHTTPClient {
    * Refuses further use: `fetch`, `models` and `ensureVerified` reject with
    * a {@link ConfigurationError} afterwards, and no replica is verified
    * again; `current` still reports the replicas' last verifications.
-   * Requests are sealed and sent through the runtime's fetch, so the client
-   * holds no connections of its own to release; a sealed exchange already
+   * Requests are sealed and sent through the runtime's fetch, or the `fetch`
+   * option, so the client holds no connections of its own to release; a sealed exchange already
    * under way completes, while a request still preparing, verifying or
    * rerouting rejects as closed. Closing again does nothing.
    */
