@@ -175,6 +175,34 @@ describe("public surface", () => {
     expect(rejected.name).toBe("VerificationError");
   });
 
+  it("parses measurements and reports a bad register as a usage error carrying the original", () => {
+    const hex = "ab".repeat(surface.REGISTER_SIZE);
+    expect(surface.registerHex(surface.parseRegister(hex.toUpperCase()))).toBe(hex);
+    expect(surface.parseExpectedSevSnp("")).toEqual({ platform: "sev-snp", launch: undefined });
+    expect(surface.parseExpectedTdx(hex, "", "", "", "")).toEqual({ platform: "tdx", mrtd: surface.parseRegister(hex), rtmr0: undefined, rtmr1: undefined, rtmr2: undefined, rtmr3: undefined });
+    const failures: [() => unknown, string][] = [
+      [() => surface.parseRegister("zz"), `register must be ${2 * surface.REGISTER_SIZE} hex characters, got 2`],
+      [() => surface.parseRegister("g".repeat(2 * surface.REGISTER_SIZE)), "register is not hex"],
+      [() => surface.parseExpectedSevSnp("zz"), `Launch: register must be ${2 * surface.REGISTER_SIZE} hex characters, got 2`],
+      [() => surface.parseExpectedTdx(hex, "", "zz", "", ""), `RTMR1: register must be ${2 * surface.REGISTER_SIZE} hex characters, got 2`],
+    ];
+    for (const [parse, message] of failures) {
+      let thrown: unknown;
+      try {
+        parse();
+      } catch (err) {
+        thrown = err;
+      }
+      expect(thrown).toBeInstanceOf(surface.UsageError);
+      expect(thrown).toBeInstanceOf(surface.VerifyError);
+      const usage = thrown as surface.UsageError;
+      expect(usage.message).toBe(`usage error: ${message}`);
+      expect(usage.cause).toBeInstanceOf(Error);
+      expect((usage.cause as Error).message).toBe(message);
+      expect(usage.cause).not.toBeInstanceOf(surface.VerifyError);
+    }
+  });
+
   it("parses references and reports a bad one as a usage error", () => {
     expect(surface.parseReference("tinfoilsh/repo@v1.0.0@sha256:" + "a".repeat(64))).toEqual({ repo: "tinfoilsh/repo", tag: "v1.0.0", digest: "a".repeat(64) });
     expect(surface.parseReference("tinfoilsh/repo")).toEqual({ repo: "tinfoilsh/repo", tag: "", digest: "" });
