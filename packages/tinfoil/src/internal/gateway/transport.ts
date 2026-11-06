@@ -13,6 +13,7 @@
 import type { Verification } from "@tinfoilsh/verifier";
 import { AttestationError, ConfigurationError, messageOf, NetworkError, type TinfoilError } from "../../errors.js";
 import type { Catalog, Fetch, ReplicaVerification, VerificationCheck } from "../../options.js";
+import { closedError } from "../dispose.js";
 import { Enclave, type EnclaveConfig } from "../enclave.js";
 import { checkEHBP, ehbpMode, type EHBPOptions } from "../transport/ehbp.js";
 import { withEnclaveURL } from "../transport/header.js";
@@ -62,6 +63,7 @@ export class GatewayTransport {
   readonly #replicas = new Map<string, ReplicaTransport>();
   /** Cache prefix to the host the gateway last routed it to. */
   #rerouted = new Map<string, string>();
+  #closed = false;
   /** Sends a request to a verified replica of the model it names. */
   readonly fetch: Fetch;
 
@@ -79,6 +81,7 @@ export class GatewayTransport {
 
   /** The catalog's models that the policy serves, sorted, without verifying replicas. */
   async models(signal?: AbortSignal): Promise<string[]> {
+    if (this.#closed) throw closedError();
     signal?.throwIfAborted();
     const catalog = await this.#catalog(signal);
     return [...catalog.keys()].filter((model) => this.#config.policy.serves(model, catalog)).sort();
@@ -90,6 +93,7 @@ export class GatewayTransport {
    * while it stays valid. Stops once `signal` aborts.
    */
   async ensureVerified(model: string, signal?: AbortSignal): Promise<Verification> {
+    if (this.#closed) throw closedError();
     const catalog = await this.#catalog(signal);
     const { hosts, replica } = this.#config.policy.resolve(model, catalog);
     let failure: unknown;
@@ -116,11 +120,24 @@ export class GatewayTransport {
     return results.sort((a, b) => compare(a.host, b.host) || compare(a.reference, b.reference) || compare(a.pinnedModel, b.pinnedModel));
   }
 
+  /**
+   * Closes every replica's transport, including one still being built, and
+   * refuses further use: requests, the model listing and verification calls
+   * reject as closed, while {@link verifications} still reports the last
+   * ones. Closing again does nothing.
+   */
+  close(): void {
+    if (this.#closed) return;
+    this.#closed = true;
+    for (const rt of this.#replicas.values()) rt.keyed.close();
+  }
+
   async #send(input: string | URL | Request, init?: RequestInit): Promise<Response> {
     const shape = shapeOf(input, init);
     // Each replica's EHBP transport makes the same check; making it here
     // refuses a request before the catalog is read or a replica verified.
     checkEHBP(shape);
+    if (this.#closed) throw closedError();
     const request = input instanceof Request ? input : undefined;
     // A Request carries a signal of its own; the init's takes precedence, as fetch has it.
     const signal = init?.signal ?? request?.signal;
@@ -183,7 +200,14 @@ export class GatewayTransport {
     let pending = this.#pending.get(key);
     if (pending === undefined) {
       pending = this.#build(r);
-      pending.then((rt) => this.#replicas.set(key, rt)).catch(() => {}).finally(() => this.#pending.delete(key));
+      pending
+        .then((rt) => {
+          this.#replicas.set(key, rt);
+          // A replica built after the close is closed with the rest.
+          if (this.#closed) rt.keyed.close();
+        })
+        .catch(() => {})
+        .finally(() => this.#pending.delete(key));
       this.#pending.set(key, pending);
     }
     return pending;

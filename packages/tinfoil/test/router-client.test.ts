@@ -197,6 +197,21 @@ describe("RouterHTTPClient over TLS", () => {
   });
 });
 
+describe("RouterHTTPClient.close", () => {
+  it("refuses further use, keeps the last verification, and closes again without effect", async () => {
+    const s = seams([tls.host]);
+    const client = await createRouterHTTPClient({ verifier: verifier({ tls: TEST_PIN }), transportMode: "tls" }, s);
+    const verified = s.documentHosts.length;
+    await client.close();
+    await client.close();
+    expect(client.current?.tlsPublicKeyFP).toBe(TEST_PIN);
+    await expect(client.fetch(`${tls.origin}/v1/models`)).rejects.toThrow(/client is closed/);
+    await expect(client.ensureVerified()).rejects.toBeInstanceOf(ConfigurationError);
+    await expect(client.reverify()).rejects.toThrow(/client is closed/);
+    expect(s.documentHosts).toHaveLength(verified);
+  });
+});
+
 describe("RouterHTTPClient over EHBP", () => {
   it("reaches the discovered router through a proxy, sealing the body with the secret spliced in", async () => {
     const s = seams(["router.example"]);

@@ -7,11 +7,16 @@
  * attested transport. Per-request `fetchOptions` are passed through to the
  * attested `fetch` and can't bypass it; only a separately constructed OpenAI
  * client sends requests outside the attested client's protections.
+ *
+ * The HTTP client owns the lifecycle: `httpClient.close()` releases it, and
+ * an `await using` of the OpenAI client does the same, for its clones too,
+ * since they share the transport.
  */
 import OpenAI, { type ClientOptions } from "openai";
 import { createEnclaveHTTPClient, EnclaveHTTPClient, openAIURLOf, type EnclaveClientSeams } from "./enclave-client.js";
 import { ConfigurationError } from "./errors.js";
 import { createGatewayHTTPClient, GatewayHTTPClient, type GatewayClientSeams } from "./gateway-client.js";
+import { asyncDispose } from "./internal/dispose.js";
 import type { EnclaveOptions, GatewayOptions, RouterOptions } from "./options.js";
 import { createRouterHTTPClient, RouterHTTPClient, type RouterClientSeams } from "./router-client.js";
 
@@ -98,6 +103,11 @@ export class TinfoilClient extends OpenAI {
     return new TinfoilClient(TOKEN, this.httpClient, inherit(this, options)) as this;
   }
 
+  /** Closes `httpClient` at the end of an `await using` block; see {@link RouterHTTPClient.close}. */
+  [asyncDispose](): Promise<void> {
+    return this.httpClient.close();
+  }
+
   /** A client for the recommended route, verified before it returns. */
   static create(options?: OpenAIOptions): Promise<TinfoilClient> {
     return createTinfoilClient(options ?? {}, {});
@@ -151,6 +161,11 @@ export class EnclaveOpenAIClient extends OpenAI {
     return new EnclaveOpenAIClient(TOKEN, this.httpClient, inherit(this, options)) as this;
   }
 
+  /** Closes `httpClient` at the end of an `await using` block; see {@link EnclaveHTTPClient.close}. */
+  [asyncDispose](): Promise<void> {
+    return this.httpClient.close();
+  }
+
   /** Creates an enclave client as {@link EnclaveHTTPClient.create} does, and an OpenAI client over it. */
   static create(host: string, repo: string, options?: EnclaveOptions, openaiOptions?: OpenAIOptions): Promise<EnclaveOpenAIClient> {
     return createEnclaveOpenAIClient(host, repo, options ?? {}, openaiOptions ?? {}, {});
@@ -181,6 +196,11 @@ export class RouterOpenAIClient extends OpenAI {
   /** A client with `options` applied over this one's, on the same attested transport. */
   override withOptions(options: Partial<ClientOptions> & Partial<OpenAIOptions>): this {
     return new RouterOpenAIClient(TOKEN, this.httpClient, inherit(this, options)) as this;
+  }
+
+  /** Closes `httpClient` at the end of an `await using` block; see {@link RouterHTTPClient.close}. */
+  [asyncDispose](): Promise<void> {
+    return this.httpClient.close();
   }
 
   /** Creates a router client as {@link RouterHTTPClient.create} does, and an OpenAI client over it. */
@@ -219,6 +239,11 @@ export class GatewayOpenAIClient extends OpenAI {
   /** A client with `options` applied over this one's, on the same attested transport. */
   override withOptions(options: Partial<ClientOptions> & Partial<OpenAIOptions>): this {
     return new GatewayOpenAIClient(TOKEN, this.httpClient, inherit(this, options)) as this;
+  }
+
+  /** Closes `httpClient` at the end of an `await using` block; see {@link GatewayHTTPClient.close}. */
+  [asyncDispose](): Promise<void> {
+    return this.httpClient.close();
   }
 
   /** Creates a gateway client as {@link GatewayHTTPClient.create} does, and an OpenAI client over it. */

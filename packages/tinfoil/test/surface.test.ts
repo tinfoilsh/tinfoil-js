@@ -71,7 +71,7 @@ const EXPORTS = [
  * runtime; the own properties of an instance are pinned in each client's
  * tests, where one is built.
  */
-type Members<T> = Record<keyof T, "property" | "getter" | "method">;
+type Members<T> = Record<Extract<keyof T, string>, "property" | "getter" | "method">;
 const ATTESTED_CLIENT_MEMBERS: Members<surface.EnclaveHTTPClient> & Members<surface.RouterHTTPClient> = {
   fetch: "property",
   baseURL: "property",
@@ -80,8 +80,9 @@ const ATTESTED_CLIENT_MEMBERS: Members<surface.EnclaveHTTPClient> & Members<surf
   current: "getter",
   ensureVerified: "method",
   reverify: "method",
+  close: "method",
 };
-const GATEWAY_CLIENT_MEMBERS: Members<surface.GatewayHTTPClient> = { fetch: "property", baseURL: "property", current: "getter", models: "method", ensureVerified: "method" };
+const GATEWAY_CLIENT_MEMBERS: Members<surface.GatewayHTTPClient> = { fetch: "property", baseURL: "property", current: "getter", models: "method", ensureVerified: "method", close: "method" };
 const UNVERIFIED_CLIENT_MEMBERS: Members<unsafeEntry.UnverifiedClient> = { fetch: "property", baseURL: "property", keyOrigin: "property" };
 /** What the OpenAI subclasses add to the OpenAI client. */
 const OPENAI_CLIENT_MEMBERS = { httpClient: "property", withOptions: "method" } as const satisfies Pick<Members<surface.TinfoilClient>, "httpClient" | "withOptions">;
@@ -217,6 +218,14 @@ describe("public surface", () => {
     }
     expect(staticsOf(surface.GatewayHTTPClient)).toEqual(["create"]);
     expectShape(surface.GatewayHTTPClient, GATEWAY_CLIENT_MEMBERS);
+  });
+
+  it("disposes the HTTP clients and the OpenAI clients over them with `await using`", () => {
+    for (const cls of [surface.EnclaveHTTPClient, surface.RouterHTTPClient, surface.GatewayHTTPClient, surface.TinfoilClient, surface.EnclaveOpenAIClient, surface.RouterOpenAIClient, surface.GatewayOpenAIClient]) {
+      expect(typeof (cls.prototype as AsyncDisposable)[Symbol.asyncDispose], cls.name).toBe("function");
+    }
+    expect(Symbol.asyncDispose in OpenAI.prototype).toBe(false);
+    expect(Symbol.asyncDispose in unsafeEntry.UnverifiedClient.prototype).toBe(false);
   });
 
   it("shapes the OpenAI clients as OpenAI subclasses with a `create` factory and an `httpClient` property", () => {

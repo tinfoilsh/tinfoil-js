@@ -9,6 +9,7 @@
  */
 import type { Verification } from "@tinfoilsh/verifier";
 import { AttestationError } from "../errors.js";
+import { closedError } from "./dispose.js";
 import { Enclave, FRESHNESS_EXPIRED, freshAt } from "./enclave.js";
 
 /** One successful verification and what the transport bound to its keys. */
@@ -29,6 +30,7 @@ export class VerifiedEnclave<T = void> {
   #current: Entry<T> | undefined;
   /** The refresh in flight, shared by every caller that needs one. */
   #refreshing: Promise<void> | undefined;
+  #closed = false;
 
   /**
    * `bind` makes what the transport ties to a verification's keys; a cache
@@ -72,12 +74,25 @@ export class VerifiedEnclave<T = void> {
     if (this.#current !== undefined && this.#current.verification === state.verification) this.#current.rejected = true;
   }
 
+  /**
+   * Releases the current binding and verifies no more: every later call
+   * for a state rejects as closed, and a refresh in flight releases what it
+   * binds instead of publishing it. The last verification stays readable.
+   * Closing again does nothing.
+   */
+  close(): void {
+    if (this.#closed) return;
+    this.#closed = true;
+    if (this.#current !== undefined) this.#release(this.#current.bound);
+  }
+
   #valid(entry: Entry<T>): boolean {
     return !entry.rejected && freshAt(entry.verification, this.#clock());
   }
 
   async #verified(signal: AbortSignal | undefined, force: boolean, verify: (e: Enclave) => Promise<Verification>): Promise<State<T>> {
     for (;;) {
+      if (this.#closed) throw closedError();
       signal?.throwIfAborted();
       const current = this.#current;
       if (current !== undefined && this.#valid(current) && !force) return current;
@@ -101,6 +116,11 @@ export class VerifiedEnclave<T = void> {
     const verification = await verify(this.#enclave);
     const bound = await this.#bind(verification);
     const entry: Entry<T> = { verification, bound, rejected: false };
+    // A close during the refresh already released the current binding; this one is not published.
+    if (this.#closed) {
+      this.#release(bound);
+      throw closedError();
+    }
     // Binding can outlast freshness.
     if (!this.#valid(entry)) {
       this.#release(bound);

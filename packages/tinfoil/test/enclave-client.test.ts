@@ -5,13 +5,14 @@
  * and the OpenAI client bound to the attested fetch.
  */
 import { Identity } from "ehbp";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { createEnclaveHTTPClient, EnclaveHTTPClient, resolveTransportMode, type EnclaveClientSeams } from "../src/enclave-client.js";
 import { checkTransportMode, defaultTransportMode, isServerRuntime } from "../src/internal/platform.js";
 import { AttestationError, ConfigurationError } from "../src/errors.js";
 import { createEnclaveOpenAIClient, EnclaveOpenAIClient } from "../src/openai-client.js";
 import type { EnclaveOptions, Fetch } from "../src/options.js";
 import { KEY_SPKI_FP_SHA256_V1_FORMAT, KEY_X25519_HPKE_V1_FORMAT, UsageError, type Verification, type Verifier } from "../../verifier/src/index.js";
+import { createWebSocket, pinnedWebSocketOptions } from "../src/websocket.js";
 import { startEhbpServer, type EhbpServer } from "./helpers/ehbp-server.js";
 import { paced, startTlsServer, TEST_CERT, TEST_PIN, type TlsServer } from "./helpers/tls-server.js";
 
@@ -253,6 +254,66 @@ describe("EnclaveHTTPClient over TLS", () => {
   });
 });
 
+describe("EnclaveHTTPClient.close over TLS", () => {
+  /** A server of this group's own, so the connections counted are only those of the clients made here. */
+  let own: TlsServer;
+  const options: EnclaveOptions = { verifier: verifier(() => ({ tls: TEST_PIN })), transportMode: "tls" };
+
+  beforeAll(async () => {
+    own = await startTlsServer((seen) =>
+      seen.path === "/sse" ? { headers: { "content-type": "text/event-stream" }, body: paced(["data: a\n\n", "data: b\n\n"], 2_000) } : { body: "ok" },
+    );
+  });
+
+  afterAll(async () => {
+    await own.close();
+  });
+
+  it("closes the pooled connection, keeps the last verification, refuses further use, and closes again without effect", async () => {
+    const docs = documents();
+    const client = await createEnclaveHTTPClient(own.host, "tinfoilsh/repo", options, { documentFetch: docs.fetch, tls: { ca: TEST_CERT } });
+    expect(await (await client.fetch(`${own.origin}/models`)).text()).toBe("ok");
+    expect(own.openConnections()).toBe(1);
+    await client.close();
+    await vi.waitFor(() => expect(own.openConnections()).toBe(0));
+    await client.close();
+    expect(client.current?.tlsPublicKeyFP).toBe(TEST_PIN);
+    for (const call of [client.fetch(`${own.origin}/models`), client.ensureVerified(), client.reverify(), createWebSocket(client, "/x"), pinnedWebSocketOptions(client)]) {
+      await expect(call).rejects.toBeInstanceOf(ConfigurationError);
+      await expect(call).rejects.toThrow(/client is closed/);
+    }
+    expect(docs.calls).toHaveLength(1);
+    expect(own.openConnections()).toBe(0);
+  });
+
+  it("ends a response still streaming over the pooled connection", async () => {
+    const client = await createEnclaveHTTPClient(own.host, "tinfoilsh/repo", options, { documentFetch: documents().fetch, tls: { ca: TEST_CERT } });
+    const reader = (await client.fetch(`${own.origin}/sse`)).body!.getReader();
+    expect(new TextDecoder().decode((await reader.read()).value)).toBe("data: a\n\n");
+    await client.close();
+    await expect(reader.read()).rejects.toThrow();
+    await vi.waitFor(() => expect(own.openConnections()).toBe(0));
+  });
+
+  it("closes at the end of an `await using` block, and an OpenAI client closes the HTTP client under it", async () => {
+    const client = await createEnclaveHTTPClient(own.host, "tinfoilsh/repo", options, { documentFetch: documents().fetch, tls: { ca: TEST_CERT } });
+    {
+      await using scoped = client;
+      expect(scoped.current).toBeDefined();
+    }
+    await expect(client.ensureVerified()).rejects.toThrow(/client is closed/);
+
+    const ai = await createEnclaveOpenAIClient(own.host, "tinfoilsh/repo", options, { apiKey: "k", maxRetries: 0 }, { documentFetch: documents().fetch, tls: { ca: TEST_CERT } });
+    const clone = ai.withOptions({ apiKey: "k2" });
+    {
+      await using scoped = clone;
+      expect(scoped.httpClient).toBe(ai.httpClient);
+    }
+    await expect(ai.httpClient.ensureVerified()).rejects.toThrow(/client is closed/);
+    await expect(ai.chat.completions.create({ model: "test", messages: [{ role: "user", content: "hi" }] })).rejects.toThrow();
+  });
+});
+
 describe("EnclaveHTTPClient over EHBP", () => {
   it("seals requests to the enclave's key and reaches the enclave through a proxy with the enclave header", async () => {
     const docs = documents();
@@ -289,6 +350,20 @@ describe("EnclaveHTTPClient over EHBP", () => {
     expect((await res.json()).text).toBe("again");
     expect(verified).toBe(2);
     expect(ehbp.seen.length).toBe(before + 1);
+    expect(client.current?.hpkePublicKey).toBe(ehbp.publicKeyHex);
+  });
+
+  it("closes with nothing to release, and a sealed exchange in flight completes", async () => {
+    const client = await createEnclaveHTTPClient(
+      "enclave.example",
+      "",
+      { verifier: verifier(() => ({ tls: "ab".repeat(32), hpke: ehbp.publicKeyHex })), transportMode: "ehbp", baseURL: `${ehbp.origin}/` },
+      { documentFetch: documents().fetch },
+    );
+    const inFlight = client.fetch(`${ehbp.origin}/echo`, { method: "POST", body: "still going" });
+    await client.close();
+    expect((await (await inFlight).json()).text).toBe("still going");
+    await expect(client.fetch(`${ehbp.origin}/echo`, { method: "POST", body: "x" })).rejects.toThrow(/client is closed/);
     expect(client.current?.hpkePublicKey).toBe(ehbp.publicKeyHex);
   });
 
