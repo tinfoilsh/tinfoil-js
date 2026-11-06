@@ -278,7 +278,7 @@ const DOCUMENT_MEMBERS = [
   "collateral",
 ] as const;
 
-/** Strict unmarshal → format → challenge → cpu_evidence → sections → collateral. */
+/** @internal Strict unmarshal → format → challenge → cpu_evidence → sections → collateral. */
 export function decode(docBytes: Uint8Array): DecodedDocument {
   let root: JsonObject;
   let challenge: JsonObject;
@@ -353,7 +353,7 @@ function parseStage<T>(what: string, f: () => T): T {
   }
 }
 
-/** Checks nonce equality, section hashes and REPORT_DATA; returns the bound fields. */
+/** @internal Checks nonce equality, section hashes and REPORT_DATA; returns the bound fields. */
 export async function bind(doc: DecodedDocument, expectedNonce: Uint8Array): Promise<DecodedDocument> {
   if (doc.challenge.nonce !== toHex(expectedNonce)) {
     throw new Error("challenge nonce does not match the expected nonce");

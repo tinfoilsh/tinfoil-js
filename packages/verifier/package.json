@@ -14,7 +14,7 @@
     }
   },
   "scripts": {
-    "build": "tsc",
+    "build": "tsc && node ../../scripts/prune-declarations.mjs dist dist/index.d.ts",
     "build:conformance": "tsc -p conformance/tsconfig.json",
     "check:types": "tsc -p tsconfig.test.json",
     "lint": "eslint src conformance test scripts",

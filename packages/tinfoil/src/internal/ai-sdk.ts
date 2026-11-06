@@ -49,7 +49,7 @@ export interface TinfoilProvider extends OpenAICompatibleProvider {
   readonly httpClient: EnclaveHTTPClient | RouterHTTPClient;
 }
 
-/** Seams for tests: the attested clients' own, including the globals the runtime is identified by. */
+/** @internal Seams for tests: the attested clients' own, including the globals the runtime is identified by. */
 export type TinfoilProviderSeams = RouterClientSeams & EnclaveClientSeams;
 
 /**
@@ -67,7 +67,7 @@ function credentialOf(options: TinfoilProviderOptions, globals: RuntimeGlobals |
   return apiKey !== "" ? apiKey : bearerToken;
 }
 
-/** The factory with its test seams; {@link createTinfoil} is this without them. */
+/** @internal The factory with its test seams; {@link createTinfoil} is this without them. */
 export async function createTinfoilProvider(options: TinfoilProviderOptions, seams: TinfoilProviderSeams): Promise<TinfoilProvider> {
   // The credential is checked first, so a provider without one fails before any network I/O.
   const credential = credentialOf(options, seams.globals);
