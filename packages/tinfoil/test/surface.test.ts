@@ -111,6 +111,31 @@ type TypeExports = [
 const typeExports: TypeExports | undefined = undefined;
 void typeExports;
 
+/**
+ * Only the factories build clients: every constructor is private, so a
+ * caller who tries fails to compile. Never called; the directives pin the
+ * errors under the test typecheck.
+ */
+function privateConstructors(): void {
+  // @ts-expect-error The constructor is private; a client comes from EnclaveHTTPClient.create.
+  new surface.EnclaveHTTPClient({} as never);
+  // @ts-expect-error The constructor is private; a client comes from RouterHTTPClient.create.
+  new surface.RouterHTTPClient({} as never);
+  // @ts-expect-error The constructor is private; a client comes from GatewayHTTPClient.create.
+  new surface.GatewayHTTPClient({} as never);
+  // @ts-expect-error The constructor is private; a client comes from createClient.
+  new surface.TinfoilClient({} as never);
+  // @ts-expect-error The constructor is private; a client comes from EnclaveOpenAIClient.create.
+  new surface.EnclaveOpenAIClient({} as never);
+  // @ts-expect-error The constructor is private; a client comes from RouterOpenAIClient.create.
+  new surface.RouterOpenAIClient({} as never);
+  // @ts-expect-error The constructor is private; a client comes from GatewayOpenAIClient.create.
+  new surface.GatewayOpenAIClient({} as never);
+  // @ts-expect-error The constructor is private; a client comes from UnverifiedClient.create.
+  new unsafeEntry.UnverifiedClient({} as never);
+}
+void privateConstructors;
+
 const descriptorsOf = (cls: { prototype: object }): [string, PropertyDescriptor][] =>
   Object.getOwnPropertyNames(cls.prototype)
     .filter((n) => n !== "constructor")

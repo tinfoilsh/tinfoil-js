@@ -15,17 +15,17 @@ import type { KeyedTransport } from "./internal/transport/transport.js";
 import { registerWebSocketAccess } from "./internal/websocket.js";
 import type { CallOptions, Fetch, RouterOptions } from "./options.js";
 
-/** Seams for tests: the enclave client's, and the fetch that retrieves the router list. */
+/** @internal Seams for tests: the enclave client's, and the fetch that retrieves the router list. */
 export interface RouterClientSeams extends EnclaveClientSeams {
   readonly routersFetch?: Fetch;
   /** Resolves the cache secret when the option is empty. */
   readonly resolveSecret?: (explicit: string | undefined) => Promise<string>;
 }
 
-/** Marks construction by this module's factory; the constructor refuses anything else. */
-const TOKEN = Symbol("RouterHTTPClient");
+/** Calls the private constructor; the class assigns it, as the only place the constructor can be called. */
+let construct: (transport: KeyedTransport, baseURL: string, openAIURL: string, fetchImpl: Fetch) => RouterHTTPClient;
 
-/** The factory with its test seams; {@link RouterHTTPClient.create} is this without them. */
+/** @internal The factory with its test seams; {@link RouterHTTPClient.create} is this without them. */
 export async function createRouterHTTPClient(options: RouterOptions, seams: RouterClientSeams): Promise<RouterHTTPClient> {
   const mode = resolveTransportMode(options.transportMode, seams.globals);
   let baseURL = options.baseURL ?? "";
@@ -52,8 +52,7 @@ export async function createRouterHTTPClient(options: RouterOptions, seams: Rout
   });
   const secret = await (seams.resolveSecret ?? resolveUserCacheSecret)(options.userCacheSecret);
   const host = transport.enclave().host();
-  const client = new RouterHTTPClient(
-    TOKEN,
+  const client = construct(
     transport,
     baseURL !== "" ? baseURL : `https://${host}/`,
     baseURL !== "" ? baseURL : `https://${host}/v1/`,
@@ -65,6 +64,7 @@ export async function createRouterHTTPClient(options: RouterOptions, seams: Rout
   return client;
 }
 
+/** An HTTP client bound to the attested router it discovered; see the module header. Created only by {@link RouterHTTPClient.create}: the constructor is private. */
 export class RouterHTTPClient {
   /** As {@link EnclaveHTTPClient.fetch}. */
   readonly fetch: Fetch;
@@ -76,9 +76,7 @@ export class RouterHTTPClient {
   readonly repo: string;
   readonly #transport: KeyedTransport;
 
-  /** @internal Only {@link create} constructs a client; anything else is refused. */
-  constructor(token: symbol, transport: KeyedTransport, baseURL: string, openAIURL: string, fetchImpl: Fetch) {
-    if (token !== TOKEN) throw new ConfigurationError("RouterHTTPClient is created with RouterHTTPClient.create");
+  private constructor(transport: KeyedTransport, baseURL: string, openAIURL: string, fetchImpl: Fetch) {
     this.#transport = transport;
     this.fetch = fetchImpl;
     this.baseURL = baseURL;
@@ -87,6 +85,10 @@ export class RouterHTTPClient {
     setOpenAIURL(this, openAIURL);
     // The client's state lives in the transport; the client itself never changes once created.
     Object.freeze(this);
+  }
+
+  static {
+    construct = (...parts) => new RouterHTTPClient(...parts);
   }
 
   /**

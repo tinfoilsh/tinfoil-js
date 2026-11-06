@@ -25,24 +25,16 @@ import type { CallOptions, Catalog, Fetch, GatewayOptions, ReplicaVerification }
  */
 export const DEFAULT_GATEWAY_URL = "https://inference-gateway.tinfoil.sh/v1/";
 
-/**
- * Seams for tests: the enclave client's, the catalog fetch, and the secret resolution.
- *
- * @experimental The gateway route is new; this API may change without a major version.
- */
+/** @internal Seams for tests: the enclave client's, the catalog fetch, and the secret resolution. */
 export interface GatewayClientSeams extends Omit<EnclaveClientSeams, "tls"> {
   readonly catalogFetch?: Fetch;
   readonly resolveSecret?: (explicit: string | undefined) => Promise<string>;
 }
 
-/** Marks construction by this module's factory; the constructor refuses anything else. */
-const TOKEN = Symbol("GatewayHTTPClient");
+/** Calls the private constructor; the class assigns it, as the only place the constructor can be called. */
+let construct: (transport: GatewayTransport, baseURL: string, fetchImpl: Fetch) => GatewayHTTPClient;
 
-/**
- * The factory with its test seams; {@link GatewayHTTPClient.create} is this without them.
- *
- * @experimental The gateway route is new; this API may change without a major version.
- */
+/** @internal The factory with its test seams; {@link GatewayHTTPClient.create} is this without them. */
 export async function createGatewayHTTPClient(options: GatewayOptions, seams: GatewayClientSeams): Promise<GatewayHTTPClient> {
   const given = options.url === undefined || options.url === "" ? DEFAULT_GATEWAY_URL : options.url;
   let base: URL;
@@ -73,7 +65,7 @@ export async function createGatewayHTTPClient(options: GatewayOptions, seams: Ga
     sleep: seams.sleep,
     ehbp: seams.ehbp,
   });
-  const client = new GatewayHTTPClient(TOKEN, transport, baseURL, withOriginRestriction(transport.fetch, "", baseURL));
+  const client = construct(transport, baseURL, withOriginRestriction(transport.fetch, "", baseURL));
   // An unreachable gateway fails here rather than on the first request.
   await client.models({ signal: options.signal });
   return client;
@@ -81,7 +73,8 @@ export async function createGatewayHTTPClient(options: GatewayOptions, seams: Ga
 
 /**
  * The HTTP client for Tinfoil inference through the gateway; see the module
- * header for what it protects.
+ * header for what it protects. Created only by {@link GatewayHTTPClient.create}:
+ * the constructor is private.
  *
  * @experimental The gateway route is new; this API may change without a major version.
  */
@@ -92,14 +85,16 @@ export class GatewayHTTPClient {
   readonly baseURL: string;
   readonly #transport: GatewayTransport;
 
-  /** @internal Only {@link create} constructs a client; anything else is refused. */
-  constructor(token: symbol, transport: GatewayTransport, baseURL: string, fetchImpl: Fetch) {
-    if (token !== TOKEN) throw new ConfigurationError("GatewayHTTPClient is created with GatewayHTTPClient.create");
+  private constructor(transport: GatewayTransport, baseURL: string, fetchImpl: Fetch) {
     this.#transport = transport;
     this.fetch = fetchImpl;
     this.baseURL = baseURL;
     // The client's state lives in the transport; the client itself never changes once created.
     Object.freeze(this);
+  }
+
+  static {
+    construct = (...parts) => new GatewayHTTPClient(...parts);
   }
 
   /**

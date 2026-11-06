@@ -175,7 +175,8 @@ describe("UnverifiedClient", () => {
   });
 
   it("is constructed only through its factory", () => {
-    expect(() => new UnverifiedClient(Symbol("x"), "", "", fetch)).toThrow(/created with UnverifiedClient.create/);
+    // @ts-expect-error The constructor is private; a client comes from UnverifiedClient.create.
+    void (() => new UnverifiedClient({} as never));
     expect(Object.getOwnPropertyNames(UnverifiedClient).filter((n) => !["length", "name", "prototype"].includes(n))).toEqual(["create"]);
   });
 });

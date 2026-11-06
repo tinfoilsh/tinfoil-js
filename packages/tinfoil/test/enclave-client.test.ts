@@ -205,7 +205,6 @@ describe("EnclaveHTTPClient over TLS", () => {
     const completion = await ai.chat.completions.create({ model: "test", messages: [{ role: "user", content: "hi" }] });
     expect(completion.choices[0]!.message.content).toBe("pinned");
     expect(tls.seen[tls.seen.length - 1]!.headers.authorization).toBe("Bearer k");
-    expect(() => new (EnclaveOpenAIClient as unknown as new (...a: unknown[]) => unknown)(Symbol("x"), ai.httpClient, {})).toThrow(ConfigurationError);
   });
 
   it("keeps the attested transport and its own settings through option changes and clones", async () => {
