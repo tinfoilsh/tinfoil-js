@@ -36,6 +36,8 @@ import { RouterOpenAIClient } from "tinfoil";
 const client = await RouterOpenAIClient.create({ baseURL: "https://proxy.example.com/v1/" }, { bearerToken: "<SESSION_TOKEN>" });
 ```
 
+Browsers use the EHBP transport, the default and the only one available there. The package's type declarations are shared with the Node build, so a browser project type-checks a few names that throw a `ConfigurationError` when called: `createWebSocket` and `pinnedWebSocketOptions` (a verified WebSocket pins the server certificate, which browsers don't expose to scripts), `createRealtimeWebSocket` (a realtime session runs over such a WebSocket), and `transportMode: "tls"` (the `"tls"` transport mode pins the server certificate too; `"ehbp"` seals request and response bodies to the enclave's key instead).
+
 The request body is still encrypted to the verified enclave's key; the proxy only forwards it. `baseURL` is the API root, as for `new OpenAI({ baseURL })`: the client appends `chat/completions` and the other OpenAI paths to it, so a proxy that forwards paths as they are takes the enclave's `/v1/`. Multi-user services must scope prompt caches to each end user with `userCacheSecret` or a per-request `user_cache_secret`; see [Prompt caching](https://docs.tinfoil.sh/sdk/prompt-caching).
 
 ## Errors
