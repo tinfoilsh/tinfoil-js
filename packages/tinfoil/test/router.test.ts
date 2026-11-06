@@ -3,7 +3,8 @@
  * the order routers are tried in, the fallback, the time budget, and the
  * failures that stop discovery instead of moving it on.
  */
-import { describe, expect, it } from "vitest";
+import { Agent } from "node:https";
+import { describe, expect, it, vi } from "vitest";
 import { ConfigurationError } from "../src/errors.js";
 import { DEFAULT_ROUTER_URL, discoverRouter, FALLBACK_ROUTER_HOST, fetchRouters, MAX_ROUTER_BYTES, type DiscoveryConfig } from "../src/internal/router.js";
 import { tlsMode } from "../src/internal/transport/tls.js";
@@ -158,6 +159,33 @@ describe("discoverRouter", () => {
       return new Response(JSON.stringify(["r1.example"]));
     };
     await expect(discoverRouter(config({ routersFetch: list, documentFetch: documents().fetch, signal: controller.signal }))).rejects.toThrow(/caller gave up/);
+  });
+
+  it("closes a candidate whose probe the caller's signal cut short, so what its verification binds is released when it finishes", async () => {
+    const destroyed = vi.spyOn(Agent.prototype, "destroy");
+    try {
+      let begun!: () => void;
+      let serve!: () => void;
+      const started = new Promise<void>((resolve) => (begun = resolve));
+      const held = new Promise<void>((resolve) => (serve = resolve));
+      const documentFetch: Fetch = async () => {
+        begun();
+        await held;
+        return new Response(new Uint8Array([1]));
+      };
+      const controller = new AbortController();
+      const pending = discoverRouter(config({ routersFetch: routerList(["r1.example"]).fetch, documentFetch, signal: controller.signal }));
+      await started;
+      const reason = new Error("caller gave up");
+      controller.abort(reason);
+      await expect(pending).rejects.toBe(reason);
+      expect(destroyed).not.toHaveBeenCalled();
+      // The probe finishes after discovery ended; the pool that its verification binds is destroyed rather than kept.
+      serve();
+      await vi.waitFor(() => expect(destroyed).toHaveBeenCalledTimes(1));
+    } finally {
+      destroyed.mockRestore();
+    }
   });
 });
 

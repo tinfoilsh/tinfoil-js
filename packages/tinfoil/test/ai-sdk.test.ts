@@ -7,6 +7,7 @@
  * and structured-output paths parsing what the server answers.
  */
 import { generateObject, generateText, NoObjectGeneratedError, Output, streamText, tool } from "ai";
+import { PROTOCOL } from "ehbp";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { z } from "zod";
 import { createTinfoil, createTinfoilProvider, type TinfoilProviderOptions, type TinfoilProviderSeams } from "../src/internal/ai-sdk.js";
@@ -18,6 +19,7 @@ import type { Fetch } from "../src/options.js";
 import { RouterHTTPClient } from "../src/router-client.js";
 import { KEY_SPKI_FP_SHA256_V1_FORMAT, KEY_X25519_HPKE_V1_FORMAT, UsageError, type Verification, type Verifier } from "../../verifier/src/index.js";
 import { startEhbpServer, type EhbpServer } from "./helpers/ehbp-server.js";
+import { recordingFetch } from "./helpers/network.js";
 import { paced, startTlsServer, TEST_CERT, TEST_PIN, type Seen, type TlsServer } from "./helpers/tls-server.js";
 
 const MODEL = "test-model";
@@ -110,6 +112,7 @@ afterAll(async () => {
 describe("createTinfoil's option checks", () => {
   it("requires exactly one credential and checks the client's options before fetching anything", async () => {
     const s = seams([tls.host]);
+    const network = recordingFetch((input, init) => fetch(input, init));
     const cases: [TinfoilProviderOptions, RegExp][] = [
       [{}, /credential is required/],
       [{ apiKey: "" }, /credential is required/],
@@ -117,6 +120,7 @@ describe("createTinfoil's option checks", () => {
       [{ apiKey: "k", enclave: { host: "", repo: ROUTER_REPO }, verifier: verifier({ tls: TEST_PIN }) }, /host is required/],
       [{ apiKey: "k", transportMode: "tls", baseURL: "https://proxy.example/", verifier: verifier({ tls: TEST_PIN }) }, /ehbp/],
       [{ apiKey: "k", transportMode: "quic" as never, verifier: verifier({ tls: TEST_PIN }) }, /unknown transport mode/],
+      [{ apiKey: "k", transportMode: "tls", fetch: network.fetch, verifier: verifier({ tls: TEST_PIN }) }, /fetch option .* requires transportMode "ehbp"/],
     ];
     for (const [options, message] of cases) {
       const failure = createTinfoilProvider(options, s);
@@ -125,6 +129,7 @@ describe("createTinfoil's option checks", () => {
     }
     expect(s.documentFetches).toBe(0);
     expect(tls.seen).toHaveLength(0);
+    expect(network.seen).toHaveLength(0);
   });
 
   it("refuses an API key where the runtime isn't a server, such as a worker, before fetching anything", async () => {
@@ -275,5 +280,34 @@ describe("the provider over one enclave", () => {
     expect(seen.headers["x-tinfoil-enclave-url"]).toBe("https://enclave.example");
     // An enclave client scopes the cache only when told to.
     expect(JSON.parse(new TextDecoder().decode(seen.body))).not.toHaveProperty("user_cache_secret");
+  });
+});
+
+describe("the provider's fetch option", () => {
+  it("sends sealed requests through the fetch option, while discovery keeps its own fetches", async () => {
+    const network = recordingFetch((input, init) => fetch(input, init));
+    const s = seams(["router.example"]);
+    const tinfoil = await createTinfoilProvider(
+      { apiKey: "secret-key", transportMode: "ehbp", baseURL: `${ehbp.origin}/`, fetch: network.fetch, verifier: verifier({ tls: "ab".repeat(32), hpke: ehbp.publicKeyHex }) },
+      s,
+    );
+    expect(tinfoil.httpClient).toBeInstanceOf(RouterHTTPClient);
+    expect(s.documentFetches).toBe(1);
+    expect(network.seen).toHaveLength(0);
+
+    const { text } = await generateText({ model: tinfoil(MODEL), prompt: "Say pong", maxRetries: 0 });
+    expect(text).toBe("pong");
+    expect(network.seen).toHaveLength(1);
+    const sealed = network.seen[0]!;
+    expect(sealed.url).toBe(`${ehbp.origin}/chat/completions`);
+    expect(sealed.headers.has(PROTOCOL.ENCAPSULATED_KEY_HEADER)).toBe(true);
+    expect(sealed.headers.get("x-tinfoil-enclave-url")).toBe("https://router.example");
+    expect(sealed.headers.get("authorization")).toBe("Bearer secret-key");
+    expect(sealed.body).not.toContain("Say pong");
+    expect(sealed.body).not.toContain("resolved-secret");
+    // The server opened what the network carried: the prompt and the secret spliced in before sealing.
+    const seen = ehbp.seen[ehbp.seen.length - 1]!;
+    expect(seen.sealed).toBe(true);
+    expect(JSON.parse(new TextDecoder().decode(seen.body))).toHaveProperty("user_cache_secret", "resolved-secret");
   });
 });
