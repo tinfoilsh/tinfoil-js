@@ -48,8 +48,10 @@ const byPrototype = (cls: abstract new (...args: never[]) => unknown, value: unk
 /**
  * Base class for every error this package throws. `instanceof` holds for
  * an error from another loaded copy of the package too: each error carries
- * a brand under a globally registered key, which the classes check after
- * the prototype chain.
+ * a brand under a globally registered key, which the three classes of this
+ * module check after the prototype chain. `Symbol.hasInstance` is
+ * inherited, so each check applies only when `this` is that class itself;
+ * a subclass defined elsewhere matches by its prototype chain alone.
  */
 export abstract class VerifyError extends Error {
   declare readonly cause?: unknown;
@@ -62,7 +64,7 @@ export abstract class VerifyError extends Error {
   }
 
   static [Symbol.hasInstance](value: unknown): boolean {
-    return byPrototype(this, value) || brandOf(value) !== undefined;
+    return byPrototype(this, value) || (this === VerifyError && brandOf(value) !== undefined);
   }
 }
 
@@ -75,7 +77,7 @@ export class UsageError extends VerifyError {
   }
 
   static override [Symbol.hasInstance](value: unknown): boolean {
-    return byPrototype(this, value) || brandOf(value) === "UsageError";
+    return byPrototype(this, value) || (this === UsageError && brandOf(value) === "UsageError");
   }
 }
 
@@ -98,6 +100,6 @@ export class VerificationError extends VerifyError {
   }
 
   static override [Symbol.hasInstance](value: unknown): boolean {
-    return byPrototype(this, value) || brandOf(value) === "VerificationError";
+    return byPrototype(this, value) || (this === VerificationError && brandOf(value) === "VerificationError");
   }
 }

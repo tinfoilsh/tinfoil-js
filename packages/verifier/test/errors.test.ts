@@ -27,6 +27,10 @@ describe("instanceof across copies of the package", () => {
     // And the other way round, since both copies check the same brand.
     expect(new UsageError("x") instanceof other.UsageError).toBe(true);
     expect(new VerificationError("policy", "x") instanceof other.VerifyError).toBe(true);
+    // A subclass of the other copy's class matches by prototype only, so this copy's errors are not its instances.
+    class OtherSub extends other.UsageError {}
+    expect(new UsageError("x") instanceof OtherSub).toBe(false);
+    expect(new OtherSub("x") instanceof UsageError).toBe(true);
   });
 
   it("still matches its own instances and subclasses, and nothing unrelated", () => {
@@ -34,6 +38,19 @@ describe("instanceof across copies of the package", () => {
     const mine = new Mine("mine");
     expect(mine instanceof VerifyError).toBe(true);
     expect(mine instanceof UsageError).toBe(false);
+    // A subclass inherits the hasInstance check but not the brand match: it matches its own instances only, never its siblings or its base's.
+    class MyUsage extends UsageError {}
+    class OtherUsage extends UsageError {}
+    expect(new MyUsage("x") instanceof MyUsage).toBe(true);
+    expect(new MyUsage("x") instanceof UsageError).toBe(true);
+    expect(new MyUsage("x") instanceof VerifyError).toBe(true);
+    expect(new UsageError("x") instanceof MyUsage).toBe(false);
+    expect(new OtherUsage("x") instanceof MyUsage).toBe(false);
+    expect(mine instanceof Mine).toBe(true);
+    expect(new UsageError("x") instanceof Mine).toBe(false);
+    class MyRejection extends VerificationError {}
+    expect(new VerificationError("quote", "x") instanceof MyRejection).toBe(false);
+    expect(new MyRejection("quote", "x") instanceof VerificationError).toBe(true);
     expect(new UsageError("x") instanceof UsageError).toBe(true);
     expect(new UsageError("x") instanceof VerifyError).toBe(true);
     expect(new UsageError("x") instanceof VerificationError).toBe(false);
