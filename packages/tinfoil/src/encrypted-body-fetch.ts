@@ -119,6 +119,19 @@ export async function encryptedBodyRequest(
 
 const ENCLAVE_URL_HEADER = 'X-Tinfoil-Enclave-Url';
 
+/**
+ * Returns `url` moved to `origin`, keeping its path, query and fragment.
+ * Copies the components rather than re-parsing their concatenation, which
+ * would read a path starting with "//" as a host.
+ */
+function atOrigin(url: URL, origin: string): URL {
+  const moved = new URL(origin);
+  moved.pathname = url.pathname;
+  moved.search = url.search;
+  moved.hash = url.hash;
+  return moved;
+}
+
 export function createEncryptedBodyFetch(baseURL: string, hpkePublicKey: string, enclaveURL?: string, userCacheSecret: string = ""): SecureTransport {
   const base = new URL(baseURL);
   const baseOrigin = base.origin;
@@ -167,7 +180,7 @@ export function createEncryptedBodyFetch(baseURL: string, hpkePublicKey: string,
       // The transport is bound to the proxy origin and rejects any other
       // (ehbp >= 0.4 no longer rewrites hosts); send the enclave path through
       // the proxy, which routes on the enclave header set above.
-      const sendUrl = new URL(targetUrl.pathname + targetUrl.search + targetUrl.hash, baseOrigin);
+      const sendUrl = atOrigin(targetUrl, baseOrigin);
       const transportInstance = await getOrCreateTransport();
       return transportInstance.request(sendUrl.toString(), initWithHeader!);
     },
@@ -228,7 +241,7 @@ export function createUnverifiedEncryptedBodyFetch(baseURL: string, keyOrigin?: 
       const initWithEnclaveHeader = { ...normalized.init, headers };
 
       const transportInstance = await getOrCreateTransport();
-      const sendUrl = new URL(targetUrl.pathname + targetUrl.search + targetUrl.hash, baseOrigin);
+      const sendUrl = atOrigin(targetUrl, baseOrigin);
       return transportInstance.request(sendUrl.toString(), initWithEnclaveHeader);
     },
 

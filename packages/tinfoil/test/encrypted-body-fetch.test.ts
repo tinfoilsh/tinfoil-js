@@ -336,6 +336,40 @@ describe("encrypted-body-fetch", () => {
       }
     });
 
+    it.each([
+      ["createEncryptedBodyFetch", (key: string) => createEncryptedBodyFetch("https://proxy.example.com", key, "https://enclave.example.com")],
+      ["createUnverifiedEncryptedBodyFetch", () => createUnverifiedEncryptedBodyFetch("https://proxy.example.com", "https://enclave.example.com")],
+    ])("%s keeps a leading double-slash path when routing through a proxy", async (_name, make) => {
+      const serverIdentity = await Identity.generate();
+      const keyHex = await serverIdentity.getPublicKeyHex();
+      const publicConfig = await serverIdentity.marshalConfig();
+      const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+      const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+        const url = input instanceof Request ? input.url : String(input);
+        if (url.endsWith(PROTOCOL.KEYS_PATH)) {
+          return new Response(publicConfig as BodyInit, { headers: { "content-type": PROTOCOL.KEYS_MEDIA_TYPE } });
+        }
+        return new Response("ok");
+      });
+
+      try {
+        const transport = make(keyHex);
+        await expect(
+          transport.fetch("https://enclave.example.com//v1/test?x=1")
+        ).resolves.toBeInstanceOf(Response);
+        const sent = fetchMock.mock.calls
+          .map(([input]) => new URL(input instanceof Request ? input.url : String(input)))
+          .filter((url) => !url.pathname.endsWith(PROTOCOL.KEYS_PATH));
+        expect(sent).toHaveLength(1);
+        expect(sent[0].origin).toBe("https://proxy.example.com");
+        expect(sent[0].pathname).toBe("//v1/test");
+        expect(sent[0].search).toBe("?x=1");
+      } finally {
+        fetchMock.mockRestore();
+        warn.mockRestore();
+      }
+    });
+
     it("preserves Request options and applies native init precedence", async () => {
       const serverIdentity = await Identity.generate();
       const keyHex = await serverIdentity.getPublicKeyHex();
