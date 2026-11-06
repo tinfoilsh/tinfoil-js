@@ -7,12 +7,12 @@ or all of them with `./run-all.sh`.
 
 | Example | Shows |
 | --- | --- |
-| [`chat/`](chat/) | A basic chat completion with `TinfoilAI` |
+| [`chat/`](chat/) | A basic chat completion with `createClient` |
 | [`streaming/`](streaming/) | Streaming chat completions |
-| [`ai-sdk/`](ai-sdk/) | The Vercel AI SDK on the server with `createTinfoilAI` |
+| [`ai-sdk/`](ai-sdk/) | The Vercel AI SDK on the server with `createTinfoil` from `tinfoil/ai-sdk` |
 | [`ai-sdk-react/`](ai-sdk-react/) | The Vercel AI SDK's `useChat` in a browser app (pattern files, not runnable) |
-| [`secure_client/`](secure_client/) | Custom HTTP requests with `SecureClient.fetch` |
-| [`unverified_client/`](unverified_client/) | `UnverifiedClient` from `tinfoil/unsafe`, which skips attestation; for development only, never in production |
+| [`http_client/`](http_client/) | Custom HTTP requests with `RouterHTTPClient.fetch` |
+| [`unverified_client/`](unverified_client/) | `UnverifiedClient` from `tinfoil/unsafe`, which skips attestation; needs `TINFOIL_UNVERIFIED_URL`, for development only, never in production |
 
 Browser apps must not hold the API key: route requests through a
 [proxy server](https://docs.tinfoil.sh/guides/proxy-server) that adds it, and

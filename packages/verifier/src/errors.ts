@@ -1,112 +1,107 @@
-/**
- * Error classes for the Tinfoil SDK.
- * 
- * Hierarchy:
- * ```
- * TinfoilError (base)
- * ├── ConfigurationError   - Client misconfigured or used incorrectly
- * ├── FetchError           - Couldn't fetch attestation materials
- * └── AttestationError     - Attestation failed (security issue)
- * ```
- */
+/** The verification layers today, in the order a document passes through them. */
+export type KnownLayer =
+  /** The document can't be parsed, isn't bound to the nonce, or contradicts itself. */
+  | "envelope"
+  /** Reference values failed to authenticate or don't match the requested workload. */
+  | "provenance"
+  /** Hardware evidence isn't authentic. */
+  | "quote"
+  /** Authentic evidence doesn't satisfy the policy. */
+  | "policy";
 
 /**
- * Base error class for all Tinfoil SDK errors.
+ * Names the verification layer that rejected a document: one of the
+ * {@link KnownLayer} values today, and a later version may add more. The
+ * type is open so a caller compiles against the names it knows; a value it
+ * doesn't recognize is still a rejection, at a stage it has no name for,
+ * and must be treated as one.
  */
-export class TinfoilError extends Error {
-  declare cause?: Error;
-  constructor(message: string, options?: { cause?: Error }) {
+export type Layer = KnownLayer | (string & {});
+
+/**
+ * The key under which every error of this package carries its brand: its
+ * class name, stamped by the constructor. The key is registered globally, so
+ * two copies of the package loaded side by side (two versions installed, or
+ * a bundle that failed to dedupe) share it, and `instanceof` against one
+ * copy's classes recognizes the other copy's errors.
+ */
+const BRAND = Symbol.for("@tinfoilsh/verifier.error");
+
+/** The brands the two concrete error classes stamp. */
+type Brand = "UsageError" | "VerificationError";
+
+/** The brand `value` carries, or undefined for anything this package didn't construct. */
+function brandOf(value: unknown): Brand | undefined {
+  if (typeof value !== "object" || value === null) return undefined;
+  const brand = (value as { [BRAND]?: unknown })[BRAND];
+  return brand === "UsageError" || brand === "VerificationError" ? brand : undefined;
+}
+
+/** Stamps `err` with its brand, as a non-enumerable property so serializing or logging the error doesn't show it. */
+function stamp(err: VerifyError, brand: Brand): void {
+  Object.defineProperty(err, BRAND, { value: brand, enumerable: false, writable: false, configurable: false });
+}
+
+/** Whether `value` is an instance of `cls` by its prototype chain: the usual `instanceof`, which a subclass defined outside this package relies on. */
+const byPrototype = (cls: abstract new (...args: never[]) => unknown, value: unknown): boolean => Function.prototype[Symbol.hasInstance].call(cls, value);
+
+/**
+ * Base class for every error this package throws. `instanceof` holds for
+ * an error from another loaded copy of the package too: each error carries
+ * a brand under a globally registered key, which the three classes of this
+ * module check after the prototype chain. `Symbol.hasInstance` is
+ * inherited, so each check applies only when `this` is that class itself;
+ * a subclass defined elsewhere matches by its prototype chain alone.
+ */
+export abstract class VerifyError extends Error {
+  declare readonly cause?: unknown;
+
+  constructor(message: string, options?: { cause?: unknown }) {
     super(message);
-    this.name = 'TinfoilError';
-    if (options?.cause) {
-      this.cause = options.cause;
+    if (options?.cause !== undefined) {
+      (this as { cause?: unknown }).cause = options.cause;
     }
   }
+
+  static [Symbol.hasInstance](value: unknown): boolean {
+    return byPrototype(this, value) || (this === VerifyError && brandOf(value) !== undefined);
+  }
 }
 
-/**
- * Thrown when the client is misconfigured or used incorrectly.
- * 
- * Examples:
- * - Missing required options (serverURL, configRepo, apiKey)
- * - Invalid option values
- * - Calling methods before client is ready
- * - Using the wrong client type
- * 
- * Action: Fix your code
- */
-export class ConfigurationError extends TinfoilError {
-  constructor(message: string, options?: { cause?: Error }) {
-    super(message, options);
-    this.name = 'ConfigurationError';
+/** The verifier was built or called with invalid inputs. Retrying won't help. */
+export class UsageError extends VerifyError {
+  constructor(message: string, options?: { cause?: unknown }) {
+    super(`usage error: ${message}`, options);
+    this.name = "UsageError";
+    stamp(this, "UsageError");
+  }
+
+  static override [Symbol.hasInstance](value: unknown): boolean {
+    return byPrototype(this, value) || (this === UsageError && brandOf(value) === "UsageError");
   }
 }
 
 /**
- * Thrown when fetching attestation materials fails.
- * 
- * Examples:
- * - Network unreachable
- * - HTTP errors (404, 500, etc.)
- * - Invalid response format (bad JSON, wrong schema)
- * - Timeout
- * 
- * Action: Retry, check network connectivity
+ * A document that must not be trusted, and the layer that rejected it. The
+ * verifier fails closed: a failure inside a layer that is not itself a
+ * VerifyError, such as a bug or an exhausted resource, is reported as a
+ * rejection at that layer with the underlying error as `cause`. An
+ * unfamiliar message at a layer may therefore be the verifier failing
+ * rather than the document, and `cause` says which. The message reads
+ * `verification error: <layer>: <message>`; the layer is given in the
+ * options, with the cause.
  */
-export class FetchError extends TinfoilError {
-  constructor(message: string, options?: { cause?: Error }) {
-    super(message, options);
-    this.name = 'FetchError';
+export class VerificationError extends VerifyError {
+  readonly layer: Layer;
+
+  constructor(message: string, options: { layer: Layer; cause?: unknown }) {
+    super(`verification error: ${options.layer}: ${message}`, options);
+    this.name = "VerificationError";
+    this.layer = options.layer;
+    stamp(this, "VerificationError");
+  }
+
+  static override [Symbol.hasInstance](value: unknown): boolean {
+    return byPrototype(this, value) || (this === VerificationError && brandOf(value) === "VerificationError");
   }
 }
-
-/**
- * Thrown when attestation verification fails.
- * 
- * This covers all attestation-related security errors:
- * - Material verification failures (parsing, signatures, certificates)
- * - Policy validation failures (measurement mismatch, policy violation)
- * 
- * Examples:
- * - Data parsing failed (malformed report, invalid base64, bad structure)
- * - Sigstore signature invalid
- * - Hardware certificate chain invalid
- * - Report signature invalid
- * - Measurement mismatch (enclave code doesn't match signed release)
- * - Policy violation (debug enabled, TCB too low)
- * - Key binding mismatch (transport keys don't match attested keys)
- * 
- * Action: Stop - security issue - you should retry the entire attestation protocol.
- */
-export class AttestationError extends TinfoilError {
-  constructor(message: string, options?: { cause?: Error }) {
-    super(message, options);
-    this.name = 'AttestationError';
-  }
-}
-
-/**
- * Helper to handle errors in catch blocks.
- * - If the error is already a TinfoilError, rethrow it as-is
- * - Otherwise, wrap it in the specified error class
- * 
- * @example
- * ```typescript
- * try {
- *   await someOperation();
- * } catch (e) {
- *   wrapOrThrow(e, AttestationError, 'Operation failed');
- * }
- * ```
- */
-export function wrapOrThrow(
-  e: unknown,
-  ErrorClass: typeof AttestationError | typeof FetchError | typeof ConfigurationError,
-  message: string
-): never {
-  if (e instanceof TinfoilError) {
-    throw e;
-  }
-  throw new ErrorClass(message, { cause: e as Error });
-}
-

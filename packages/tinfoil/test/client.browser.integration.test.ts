@@ -1,220 +1,31 @@
-import { describe, it, expect } from 'vitest';
-import { TinfoilAI } from '../src/tinfoil-ai';
-import { SecureClient } from '../src/secure-client';
-import { UnverifiedClient } from '../src/unverified-client';
+/**
+ * The browser build against the live router, in Chromium: the recommended
+ * client discovers and verifies a router over EHBP, the only transport a
+ * page has, with a bearer token as its credential, then completes a chat and
+ * streams a completion chunk by chunk through sealed bodies. Needs the
+ * integration lane and a Tinfoil API key, both compiled into the bundle by
+ * the lane's config.
+ */
+import { describe, expect, it } from "vitest";
+import { createClient, RouterHTTPClient, TinfoilClient } from "../src/index.browser.js";
+import { completeChat, LIVE_REPO, SHA256_HEX, streamChat } from "./helpers/live.js";
 
-describe('Browser Client Integration Tests', () => {
-  describe('TinfoilAI Client', () => {
-    it('should create a TinfoilAI client and make a chat completion request', async () => {
-      const client = new TinfoilAI({
-        bearerToken: process.env.TINFOIL_API_KEY,
-      });
+const RUN_INTEGRATION = process.env.RUN_TINFOIL_INTEGRATION === "true";
+const bearerToken = process.env.TINFOIL_API_KEY ?? "";
 
-      expect(client).toBeDefined();
+describe("the browser build on the live router", () => {
+  it.skipIf(!RUN_INTEGRATION || bearerToken === "")("verifies the router over EHBP with a bearer token, completes a chat and streams a completion", async () => {
+    const ai = await createClient({ bearerToken });
+    expect(ai).toBeInstanceOf(TinfoilClient);
+    const router = ai.httpClient;
+    expect(router).toBeInstanceOf(RouterHTTPClient);
+    expect(router.repo).toBe(LIVE_REPO);
+    expect(router.current?.hpkePublicKey).toMatch(SHA256_HEX);
+    expect(ai.baseURL).toBe(`https://${router.enclave}/v1/`);
 
-      await client.ready();
-
-      const completion = await client.chat.completions.create({
-        messages: [{ role: 'user', content: 'Hello!' }],
-        model: 'gpt-oss-120b',
-        max_tokens: 5,
-      });
-
-      expect(completion).toBeDefined();
-      expect(Array.isArray(completion.choices)).toBe(true);
-      expect(completion.choices.length).toBeGreaterThan(0);
-
-      const firstChoice = completion.choices[0];
-      expect(firstChoice).toBeDefined();
-      expect(firstChoice.message).toBeDefined();
-    }, 60000);
-
-    it('should get verification document after client initialization', async () => {
-      const client = new TinfoilAI({
-        bearerToken: process.env.TINFOIL_API_KEY,
-      });
-
-      await client.ready();
-
-      const verificationDoc = await client.getVerificationDocument();
-
-      expect(verificationDoc).toBeDefined();
-      expect(verificationDoc.securityVerified).toBe(true);
-      expect(verificationDoc.configRepo).toBeTruthy();
-      expect(verificationDoc.enclaveHost).toBeTruthy();
-      expect(verificationDoc.releaseDigest).toBeTruthy();
-      expect(verificationDoc.codeFingerprint).toBeTruthy();
-      expect(verificationDoc.enclaveFingerprint).toBeTruthy();
-      expect(verificationDoc.tlsPublicKey).toBeTruthy();
-      expect(verificationDoc.enclaveMeasurement.hpkePublicKey).toBeTruthy();
-    }, 60000);
-
-    it('should handle streaming chat completion', async () => {
-      const client = new TinfoilAI({
-        bearerToken: process.env.TINFOIL_API_KEY,
-      });
-
-      await client.ready();
-
-      const stream = await client.chat.completions.create({
-        messages: [
-          { role: 'system', content: 'No matter what the user says, only respond with: Done.' },
-          { role: 'user', content: 'Is this a test?' },
-        ],
-        model: 'gpt-oss-120b',
-        max_tokens: 5,
-        stream: true,
-      });
-
-      let chunksReceived = 0;
-
-      for await (const chunk of stream) {
-        chunksReceived++;
-      }
-
-      expect(chunksReceived).toBeGreaterThan(0);
-    }, 60000);
-  });
-
-  describe('SecureClient', () => {
-    it('should create a SecureClient and make a direct fetch request', async () => {
-      const client = new SecureClient();
-
-      expect(client).toBeDefined();
-
-      await client.ready();
-
-      const response = await client.fetch('/v1/chat/completions', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${process.env.TINFOIL_API_KEY}`,
-        },
-        body: JSON.stringify({
-          model: 'gpt-oss-120b',
-          max_tokens: 5,
-          messages: [{ role: 'user', content: 'Hello!' }],
-        }),
-      });
-
-      expect(response).toBeDefined();
-      expect(response.status).toBe(200);
-      expect(response.headers).toBeDefined();
-
-      const responseBody = await response.json();
-      expect(responseBody).toBeDefined();
-      expect(Array.isArray(responseBody.choices)).toBe(true);
-      expect(responseBody.choices.length).toBeGreaterThan(0);
-
-      const firstChoice = responseBody.choices[0];
-      expect(firstChoice).toBeDefined();
-      expect(firstChoice.message).toBeDefined();
-    }, 60000);
-
-    it('should get verification document from SecureClient', async () => {
-      const client = new SecureClient();
-      await client.ready();
-
-      const verificationDoc = await client.getVerificationDocument();
-
-      expect(verificationDoc).toBeDefined();
-      expect(verificationDoc.securityVerified).toBe(true);
-      expect(verificationDoc.steps.fetchDigest.status).toBe('success');
-      expect(verificationDoc.steps.verifyCode.status).toBe('success');
-      expect(verificationDoc.steps.verifyEnclave.status).toBe('success');
-      expect(verificationDoc.steps.compareMeasurements.status).toBe('success');
-    }, 60000);
-  });
-
-  describe('UnverifiedClient', () => {
-    it('should create an UnverifiedClient and make a direct fetch request', async () => {
-      const client = new UnverifiedClient();
-
-      expect(client).toBeDefined();
-
-      await client.ready();
-
-      const response = await client.fetch('/v1/chat/completions', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${process.env.TINFOIL_API_KEY}`,
-        },
-        body: JSON.stringify({
-          model: 'gpt-oss-120b',
-          max_tokens: 5,
-          messages: [{ role: 'user', content: 'Hello!' }],
-        }),
-      });
-
-      expect(response).toBeDefined();
-      expect(response.status).toBe(200);
-
-      const responseBody = await response.json();
-      expect(responseBody).toBeDefined();
-      expect(Array.isArray(responseBody.choices)).toBe(true);
-      expect(responseBody.choices.length).toBeGreaterThan(0);
-    }, 60000);
-
-    it('should throw when trying to get verification document from UnverifiedClient', async () => {
-      const client = new UnverifiedClient();
-      await client.ready();
-
-      await expect(client.getVerificationDocument()).rejects.toThrow(
-        'Verification document unavailable: this version of the client is unverified'
-      );
-    }, 30000);
-  });
-
-  describe('Client initialization options', () => {
-    it('should initialize UnverifiedClient correctly when enclaveURL is provided but baseURL is not', async () => {
-      const client = new UnverifiedClient({
-        enclaveURL: 'https://inference.tinfoil.sh'
-      });
-
-      await client.ready();
-
-      expect(client).toBeDefined();
-      expect(client.fetch).toBeDefined();
-    }, 30000);
-
-    it('should initialize UnverifiedClient correctly when baseURL is provided but enclaveURL is not', async () => {
-      const client = new UnverifiedClient({
-        baseURL: 'https://inference.tinfoil.sh/v1/'
-      });
-
-      await client.ready();
-
-      expect(client).toBeDefined();
-      expect(client.fetch).toBeDefined();
-    }, 30000);
-
-    it('SecureClient should initialize correctly when enclaveURL is provided but baseURL is not', async () => {
-      const client = new SecureClient({
-        enclaveURL: 'https://inference.tinfoil.sh'
-      });
-
-      await client.ready();
-
-      expect(client).toBeDefined();
-      expect(client.fetch).toBeDefined();
-
-      const doc = await client.getVerificationDocument();
-      expect(doc.securityVerified).toBe(true);
-    }, 60000);
-
-    it('SecureClient should initialize correctly when baseURL is provided but enclaveURL is not', async () => {
-      const client = new SecureClient({
-        baseURL: 'https://inference.tinfoil.sh/v1/'
-      });
-
-      await client.ready();
-
-      expect(client).toBeDefined();
-      expect(client.fetch).toBeDefined();
-
-      const doc = await client.getVerificationDocument();
-      expect(doc.securityVerified).toBe(true);
-    }, 60000);
+    const completed = await completeChat(ai);
+    expect(completed.finishReason).toBeTruthy();
+    const streamed = await streamChat(ai);
+    expect(streamed.deltas).toBeGreaterThan(1);
   });
 });

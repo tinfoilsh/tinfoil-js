@@ -9,11 +9,11 @@
  *
  * Run: npx ts-node main.ts
  */
-import { TinfoilAI } from "tinfoil";
+import { createClient } from "tinfoil";
 
 async function main() {
   try {
-    const client = new TinfoilAI({
+    const client = await createClient({
       apiKey: process.env.TINFOIL_API_KEY,
     });
 

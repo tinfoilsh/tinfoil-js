@@ -3,13 +3,18 @@
 Pattern files for using Tinfoil with the Vercel AI SDK's `useChat` hook in a
 browser app. They are not a runnable app; copy them into your Next.js project.
 
-- `lib/tinfoil.ts` creates one `SecureClient`, awaits `ready()` (attestation)
-  before handing its `fetch` to `DefaultChatTransport`, and reuses the transport
-  across the app.
-- `components/Chat.tsx` renders a chat with `useChat`.
+- `lib/tinfoil.ts` creates one `RouterHTTPClient` routed through your proxy
+  (the factory verifies the enclave before it returns) and wraps it as a
+  `useChat` transport. `useChat` speaks the AI SDK's own protocol, not the
+  OpenAI chat completions API that the enclave serves, so the transport
+  translates: it runs `streamText` over an OpenAI-compatible provider bound to
+  the client's `fetch` and streams the result back as UI message chunks. The
+  transport is reused across the app.
+- `components/Chat.tsx` renders a chat with `useChat`, mounted once the
+  transport exists.
 
 ```bash
-npm install tinfoil ai @ai-sdk/react
+npm install tinfoil ai @ai-sdk/react @ai-sdk/openai-compatible
 ```
 
 The browser must not hold your API key. Set up a

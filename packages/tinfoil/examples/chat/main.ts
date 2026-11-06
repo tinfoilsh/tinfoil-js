@@ -1,19 +1,20 @@
 /**
  * Basic Chat Completion Example
  *
- * The simplest way to use Tinfoil - create a client and make a chat request.
- * Verification and encryption happen automatically.
+ * The simplest way to use Tinfoil: create a client and make a chat request.
+ * The client verifies the enclave before it is returned, and every request
+ * it sends is bound to the verified enclave.
  *
  * Prerequisites:
  * - Export your API key: export TINFOIL_API_KEY="<YOUR_API_KEY>"
  *
  * Run: npx ts-node main.ts
  */
-import { TinfoilAI } from "tinfoil";
+import { createClient } from "tinfoil";
 
 async function main() {
   try {
-    const client = new TinfoilAI({
+    const client = await createClient({
       apiKey: process.env.TINFOIL_API_KEY,
     });
 

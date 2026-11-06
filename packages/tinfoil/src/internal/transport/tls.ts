@@ -1,0 +1,204 @@
+/**
+ * The TLS transport mode: every connection is pinned to the attested TLS
+ * key, so the whole request and response are protected, and a plaintext
+ * request is refused because no pinned connection carries it. The pin is
+ * checked in the TLS handshake, after the normal certificate check, on
+ * every connection; a peer whose certificate doesn't carry the key never
+ * receives the request. A redirect is handed back to the caller as the
+ * response it is, never followed. Node makes the connections through its
+ * HTTPS client, so request and response bodies stream through; Bun checks
+ * the pin through its fetch's TLS options, on a Bun new enough to run that
+ * check before it sends. This module is for Node and Bun only; the browser
+ * entry maps it to a stub.
+ */
+import type { Verification } from "@tinfoilsh/verifier";
+import { AttestationError, ConfigurationError, messageOf, NetworkError } from "../../errors.js";
+import type { Fetch } from "../../options.js";
+import { bunOlderThan, isBun, MIN_BUN_FOR_TLS_MODE, tlsUnavailableOnBun } from "../platform.js";
+import { CERT_MISMATCH, isCertificateError } from "./pin-errors.js";
+import { identityCheck } from "./pin.js";
+import { noFollow, PeerLacksKeyError, shapeOf, signalOf, type BoundFetch, type Mode, type RequestShape } from "./transport.js";
+
+/** Settings of the normal certificate check, which runs before the pin and can only reject. */
+export interface TLSOptions {
+  /** Certificate authorities to trust instead of the runtime's bundle. */
+  readonly ca?: string | Uint8Array;
+}
+
+/** The statuses that fetch treats as a redirect. */
+const REDIRECT_STATUSES: ReadonlySet<number> = new Set([301, 302, 303, 307, 308]);
+
+/**
+ * Rejects, before any verification or network I/O, a request the mode
+ * can't protect: a plaintext one, which no pinned connection carries, and
+ * one naming a Host of its own, which would address another virtual host
+ * than the one the URL names and the pin was checked for.
+ */
+export function checkTLS(request: RequestShape): void {
+  if (request.url.protocol !== "https:") throw new ConfigurationError("TLS transport mode requires an HTTPS request");
+  if (request.headers.has("host")) throw new ConfigurationError("reserved request header cannot be set by callers: host");
+}
+
+/** A mode that pins each connection's leaf certificate to the TLS key the current verification attests. */
+export function tlsMode(options: TLSOptions = {}): Mode {
+  return {
+    name: "tls",
+    validateRequest: checkTLS,
+    async bind(v: Verification) {
+      const key = v.tlsPublicKeyFP;
+      if (key === undefined) throw new AttestationError('document endorses no "tls" key');
+      return isBun() ? bunPinnedFetch(key, options) : nodePinnedFetch(key, options);
+    },
+  };
+}
+
+/** The error a failed request surfaces as: a certificate failure means the peer lacks the key; anything else is a network error. */
+function classify(err: unknown): Error {
+  if (err instanceof PeerLacksKeyError) return err;
+  if (isCertificateError(err)) return new PeerLacksKeyError(messageOf(err), { cause: err });
+  if (err instanceof Error && err.name === "AbortError") return err;
+  return new NetworkError(messageOf(err), { cause: err });
+}
+
+// ---------------------------------------------------------------- Node
+
+async function nodePinnedFetch(key: string, options: TLSOptions): Promise<BoundFetch> {
+  const [https, { Readable }, checkServerIdentity] = await Promise.all([import("node:https"), import("node:stream"), identityCheck(key)]);
+  type IncomingMessage = import("node:http").IncomingMessage;
+
+  const ca = options.ca === undefined ? undefined : typeof options.ca === "string" ? options.ca : Buffer.from(options.ca);
+  // The check is the agent's, not each request's: the agent is bound to one
+  // key, so every connection it makes is checked against that key, and a
+  // connection it pools was. A check given per request would stop the
+  // runtime from pooling the connection at all.
+  const agent = new https.Agent({ keepAlive: true, ca, checkServerIdentity });
+  // An idle pooled connection must not keep the process alive; a reused one is referenced again.
+  agent.on("free", (socket: import("node:net").Socket) => socket.unref());
+
+  const fetchImpl: Fetch = async (input, init) => {
+    // The transport validates this too, but the bound fetch can be used alone.
+    checkTLS(shapeOf(input, init));
+    const request = input instanceof Request ? input : undefined;
+    const url = new URL(request?.url ?? String(input));
+    const method = (init?.method ?? request?.method ?? "GET").toUpperCase();
+    const headers = new Headers(init?.headers ?? request?.headers);
+    // An init body of null leaves a Request input's body in place, as the Request constructor reads it.
+    const body = await requestBody(init?.body ?? request, headers);
+    const signal = signalOf(input, init);
+    const redirect = noFollow(init?.redirect ?? request?.redirect);
+    signal?.throwIfAborted();
+
+    const res = await new Promise<IncomingMessage>((resolve, reject) => {
+      const req = https.request(
+        {
+          protocol: url.protocol,
+          hostname: url.hostname.replace(/^\[|\]$/g, ""),
+          port: url.port === "" ? 443 : Number(url.port),
+          path: `${url.pathname}${url.search}`,
+          method,
+          headers: Object.fromEntries(headers.entries()),
+          agent,
+          servername: url.hostname.replace(/^\[|\]$/g, ""),
+        },
+        resolve,
+      );
+      req.once("error", (err) => reject(classify(err)));
+      if (signal !== undefined) {
+        const onAbort = (): void => {
+          req.destroy(signal.reason instanceof Error ? signal.reason : new Error(String(signal.reason)));
+          reject(signal.reason);
+        };
+        signal.addEventListener("abort", onAbort, { once: true });
+        req.once("close", () => signal.removeEventListener("abort", onAbort));
+      }
+      if (body === undefined) {
+        req.end();
+      } else if (body instanceof ReadableStream) {
+        Readable.fromWeb(body as unknown as import("node:stream/web").ReadableStream)
+          .once("error", (err) => req.destroy(err))
+          .pipe(req);
+      } else {
+        req.end(body);
+      }
+    });
+
+    // The response is handed back as it came, a redirect included: the client
+    // never follows one. A request that asked for an error on a redirect gets one.
+    const status = res.statusCode ?? 0;
+    if (redirect === "error" && REDIRECT_STATUSES.has(status)) {
+      res.resume();
+      throw new NetworkError("the server redirected the request, which asked for a redirect to be an error");
+    }
+    const responseHeaders = new Headers();
+    for (const [name, value] of Object.entries(res.headers)) {
+      if (Array.isArray(value)) for (const v of value) responseHeaders.append(name, v);
+      else if (value !== undefined) responseHeaders.set(name, value);
+    }
+    const bodiless = method === "HEAD" || status === 204 || status === 304;
+    if (bodiless) res.resume();
+    return new Response(bodiless ? null : (Readable.toWeb(res) as unknown as ReadableStream<Uint8Array>), {
+      status,
+      statusText: res.statusMessage ?? "",
+      headers: responseHeaders,
+    });
+  };
+
+  /**
+   * Retires the binding: idle connections are closed and none is pooled from
+   * now on, while a request in flight finishes on its connection, which is
+   * closed once it is freed. A binding is replaced while requests that
+   * received its state may still be using it, so those are left alone.
+   */
+  const retire = (): void => {
+    // The agent pools a freed connection only while this field, which its typings leave out, is set.
+    (agent as unknown as { keepAlive: boolean }).keepAlive = false;
+    for (const sockets of Object.values(agent.freeSockets)) {
+      for (const socket of [...(sockets ?? [])]) socket.destroy();
+    }
+  };
+  return { fetch: fetchImpl, close: () => agent.destroy(), retire };
+}
+
+/**
+ * The bytes or stream to send, with the body's content type added to
+ * `headers` when the caller set none. A stream streams; everything else is
+ * read into memory first, as fetch does.
+ */
+async function requestBody(body: BodyInit | Request | null | undefined, headers: Headers): Promise<Uint8Array | string | ReadableStream<Uint8Array> | undefined> {
+  if (body === null || body === undefined) return undefined;
+  if (body instanceof Request) {
+    if (body.body === null) return undefined;
+    return body.body;
+  }
+  if (typeof body === "string") return body;
+  if (body instanceof ReadableStream) return body as ReadableStream<Uint8Array>;
+  if (body instanceof ArrayBuffer) return new Uint8Array(body);
+  if (ArrayBuffer.isView(body)) return new Uint8Array(body.buffer, body.byteOffset, body.byteLength);
+  // Blob, FormData and URLSearchParams: let the platform encode them and name their content type.
+  const encoded = new Response(body);
+  const contentType = encoded.headers.get("content-type");
+  if (contentType !== null && !headers.has("content-type")) headers.set("content-type", contentType);
+  return new Uint8Array(await encoded.arrayBuffer());
+}
+
+// ---------------------------------------------------------------- Bun
+
+async function bunPinnedFetch(key: string, options: TLSOptions): Promise<BoundFetch> {
+  // An older Bun writes the request before the check runs, so a peer without the key would receive it.
+  const old = bunOlderThan(MIN_BUN_FOR_TLS_MODE);
+  if (old !== undefined) throw new ConfigurationError(tlsUnavailableOnBun(old));
+  const checkServerIdentity = await identityCheck(key);
+  const fetchImpl: Fetch = async (input, init) => {
+    // The transport validates this too, but the bound fetch can be used alone.
+    checkTLS(shapeOf(input, init));
+    const redirect = noFollow(init?.redirect ?? (input instanceof Request ? input.redirect : undefined));
+    try {
+      // `tls` is the runtime's own fetch option for the connection's TLS settings.
+      return await fetch(input, { ...init, redirect, tls: { ca: options.ca, checkServerIdentity } } as RequestInit);
+    } catch (err) {
+      if (messageOf(err).includes(CERT_MISMATCH)) throw new PeerLacksKeyError(CERT_MISMATCH, { cause: err });
+      throw classify(err);
+    }
+  };
+  return { fetch: fetchImpl };
+}

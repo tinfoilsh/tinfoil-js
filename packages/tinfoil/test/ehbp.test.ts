@@ -1,0 +1,343 @@
+/**
+ * The EHBP transport against a local EHBP server: sealed bodies round-trip,
+ * a bodyless request passes through unsealed, a streamed response is
+ * opened chunk by chunk as it arrives, a peer that no longer holds the key
+ * is reported as such and the request is replayed after re-verification,
+ * tunnels and reserved headers are refused, a redirect is handed back
+ * rather than followed, a failing fetch is a network error, the proxy
+ * header travels in plaintext, and the base URL rules.
+ */
+import { Identity } from "ehbp";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { AttestationError, ConfigurationError, NetworkError } from "../src/errors.js";
+import { Enclave } from "../src/internal/enclave.js";
+import { isLoopback, normalizeBaseURL, validateBaseURL, validateTLSBaseURL } from "../src/internal/transport/base-url.js";
+import { checkEHBP, ehbpMode } from "../src/internal/transport/ehbp.js";
+import { ENCLAVE_URL_HEADER, withEnclaveURL } from "../src/internal/transport/header.js";
+import { withReplay } from "../src/internal/transport/replay.js";
+import { isKeyRejection, KeyedTransport, KeyRejectionError, PeerLacksKeyError, shapeOf } from "../src/internal/transport/transport.js";
+import { KEY_X25519_HPKE_V1_FORMAT, type Verification, type Verifier } from "../../verifier/src/index.js";
+import { paced, startEhbpServer, type EhbpServer, type Reply } from "./helpers/ehbp-server.js";
+
+let server: EhbpServer;
+let sseEnded = false;
+
+function verification(hpke: string | undefined): Verification {
+  return {
+    cryptoMaterial: (hpke === undefined ? [] : [{ id: "hpke", format: KEY_X25519_HPKE_V1_FORMAT, data: hpke }]),
+    tlsPublicKeyFP: "ab".repeat(32),
+    hpkePublicKey: hpke,
+    freshnessExpiresAt: new Date(Date.now() + 60_000),
+  } as unknown as Verification;
+}
+
+beforeAll(async () => {
+  server = await startEhbpServer((seen): Reply => {
+    switch (seen.path) {
+      case "/echo":
+        return {
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ length: seen.body.length, text: new TextDecoder().decode(seen.body), enclave: seen.headers[ENCLAVE_URL_HEADER.toLowerCase()] ?? null, sealed: seen.sealed }),
+        };
+      case "/sse": {
+        sseEnded = false;
+        const chunks = paced(["data: chunk 1\n\n", "data: chunk 2\n\n", "data: chunk 3\n\n"], 60);
+        const body = (async function* () {
+          for await (const c of chunks) yield c;
+          sseEnded = true;
+        })();
+        return { headers: { "content-type": "text/event-stream" }, body };
+      }
+      case "/plain":
+        return { headers: { "content-type": "text/plain" }, body: "hello" };
+      case "/nonce-less":
+        return { plaintext: true, body: "unsealed" };
+      case "/error":
+        return { plaintext: true, status: 503, body: "busy" };
+      case "/redirect":
+        return { plaintext: true, status: 307, headers: { location: `${server.origin}/plain` }, body: "" };
+      default:
+        return { status: 404, plaintext: true, body: "" };
+    }
+  });
+});
+
+afterAll(async () => {
+  await server.close();
+});
+
+describe("checkEHBP", () => {
+  it("refuses a CONNECT or an upgrade, and allows other requests with or without a body", () => {
+    expect(() => checkEHBP(shapeOf("https://x.example/", { method: "CONNECT" }))).toThrow(ConfigurationError);
+    expect(() => checkEHBP(shapeOf("https://x.example/", { headers: { Upgrade: "websocket" } }))).toThrow(/can't protect a protocol upgrade/);
+    expect(() => checkEHBP(shapeOf("https://x.example/", { method: "POST", body: "x" }))).not.toThrow();
+    expect(() => checkEHBP(shapeOf("https://x.example/"))).not.toThrow();
+  });
+
+  it("refuses plaintext off the machine, bodies on GET or HEAD, and the protocol's headers, before any verification", () => {
+    expect(() => checkEHBP(shapeOf("http://x.example/"))).toThrow(/requires an HTTPS request, or HTTP only to localhost/);
+    expect(() => checkEHBP(shapeOf("http://10.0.0.1/"))).toThrow(ConfigurationError);
+    expect(() => checkEHBP(shapeOf("http://localhost:8080/"))).not.toThrow();
+    expect(() => checkEHBP(shapeOf("http://127.0.0.1:8080/"))).not.toThrow();
+    expect(() => checkEHBP(shapeOf("https://x.example/", { method: "GET", body: "x" }))).toThrow(/request with GET method cannot have a body/);
+    expect(() => checkEHBP(shapeOf(new Request("https://x.example/", { method: "HEAD" })))).not.toThrow();
+    expect(() => checkEHBP(shapeOf("https://x.example/", { method: "HEAD", body: "x" }))).toThrow(/request with HEAD method cannot have a body/);
+    expect(() => checkEHBP(shapeOf("https://x.example/", { method: "POST", body: "x", headers: { "Ehbp-Encapsulated-Key": "00" } }))).toThrow(/reserved request header/);
+    expect(() => checkEHBP(shapeOf("https://x.example/", { method: "POST", body: "x", headers: { "content-length": "1" } }))).toThrow(/reserved request header/);
+  });
+});
+
+describe("ehbpMode", () => {
+  const mode = ehbpMode();
+
+  it("binds to the attested HPKE key and rejects its absence or a malformed one", async () => {
+    await expect(mode.bind(verification(undefined))).rejects.toThrow(/document endorses no HPKE key; cannot use the EHBP transport mode/);
+    await expect(mode.bind(verification("zz"))).rejects.toBeInstanceOf(AttestationError);
+    await expect(mode.bind(verification("ab".repeat(16)))).rejects.toThrow(/failed to parse HPKE public key/);
+    expect(mode.name).toBe("ehbp");
+  });
+
+  it("seals a request body and opens the sealed response", async () => {
+    const bound = await mode.bind(verification(server.publicKeyHex));
+    const res = await bound.fetch(`${server.origin}/echo`, { method: "POST", body: "secret prompt", headers: { "content-type": "text/plain" } });
+    expect(res.status).toBe(200);
+    expect(res.headers.get("content-type")).toBe("application/json");
+    expect(res.headers.has("content-length")).toBe(false);
+    expect(await res.json()).toEqual({ length: 13, text: "secret prompt", enclave: null, sealed: true });
+    const last = server.seen[server.seen.length - 1]!;
+    expect(last.sealed).toBe(true);
+    expect(last.headers["ehbp-encapsulated-key"]).toMatch(/^[0-9a-f]{64}$/);
+  });
+
+  it("passes a bodyless request through unsealed, with a plaintext response", async () => {
+    const bound = await mode.bind(verification(server.publicKeyHex));
+    const res = await bound.fetch(`${server.origin}/plain`);
+    expect(await res.text()).toBe("hello");
+    const last = server.seen[server.seen.length - 1]!;
+    expect(last.sealed).toBe(false);
+    expect(last.headers["ehbp-encapsulated-key"]).toBeUndefined();
+  });
+
+  it("opens a streamed response chunk by chunk as it arrives", async () => {
+    const bound = await mode.bind(verification(server.publicKeyHex));
+    const res = await bound.fetch(`${server.origin}/sse`, { method: "POST", body: "start" });
+    expect(res.headers.get("content-type")).toBe("text/event-stream");
+    const reader = res.body!.getReader();
+    const decoder = new TextDecoder();
+    const first = await reader.read();
+    expect(decoder.decode(first.value)).toBe("data: chunk 1\n\n");
+    expect(sseEnded).toBe(false);
+    let text = decoder.decode(first.value);
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      text += decoder.decode(value);
+    }
+    expect(text).toBe("data: chunk 1\n\ndata: chunk 2\n\ndata: chunk 3\n\n");
+    expect(sseEnded).toBe(true);
+  });
+
+  it("seals a streaming request body frame by frame, and the response starts only after the body is sent in full", async () => {
+    const bound = await mode.bind(verification(server.publicKeyHex));
+    let pulled = 0;
+    let closedAt = 0;
+    const body = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        if (pulled === 3) {
+          closedAt = performance.now();
+          controller.close();
+          return;
+        }
+        pulled++;
+        controller.enqueue(new Uint8Array(70 * 1024).fill(pulled));
+      },
+    });
+    const before = server.seen.length;
+    const res = await bound.fetch(`${server.origin}/echo`, { method: "POST", body, headers: { "content-type": "application/octet-stream" } });
+    const respondedAt = performance.now();
+    // The body was pulled to its end before any response arrived, and the
+    // server saw the whole body before it answered.
+    expect(pulled).toBe(3);
+    expect(closedAt).toBeGreaterThan(0);
+    expect(respondedAt).toBeGreaterThanOrEqual(closedAt);
+    expect(server.seen.length).toBe(before + 1);
+    expect(server.seen[before]!.body.length).toBe(3 * 70 * 1024);
+    expect((await res.json()).length).toBe(3 * 70 * 1024);
+  });
+
+  it("reports a peer that no longer holds the key, and the transport replays after re-verification", async () => {
+    const other = await (await Identity.generate()).getPublicKeyHex();
+    const stale = await mode.bind(verification(other));
+    const before = server.seen.length;
+    const err = await stale.fetch(`${server.origin}/echo`, { method: "POST", body: "x" }).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(PeerLacksKeyError);
+    expect((err as Error).message).toBe("attestation error: key configuration mismatch");
+    expect(server.seen.length).toBe(before);
+
+    let verified = 0;
+    const verifier = { checkRepoVerifiability: () => {}, verifyV3At: async () => verification(verified++ === 0 ? other : server.publicKeyHex) } as unknown as Verifier;
+    const enclave = await Enclave.create({ host: "127.0.0.1", repo: "", verifier, fetch: async () => new Response(new Uint8Array([1])), sleep: async () => {} });
+    const transport = new KeyedTransport(enclave, mode);
+    const rejected = await transport.fetch(`${server.origin}/echo`, { method: "POST", body: "y" }).catch((e: unknown) => e);
+    expect(rejected).toBeInstanceOf(KeyRejectionError);
+    const replayed = withReplay(transport.fetch, isKeyRejection);
+    expect((await (await replayed(`${server.origin}/echo`, { method: "POST", body: "y" })).json()).text).toBe("y");
+    expect(verified).toBe(2);
+    expect(server.seen.length).toBe(before + 1);
+  });
+
+  it("returns a plaintext error status as is and rejects a sealed exchange answered without a nonce", async () => {
+    const bound = await mode.bind(verification(server.publicKeyHex));
+    const res = await bound.fetch(`${server.origin}/error`, { method: "POST", body: "x" });
+    expect(res.status).toBe(503);
+    expect(await res.text()).toBe("busy");
+    await expect(bound.fetch(`${server.origin}/nonce-less`, { method: "POST", body: "x" })).rejects.toThrow(/answered without the Ehbp-Response-Nonce header/);
+    await expect(bound.fetch(`${server.origin}/nonce-less`, { method: "POST", body: "x" })).rejects.toBeInstanceOf(NetworkError);
+  });
+
+  it("refuses tunnels, bodies on GET, and reserved headers before sending", async () => {
+    const bound = await mode.bind(verification(server.publicKeyHex));
+    const before = server.seen.length;
+    await expect(bound.fetch(`${server.origin}/echo`, { method: "CONNECT" })).rejects.toThrow(ConfigurationError);
+    await expect(bound.fetch(`${server.origin}/echo`, { headers: { upgrade: "websocket" } })).rejects.toThrow(ConfigurationError);
+    await expect(bound.fetch(`${server.origin}/echo`, { method: "GET", body: "x" })).rejects.toThrow(/request with GET method cannot have a body/);
+    await expect(bound.fetch(`${server.origin}/echo`, { method: "POST", body: "x", headers: { "Ehbp-Encapsulated-Key": "00" } })).rejects.toThrow(/reserved request header/);
+    expect(server.seen.length).toBe(before);
+  });
+
+  it("carries the enclave header in plaintext when a proxy is in front, and omits it otherwise", async () => {
+    const bound = await mode.bind(verification(server.publicKeyHex));
+    const proxied = withEnclaveURL(bound.fetch, "enclave.example", server.origin);
+    expect((await (await proxied(`${server.origin}/echo`, { method: "POST", body: "p" })).json()).enclave).toBe("https://enclave.example");
+    const direct = withEnclaveURL(bound.fetch, "enclave.example", "");
+    expect((await (await direct(`${server.origin}/echo`, { method: "POST", body: "d" })).json()).enclave).toBeNull();
+  });
+
+  it("hands a redirect back rather than following it, and keeps a request's own refusal of one", async () => {
+    const bound = await mode.bind(verification(server.publicKeyHex));
+    const before = server.seen.length;
+    const sealedExchange = await bound.fetch(`${server.origin}/redirect`, { method: "POST", body: "x", redirect: "follow" });
+    expect(sealedExchange.status).toBe(307);
+    expect(sealedExchange.headers.get("location")).toBe(`${server.origin}/plain`);
+    await sealedExchange.text();
+    const plainExchange = await bound.fetch(`${server.origin}/redirect`);
+    expect(plainExchange.status).toBe(307);
+    await plainExchange.text();
+    expect(server.seen.slice(before).map((s) => s.path)).toEqual(["/redirect", "/redirect"]);
+
+    const sent: (string | undefined)[] = [];
+    const observed = await ehbpMode({
+      fetch: async (input, init) => {
+        sent.push(init?.redirect);
+        return fetch(input, init);
+      },
+    }).bind(verification(server.publicKeyHex));
+    await (await observed.fetch(`${server.origin}/plain`)).text();
+    await expect(observed.fetch(`${server.origin}/redirect`, { method: "POST", body: "x", redirect: "error" })).rejects.toBeInstanceOf(NetworkError);
+    await expect(observed.fetch(new Request(`${server.origin}/redirect`, { redirect: "error" }))).rejects.toBeInstanceOf(NetworkError);
+    expect(sent).toEqual(["manual", "error", "error"]);
+  });
+
+  it("reports a failing fetch as a network error, a redirect the runtime hid as one too, and an abort as its own reason", async () => {
+    const failing = await ehbpMode({
+      fetch: async () => {
+        throw new TypeError("fetch failed");
+      },
+    }).bind(verification(server.publicKeyHex));
+    for (const init of [{ method: "POST", body: "x" }, {}]) {
+      const err = await failing.fetch(`${server.origin}/echo`, init).catch((e: unknown) => e);
+      expect(err).toBeInstanceOf(NetworkError);
+      expect((err as Error).message).toBe("network error: fetch failed");
+      expect((err as Error).cause).toBeInstanceOf(TypeError);
+    }
+
+    const hidden = await ehbpMode({
+      fetch: async () => {
+        const response = new Response(null, { status: 200 });
+        Object.defineProperty(response, "type", { value: "opaqueredirect" });
+        return response;
+      },
+    }).bind(verification(server.publicKeyHex));
+    const hiddenErr = await hidden.fetch(`${server.origin}/plain`).catch((e: unknown) => e);
+    expect(hiddenErr).toBeInstanceOf(NetworkError);
+    expect((hiddenErr as Error).message).toMatch(/redirected the request, which a sealed request does not follow/);
+
+    const reason = new Error("caller gave up");
+    const aborting = await ehbpMode({
+      fetch: async (_input, init) => {
+        init?.signal?.throwIfAborted();
+        return new Response("late");
+      },
+    }).bind(verification(server.publicKeyHex));
+    await expect(aborting.fetch(`${server.origin}/echo`, { method: "POST", body: "x", signal: AbortSignal.abort(reason) })).rejects.toBe(reason);
+    await expect(aborting.fetch(new Request(`${server.origin}/echo`, { method: "POST", body: "x", signal: AbortSignal.abort(reason) }))).rejects.toBe(reason);
+    await expect(aborting.fetch(`${server.origin}/plain`, { signal: AbortSignal.abort(reason) })).rejects.toBe(reason);
+  });
+
+  it("sends through the fetch it is given", async () => {
+    const urls: string[] = [];
+    const observed = ehbpMode({
+      fetch: async (input, init) => {
+        urls.push(input instanceof Request ? input.url : String(input));
+        return fetch(input, init);
+      },
+    });
+    const bound = await observed.bind(verification(server.publicKeyHex));
+    await (await bound.fetch(`${server.origin}/echo`, { method: "POST", body: "via" })).json();
+    expect(urls).toEqual([`${server.origin}/echo`]);
+  });
+});
+
+describe("base URL rules", () => {
+  it("accepts HTTPS anywhere and HTTP only to a loopback host", () => {
+    for (const ok of ["https://proxy.example/v1/", "http://localhost:8080/", "http://127.0.0.1/", "http://127.9.9.9:3000/x", "http://[::1]:8443/"]) {
+      expect(() => validateBaseURL(ok), ok).not.toThrow();
+    }
+    for (const bad of ["http://proxy.example/", "http://10.0.0.1/", "ftp://x/", "/relative", "http://localhost.evil.example/", "https://proxy.example/v1/?key=1", "https://proxy.example/v1/#frag", "https://proxy.example/?", "https://user:pw@proxy.example/v1/", "https://user@proxy.example/", "http://u:p@localhost:8080/"]) {
+      expect(() => validateBaseURL(bad), bad).toThrow(ConfigurationError);
+    }
+    expect(() => validateBaseURL("https://proxy.example/v1?x=1")).toThrow(/query string or fragment/);
+    const credentials = ((): Error => {
+      try {
+        validateBaseURL("https://user:hunter2@proxy.example/v1/");
+      } catch (err) {
+        return err as Error;
+      }
+      throw new Error("accepted");
+    })();
+    expect(credentials.message).toMatch(/a username or password can't be part of a base URL/);
+    expect(credentials.message).not.toContain("hunter2");
+    // Credentials are refused before a query string or fragment is, whose error repeats the URL.
+    const credentialsAndQuery = ((): Error => {
+      try {
+        validateBaseURL("https://user:hunter2@proxy.example/v1/?k=1");
+      } catch (err) {
+        return err as Error;
+      }
+      throw new Error("accepted");
+    })();
+    expect(credentialsAndQuery.message).toMatch(/a username or password can't be part of a base URL/);
+    expect(credentialsAndQuery.message).not.toContain("hunter2");
+    expect(isLoopback("LOCALHOST")).toBe(true);
+    expect(isLoopback("[::1]")).toBe(true);
+    expect(isLoopback("127.0.0.1")).toBe(true);
+    expect(isLoopback("128.0.0.1")).toBe(false);
+    expect(isLoopback("localhost.evil.example")).toBe(false);
+  });
+
+  it("ends a base URL with a slash as the URL parser reads it, leaving one that already does unchanged", () => {
+    expect(normalizeBaseURL("https://proxy.example.com")).toBe("https://proxy.example.com/");
+    expect(normalizeBaseURL("https://proxy.example.com/v1")).toBe("https://proxy.example.com/v1/");
+    expect(normalizeBaseURL("https://proxy.example.com/v1/")).toBe("https://proxy.example.com/v1/");
+    expect(normalizeBaseURL("http://localhost:8080")).toBe("http://localhost:8080/");
+    expect(normalizeBaseURL("  https://proxy.example.com/v1  ")).toBe("https://proxy.example.com/v1/");
+    expect(normalizeBaseURL("HTTPS://Proxy.Example.com:443/v1")).toBe("https://proxy.example.com/v1/");
+  });
+
+  it("requires a TLS-mode base URL to stay on the enclave's origin", () => {
+    expect(() => validateTLSBaseURL("", "enclave.example")).not.toThrow();
+    expect(() => validateTLSBaseURL("https://enclave.example:443/v1/", "enclave.example")).not.toThrow();
+    expect(() => validateTLSBaseURL("https://proxy.example/v1/", "enclave.example")).toThrow(/is a proxy, which requires the EHBP transport mode/);
+    expect(() => validateTLSBaseURL("not a url", "enclave.example")).toThrow(ConfigurationError);
+  });
+});

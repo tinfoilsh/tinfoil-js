@@ -1,20 +1,14 @@
 /**
- * Browser stub for realtime.
- * Verified realtime connections require TLS pinning, which browsers cannot do.
- * The runtime check in secure-client.ts throws before reaching this code.
- * This stub exists to satisfy bundlers.
+ * Realtime sessions in a browser: unavailable, since the connection can't be
+ * pinned to the attested key there. This stub exists so bundlers resolve
+ * the import.
  */
-import type * as WS from "ws";
 import type { OpenAIRealtimeWS } from "openai/realtime/ws";
-import { ConfigurationError } from "./verifier.js";
+import { ConfigurationError } from "./errors.js";
+import type { EnclaveOpenAIClient, RouterOpenAIClient, TinfoilClient } from "./openai-client.js";
+import type { RealtimeOptions } from "./options.js";
+import { WEBSOCKETS_UNAVAILABLE_IN_BROWSERS } from "./internal/transport/ws.browser.js";
 
-export async function createPinnedRealtimeWS(
-  _props: { model: string; options?: WS.ClientOptions },
-  _client: { apiKey: string; baseURL: string },
-  _pinnedOptions: WS.ClientOptions,
-): Promise<OpenAIRealtimeWS> {
-  throw new ConfigurationError(
-    "Verified realtime connections are not supported in browser environments: browsers do not " +
-      "expose TLS certificate details, so the connection cannot be pinned to the attested enclave key.",
-  );
+export async function createRealtimeWebSocket(_client: TinfoilClient | EnclaveOpenAIClient | RouterOpenAIClient, _options: RealtimeOptions): Promise<OpenAIRealtimeWS> {
+  throw new ConfigurationError(WEBSOCKETS_UNAVAILABLE_IN_BROWSERS);
 }

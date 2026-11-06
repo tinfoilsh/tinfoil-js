@@ -1,91 +1,44 @@
 /**
- * Bun integration tests - verify both EHBP and TLS transports work with real Tinfoil API
- * Run with: bun test test/integration.bun.ts
- *
- * These tests require:
- * - RUN_TINFOIL_INTEGRATION=true environment variable
+ * The client under Bun against the live router: a router client discovers
+ * and verifies a router without a credential, and an OpenAI client completes
+ * a chat over each transport, TLS pinned to the attested key and EHBP sealed
+ * to it. Needs the integration lane; the completions need a Tinfoil API key
+ * too. Run with: RUN_TINFOIL_INTEGRATION=true bun test test/integration.bun.ts
  */
-import { describe, it, expect, beforeAll } from "bun:test";
+import { describe, expect, it } from "bun:test";
+import { RouterHTTPClient, RouterOpenAIClient } from "../src/index.js";
+import type { TransportMode } from "../src/options.js";
+import { completeChat, LIVE_REPO, SHA256_HEX } from "./helpers/live.js";
 
 const RUN_INTEGRATION = process.env.RUN_TINFOIL_INTEGRATION === "true";
-const isBun = typeof process !== "undefined" && (process as any).versions?.bun;
+const apiKey = process.env.TINFOIL_API_KEY ?? "";
 
-describe("Bun Integration", () => {
-  beforeAll(() => {
-    if (!isBun) console.log("Skipping - not running in Bun");
-    if (!RUN_INTEGRATION) console.log("Skipping - RUN_TINFOIL_INTEGRATION not set");
-  });
-
-  it("should create TinfoilAI client with EHBP transport (default)", async () => {
-    if (!isBun || !RUN_INTEGRATION) return;
-
-    const { TinfoilAI } = await import("../src/index.js");
-    const client = new TinfoilAI({
-      apiKey: process.env.TINFOIL_API_KEY,
-      // transport defaults to 'ehbp'
-    });
-    await client.ready();
-
-    const doc = await client.getVerificationDocument();
-    expect(doc.securityVerified).toBe(true);
-  });
-
-  it("should make chat completion via EHBP transport (default)", async () => {
-    if (!isBun || !RUN_INTEGRATION) return;
-
-    const { TinfoilAI } = await import("../src/index.js");
-    const client = new TinfoilAI({
-      apiKey: process.env.TINFOIL_API_KEY,
-    });
-
-    const completion = await client.chat.completions.create({
-      model: "gpt-oss-120b",
-      messages: [{ role: "user", content: "Hello!" }],
-    });
-
-    expect(completion.choices[0].message.content).toBeDefined();
-  });
-
-  it("should create TinfoilAI client with TLS transport", async () => {
-    if (!isBun || !RUN_INTEGRATION) return;
-
-    const { TinfoilAI } = await import("../src/index.js");
-    const client = new TinfoilAI({
-      apiKey: process.env.TINFOIL_API_KEY,
-      transport: 'tls',
-    });
-    await client.ready();
-
-    const doc = await client.getVerificationDocument();
-    expect(doc.securityVerified).toBe(true);
-  });
-
-  it("should make chat completion via TLS transport", async () => {
-    if (!isBun || !RUN_INTEGRATION) return;
-
-    const { TinfoilAI } = await import("../src/index.js");
-    const client = new TinfoilAI({
-      apiKey: process.env.TINFOIL_API_KEY,
-      transport: 'tls',
-    });
-
-    const completion = await client.chat.completions.create({
-      model: "gpt-oss-120b",
-      messages: [{ role: "user", content: "Hello!" }],
-    });
-
-    expect(completion.choices[0].message.content).toBeDefined();
-  });
-
-  it("should create SecureClient with TLS transport", async () => {
-    if (!isBun || !RUN_INTEGRATION) return;
-
-    const { SecureClient } = await import("../src/index.js");
-    const client = new SecureClient({ transport: 'tls' });
-    await client.ready();
-
-    const doc = await client.getVerificationDocument();
-    expect(doc.securityVerified).toBe(true);
-    expect(client.getBaseURL()).toBeDefined();
-  });
+describe("RouterHTTPClient under Bun on the live router", () => {
+  it.skipIf(!RUN_INTEGRATION)(
+    "discovers and verifies a router",
+    async () => {
+      const http = await RouterHTTPClient.create();
+      expect(http.repo).toBe(LIVE_REPO);
+      expect(http.current?.tlsPublicKeyFP).toMatch(SHA256_HEX);
+      expect(http.current?.hpkePublicKey).toMatch(SHA256_HEX);
+    },
+    180_000,
+  );
 });
+
+for (const transportMode of ["tls", "ehbp"] as const satisfies readonly TransportMode[]) {
+  describe(`RouterOpenAIClient under Bun over ${transportMode} on the live router`, () => {
+    it.skipIf(!RUN_INTEGRATION || apiKey === "")(
+      "verifies a router and completes a chat through it",
+      async () => {
+        const ai = await RouterOpenAIClient.create({ transportMode }, { apiKey });
+        const router = ai.httpClient;
+        expect(router.repo).toBe(LIVE_REPO);
+        expect(ai.baseURL).toBe(`https://${router.enclave}/v1/`);
+        const completed = await completeChat(ai);
+        expect(completed.finishReason).toBeTruthy();
+      },
+      180_000,
+    );
+  });
+}
