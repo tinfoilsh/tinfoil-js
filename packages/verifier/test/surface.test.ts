@@ -43,9 +43,6 @@ const EXPORTS = [
   "parseRegister",
   "parseExpectedSevSnp",
   "parseExpectedTdx",
-  "expectedOf",
-  "cloneMeasurement",
-  "cloneExpected",
   "formatMeasurement",
 ].sort();
 

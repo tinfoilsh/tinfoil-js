@@ -2,7 +2,6 @@
 import { describe, expect, it } from "vitest";
 import {
   cloneExpected,
-  expectedOf,
   formatMeasurement,
   parseExpectedSevSnp,
   parseExpectedTdx,
@@ -66,30 +65,17 @@ describe("measurement", () => {
       registerHex(tdx.rtmr2),
       registerHex(tdx.rtmr3),
     );
-    expect(all, "arguments are in register order").toEqual(expectedOf(tdx));
+    // A measurement with every register set is the expectation that pins each of them.
+    expect(all, "arguments are in register order").toEqual(tdx);
     const sparse = parseExpectedTdx("", "", "", "", registerHex(tdx.rtmr3).toUpperCase());
     expect(sparse, `"" leaves a register unconstrained`).toEqual({ platform: "tdx", rtmr3: tdx.rtmr3 });
 
     const sev: SevSnpMeasurement = { platform: "sev-snp", launch: reg(1) };
-    expect(parseExpectedSevSnp(registerHex(sev.launch))).toEqual(expectedOf(sev));
+    expect(parseExpectedSevSnp(registerHex(sev.launch))).toEqual(sev);
     expect(parseExpectedSevSnp("")).toEqual({ platform: "sev-snp" });
 
     expect(() => parseExpectedTdx("", "", "", "abcd", "")).toThrow("RTMR2: register must be 96 hex characters");
     expect(() => parseExpectedSevSnp("zz".repeat(REGISTER_SIZE))).toThrow("Launch: register is not hex");
-  });
-
-  it("expectedOf pins every register", () => {
-    const tdx = tdxFixture();
-    expect(expectedOf(tdx)).toEqual({
-      platform: "tdx",
-      mrtd: tdx.mrtd,
-      rtmr0: tdx.rtmr0,
-      rtmr1: tdx.rtmr1,
-      rtmr2: tdx.rtmr2,
-      rtmr3: tdx.rtmr3,
-    });
-    const sev: SevSnpMeasurement = { platform: "sev-snp", launch: reg(1) };
-    expect(expectedOf(sev)).toEqual({ platform: "sev-snp", launch: sev.launch });
   });
 
   it("formatMeasurement lists one labeled register per line", () => {
