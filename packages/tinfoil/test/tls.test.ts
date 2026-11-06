@@ -31,6 +31,8 @@ let origin: string;
 let sseEnded = false;
 /** The TLS connections open right now, pooled ones included. */
 let open = 0;
+/** The TLS connections the server has accepted so far. */
+let accepted = 0;
 
 /** Resolves once `cond` holds, polling; fails after `ms`. */
 async function until(cond: () => boolean, ms = 5_000): Promise<void> {
@@ -94,6 +96,7 @@ beforeAll(async () => {
   });
   server.on("secureConnection", (socket) => {
     open++;
+    accepted++;
     socket.once("close", () => open--);
   });
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
@@ -249,12 +252,15 @@ describe("tlsMode", () => {
     bound.close?.();
   });
 
-  it("retires a binding without cutting a request in flight, closing its idle connections and pooling no more", async () => {
+  it("pools a connection across requests, and retires a binding without cutting a request in flight, closing its idle connections and pooling no more", async () => {
     await until(() => open === 0);
     const idle = await mode.bind(verification(PIN));
+    const before = accepted;
     expect(await (await idle.fetch(`${origin}/plain`)).text()).toBe("hello");
     await new Promise((resolve) => setTimeout(resolve, 20));
     expect(open).toBe(1);
+    expect(await (await idle.fetch(`${origin}/plain`)).text()).toBe("hello");
+    expect(accepted).toBe(before + 1);
     idle.retire?.();
     await until(() => open === 0);
 

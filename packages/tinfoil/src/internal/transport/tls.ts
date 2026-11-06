@@ -63,10 +63,14 @@ async function nodePinnedFetch(key: string, options: TLSOptions): Promise<BoundF
   const [https, { Readable }, checkServerIdentity] = await Promise.all([import("node:https"), import("node:stream"), identityCheck(key)]);
   type IncomingMessage = import("node:http").IncomingMessage;
 
-  const agent = new https.Agent({ keepAlive: true });
+  const ca = options.ca === undefined ? undefined : typeof options.ca === "string" ? options.ca : Buffer.from(options.ca);
+  // The check is the agent's, not each request's: the agent is bound to one
+  // key, so every connection it makes is checked against that key, and a
+  // connection it pools was. A check given per request would stop the
+  // runtime from pooling the connection at all.
+  const agent = new https.Agent({ keepAlive: true, ca, checkServerIdentity });
   // An idle pooled connection must not keep the process alive; a reused one is referenced again.
   agent.on("free", (socket: import("node:net").Socket) => socket.unref());
-  const ca = options.ca === undefined ? undefined : typeof options.ca === "string" ? options.ca : Buffer.from(options.ca);
 
   const fetchImpl: Fetch = async (input, init) => {
     // The transport validates this too, but the bound fetch can be used alone.
@@ -90,9 +94,7 @@ async function nodePinnedFetch(key: string, options: TLSOptions): Promise<BoundF
           method,
           headers: Object.fromEntries(headers.entries()),
           agent,
-          ca,
           servername: url.hostname.replace(/^\[|\]$/g, ""),
-          checkServerIdentity,
         },
         resolve,
       );
