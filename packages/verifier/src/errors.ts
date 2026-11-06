@@ -1,8 +1,5 @@
-/**
- * Names the verification layer that rejected a document. More layers may be
- * added, so callers must tolerate values they do not recognize.
- */
-export type Layer =
+/** The verification layers today, in the order a document passes through them. */
+export type KnownLayer =
   /** The document can't be parsed, isn't bound to the nonce, or contradicts itself. */
   | "envelope"
   /** Reference values failed to authenticate or don't match the requested workload. */
@@ -11,6 +8,15 @@ export type Layer =
   | "quote"
   /** Authentic evidence doesn't satisfy the policy. */
   | "policy";
+
+/**
+ * Names the verification layer that rejected a document: one of the
+ * {@link KnownLayer} values today, and a later version may add more. The
+ * type is open so a caller compiles against the names it knows; a value it
+ * doesn't recognize is still a rejection, at a stage it has no name for,
+ * and must be treated as one.
+ */
+export type Layer = KnownLayer | (string & {});
 
 /** Base class for every error this package throws. */
 export abstract class VerifyError extends Error {

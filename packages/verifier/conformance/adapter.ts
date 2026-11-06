@@ -327,6 +327,10 @@ export function rejectionCode(err: unknown): { code: RejectionCode; exitCode: Ex
         return { code: "QUOTE_REJECTED", exitCode: ExitCode.Rejected };
       case "policy":
         return { code: "POLICY_REJECTED", exitCode: ExitCode.Rejected };
+      default:
+        // A layer this adapter has no code for still rejects the document;
+        // the verdict stays a rejection, reported under the broadest code.
+        return { code: "POLICY_REJECTED", exitCode: ExitCode.Rejected };
     }
   }
   return undefined;
