@@ -31,6 +31,9 @@ export interface GatewayClientSeams extends Omit<EnclaveClientSeams, "tls"> {
   readonly resolveSecret?: (explicit: string | undefined) => Promise<string>;
 }
 
+/** Only this module holds the token the constructor requires, so untyped code that calls it is refused. */
+const TOKEN: unique symbol = Symbol("GatewayHTTPClient");
+
 /** Calls the private constructor; the class assigns it, as the only place the constructor can be called. */
 let construct: (transport: GatewayTransport, baseURL: string, fetchImpl: Fetch) => GatewayHTTPClient;
 
@@ -73,8 +76,10 @@ export async function createGatewayHTTPClient(options: GatewayOptions, seams: Ga
 
 /**
  * The HTTP client for Tinfoil inference through the gateway; see the module
- * header for what it protects. Created only by {@link GatewayHTTPClient.create}:
- * the constructor is private.
+ * header for what it protects. The constructor is private: type-checked
+ * code cannot call it, and a call from untyped code is refused at runtime.
+ * Clients come from {@link GatewayHTTPClient.create} and
+ * {@link GatewayOpenAIClient.create}.
  *
  * @experimental The gateway route is new; this API may change without a major version.
  */
@@ -85,7 +90,8 @@ export class GatewayHTTPClient {
   readonly baseURL: string;
   readonly #transport: GatewayTransport;
 
-  private constructor(transport: GatewayTransport, baseURL: string, fetchImpl: Fetch) {
+  private constructor(token: typeof TOKEN, transport: GatewayTransport, baseURL: string, fetchImpl: Fetch) {
+    if (token !== TOKEN) throw new ConfigurationError("GatewayHTTPClient is created with GatewayHTTPClient.create");
     this.#transport = transport;
     this.fetch = fetchImpl;
     this.baseURL = baseURL;
@@ -94,7 +100,7 @@ export class GatewayHTTPClient {
   }
 
   static {
-    construct = (...parts) => new GatewayHTTPClient(...parts);
+    construct = (...parts) => new GatewayHTTPClient(TOKEN, ...parts);
   }
 
   /**

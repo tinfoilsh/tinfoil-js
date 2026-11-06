@@ -158,13 +158,17 @@ interface Parts {
   readonly roots: quote.VendorRoots;
 }
 
+/** Only this module holds the token the constructor requires, so untyped code that calls it is refused. */
+const BUILT_HERE: unique symbol = Symbol("Verifier");
+
 /** Calls the private constructor; the class assigns it, as the only place the constructor can be called. */
 let construct: (parts: Parts) => Verifier;
 
 /**
  * Appraises v3 attestation documents against a fixed policy. Immutable once
  * built, and built only by {@link Verifier.create}: the constructor is
- * private.
+ * private, so type-checked code cannot call it, and a call from untyped
+ * code is refused at runtime.
  */
 export class Verifier {
   /** The freshness window in milliseconds. */
@@ -183,7 +187,8 @@ export class Verifier {
   readonly #freshnessVerifier: FreshnessVerifier;
   readonly #roots: quote.VendorRoots;
 
-  private constructor(parts: Parts) {
+  private constructor(token: typeof BUILT_HERE, parts: Parts) {
+    if (token !== BUILT_HERE) throw new UsageError("verifier must be built with Verifier.create");
     this.#policy = parts.policy;
     this.#prov = parts.prov;
     this.#configVerifier = parts.configVerifier;
@@ -197,7 +202,7 @@ export class Verifier {
   }
 
   static {
-    construct = (parts) => new Verifier(parts);
+    construct = (parts) => new Verifier(BUILT_HERE, parts);
   }
 
   /**

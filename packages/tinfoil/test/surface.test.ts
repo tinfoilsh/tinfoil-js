@@ -114,7 +114,8 @@ void typeExports;
 /**
  * Only the factories build clients: every constructor is private, so a
  * caller who tries fails to compile. Never called; the directives pin the
- * errors under the test typecheck.
+ * errors under the test typecheck. Untyped construction is refused at
+ * runtime, which each client's own tests check.
  */
 function privateConstructors(): void {
   // @ts-expect-error The constructor is private; a client comes from EnclaveHTTPClient.create.

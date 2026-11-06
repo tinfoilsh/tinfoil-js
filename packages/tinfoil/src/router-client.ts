@@ -22,6 +22,9 @@ export interface RouterClientSeams extends EnclaveClientSeams {
   readonly resolveSecret?: (explicit: string | undefined) => Promise<string>;
 }
 
+/** Only this module holds the token the constructor requires, so untyped code that calls it is refused. */
+const TOKEN: unique symbol = Symbol("RouterHTTPClient");
+
 /** Calls the private constructor; the class assigns it, as the only place the constructor can be called. */
 let construct: (transport: KeyedTransport, baseURL: string, openAIURL: string, fetchImpl: Fetch) => RouterHTTPClient;
 
@@ -64,7 +67,14 @@ export async function createRouterHTTPClient(options: RouterOptions, seams: Rout
   return client;
 }
 
-/** An HTTP client bound to the attested router it discovered; see the module header. Created only by {@link RouterHTTPClient.create}: the constructor is private. */
+/**
+ * An HTTP client bound to the attested router it discovered; see the module
+ * header. The constructor is private: type-checked code cannot call it, and
+ * a call from untyped code is refused at runtime. Clients come from
+ * {@link RouterHTTPClient.create}, and from the factories built over it:
+ * `createClient` and {@link TinfoilClient.create},
+ * {@link RouterOpenAIClient.create}, and the AI SDK provider.
+ */
 export class RouterHTTPClient {
   /** As {@link EnclaveHTTPClient.fetch}. */
   readonly fetch: Fetch;
@@ -76,7 +86,8 @@ export class RouterHTTPClient {
   readonly repo: string;
   readonly #transport: KeyedTransport;
 
-  private constructor(transport: KeyedTransport, baseURL: string, openAIURL: string, fetchImpl: Fetch) {
+  private constructor(token: typeof TOKEN, transport: KeyedTransport, baseURL: string, openAIURL: string, fetchImpl: Fetch) {
+    if (token !== TOKEN) throw new ConfigurationError("RouterHTTPClient is created with RouterHTTPClient.create");
     this.#transport = transport;
     this.fetch = fetchImpl;
     this.baseURL = baseURL;
@@ -88,7 +99,7 @@ export class RouterHTTPClient {
   }
 
   static {
-    construct = (...parts) => new RouterHTTPClient(...parts);
+    construct = (...parts) => new RouterHTTPClient(TOKEN, ...parts);
   }
 
   /**

@@ -224,6 +224,7 @@ describe("GatewayHTTPClient", () => {
     expect(res.status).toBe(200);
     expect(c.current.map((r) => r.host)).toEqual(["replica-b.example"]);
     expect(checked).toEqual([gateway.publicKeyHex]);
+    expect(() => new (GatewayHTTPClient as any)(Symbol("x"))).toThrow(ConfigurationError);
   });
 });
 
@@ -241,5 +242,6 @@ describe("GatewayOpenAIClient", () => {
     const sent = JSON.parse(new TextDecoder().decode(last.body)) as Record<string, unknown>;
     expect(sent.cache_salt).toMatch(/^[A-Za-z0-9_-]{43}$/);
     expect(sent.user_cache_secret).toBeUndefined();
+    expect(() => new (GatewayOpenAIClient as any)(Symbol("x"), ai.httpClient, {})).toThrow(ConfigurationError);
   });
 });

@@ -14,6 +14,7 @@
  */
 import OpenAI, { type ClientOptions } from "openai";
 import { createEnclaveHTTPClient, EnclaveHTTPClient, openAIURLOf, type EnclaveClientSeams } from "./enclave-client.js";
+import { ConfigurationError } from "./errors.js";
 import { createGatewayHTTPClient, GatewayHTTPClient, type GatewayClientSeams } from "./gateway-client.js";
 import { checkAPIKeyRuntime } from "./internal/credential.js";
 import { asyncDispose } from "./internal/dispose.js";
@@ -85,10 +86,13 @@ function inherit(client: OpenAI, options: Partial<OpenAIOptions>): OpenAIOptions
   return merged;
 }
 
+/** Only this module holds the token the constructors require, so untyped code that calls one is refused. */
+const TOKEN: unique symbol = Symbol("OpenAIClient");
+
 /**
  * Call the private constructors; each class assigns its own, as the only
- * place its constructor can be called, so a client over an attested
- * transport comes from a factory and nothing else.
+ * place its constructor can be called by type-checked code, so a client
+ * over an attested transport comes from a factory and nothing else.
  */
 let constructTinfoil: (httpClient: RouterHTTPClient, options: OpenAIOptions) => TinfoilClient;
 let constructEnclave: (httpClient: EnclaveHTTPClient, options: OpenAIOptions) => EnclaveOpenAIClient;
@@ -100,7 +104,8 @@ let constructGateway: (httpClient: GatewayHTTPClient, options: OpenAIOptions) =>
  * verified before the client is returned. Its `baseURL` is the URL requests
  * go to on that route. Created only by {@link createClient} or
  * {@link TinfoilClient.create}: the constructor is private, as it is on
- * every client below.
+ * every client below, so type-checked code cannot call it, and a call from
+ * untyped code is refused at runtime.
  *
  * Errors: the factory rejects with the client's own errors
  * ({@link ConfigurationError}, {@link NetworkError}, {@link AttestationError}).
@@ -124,13 +129,14 @@ export class TinfoilClient extends OpenAI {
    */
   declare readonly httpClient: RouterHTTPClient;
 
-  private constructor(httpClient: RouterHTTPClient, options: OpenAIOptions) {
+  private constructor(token: typeof TOKEN, httpClient: RouterHTTPClient, options: OpenAIOptions) {
+    if (token !== TOKEN) throw new ConfigurationError("TinfoilClient is created with createClient");
     super({ ...openAIClientOptions(options), fetch: httpClient.fetch, baseURL: openAIURLOf(httpClient) });
     attest(this, httpClient, openAIURLOf(httpClient), options);
   }
 
   static {
-    constructTinfoil = (httpClient, options) => new TinfoilClient(httpClient, options);
+    constructTinfoil = (httpClient, options) => new TinfoilClient(TOKEN, httpClient, options);
   }
 
   /**
@@ -139,7 +145,7 @@ export class TinfoilClient extends OpenAI {
    * them, and one passed from untyped code is ignored.
    */
   override withOptions(options: Partial<OpenAIOptions>): this {
-    return new TinfoilClient(this.httpClient, inherit(this, options)) as this;
+    return new TinfoilClient(TOKEN, this.httpClient, inherit(this, options)) as this;
   }
 
   /** Closes `httpClient` at the end of an `await using` block; see {@link RouterHTTPClient.close}. */
@@ -191,14 +197,15 @@ export class EnclaveOpenAIClient extends OpenAI {
   /** The enclave client requests go through. */
   declare readonly httpClient: EnclaveHTTPClient;
 
-  private constructor(httpClient: EnclaveHTTPClient, options: OpenAIOptions) {
+  private constructor(token: typeof TOKEN, httpClient: EnclaveHTTPClient, options: OpenAIOptions) {
+    if (token !== TOKEN) throw new ConfigurationError("EnclaveOpenAIClient is created with EnclaveOpenAIClient.create");
     // The transport and base URL come last, so the caller's options can't replace them.
     super({ ...openAIClientOptions(options), fetch: httpClient.fetch, baseURL: openAIURLOf(httpClient) });
     attest(this, httpClient, openAIURLOf(httpClient), options);
   }
 
   static {
-    constructEnclave = (httpClient, options) => new EnclaveOpenAIClient(httpClient, options);
+    constructEnclave = (httpClient, options) => new EnclaveOpenAIClient(TOKEN, httpClient, options);
   }
 
   /**
@@ -207,7 +214,7 @@ export class EnclaveOpenAIClient extends OpenAI {
    * them, and one passed from untyped code is ignored.
    */
   override withOptions(options: Partial<OpenAIOptions>): this {
-    return new EnclaveOpenAIClient(this.httpClient, inherit(this, options)) as this;
+    return new EnclaveOpenAIClient(TOKEN, this.httpClient, inherit(this, options)) as this;
   }
 
   /** Closes `httpClient` at the end of an `await using` block; see {@link EnclaveHTTPClient.close}. */
@@ -237,13 +244,14 @@ export class RouterOpenAIClient extends OpenAI {
   /** The router client requests go through. */
   declare readonly httpClient: RouterHTTPClient;
 
-  private constructor(httpClient: RouterHTTPClient, options: OpenAIOptions) {
+  private constructor(token: typeof TOKEN, httpClient: RouterHTTPClient, options: OpenAIOptions) {
+    if (token !== TOKEN) throw new ConfigurationError("RouterOpenAIClient is created with RouterOpenAIClient.create");
     super({ ...openAIClientOptions(options), fetch: httpClient.fetch, baseURL: openAIURLOf(httpClient) });
     attest(this, httpClient, openAIURLOf(httpClient), options);
   }
 
   static {
-    constructRouter = (httpClient, options) => new RouterOpenAIClient(httpClient, options);
+    constructRouter = (httpClient, options) => new RouterOpenAIClient(TOKEN, httpClient, options);
   }
 
   /**
@@ -252,7 +260,7 @@ export class RouterOpenAIClient extends OpenAI {
    * them, and one passed from untyped code is ignored.
    */
   override withOptions(options: Partial<OpenAIOptions>): this {
-    return new RouterOpenAIClient(this.httpClient, inherit(this, options)) as this;
+    return new RouterOpenAIClient(TOKEN, this.httpClient, inherit(this, options)) as this;
   }
 
   /** Closes `httpClient` at the end of an `await using` block; see {@link RouterHTTPClient.close}. */
@@ -283,13 +291,14 @@ export class GatewayOpenAIClient extends OpenAI {
   /** The gateway client requests go through. */
   declare readonly httpClient: GatewayHTTPClient;
 
-  private constructor(httpClient: GatewayHTTPClient, options: OpenAIOptions) {
+  private constructor(token: typeof TOKEN, httpClient: GatewayHTTPClient, options: OpenAIOptions) {
+    if (token !== TOKEN) throw new ConfigurationError("GatewayOpenAIClient is created with GatewayOpenAIClient.create");
     super({ ...openAIClientOptions(options), fetch: httpClient.fetch, baseURL: httpClient.baseURL });
     attest(this, httpClient, httpClient.baseURL, options);
   }
 
   static {
-    constructGateway = (httpClient, options) => new GatewayOpenAIClient(httpClient, options);
+    constructGateway = (httpClient, options) => new GatewayOpenAIClient(TOKEN, httpClient, options);
   }
 
   /**
@@ -298,7 +307,7 @@ export class GatewayOpenAIClient extends OpenAI {
    * them, and one passed from untyped code is ignored.
    */
   override withOptions(options: Partial<OpenAIOptions>): this {
-    return new GatewayOpenAIClient(this.httpClient, inherit(this, options)) as this;
+    return new GatewayOpenAIClient(TOKEN, this.httpClient, inherit(this, options)) as this;
   }
 
   /** Closes `httpClient` at the end of an `await using` block; see {@link GatewayHTTPClient.close}. */

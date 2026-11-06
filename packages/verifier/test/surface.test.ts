@@ -115,7 +115,8 @@ const gettersOf = (cls: { prototype: object }): string[] =>
 /**
  * Only the verifier builds these: the constructors are private, so a caller
  * who tries fails to compile. Never called; the directives pin the errors
- * under the test typecheck.
+ * under the test typecheck. Untyped construction is refused at runtime,
+ * which the surface test checks.
  */
 function privateConstructors(): void {
   // @ts-expect-error The constructor is private; a verification comes from a verifier.
@@ -155,6 +156,13 @@ describe("public surface", () => {
     expect(surface.randomNonce()).toHaveLength(32);
     expect(surface.CRYPTO_MATERIAL_ID_TLS).toBe("tls");
     expect(surface.CRYPTO_MATERIAL_ID_HPKE).toBe("hpke");
+  });
+
+  it("refuses untyped construction of a verifier or a verification", () => {
+    expect(() => new (surface.Verifier as any)({ serverURL: "https://x", configRepo: "org/repo" })).toThrow(surface.UsageError);
+    expect(() => new (surface.Verifier as any)({})).toThrow(/Verifier.create/);
+    expect(() => new (surface.Verification as any)(verification())).toThrow(surface.UsageError);
+    expect(() => new (surface.Verification as any)({})).toThrow(/comes from a verifier/);
   });
 
   it("builds a default verifier through the public entry", async () => {

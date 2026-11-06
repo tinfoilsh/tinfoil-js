@@ -1,4 +1,5 @@
 import { CRYPTO_MATERIAL_ID_HPKE, CRYPTO_MATERIAL_ID_TLS, KEY_SPKI_FP_SHA256_V1_FORMAT, KEY_X25519_HPKE_V1_FORMAT, type CryptoMaterialItem } from "./document/document.js";
+import { UsageError } from "./errors.js";
 import { cloneExpected, cloneMeasurement, registerHex, type Expected, type Measurement, type Register } from "./measurement.js";
 
 /** Where a reference value came from: a verified endorsement, caller-embedded references, or caller policy. */
@@ -89,13 +90,17 @@ export interface VerificationJSON {
   readonly metadata: { readonly verifier: VerificationMetadata["verifier"]; readonly verifiedAt: string };
 }
 
+/** Only this module holds the token the constructor requires, so untyped code that calls it is refused. */
+const BUILT_HERE: unique symbol = Symbol("Verification");
+
 /** Calls the private constructor; the class assigns it, as the only place the constructor can be called. */
 let construct: (fields: VerificationFields) => Verification;
 
 /**
  * The facts proven by verifying an attestation document. Only the verifier
- * creates one: the constructor is private, so there is no way to make a
- * verification that no verifier proved. Every fact is a `readonly` property
+ * creates one: the constructor is private, so type-checked code cannot
+ * construct a verification, and a call from untyped code is refused at
+ * runtime by a token only this module holds. Every fact is a `readonly` property
  * whose value is fixed at construction: the instance and every nested
  * object and array are frozen, so a property always yields the same
  * reference and nothing on it can be reassigned. Register bytes
@@ -127,7 +132,8 @@ export class Verification {
   /** The verifier's name and version, and when it ran. */
   readonly metadata: VerificationMetadata;
 
-  private constructor(fields: VerificationFields) {
+  private constructor(token: typeof BUILT_HERE, fields: VerificationFields) {
+    if (token !== BUILT_HERE) throw new UsageError("a Verification comes from a verifier: verify a document to get one");
     this.codeDigest = fields.codeDigest;
     this.codeTag = fields.codeTag;
     this.configRepo = fields.configRepo;
@@ -143,7 +149,7 @@ export class Verification {
   }
 
   static {
-    construct = (fields) => new Verification(fields);
+    construct = (fields) => new Verification(BUILT_HERE, fields);
   }
 
   /** The data of the endorsed item with the given id and format, or undefined. */

@@ -55,6 +55,9 @@ export const UNVERIFIED_WARNING =
 
 const MAX_KEY_CONFIG_BYTES = 64 * 1024;
 
+/** Only this module holds the token the constructor requires, so untyped code that calls it is refused. */
+const TOKEN: unique symbol = Symbol("UnverifiedClient");
+
 /** Calls the private constructor; the class assigns it, as the only place the constructor can be called. */
 let construct: (baseURL: string, keyOrigin: string, fetchImpl: Fetch) => UnverifiedClient;
 
@@ -155,7 +158,8 @@ async function fetchUnverifiedKey(keyOrigin: string, send: Fetch, signal: AbortS
  * INSECURE: seals bodies to whatever key the server hands out, with no
  * attestation. For local development against a server without attestation
  * only; see the module header. Created only by {@link UnverifiedClient.create}:
- * the constructor is private.
+ * the constructor is private, so type-checked code cannot call it, and a
+ * call from untyped code is refused at runtime.
  */
 export class UnverifiedClient {
   /**
@@ -169,7 +173,8 @@ export class UnverifiedClient {
   /** The origin the sealing key was fetched from. */
   readonly keyOrigin: string;
 
-  private constructor(baseURL: string, keyOrigin: string, fetchImpl: Fetch) {
+  private constructor(token: typeof TOKEN, baseURL: string, keyOrigin: string, fetchImpl: Fetch) {
+    if (token !== TOKEN) throw new ConfigurationError("UnverifiedClient is created with UnverifiedClient.create");
     this.fetch = fetchImpl;
     this.baseURL = baseURL;
     this.keyOrigin = keyOrigin;
@@ -177,7 +182,7 @@ export class UnverifiedClient {
   }
 
   static {
-    construct = (...parts) => new UnverifiedClient(...parts);
+    construct = (...parts) => new UnverifiedClient(TOKEN, ...parts);
   }
 
   /**

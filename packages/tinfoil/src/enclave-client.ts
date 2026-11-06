@@ -86,6 +86,9 @@ export function checkEnclaveOptions(host: string, options: EnclaveOptions, globa
   return { mode, baseURL: baseURL === "" ? "" : normalizeBaseURL(baseURL) };
 }
 
+/** Only this module holds the token the constructor requires, so untyped code that calls it is refused. */
+const TOKEN: unique symbol = Symbol("EnclaveHTTPClient");
+
 /** Calls the private constructor; the class assigns it, as the only place the constructor can be called. */
 let construct: (transport: KeyedTransport, baseURL: string, openAIURL: string, fetchImpl: Fetch) => EnclaveHTTPClient;
 
@@ -114,7 +117,14 @@ export async function createEnclaveHTTPClient(host: string, repo: string, option
   return client;
 }
 
-/** An HTTP client bound to one attested enclave; see the module header. Created only by {@link EnclaveHTTPClient.create}: the constructor is private. */
+/**
+ * An HTTP client bound to one attested enclave; see the module header. The
+ * constructor is private: type-checked code cannot call it, and a call from
+ * untyped code is refused at runtime. Clients come from
+ * {@link EnclaveHTTPClient.create}, and from the factories built over it:
+ * {@link EnclaveOpenAIClient.create} and the AI SDK provider's `enclave`
+ * option.
+ */
 export class EnclaveHTTPClient {
   /**
    * Sends a request through the attested transport. Bound, so it can be
@@ -130,7 +140,8 @@ export class EnclaveHTTPClient {
   readonly repo: string;
   readonly #transport: KeyedTransport;
 
-  private constructor(transport: KeyedTransport, baseURL: string, openAIURL: string, fetchImpl: Fetch) {
+  private constructor(token: typeof TOKEN, transport: KeyedTransport, baseURL: string, openAIURL: string, fetchImpl: Fetch) {
+    if (token !== TOKEN) throw new ConfigurationError("EnclaveHTTPClient is created with EnclaveHTTPClient.create");
     this.#transport = transport;
     this.fetch = fetchImpl;
     this.baseURL = baseURL;
@@ -142,7 +153,7 @@ export class EnclaveHTTPClient {
   }
 
   static {
-    construct = (...parts) => new EnclaveHTTPClient(...parts);
+    construct = (...parts) => new EnclaveHTTPClient(TOKEN, ...parts);
   }
 
   /**
