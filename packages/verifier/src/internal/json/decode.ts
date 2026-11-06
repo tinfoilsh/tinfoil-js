@@ -1,15 +1,15 @@
 /**
  * Helpers for hand-written record decoders over strictParse output. Member
- * names match case-sensitively, an absent member takes its zero value ("",
- * false, 0, none), `null` also takes the zero value, and a member of the
- * wrong JSON type is an error.
+ * names match case-sensitively; a missing member decodes to its type's
+ * empty value (empty string, false, 0, no entries), and so does `null`; a
+ * member of the wrong JSON type is an error.
  */
 import { JsonError, JsonNumber, type JsonObject, type JsonValue } from "./index.js";
 
 /**
  * Requires `v` to be an object. With `known` set, members outside it reject.
- * `null` decodes to an empty object (the zero record); callers that need to
- * tell null from an object must check before calling.
+ * `null` decodes to an empty object; callers that need to tell null from an
+ * object must check before calling.
  */
 export function object(v: JsonValue, what: string, known?: readonly string[]): JsonObject {
   if (v === null) return new Map();

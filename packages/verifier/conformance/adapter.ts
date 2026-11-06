@@ -411,8 +411,8 @@ const STRING_FIELDS = [
 
 /**
  * Validates the parsed stdin value against the Input shape: unknown members
- * are ignored, absent or null members take their zero value ("" or 0), and a
- * member of the wrong type is malformed.
+ * are ignored, absent or null members take their type's empty value ("" or
+ * 0), and a member of the wrong type is malformed.
  */
 function decodeInput(raw: unknown): Input | undefined {
   if (typeof raw !== "object" || raw === null || Array.isArray(raw)) return undefined;

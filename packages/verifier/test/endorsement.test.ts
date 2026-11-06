@@ -363,7 +363,7 @@ describe("freshness statement checks", () => {
     expect(parsed.subjects).toEqual([{ name: "model.tar", sha256: "b".repeat(64) }]);
     expect(() => parseFreshnessStatement(utf8(JSON.stringify({ ...statement, extra: 1 })))).toThrow(/unknown object member/);
     expect(() => parseFreshnessStatement(utf8(JSON.stringify({ ...statement, predicate: { ...statement.predicate, note: 1 } })))).toThrow(/unknown object member/);
-    // A null subject reads as an empty one (zero record); a non-object subject rejects.
+    // A null subject reads as an empty one; a non-object subject rejects.
     expect(parseFreshnessStatement(utf8(JSON.stringify({ ...statement, subject: [null] }))).subjects).toEqual([{ name: "", sha256: "" }]);
     expect(() => parseFreshnessStatement(utf8(JSON.stringify({ ...statement, subject: [1] })))).toThrow(/parsing freshness statement/);
     expect(() => parseFreshnessStatement(utf8("not json"))).toThrow(/parsing freshness statement/);
