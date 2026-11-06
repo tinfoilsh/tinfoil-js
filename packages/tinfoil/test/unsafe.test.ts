@@ -95,6 +95,8 @@ describe("UnverifiedClient", () => {
     expect(await response.json()).toMatchObject({ path: "/api/models", sealed: false });
     const bare = await client({ baseURL: `${server.origin}/api` });
     expect(bare.client.baseURL).toBe(`${server.origin}/api/`);
+    const padded = await client({ baseURL: `  ${server.origin}/api  ` });
+    expect(padded.client.baseURL).toBe(`${server.origin}/api/`);
     expect(await (await bare.client.fetch("models")).json()).toMatchObject({ path: "/api/models" });
     await expect(bare.client.fetch("https://other.example/api/models")).rejects.toThrow(/client is bound/);
     for (const bad of [`${server.origin}/api/?key=1`, `${server.origin}/api/#frag`]) {

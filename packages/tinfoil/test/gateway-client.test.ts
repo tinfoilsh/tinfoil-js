@@ -116,6 +116,8 @@ describe("GatewayHTTPClient.create", () => {
     expect(await supplied.models()).toEqual([]);
     const bare = await createGatewayHTTPClient({ verifier: verifier(gateway.publicKeyHex), url: "https://gateway.example/v1" }, seams());
     expect(bare.baseURL).toBe(GATEWAY_URL);
+    const padded = await createGatewayHTTPClient({ verifier: verifier(gateway.publicKeyHex), url: "  https://gateway.example/v1  " }, seams());
+    expect(padded.baseURL).toBe(GATEWAY_URL);
     await expect(bare.fetch("https://other.example/v1/models")).rejects.toThrow(/client is bound/);
   });
 });

@@ -240,11 +240,13 @@ describe("base URL rules", () => {
     expect(isLoopback("localhost.evil.example")).toBe(false);
   });
 
-  it("ends a base URL with a slash, leaving one that already does unchanged", () => {
+  it("ends a base URL with a slash as the URL parser reads it, leaving one that already does unchanged", () => {
     expect(normalizeBaseURL("https://proxy.example.com")).toBe("https://proxy.example.com/");
     expect(normalizeBaseURL("https://proxy.example.com/v1")).toBe("https://proxy.example.com/v1/");
     expect(normalizeBaseURL("https://proxy.example.com/v1/")).toBe("https://proxy.example.com/v1/");
     expect(normalizeBaseURL("http://localhost:8080")).toBe("http://localhost:8080/");
+    expect(normalizeBaseURL("  https://proxy.example.com/v1  ")).toBe("https://proxy.example.com/v1/");
+    expect(normalizeBaseURL("HTTPS://Proxy.Example.com:443/v1")).toBe("https://proxy.example.com/v1/");
   });
 
   it("requires a TLS-mode base URL to stay on the enclave's origin", () => {

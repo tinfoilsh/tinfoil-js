@@ -28,9 +28,16 @@ export function validateBaseURL(baseURL: string): void {
   }
 }
 
-/** `baseURL` ending with `/`, so a relative path resolves under it rather than beside its last segment. */
+/**
+ * `baseURL` as the URL parser reads it (surrounding whitespace dropped, the
+ * host lowercased, a default port removed), with its path ending in `/` so
+ * a relative path resolves under it rather than beside its last segment.
+ * The caller has validated it, so it parses.
+ */
 export function normalizeBaseURL(baseURL: string): string {
-  return baseURL.endsWith("/") ? baseURL : `${baseURL}/`;
+  const url = new URL(baseURL);
+  if (!url.pathname.endsWith("/")) url.pathname += "/";
+  return url.href;
 }
 
 /**

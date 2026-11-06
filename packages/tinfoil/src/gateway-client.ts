@@ -14,7 +14,7 @@ import { asyncDispose } from "./internal/dispose.js";
 import { fetchCatalogWith } from "./internal/gateway/catalog.js";
 import { GatewayPolicy } from "./internal/gateway/policy.js";
 import { GatewayTransport } from "./internal/gateway/transport.js";
-import { normalizeBaseURL } from "./internal/transport/base-url.js";
+import { normalizeBaseURL, validateBaseURL } from "./internal/transport/base-url.js";
 import { withOriginRestriction } from "./internal/transport/origin.js";
 import type { CallOptions, Catalog, Fetch, GatewayOptions, ReplicaVerification } from "./options.js";
 
@@ -54,7 +54,8 @@ export async function createGatewayHTTPClient(options: GatewayOptions, seams: Ga
   if (base.protocol !== "https:" || base.host === "") throw new ConfigurationError(`gateway base URL must be an absolute HTTPS URL: ${JSON.stringify(given)}`);
   // Credentials in the URL would go out in plaintext to the gateway with every request.
   if (base.username !== "" || base.password !== "") throw new ConfigurationError("gateway base URL must not carry a username or password");
-  if (given.includes("?") || given.includes("#")) throw new ConfigurationError(`gateway base URL can't carry a query string or fragment: ${JSON.stringify(given)}`);
+  // The rules every base URL follows, such as no query string or fragment; HTTPS is already required above.
+  validateBaseURL(given);
   const baseURL = normalizeBaseURL(given);
   const policy = await GatewayPolicy.create(options.modelPins, options.pinnedModelsOnly ?? false, options.verifier);
   const secret = await (seams.resolveSecret ?? resolveUserCacheSecret)(options.userCacheSecret);

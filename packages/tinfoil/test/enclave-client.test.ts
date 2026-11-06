@@ -344,6 +344,8 @@ describe("EnclaveHTTPClient over EHBP", () => {
     await expect(bare.fetch("https://other.example/echo")).rejects.toThrow(/client is bound to enclave/);
     const slashed = await createEnclaveHTTPClient("enclave.example", "", options(`${ehbp.origin}/`), { documentFetch: documents().fetch });
     expect(slashed.baseURL).toBe(`${ehbp.origin}/`);
+    const padded = await createEnclaveHTTPClient("enclave.example", "", options(`  ${ehbp.origin}/v1  `), { documentFetch: documents().fetch });
+    expect(padded.baseURL).toBe(`${ehbp.origin}/v1/`);
 
     const paths: string[] = [];
     for (const base of [`${ehbp.origin}/v1`, `${ehbp.origin}/v1/`]) {

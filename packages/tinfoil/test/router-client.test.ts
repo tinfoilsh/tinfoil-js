@@ -230,7 +230,7 @@ describe("RouterHTTPClient over EHBP", () => {
     expect(last.headers["x-tinfoil-enclave-url"]).toBe("https://router.example");
   });
 
-  it("ends the proxy base URL with a slash and keeps requests on its origin", async () => {
+  it("ends the proxy base URL with a slash, resolves a relative path under it, and keeps requests on its origin", async () => {
     const client = await createRouterHTTPClient(
       { verifier: verifier({ tls: "ab".repeat(32), hpke: ehbp.publicKeyHex }), transportMode: "ehbp", baseURL: ehbp.origin },
       seams(["router.example"]),
@@ -238,7 +238,13 @@ describe("RouterHTTPClient over EHBP", () => {
     expect(client.baseURL).toBe(`${ehbp.origin}/`);
     const res = await client.fetch(new URL("v1/echo", client.baseURL), { method: "POST", body: "under", headers: { "x-raw": "1" } });
     expect(await res.text()).toBe("under");
+    expect(ehbp.seen[ehbp.seen.length - 1]!.path).toBe("/v1/echo");
     await expect(client.fetch("https://other.example/v1/echo")).rejects.toThrow(/client is bound to enclave/);
+    const padded = await createRouterHTTPClient(
+      { verifier: verifier({ tls: "ab".repeat(32), hpke: ehbp.publicKeyHex }), transportMode: "ehbp", baseURL: `  ${ehbp.origin}/v1  ` },
+      seams(["router.example"]),
+    );
+    expect(padded.baseURL).toBe(`${ehbp.origin}/v1/`);
   });
 
   it("backs an OpenAI client on the proxy base URL", async () => {
