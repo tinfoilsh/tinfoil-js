@@ -145,7 +145,7 @@ export interface PinnedWebSocket {
 
 /** Configures an {@link EnclaveHTTPClient}. */
 export interface EnclaveOptions {
-  /** Defaults to `"tls"` on Node and Bun, `"ehbp"` in browsers. */
+  /** Defaults to `"tls"` on Node and Bun 1.4.0 or later, `"ehbp"` in browsers and on an older Bun, which refuses `"tls"`. */
   readonly transportMode?: TransportMode;
   /**
    * A path on the enclave's own HTTPS origin, or a proxy on another origin,
@@ -187,7 +187,7 @@ export interface EnclaveOptions {
 
 /** Configures a {@link RouterHTTPClient}. */
 export interface RouterOptions {
-  /** Defaults to `"tls"` on Node and Bun, `"ehbp"` in browsers. */
+  /** Defaults to `"tls"` on Node and Bun 1.4.0 or later, `"ehbp"` in browsers and on an older Bun, which refuses `"tls"`. */
   readonly transportMode?: TransportMode;
   /**
    * A proxy that forwards requests to the router discovery chooses, which

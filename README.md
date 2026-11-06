@@ -4,7 +4,7 @@
 [![NPM version](https://img.shields.io/npm/v/tinfoil.svg)](https://npmjs.org/package/tinfoil)
 [![Documentation](https://img.shields.io/badge/docs-tinfoil.sh-blue)](https://docs.tinfoil.sh/sdk/javascript-sdk)
 
-A TypeScript client for verifiably private AI inference with Tinfoil. It wraps the [OpenAI Node client](https://github.com/openai/openai-node) with the same API. A client verifies the enclave's attestation before it is returned, and every request it sends is bound to the verified enclave: on Node and Bun the TLS connection is pinned to the attested key, and in browsers the request body is encrypted to the attested key with [EHBP](https://docs.tinfoil.sh/resources/ehbp), so only the verified enclave can read it. Works in Node (22.23.4+, 24.22.1+, or 26.12.1+), browsers, Electron, and Bun, and supports the [Vercel AI SDK](https://sdk.vercel.ai/).
+A TypeScript client for verifiably private AI inference with Tinfoil. It wraps the [OpenAI Node client](https://github.com/openai/openai-node) with the same API. A client verifies the enclave's attestation before it is returned, and every request it sends is bound to the verified enclave: on Node and Bun the TLS connection is pinned to the attested key, and in browsers the request body is encrypted to the attested key with [EHBP](https://docs.tinfoil.sh/resources/ehbp), so only the verified enclave can read it. Works in Node (22.23.4+, 24.22.1+, or 26.12.1+), browsers, Electron, and Bun (1.4.0+ for the pinned TLS connection; see below), and supports the [Vercel AI SDK](https://sdk.vercel.ai/).
 
 ## Installation
 
@@ -37,6 +37,8 @@ const client = await RouterOpenAIClient.create({ baseURL: "https://proxy.example
 ```
 
 Browsers use the EHBP transport, the default and the only one available there. The package's type declarations are shared with the Node build, so a browser project type-checks a few names that throw a `ConfigurationError` when called: `createWebSocket` and `pinnedWebSocketOptions` (a verified WebSocket pins the server certificate, which browsers don't expose to scripts), `createRealtimeWebSocket` (a realtime session runs over such a WebSocket), and `transportMode: "tls"` (the `"tls"` transport mode pins the server certificate too; `"ehbp"` seals request and response bodies to the enclave's key instead).
+
+Bun pins the TLS connection from Bun 1.4.0, the first release whose `fetch` checks the server certificate before it sends the request; on an older Bun the default transport mode is `"ehbp"` and `transportMode: "tls"` is refused with a `ConfigurationError`. `createWebSocket` needs Bun 1.4.4 or later, the first release whose WebSocket runs the certificate check at all, and is refused on an older Bun before anything is sent. `pinnedWebSocketOptions` and `createRealtimeWebSocket` hand settings to the `ws` library, which Bun replaces with its own WebSocket, so they are available on Node only.
 
 The request body is still encrypted to the verified enclave's key; the proxy only forwards it. `baseURL` is the API root, as for `new OpenAI({ baseURL })`: the client appends `chat/completions` and the other OpenAI paths to it, so a proxy that forwards paths as they are takes the enclave's `/v1/`. Multi-user services must scope prompt caches to each end user with `userCacheSecret` or a per-request `user_cache_secret`; see [Prompt caching](https://docs.tinfoil.sh/sdk/prompt-caching).
 

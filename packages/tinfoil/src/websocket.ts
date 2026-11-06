@@ -14,7 +14,7 @@ import type { RouterHTTPClient } from "./router-client.js";
  * Opens a WebSocket to `path` on `client`'s enclave (a path and query such
  * as `/v1/realtime?model=…`, or a URL on the enclave's origin) over a
  * connection pinned to the attested TLS key. The client verifies first if
- * its verification has expired. Node and Bun only; a browser is a
+ * its verification has expired. Node and Bun 1.4.4 or later only; an older Bun or a browser is a
  * {@link ConfigurationError}. The socket is returned in the CONNECTING
  * state; a pin failure surfaces as its `error` event and makes the next call
  * verify again.
