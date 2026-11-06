@@ -43,7 +43,17 @@ import type { TrustedRoot } from "../src/internal/sigstore/trusted-root.js";
 import { PUBLIC_SIGNING_KEY_PEM } from "../src/trust/signing-keys.js";
 import { CERTIFICATE_CLOCK_SKEW_MS } from "../src/internal/endorsement/registry-certificate.js";
 import { b64, build, newLog, newSigner, rootOf, toJson, type Signer, type TestLog } from "./helpers/keyed.js";
-import { dnsName, newRegistry, OID_KP_SERVER_AUTH, registryCertificate, uriName, type Registry, type RegistryCertificateOptions } from "./helpers/registry.js";
+import {
+  dnsName,
+  newRegistry,
+  OID_KP_ANY,
+  OID_KP_CODE_SIGNING,
+  OID_KP_SERVER_AUTH,
+  registryCertificate,
+  uriName,
+  type Registry,
+  type RegistryCertificateOptions,
+} from "./helpers/registry.js";
 import { authorityJson, extension, name, newTimestampAuthority, seq, timestampResponse, tlv, type TimestampAuthority } from "./helpers/tsa.js";
 
 const CONFIG_DOMAIN = "tinfoil-config-freshness/v1\0";
@@ -421,6 +431,20 @@ describe("certified config approvals", () => {
     const rootLeaf = await leaf({}, registry.root.spki);
     const byRoot = await configBundle({ v2: true, certificate: rootLeaf, signer: registry.root });
     await expect(verifier.verifyCertified(byRoot.config, toJson(byRoot.json), registry.rootDer, policy())).rejects.toThrow(/registry root cannot serve/);
+  });
+
+  it("requires a registry root whose extended key usage, when present, allows code signing", async () => {
+    const certified = async (issuer: Registry) => {
+      const certificate = await registryCertificate(issuer, signer.spki, { registryID: PUBLIC_REGISTRY_ID, now: GEN_TIME });
+      const { json, config } = await configBundle({ v2: true, certificate });
+      const issuerKeys = await pinnedKeys([issuer.root.pem]);
+      return new ConfigVerifier(root, issuerKeys, issuerKeys).verifyCertified(config, toJson(json), issuer.rootDer, policy());
+    };
+    const restricted = await newRegistry(GEN_TIME, { extendedKeyUsage: [OID_KP_SERVER_AUTH] });
+    await expect(certified(restricted)).rejects.toThrow(/registry root's extended key usage does not allow code signing/);
+    for (const purposes of [[OID_KP_CODE_SIGNING], [OID_KP_SERVER_AUTH, OID_KP_ANY]]) {
+      expect((await certified(await newRegistry(GEN_TIME, { extendedKeyUsage: purposes }))).registryID).toBe(PUBLIC_REGISTRY_ID);
+    }
   });
 
   it("rejects a signing certificate outside the profile", async () => {

@@ -14,6 +14,7 @@ const OID_EXT_KEY_USAGE = "2.5.29.37";
 const OID_SUBJECT_ALT_NAME = "2.5.29.17";
 export const OID_KP_CODE_SIGNING = "1.3.6.1.5.5.7.3.3";
 export const OID_KP_SERVER_AUTH = "1.3.6.1.5.5.7.3.1";
+export const OID_KP_ANY = "2.5.29.37.0";
 
 const HOUR_MS = 60 * 60 * 1000;
 const MINUTE_MS = 60 * 1000;
@@ -32,12 +33,22 @@ export interface Registry {
   readonly notAfter: Date;
 }
 
+export interface RegistryOptions {
+  /** Extended key usage purposes of the root (default: no extended key usage extension). */
+  readonly extendedKeyUsage?: readonly string[];
+}
+
 /** A self-signed registry root (CA, path length 0, keyCertSign and digitalSignature) valid from an hour before `now` for a year. */
-export async function newRegistry(now: Date): Promise<Registry> {
+export async function newRegistry(now: Date, opts: RegistryOptions = {}): Promise<Registry> {
   const root = await newSigner();
   const rootName = name("registry test root");
   const notBefore = new Date(now.getTime() - HOUR_MS);
   const notAfter = new Date(now.getTime() + 365 * 24 * HOUR_MS);
+  const extensions = [
+    extension(OID_BASIC_CONSTRAINTS, true, seq(boolTrue(), integer(0))),
+    extension(OID_KEY_USAGE, true, tlv(0x03, [0x02, 0x84])), // digitalSignature, keyCertSign
+  ];
+  if (opts.extendedKeyUsage !== undefined) extensions.push(extension(OID_EXT_KEY_USAGE, false, seq(...opts.extendedKeyUsage.map(oid))));
   const rootDer = await certificate(
     {
       subject: rootName,
@@ -46,10 +57,7 @@ export async function newRegistry(now: Date): Promise<Registry> {
       notBefore,
       notAfter,
       spki: root.spki,
-      extensions: [
-        extension(OID_BASIC_CONSTRAINTS, true, seq(boolTrue(), integer(0))),
-        extension(OID_KEY_USAGE, true, tlv(0x03, [0x02, 0x84])), // digitalSignature, keyCertSign
-      ],
+      extensions,
     },
     root.pair.privateKey,
   );
