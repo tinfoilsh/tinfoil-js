@@ -233,8 +233,8 @@ describe("EnclaveHTTPClient over TLS", () => {
     expect(completion.choices[0]!.message.content).toBe("pinned");
     expect(tls.seen[tls.seen.length - 1]!.headers.authorization).toBe("Bearer k2");
     expect(tls.seen[tls.seen.length - 1]!.headers["x-custom"]).toBe("kept");
-    const again = clone.withOptions({ timeout: 99, defaultHeaders: { "x-custom": "changed", "x-added": "new" } });
-    expect(again.timeout).toBe(99);
+    const again = clone.withOptions({ timeout: 5_000, defaultHeaders: { "x-custom": "changed", "x-added": "new" } });
+    expect(again.timeout).toBe(5_000);
     expect(again.apiKey).toBe("k2");
     expect(again.maxRetries).toBe(0);
     await again.chat.completions.create({ model: "test", messages: [{ role: "user", content: "hi" }] });
