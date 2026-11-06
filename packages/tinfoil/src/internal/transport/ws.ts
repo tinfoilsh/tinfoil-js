@@ -74,6 +74,12 @@ export function checkWsClientOptionsCapability(): void {
   if (isBun()) throw new ConfigurationError(WS_OPTIONS_UNAVAILABLE_ON_BUN);
 }
 
+/** Rejects a Bun whose WebSocket skips a caller's certificate check, before anything else is done for a pinned WebSocket. */
+export function checkPinnedWebSocketCapability(): void {
+  const old = bunOlderThan(MIN_BUN_FOR_PINNED_WEBSOCKETS);
+  if (old !== undefined) throw new ConfigurationError(webSocketsUnavailableOnBun(old));
+}
+
 /**
  * `ws` client settings that pin the connection to `key`, for wiring a pinned
  * WebSocket into a library that builds its own: the normal certificate check
@@ -178,9 +184,10 @@ interface BunWebSocketInit {
 
 /** Opens through Bun's own WebSocket, an EventTarget whose `addEventListener` takes `once` and `signal` itself. */
 async function openOnBun(url: URL, key: string, protocols: string[] | undefined, options: WebSocketOptions, tls: TLSOptions, onRejected: OnRejected | undefined): Promise<PinnedWebSocket> {
-  // An older Bun never runs the check: the upgrade request, headers and all, would go out unpinned.
-  const old = bunOlderThan(MIN_BUN_FOR_PINNED_WEBSOCKETS);
-  if (old !== undefined) throw new ConfigurationError(webSocketsUnavailableOnBun(old));
+  // An older Bun never runs the check: the upgrade request, headers and all,
+  // would go out unpinned. The client checks this before it verifies; the
+  // check is repeated here because the open can be used alone.
+  checkPinnedWebSocketCapability();
   const check = await reportingIdentityCheck(key, onRejected);
   let checked = false;
   let rejection: Error | undefined;

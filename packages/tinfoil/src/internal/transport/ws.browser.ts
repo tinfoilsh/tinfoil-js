@@ -23,6 +23,10 @@ export function checkWsClientOptionsCapability(): void {
   throw new ConfigurationError(WEBSOCKETS_UNAVAILABLE_IN_BROWSERS);
 }
 
+export function checkPinnedWebSocketCapability(): void {
+  throw new ConfigurationError(WEBSOCKETS_UNAVAILABLE_IN_BROWSERS);
+}
+
 export async function pinnedWsClientOptions(_key: string, _tls: TLSOptions, _onRejected?: OnRejected): Promise<WS.ClientOptions> {
   throw new ConfigurationError(WEBSOCKETS_UNAVAILABLE_IN_BROWSERS);
 }

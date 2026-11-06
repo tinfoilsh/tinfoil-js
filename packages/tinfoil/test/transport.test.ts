@@ -10,6 +10,7 @@ import { Enclave } from "../src/internal/enclave.js";
 import { ENCLAVE_URL_HEADER, enclaveURLHeaderValue, withEnclaveURL } from "../src/internal/transport/header.js";
 import { allowedOrigins, normalizedOrigin, originOf, requestURL, withOriginRestriction } from "../src/internal/transport/origin.js";
 import { withReplay } from "../src/internal/transport/replay.js";
+import { openClientWebSocket } from "../src/internal/websocket.js";
 import { isKeyRejection, KeyedTransport, KeyRejectionError, PeerLacksKeyError, type Mode } from "../src/internal/transport/transport.js";
 import type { Fetch } from "../src/options.js";
 import { KEY_SPKI_FP_SHA256_V1_FORMAT, type Verification, type Verifier } from "../../verifier/src/index.js";
@@ -317,6 +318,28 @@ describe("KeyedTransport", () => {
     expect(await (await inFlight).text()).toBe("k1");
     t.close();
     expect(released).toEqual(["retired k1", "closed k2", "closed k1"]);
+  });
+
+  it("refuses a pinned WebSocket on a Bun too old to run the check, before any verification I/O", async () => {
+    const fetched: string[] = [];
+    const enclave = await Enclave.create({
+      host: HOST,
+      repo: "",
+      verifier: keyedVerifier(() => "k1", new Date(Date.now() + 60_000)),
+      fetch: async (input) => {
+        fetched.push(String(input));
+        return new Response(new Uint8Array([1]));
+      },
+    });
+    const t = new KeyedTransport(enclave, fakeMode(() => "k1", []));
+    // The runtime's own version record names the Bun that the check reads.
+    Object.defineProperty(process.versions, "bun", { value: "1.4.3", configurable: true, enumerable: true });
+    try {
+      await expect(openClientWebSocket(t, "/v1/realtime", {}, {})).rejects.toThrow(/a pinned WebSocket needs Bun 1.4.4 or later: Bun 1.4.3/);
+    } finally {
+      delete (process.versions as { bun?: string }).bun;
+    }
+    expect(fetched).toEqual([]);
   });
 
   it("closes: releases the current binding, refuses further use, keeps the last verification, and closes again without effect", async () => {
