@@ -42,7 +42,14 @@ export class NetworkError extends TinfoilError {
   }
 }
 
-/** Rejected evidence, policy, or channel binding: the enclave couldn't be trusted. */
+/**
+ * Rejected evidence, policy, or channel binding: the enclave couldn't be
+ * trusted. When verification itself rejected the document, `cause` is the
+ * verifier's `VerificationError` (from `@tinfoilsh/verifier`), whose `layer`
+ * names the check that rejected it. A connection whose key doesn't match
+ * the attested one, or a key the enclave no longer holds after rotation, is
+ * reported as an AttestationError too.
+ */
 export class AttestationError extends TinfoilError {
   constructor(message: string, options?: { cause?: unknown }) {
     super("attestation", message, options);

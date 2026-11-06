@@ -12,6 +12,7 @@
  * runtime release has no vector yet, so only its pure checks run.
  */
 import { beforeAll, describe, expect, it } from "vitest";
+import { dangerousTestOnlyDecode } from "../conformance/testing.js";
 import * as document from "../src/document/document.js";
 import { utf8 } from "../src/internal/bytes.js";
 import {
@@ -123,7 +124,7 @@ async function clientOf(fixture: ConformanceFixture): Promise<ProvenanceClient> 
   return rootBytes === undefined ? ProvenanceClient.default() : ProvenanceClient.fromJSON(rootBytes);
 }
 
-const documentOf = (fixture: ConformanceFixture): Promise<document.Document> => document.dangerousTestOnlyDecode(inputBytes(fixture, "document_b64"));
+const documentOf = (fixture: ConformanceFixture): Promise<document.Document> => dangerousTestOnlyDecode(inputBytes(fixture, "document_b64"));
 const clockOf = (fixture: ConformanceFixture): Date => {
   const unix = verificationTime(fixture);
   return unix === undefined ? new Date() : new Date(unix * 1000);
@@ -362,7 +363,7 @@ describe("freshness statement checks", () => {
     expect(parsed.subjects).toEqual([{ name: "model.tar", sha256: "b".repeat(64) }]);
     expect(() => parseFreshnessStatement(utf8(JSON.stringify({ ...statement, extra: 1 })))).toThrow(/unknown object member/);
     expect(() => parseFreshnessStatement(utf8(JSON.stringify({ ...statement, predicate: { ...statement.predicate, note: 1 } })))).toThrow(/unknown object member/);
-    // A null subject reads as an empty one (zero record); a non-object subject rejects.
+    // A null subject reads as an empty one; a non-object subject rejects.
     expect(parseFreshnessStatement(utf8(JSON.stringify({ ...statement, subject: [null] }))).subjects).toEqual([{ name: "", sha256: "" }]);
     expect(() => parseFreshnessStatement(utf8(JSON.stringify({ ...statement, subject: [1] })))).toThrow(/parsing freshness statement/);
     expect(() => parseFreshnessStatement(utf8("not json"))).toThrow(/parsing freshness statement/);

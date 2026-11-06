@@ -90,7 +90,7 @@ export interface DeviceEvidenceItem {
 export class Document {
   readonly #d: DecodedDocument;
 
-  /** @internal Build with {@link parse} or {@link dangerousTestOnlyDecode}. */
+  /** @internal Build with {@link parse}, which binds the document to a nonce; only the tests take an unbound one. */
   constructor(fields: DecodedDocument) {
     this.#d = fields;
   }
@@ -243,14 +243,6 @@ export async function parse(docBytes: Uint8Array, expectedNonce: Uint8Array): Pr
 }
 
 /**
- * Decodes a document without binding it to a nonce, so the conformance
- * adapter can drive a single layer. Not exported from the package entry.
- */
-export async function dangerousTestOnlyDecode(docBytes: Uint8Array): Promise<Document> {
-  return new Document(decode(docBytes));
-}
-
-/**
  * Derives REPORT_DATA (https://tinfoil.sh/report-data/v1): SHA-256 over the
  * algorithm URI then the three 32-byte inputs, in bytes [0:32]; [32:64] zero.
  */
@@ -286,7 +278,7 @@ const DOCUMENT_MEMBERS = [
   "collateral",
 ] as const;
 
-/** Strict unmarshal → format → challenge → cpu_evidence → sections → collateral. */
+/** @internal Strict unmarshal → format → challenge → cpu_evidence → sections → collateral. */
 export function decode(docBytes: Uint8Array): DecodedDocument {
   let root: JsonObject;
   let challenge: JsonObject;
@@ -361,7 +353,7 @@ function parseStage<T>(what: string, f: () => T): T {
   }
 }
 
-/** Checks nonce equality, section hashes and REPORT_DATA; returns the bound fields. */
+/** @internal Checks nonce equality, section hashes and REPORT_DATA; returns the bound fields. */
 export async function bind(doc: DecodedDocument, expectedNonce: Uint8Array): Promise<DecodedDocument> {
   if (doc.challenge.nonce !== toHex(expectedNonce)) {
     throw new Error("challenge nonce does not match the expected nonce");

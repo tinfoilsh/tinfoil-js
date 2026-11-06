@@ -6,6 +6,7 @@
  */
 import { beforeAll, describe, expect, it } from "vitest";
 import { expectedOf, measurementOf } from "../conformance/adapter.js";
+import { dangerousTestOnlyVerifier } from "../conformance/testing.js";
 import { CONFIG_ENDORSEMENT_V2_FORMAT, CONFIG_ID, FORMAT_V3, ROLE_REFERENCE_VALUES } from "../src/document/collateral/collateral.js";
 import type { ConfigEndorsement } from "../src/document/collateral/config.js";
 import type { RuntimeReference } from "../src/document/collateral/runtime.js";
@@ -16,7 +17,7 @@ import { CONFIG_ENDORSEMENT_PREDICATE_TYPE_V2, IN_TOTO_STATEMENT_V1, PUBLIC_REGI
 import { ARTIFACT_FORMAT, ARTIFACT_FORMAT_V2 } from "../src/internal/policy/artifact.js";
 import { endorsementReference, timestampInput } from "../src/internal/sigstore/timestamp.js";
 import type { Expected } from "../src/measurement.js";
-import { dangerousTestOnlyVerifier, Verifier, type EmbeddedConfigReference, type VerifierOptions } from "../src/verifier.js";
+import { Verifier, type EmbeddedConfigReference, type VerifierOptions } from "../src/verifier.js";
 import { VERIFIER_NAME, VERIFIER_VERSION } from "../src/version.js";
 import { buildDocument } from "./helpers/builder.js";
 import { conformanceAvailable, inputBytes, loadFixture, loadFixtures, repoOf, vectorsTitle, type ConformanceFixture } from "./helpers/conformance.js";

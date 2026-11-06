@@ -388,9 +388,9 @@ describe("sourceText", () => {
 
 // The decode helpers read typed members out of a parsed object: a known
 // member set rejects unknown members, names match case-sensitively, and an
-// absent member yields the type's zero value.
+// absent member yields the type's empty value.
 describe("decode helpers", () => {
-  it("object accepts objects and treats null as the zero struct", () => {
+  it("object accepts objects and treats null as an empty object", () => {
     expect(object(parse('{"a":1}'), "S").get("a")).toBeInstanceOf(JsonNumber);
     expect(object(null, "S").size).toBe(0);
     expect(object(null, "S", ["a"]).size).toBe(0);

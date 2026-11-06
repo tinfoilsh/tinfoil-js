@@ -5,6 +5,7 @@
  * golden SEV-SNP and TDX documents and their endorsed policy artifacts.
  */
 import { beforeAll, describe, expect, it } from "vitest";
+import { dangerousTestOnlyDecode } from "../conformance/testing.js";
 import { parse as parseDocument, type Document } from "../src/document/document.js";
 import { sha256 } from "../src/internal/bytes.js";
 import { decodeManifest } from "../src/internal/runtime/manifest.js";
@@ -134,7 +135,7 @@ describe.skipIf(withoutVectors)(vectorsTitle("assembly for an SEV-SNP code relea
   });
 
   it("refuses a document that was not bound to a nonce, or another document's quote", async () => {
-    const unbound = await import("../src/document/document.js").then((d) => d.dangerousTestOnlyDecode(inputBytes(loadFixture("golden/golden-happy.json"), "document_b64")));
+    const unbound = await dangerousTestOnlyDecode(inputBytes(loadFixture("golden/golden-happy.json"), "document_b64"));
     await expect(assemble(unbound, legacy(), undefined, m.q)).rejects.toThrow(/a document checked by document.parse is required/);
     const other: Authenticated = { ...m.q, evidence: { ...m.q.evidence, report: m.q.evidence.report.map((b) => b ^ 1) } };
     await expect(assemble(m.doc, legacy(), undefined, other)).rejects.toThrow(/not this document's CPU evidence/);

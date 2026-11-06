@@ -43,7 +43,7 @@ export interface UnverifiedOptions {
   readonly signal?: AbortSignal;
 }
 
-/** Seams for tests: the fetch used for the key and for requests, and where the warning goes. */
+/** @internal Seams for tests: the fetch used for the key and for requests, and where the warning goes. */
 export interface UnverifiedClientSeams {
   readonly fetch?: Fetch;
   readonly warn?: (message: string) => void;
@@ -55,10 +55,13 @@ export const UNVERIFIED_WARNING =
 
 const MAX_KEY_CONFIG_BYTES = 64 * 1024;
 
-/** Marks construction by this module's factory; the constructor refuses anything else. */
-const TOKEN = Symbol("UnverifiedClient");
+/** Only this module holds the token the constructor requires, so untyped code that calls it is refused. */
+const TOKEN: unique symbol = Symbol("UnverifiedClient");
 
-/** The option checks that need no network I/O. The base URL comes back ending with `/`. */
+/** Calls the private constructor; the class assigns it, as the only place the constructor can be called. */
+let construct: (baseURL: string, keyOrigin: string, fetchImpl: Fetch) => UnverifiedClient;
+
+/** @internal The option checks that need no network I/O. The base URL comes back ending with `/`. */
 export function checkUnverifiedOptions(options: UnverifiedOptions): { baseURL: string; keyOrigin: string } {
   if (options.baseURL === undefined && options.keyOrigin === undefined) {
     throw new ConfigurationError("UnverifiedClient needs a baseURL or a keyOrigin; it never discovers a server by itself");
@@ -78,7 +81,7 @@ function checkURL(url: string): void {
   if (u.username !== "" || u.password !== "") throw new ConfigurationError(`URL must not carry credentials: ${JSON.stringify(url)}`);
 }
 
-/** The factory with its test seams; {@link UnverifiedClient.create} is this without them. */
+/** @internal The factory with its test seams; {@link UnverifiedClient.create} is this without them. */
 export async function createUnverifiedClient(options: UnverifiedOptions, seams: UnverifiedClientSeams): Promise<UnverifiedClient> {
   const { baseURL, keyOrigin } = checkUnverifiedOptions(options);
   (seams.warn ?? ((message: string) => console.warn(message)))(UNVERIFIED_WARNING);
@@ -107,7 +110,7 @@ export async function createUnverifiedClient(options: UnverifiedOptions, seams: 
       throw new NetworkError(messageOf(err), { cause: err });
     }
   };
-  return new UnverifiedClient(TOKEN, baseURL, keyOrigin, fetchImpl);
+  return construct(baseURL, keyOrigin, fetchImpl);
 }
 
 /**
@@ -154,7 +157,9 @@ async function fetchUnverifiedKey(keyOrigin: string, send: Fetch, signal: AbortS
 /**
  * INSECURE: seals bodies to whatever key the server hands out, with no
  * attestation. For local development against a server without attestation
- * only; see the module header.
+ * only; see the module header. Created only by {@link UnverifiedClient.create}:
+ * the constructor is private, so type-checked code cannot call it, and a
+ * call from untyped code is refused at runtime.
  */
 export class UnverifiedClient {
   /**
@@ -168,13 +173,16 @@ export class UnverifiedClient {
   /** The origin the sealing key was fetched from. */
   readonly keyOrigin: string;
 
-  /** @internal Only {@link create} constructs a client; anything else is refused. */
-  constructor(token: symbol, baseURL: string, keyOrigin: string, fetchImpl: Fetch) {
+  private constructor(token: typeof TOKEN, baseURL: string, keyOrigin: string, fetchImpl: Fetch) {
     if (token !== TOKEN) throw new ConfigurationError("UnverifiedClient is created with UnverifiedClient.create");
     this.fetch = fetchImpl;
     this.baseURL = baseURL;
     this.keyOrigin = keyOrigin;
     Object.freeze(this);
+  }
+
+  static {
+    construct = (...parts) => new UnverifiedClient(TOKEN, ...parts);
   }
 
   /**

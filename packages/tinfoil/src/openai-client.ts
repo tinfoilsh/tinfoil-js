@@ -86,13 +86,26 @@ function inherit(client: OpenAI, options: Partial<OpenAIOptions>): OpenAIOptions
   return merged;
 }
 
-/** Marks construction by this module's factories; the constructors refuse anything else. */
-const TOKEN = Symbol("OpenAIClient");
+/** Only this module holds the token the constructors require, so untyped code that calls one is refused. */
+const TOKEN: unique symbol = Symbol("OpenAIClient");
+
+/**
+ * Call the private constructors; each class assigns its own, as the only
+ * place its constructor can be called by type-checked code, so a client
+ * over an attested transport comes from a factory and nothing else.
+ */
+let constructTinfoil: (httpClient: RouterHTTPClient, options: OpenAIOptions) => TinfoilClient;
+let constructEnclave: (httpClient: EnclaveHTTPClient, options: OpenAIOptions) => EnclaveOpenAIClient;
+let constructRouter: (httpClient: RouterHTTPClient, options: OpenAIOptions) => RouterOpenAIClient;
+let constructGateway: (httpClient: GatewayHTTPClient, options: OpenAIOptions) => GatewayOpenAIClient;
 
 /**
  * An OpenAI client for Tinfoil's recommended route: the discovered router,
  * verified before the client is returned. Its `baseURL` is the URL requests
- * go to on that route.
+ * go to on that route. Created only by {@link createClient} or
+ * {@link TinfoilClient.create}: the constructor is private, as it is on
+ * every client below, so type-checked code cannot call it, and a call from
+ * untyped code is refused at runtime.
  *
  * Errors: the factory rejects with the client's own errors
  * ({@link ConfigurationError}, {@link NetworkError}, {@link AttestationError}).
@@ -116,11 +129,14 @@ export class TinfoilClient extends OpenAI {
    */
   declare readonly httpClient: RouterHTTPClient;
 
-  /** @internal Only {@link create} constructs a client; anything else is refused. */
-  constructor(token: symbol, httpClient: RouterHTTPClient, options: OpenAIOptions) {
+  private constructor(token: typeof TOKEN, httpClient: RouterHTTPClient, options: OpenAIOptions) {
     if (token !== TOKEN) throw new ConfigurationError("TinfoilClient is created with createClient");
     super({ ...openAIClientOptions(options), fetch: httpClient.fetch, baseURL: openAIURLOf(httpClient) });
     attest(this, httpClient, openAIURLOf(httpClient), options);
+  }
+
+  static {
+    constructTinfoil = (httpClient, options) => new TinfoilClient(TOKEN, httpClient, options);
   }
 
   /**
@@ -144,14 +160,14 @@ export class TinfoilClient extends OpenAI {
 }
 
 /**
- * The recommended-route factory with its test seams; {@link createClient} is
- * this with the default router options and no seams.
+ * @internal The recommended-route factory with its test seams;
+ * {@link createClient} is this with the default router options and no seams.
  */
 export async function createTinfoilClient(openaiOptions: OpenAIOptions, seams: RouterClientSeams, routerOptions: RouterOptions = {}): Promise<TinfoilClient> {
   // The credential is checked first, so a client with the wrong one fails before any network I/O.
   checkAPIKeyRuntime(openaiOptions.apiKey, seams.globals);
   const httpClient = await createRouterHTTPClient(routerOptions, seams);
-  return new TinfoilClient(TOKEN, httpClient, openaiOptions);
+  return constructTinfoil(httpClient, openaiOptions);
 }
 
 /** A client for Tinfoil's recommended route, verified before it returns. */
@@ -159,7 +175,7 @@ export function createClient(options?: OpenAIOptions): Promise<TinfoilClient> {
   return TinfoilClient.create(options);
 }
 
-/** The enclave OpenAI factory with its test seams; {@link EnclaveOpenAIClient.create} is this without them. */
+/** @internal The enclave OpenAI factory with its test seams; {@link EnclaveOpenAIClient.create} is this without them. */
 export async function createEnclaveOpenAIClient(
   host: string,
   repo: string,
@@ -169,7 +185,7 @@ export async function createEnclaveOpenAIClient(
 ): Promise<EnclaveOpenAIClient> {
   checkAPIKeyRuntime(openaiOptions.apiKey, seams.globals);
   const httpClient = await createEnclaveHTTPClient(host, repo, options, seams);
-  return new EnclaveOpenAIClient(TOKEN, httpClient, openaiOptions);
+  return constructEnclave(httpClient, openaiOptions);
 }
 
 /**
@@ -181,12 +197,15 @@ export class EnclaveOpenAIClient extends OpenAI {
   /** The enclave client requests go through. */
   declare readonly httpClient: EnclaveHTTPClient;
 
-  /** @internal Only {@link create} constructs a client; anything else is refused. */
-  constructor(token: symbol, httpClient: EnclaveHTTPClient, options: OpenAIOptions) {
+  private constructor(token: typeof TOKEN, httpClient: EnclaveHTTPClient, options: OpenAIOptions) {
     if (token !== TOKEN) throw new ConfigurationError("EnclaveOpenAIClient is created with EnclaveOpenAIClient.create");
     // The transport and base URL come last, so the caller's options can't replace them.
     super({ ...openAIClientOptions(options), fetch: httpClient.fetch, baseURL: openAIURLOf(httpClient) });
     attest(this, httpClient, openAIURLOf(httpClient), options);
+  }
+
+  static {
+    constructEnclave = (httpClient, options) => new EnclaveOpenAIClient(TOKEN, httpClient, options);
   }
 
   /**
@@ -209,11 +228,11 @@ export class EnclaveOpenAIClient extends OpenAI {
   }
 }
 
-/** The router OpenAI factory with its test seams; {@link RouterOpenAIClient.create} is this without them. */
+/** @internal The router OpenAI factory with its test seams; {@link RouterOpenAIClient.create} is this without them. */
 export async function createRouterOpenAIClient(options: RouterOptions, openaiOptions: OpenAIOptions, seams: RouterClientSeams): Promise<RouterOpenAIClient> {
   checkAPIKeyRuntime(openaiOptions.apiKey, seams.globals);
   const httpClient = await createRouterHTTPClient(options, seams);
-  return new RouterOpenAIClient(TOKEN, httpClient, openaiOptions);
+  return constructRouter(httpClient, openaiOptions);
 }
 
 /**
@@ -225,11 +244,14 @@ export class RouterOpenAIClient extends OpenAI {
   /** The router client requests go through. */
   declare readonly httpClient: RouterHTTPClient;
 
-  /** @internal Only {@link create} constructs a client; anything else is refused. */
-  constructor(token: symbol, httpClient: RouterHTTPClient, options: OpenAIOptions) {
+  private constructor(token: typeof TOKEN, httpClient: RouterHTTPClient, options: OpenAIOptions) {
     if (token !== TOKEN) throw new ConfigurationError("RouterOpenAIClient is created with RouterOpenAIClient.create");
     super({ ...openAIClientOptions(options), fetch: httpClient.fetch, baseURL: openAIURLOf(httpClient) });
     attest(this, httpClient, openAIURLOf(httpClient), options);
+  }
+
+  static {
+    constructRouter = (httpClient, options) => new RouterOpenAIClient(TOKEN, httpClient, options);
   }
 
   /**
@@ -252,15 +274,11 @@ export class RouterOpenAIClient extends OpenAI {
   }
 }
 
-/**
- * The gateway OpenAI factory with its test seams; {@link GatewayOpenAIClient.create} is this without them.
- *
- * @experimental The gateway route is new; this API may change without a major version.
- */
+/** @internal The gateway OpenAI factory with its test seams; {@link GatewayOpenAIClient.create} is this without them. */
 export async function createGatewayOpenAIClient(options: GatewayOptions, openaiOptions: OpenAIOptions, seams: GatewayClientSeams): Promise<GatewayOpenAIClient> {
   checkAPIKeyRuntime(openaiOptions.apiKey, seams.globals);
   const httpClient = await createGatewayHTTPClient(options, seams);
-  return new GatewayOpenAIClient(TOKEN, httpClient, openaiOptions);
+  return constructGateway(httpClient, openaiOptions);
 }
 
 /**
@@ -273,11 +291,14 @@ export class GatewayOpenAIClient extends OpenAI {
   /** The gateway client requests go through. */
   declare readonly httpClient: GatewayHTTPClient;
 
-  /** @internal Only {@link create} constructs a client; anything else is refused. */
-  constructor(token: symbol, httpClient: GatewayHTTPClient, options: OpenAIOptions) {
+  private constructor(token: typeof TOKEN, httpClient: GatewayHTTPClient, options: OpenAIOptions) {
     if (token !== TOKEN) throw new ConfigurationError("GatewayOpenAIClient is created with GatewayOpenAIClient.create");
     super({ ...openAIClientOptions(options), fetch: httpClient.fetch, baseURL: httpClient.baseURL });
     attest(this, httpClient, httpClient.baseURL, options);
+  }
+
+  static {
+    constructGateway = (httpClient, options) => new GatewayOpenAIClient(TOKEN, httpClient, options);
   }
 
   /**

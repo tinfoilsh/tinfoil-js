@@ -196,8 +196,8 @@ describe("RouterHTTPClient over TLS", () => {
     const last = tls.seen[tls.seen.length - 1]!;
     expect(JSON.parse(new TextDecoder().decode(last.body)).user_cache_secret).toBe("option-secret");
     expect(last.headers.authorization).toBe("Bearer k");
-    expect(() => new (RouterOpenAIClient as unknown as new (...a: unknown[]) => unknown)(Symbol("x"), ai.httpClient, {})).toThrow(ConfigurationError);
-    expect(() => new (RouterHTTPClient as unknown as new (...a: unknown[]) => unknown)(Symbol("x"))).toThrow(ConfigurationError);
+    expect(() => new (RouterOpenAIClient as any)(Symbol("x"), ai.httpClient, {})).toThrow(ConfigurationError);
+    expect(() => new (RouterHTTPClient as any)(Symbol("x"))).toThrow(ConfigurationError);
   });
 });
 
@@ -273,7 +273,7 @@ describe("createClient", () => {
     const reply = await ai.chat.completions.create({ model: "test", messages: [{ role: "user", content: "hi" }] });
     expect(reply.choices[0]!.message.content).toBe("pinned");
     expect(JSON.parse(new TextDecoder().decode(tls.seen[tls.seen.length - 1]!.body)).user_cache_secret).toBe("resolved-secret");
-    expect(() => new (TinfoilClient as unknown as new (...a: unknown[]) => unknown)(Symbol("x"), ai.httpClient, {})).toThrow(ConfigurationError);
+    expect(() => new (TinfoilClient as any)(Symbol("x"), ai.httpClient, {})).toThrow(ConfigurationError);
   });
 
   it("accepts an API key on a server and refuses one anywhere else before fetching anything", async () => {

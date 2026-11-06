@@ -20,7 +20,7 @@ import { isKeyRejection, KeyedTransport, type Mode } from "./internal/transport/
 import { registerWebSocketAccess } from "./internal/websocket.js";
 import type { CallOptions, EnclaveOptions, Fetch, TransportMode } from "./options.js";
 
-/** Seams for tests: the fetch that retrieves attestation documents, the clock, the modes' settings, and the globals the runtime is identified by. */
+/** @internal Seams for tests: the fetch that retrieves attestation documents, the clock, the modes' settings, and the globals the runtime is identified by. */
 export interface EnclaveClientSeams {
   readonly documentFetch?: Fetch;
   readonly globals?: RuntimeGlobals;
@@ -33,22 +33,22 @@ export interface EnclaveClientSeams {
 
 const openAIURLs = new WeakMap<object, string>();
 
-/** Where an OpenAI client over `client` sends requests: the base URL option, or the enclave's `/v1/` API. */
+/** @internal Where an OpenAI client over `client` sends requests: the base URL option, or the enclave's `/v1/` API. */
 export function openAIURLOf(client: object): string {
   const url = openAIURLs.get(client);
   if (url === undefined) throw new ConfigurationError("client was not created by its factory");
   return url;
 }
 
-/** Records where an OpenAI client over `client` sends requests. */
+/** @internal Records where an OpenAI client over `client` sends requests. */
 export function setOpenAIURL(client: object, url: string): void {
   openAIURLs.set(client, url);
 }
 
 /**
- * `mode`, or the platform's default: pinned connections where the runtime
- * exposes them, sealed bodies in browsers. A mode the platform can't provide
- * is a {@link ConfigurationError}.
+ * @internal `mode`, or the platform's default: pinned connections where the
+ * runtime exposes them, sealed bodies in browsers. A mode the platform can't
+ * provide is a {@link ConfigurationError}.
  */
 export function resolveTransportMode(mode: TransportMode | undefined, globals?: RuntimeGlobals): TransportMode {
   if (mode === undefined) return defaultTransportMode(globals);
@@ -57,16 +57,17 @@ export function resolveTransportMode(mode: TransportMode | undefined, globals?: 
   return mode;
 }
 
+/** @internal The transport mode's settings, from the seams. */
 export function modeFor(mode: TransportMode, seams: EnclaveClientSeams): Mode {
   return mode === "tls" ? tlsMode(seams.tls) : ehbpMode(seams.ehbp);
 }
 
 /**
- * The fetch chain the enclave and router clients send through, from the
- * inside out: the proxy header, one replay after a key rejection, the cache
- * secret, and origin pinning. The cache secret sits above the transport, so
- * the field it adds is sealed with the rest of the body or sent over the
- * pinned connection.
+ * @internal The fetch chain the enclave and router clients send through,
+ * from the inside out: the proxy header, one replay after a key rejection,
+ * the cache secret, and origin pinning. The cache secret sits above the
+ * transport, so the field it adds is sealed with the rest of the body or
+ * sent over the pinned connection.
  */
 export function attestedFetch(transport: KeyedTransport, host: string, baseURL: string, cacheSecret: string = ""): Fetch {
   let chain = withEnclaveURL(transport.fetch, host, baseURL);
@@ -75,7 +76,7 @@ export function attestedFetch(transport: KeyedTransport, host: string, baseURL: 
   return withOriginRestriction(chain, host, baseURL);
 }
 
-/** The option checks that need no network I/O, so a misconfigured client fails before anything is fetched. The base URL comes back ending with `/`, or empty. */
+/** @internal The option checks that need no network I/O, so a misconfigured client fails before anything is fetched. The base URL comes back ending with `/`, or empty. */
 export function checkEnclaveOptions(host: string, options: EnclaveOptions, globals?: RuntimeGlobals): { mode: TransportMode; baseURL: string } {
   if (host === "") throw new ConfigurationError("enclave host is required");
   const mode = resolveTransportMode(options.transportMode, globals);
@@ -85,10 +86,13 @@ export function checkEnclaveOptions(host: string, options: EnclaveOptions, globa
   return { mode, baseURL: baseURL === "" ? "" : normalizeBaseURL(baseURL) };
 }
 
-/** Marks construction by this module's factory; the constructor refuses anything else. */
-const TOKEN = Symbol("EnclaveHTTPClient");
+/** Only this module holds the token the constructor requires, so untyped code that calls it is refused. */
+const TOKEN: unique symbol = Symbol("EnclaveHTTPClient");
 
-/** The factory with its test seams; {@link EnclaveHTTPClient.create} is this without them. */
+/** Calls the private constructor; the class assigns it, as the only place the constructor can be called. */
+let construct: (transport: KeyedTransport, baseURL: string, openAIURL: string, fetchImpl: Fetch) => EnclaveHTTPClient;
+
+/** @internal The factory with its test seams; {@link EnclaveHTTPClient.create} is this without them. */
 export async function createEnclaveHTTPClient(host: string, repo: string, options: EnclaveOptions, seams: EnclaveClientSeams): Promise<EnclaveHTTPClient> {
   const { mode, baseURL } = checkEnclaveOptions(host, options, seams.globals);
   const enclave = await Enclave.create({
@@ -102,8 +106,7 @@ export async function createEnclaveHTTPClient(host: string, repo: string, option
     sleep: seams.sleep,
   });
   const transport = new KeyedTransport(enclave, modeFor(mode, seams), seams.clock);
-  const client = new EnclaveHTTPClient(
-    TOKEN,
+  const client = construct(
     transport,
     baseURL !== "" ? baseURL : `https://${host}/`,
     baseURL !== "" ? baseURL : `https://${host}/v1/`,
@@ -114,6 +117,14 @@ export async function createEnclaveHTTPClient(host: string, repo: string, option
   return client;
 }
 
+/**
+ * An HTTP client bound to one attested enclave; see the module header. The
+ * constructor is private: type-checked code cannot call it, and a call from
+ * untyped code is refused at runtime. Clients come from
+ * {@link EnclaveHTTPClient.create}, and from the factories built over it:
+ * {@link EnclaveOpenAIClient.create} and the AI SDK provider's `enclave`
+ * option.
+ */
 export class EnclaveHTTPClient {
   /**
    * Sends a request through the attested transport. Bound, so it can be
@@ -129,8 +140,7 @@ export class EnclaveHTTPClient {
   readonly repo: string;
   readonly #transport: KeyedTransport;
 
-  /** @internal Only {@link create} constructs a client; anything else is refused. */
-  constructor(token: symbol, transport: KeyedTransport, baseURL: string, openAIURL: string, fetchImpl: Fetch) {
+  private constructor(token: typeof TOKEN, transport: KeyedTransport, baseURL: string, openAIURL: string, fetchImpl: Fetch) {
     if (token !== TOKEN) throw new ConfigurationError("EnclaveHTTPClient is created with EnclaveHTTPClient.create");
     this.#transport = transport;
     this.fetch = fetchImpl;
@@ -140,6 +150,10 @@ export class EnclaveHTTPClient {
     setOpenAIURL(this, openAIURL);
     // The client's state lives in the transport; the client itself never changes once created.
     Object.freeze(this);
+  }
+
+  static {
+    construct = (...parts) => new EnclaveHTTPClient(TOKEN, ...parts);
   }
 
   /**
