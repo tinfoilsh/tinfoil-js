@@ -12,7 +12,7 @@ import { readFileSync } from "node:fs";
 import { createServer, type Server } from "node:https";
 import type { AddressInfo } from "node:net";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { AttestationError, ConfigurationError } from "../src/errors.js";
+import { AttestationError, ConfigurationError, NetworkError } from "../src/errors.js";
 import { Enclave } from "../src/internal/enclave.js";
 import { withReplay } from "../src/internal/transport/replay.js";
 import { tlsMode } from "../src/internal/transport/tls.js";
@@ -271,7 +271,7 @@ describe("tlsMode", () => {
     bound.close?.();
   });
 
-  it("hands a redirect back as the response it is, never following it", async () => {
+  it("hands a redirect back as the response it is, never following it, or fails it when the request asked for that", async () => {
     const bound = await mode.bind(verification(PIN));
     const before = seen.length;
     const res = await bound.fetch(`${origin}/redirect`, { redirect: "follow" });
@@ -279,6 +279,10 @@ describe("tlsMode", () => {
     expect(res.headers.get("location")).toBe(`${origin}/plain`);
     await res.text();
     expect(seen.slice(before).map((s) => s.path)).toEqual(["/redirect"]);
+    // A request that asked for an error on a redirect gets one, from either form of input.
+    await expect(bound.fetch(`${origin}/redirect`, { redirect: "error" })).rejects.toBeInstanceOf(NetworkError);
+    await expect(bound.fetch(new Request(`${origin}/redirect`, { redirect: "error" }))).rejects.toBeInstanceOf(NetworkError);
+    expect(seen.slice(before).map((s) => s.path)).toEqual(["/redirect", "/redirect", "/redirect"]);
     bound.close?.();
   });
 

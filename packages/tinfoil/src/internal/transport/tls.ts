@@ -25,6 +25,9 @@ export interface TLSOptions {
   readonly ca?: string | Uint8Array;
 }
 
+/** The statuses that fetch treats as a redirect. */
+const REDIRECT_STATUSES: ReadonlySet<number> = new Set([301, 302, 303, 307, 308]);
+
 /**
  * Rejects, before any verification or network I/O, a request the mode
  * can't protect: a plaintext one, which no pinned connection carries, and
@@ -82,6 +85,7 @@ async function nodePinnedFetch(key: string, options: TLSOptions): Promise<BoundF
     // An init body of null leaves a Request input's body in place, as the Request constructor reads it.
     const body = await requestBody(init?.body ?? request, headers);
     const signal = signalOf(input, init);
+    const redirect = noFollow(init?.redirect ?? request?.redirect);
     signal?.throwIfAborted();
 
     const res = await new Promise<IncomingMessage>((resolve, reject) => {
@@ -118,13 +122,18 @@ async function nodePinnedFetch(key: string, options: TLSOptions): Promise<BoundF
       }
     });
 
-    // The response is handed back as it came, a redirect included: the client never follows one.
+    // The response is handed back as it came, a redirect included: the client
+    // never follows one. A request that asked for an error on a redirect gets one.
+    const status = res.statusCode ?? 0;
+    if (redirect === "error" && REDIRECT_STATUSES.has(status)) {
+      res.resume();
+      throw new NetworkError("the server redirected the request, which asked for a redirect to be an error");
+    }
     const responseHeaders = new Headers();
     for (const [name, value] of Object.entries(res.headers)) {
       if (Array.isArray(value)) for (const v of value) responseHeaders.append(name, v);
       else if (value !== undefined) responseHeaders.set(name, value);
     }
-    const status = res.statusCode ?? 0;
     const bodiless = method === "HEAD" || status === 204 || status === 304;
     if (bodiless) res.resume();
     return new Response(bodiless ? null : (Readable.toWeb(res) as unknown as ReadableStream<Uint8Array>), {
