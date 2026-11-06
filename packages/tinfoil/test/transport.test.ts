@@ -279,7 +279,7 @@ describe("KeyedTransport", () => {
     expect(closed).toEqual(["k1", "k2"]);
   });
 
-  it("retires a binding a newer verification replaces, so a request still in flight on it finishes, and closes bindings only when it closes", async () => {
+  it("retires a binding a newer verification replaces, so a request still in flight on it finishes, and closes every binding, the retired one included, only when it closes", async () => {
     const released: string[] = [];
     let verified = 0;
     const now = new Date("2026-01-01T00:00:00Z");
@@ -316,7 +316,7 @@ describe("KeyedTransport", () => {
     release();
     expect(await (await inFlight).text()).toBe("k1");
     t.close();
-    expect(released).toEqual(["retired k1", "closed k2"]);
+    expect(released).toEqual(["retired k1", "closed k2", "closed k1"]);
   });
 
   it("closes: releases the current binding, refuses further use, keeps the last verification, and closes again without effect", async () => {

@@ -136,6 +136,8 @@ export class KeyedTransport {
   readonly #mode: Mode;
   readonly #cache: VerifiedEnclave<BoundFetch>;
   #closed = false;
+  /** Bindings retired while the transport was open: a request may still be in flight on one, so each is closed outright when the transport closes. */
+  readonly #retired = new Set<BoundFetch>();
   /** Sends a request over a fetch tied to the current verification's keys, verifying first if needed. */
   readonly fetch: Fetch;
 
@@ -147,13 +149,17 @@ export class KeyedTransport {
 
   /**
    * Releases a binding the cache lets go of. A binding replaced while the
-   * transport is open is retired: a request that received its state may
-   * still be in flight on it. Once the transport closes, every binding is
-   * closed outright.
+   * transport is open is retired and kept until the transport closes: a
+   * request that received its state may still be in flight on it. Once the
+   * transport closes, every binding is closed outright.
    */
   #release(bound: BoundFetch): void {
-    if (this.#closed) bound.close?.();
-    else (bound.retire ?? bound.close)?.();
+    if (this.#closed || bound.retire === undefined) {
+      bound.close?.();
+      return;
+    }
+    bound.retire();
+    this.#retired.add(bound);
   }
 
   async #send(input: string | URL | Request, init?: RequestInit): Promise<Response> {
@@ -210,13 +216,16 @@ export class KeyedTransport {
   }
 
   /**
-   * Releases what the current binding holds (the mode's pooled connections,
-   * if any, requests in flight on them included) and refuses further use:
-   * requests and verification calls reject as closed, while {@link current}
-   * still reports the last verification. Closing again does nothing.
+   * Releases what the current binding and every retired one hold (the
+   * mode's pooled connections, if any, requests in flight on them included)
+   * and refuses further use: requests and verification calls reject as
+   * closed, while {@link current} still reports the last verification.
+   * Closing again does nothing.
    */
   close(): void {
     this.#closed = true;
     this.#cache.close();
+    for (const bound of this.#retired) bound.close?.();
+    this.#retired.clear();
   }
 }
