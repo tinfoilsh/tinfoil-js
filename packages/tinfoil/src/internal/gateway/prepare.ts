@@ -11,6 +11,7 @@
  * @experimental The gateway route is new; this API may change without a major version.
  */
 import { ConfigurationError } from "../../errors.js";
+import { readAll } from "../body.js";
 import { appendMember, firstArrayElement, objectMembers, pathEligible, removeMember, replaceMember, USER_CACHE_SECRET_FIELD, type Member } from "../cachesecret.js";
 import type { RequestShape } from "../transport/transport.js";
 
@@ -259,58 +260,6 @@ function indexOf(bytes: Uint8Array, needle: ArrayLike<number>, from: number, end
     return i;
   }
   return -1;
-}
-
-/**
- * The body's bytes, within `limit`; a larger body is a {@link ConfigurationError}
- * naming `what`. An abort of `signal` stops the read and rejects with its reason.
- */
-async function readAll(body: BodyInit, limit: number, what: string, signal?: AbortSignal): Promise<Uint8Array<ArrayBuffer>> {
-  signal?.throwIfAborted();
-  if (typeof body === "string") {
-    const encoded = new TextEncoder().encode(body) as Uint8Array<ArrayBuffer>;
-    if (encoded.length > limit) throw new ConfigurationError(`reading ${what}: body exceeds ${limit} bytes`);
-    return encoded;
-  }
-  const response = new Response(body);
-  const reader = response.body?.getReader();
-  if (reader === undefined) return new Uint8Array();
-  const chunks: Uint8Array[] = [];
-  let total = 0;
-  const abort = (): void => void reader.cancel(signal?.reason).catch(() => {});
-  signal?.addEventListener("abort", abort, { once: true });
-  try {
-    for (;;) {
-      const next = await Promise.race([reader.read(), abortedWith(signal)]);
-      signal?.throwIfAborted();
-      const { done, value } = next;
-      if (done) break;
-      total += value.length;
-      if (total > limit) {
-        await reader.cancel();
-        throw new ConfigurationError(`reading ${what}: body exceeds ${limit} bytes`);
-      }
-      chunks.push(value);
-    }
-  } finally {
-    signal?.removeEventListener("abort", abort);
-  }
-  const out = new Uint8Array(new ArrayBuffer(total));
-  let at = 0;
-  for (const chunk of chunks) {
-    out.set(chunk, at);
-    at += chunk.length;
-  }
-  return out;
-}
-
-/** A promise that rejects with the signal's reason when it aborts, and never settles without a signal. */
-function abortedWith(signal: AbortSignal | undefined): Promise<never> {
-  return new Promise((_, reject) => {
-    if (signal === undefined) return;
-    if (signal.aborted) reject(signal.reason as Error);
-    else signal.addEventListener("abort", () => reject(signal.reason as Error), { once: true });
-  });
 }
 
 /** A media type and its parameters, lower-cased, from a Content-Type value. */

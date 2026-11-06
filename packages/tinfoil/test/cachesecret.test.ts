@@ -126,6 +126,32 @@ describe("withCacheSecret", () => {
     await send("https://e.example/v1/responses", { method: "POST", body: '{"user_cache_secret":"theirs"}' });
     expect(last().body).toBe('{"user_cache_secret":"theirs"}');
   });
+
+  it("stops reading a stream body when the request is aborted and rejects with the reason", async () => {
+    const url = "https://e.example/v1/chat/completions";
+    const stalled = (onCancel: (reason: unknown) => void) =>
+      new ReadableStream<Uint8Array>({
+        start: (c) => c.enqueue(new TextEncoder().encode('{"seed":')),
+        cancel: onCancel,
+      });
+    const sent = captured.length;
+    const controller = new AbortController();
+    let cancelled: unknown;
+    const pending = send(url, { method: "POST", body: stalled((reason) => (cancelled = reason)), signal: controller.signal, duplex: "half" } as RequestInit);
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    const reason = new Error("upload abandoned");
+    controller.abort(reason);
+    await expect(pending).rejects.toBe(reason);
+    expect(cancelled).toBe(reason);
+    // A Request's own signal stops the read of its body too.
+    const gone = new AbortController();
+    const request = new Request(url, { method: "POST", body: stalled(() => {}), signal: gone.signal, duplex: "half" } as RequestInit);
+    const waiting = send(request);
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    gone.abort(new Error("gone"));
+    await expect(waiting).rejects.toThrow(/gone/);
+    expect(captured).toHaveLength(sent);
+  });
 });
 
 describe("resolveUserCacheSecret", () => {
