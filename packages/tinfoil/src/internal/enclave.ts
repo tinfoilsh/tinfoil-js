@@ -181,12 +181,20 @@ export function freshAt(v: Verification, now: Date): boolean {
  * A verifier error in the client's categories, by its outermost type: a
  * usage error is the caller's configuration error, and anything else the
  * verifier rejects is an attestation failure. The verifier error remains the
- * cause.
+ * cause. A usage error is recognized by `instanceof` first and by its name
+ * otherwise, so one thrown by another loaded copy of the verifier package
+ * (a second version installed alongside, or a bundle that failed to
+ * dedupe), whose class is a different object, is still the caller's error.
  */
 export function fromVerify(err: unknown): TinfoilError {
   if (err instanceof TinfoilError) return err;
-  if (err instanceof UsageError) return new ConfigurationError(err.message, { cause: err });
+  if (err instanceof UsageError || isUsageErrorByName(err)) return new ConfigurationError(messageOf(err), { cause: err });
   return new AttestationError(messageOf(err), { cause: err });
+}
+
+/** Whether `err` presents as the verifier's usage error without sharing its class. */
+function isUsageErrorByName(err: unknown): boolean {
+  return err instanceof Error && err.name === "UsageError";
 }
 
 /** Requires the keys a transport binds traffic to: the TLS key, and the HPKE key when the document endorses one. */

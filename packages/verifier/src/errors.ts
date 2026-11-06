@@ -18,7 +18,39 @@ export type KnownLayer =
  */
 export type Layer = KnownLayer | (string & {});
 
-/** Base class for every error this package throws. */
+/**
+ * The key under which every error of this package carries its brand: its
+ * class name, stamped by the constructor. The key is registered globally, so
+ * two copies of the package loaded side by side (two versions installed, or
+ * a bundle that failed to dedupe) share it, and `instanceof` against one
+ * copy's classes recognizes the other copy's errors.
+ */
+const BRAND = Symbol.for("@tinfoilsh/verifier.error");
+
+/** The brands the two concrete error classes stamp. */
+type Brand = "UsageError" | "VerificationError";
+
+/** The brand `value` carries, or undefined for anything this package didn't construct. */
+function brandOf(value: unknown): Brand | undefined {
+  if (typeof value !== "object" || value === null) return undefined;
+  const brand = (value as { [BRAND]?: unknown })[BRAND];
+  return brand === "UsageError" || brand === "VerificationError" ? brand : undefined;
+}
+
+/** Stamps `err` with its brand, as a non-enumerable property so serializing or logging the error doesn't show it. */
+function stamp(err: VerifyError, brand: Brand): void {
+  Object.defineProperty(err, BRAND, { value: brand, enumerable: false, writable: false, configurable: false });
+}
+
+/** Whether `value` is an instance of `cls` by its prototype chain: the usual `instanceof`, which a subclass defined outside this package relies on. */
+const byPrototype = (cls: abstract new (...args: never[]) => unknown, value: unknown): boolean => Function.prototype[Symbol.hasInstance].call(cls, value);
+
+/**
+ * Base class for every error this package throws. `instanceof` holds for
+ * an error from another loaded copy of the package too: each error carries
+ * a brand under a globally registered key, which the classes check after
+ * the prototype chain.
+ */
 export abstract class VerifyError extends Error {
   declare readonly cause?: unknown;
 
@@ -28,6 +60,10 @@ export abstract class VerifyError extends Error {
       (this as { cause?: unknown }).cause = options.cause;
     }
   }
+
+  static [Symbol.hasInstance](value: unknown): boolean {
+    return byPrototype(this, value) || brandOf(value) !== undefined;
+  }
 }
 
 /** The verifier was built or called with invalid inputs. Retrying won't help. */
@@ -35,6 +71,11 @@ export class UsageError extends VerifyError {
   constructor(message: string, options?: { cause?: unknown }) {
     super(`usage error: ${message}`, options);
     this.name = "UsageError";
+    stamp(this, "UsageError");
+  }
+
+  static override [Symbol.hasInstance](value: unknown): boolean {
+    return byPrototype(this, value) || brandOf(value) === "UsageError";
   }
 }
 
@@ -46,5 +87,10 @@ export class VerificationError extends VerifyError {
     super(`verification error: ${layer}: ${message}`, options);
     this.name = "VerificationError";
     this.layer = layer;
+    stamp(this, "VerificationError");
+  }
+
+  static override [Symbol.hasInstance](value: unknown): boolean {
+    return byPrototype(this, value) || brandOf(value) === "VerificationError";
   }
 }

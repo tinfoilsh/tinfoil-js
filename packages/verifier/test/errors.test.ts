@@ -1,6 +1,61 @@
-/** The error types: the layer names, and how a rejection carries its layer. */
-import { describe, expect, expectTypeOf, it } from "vitest";
-import { VerificationError, type KnownLayer, type Layer } from "../src/errors.js";
+/** The error types: the layer names, how a rejection carries its layer, and `instanceof` across copies of the package. */
+import { describe, expect, expectTypeOf, it, vi } from "vitest";
+import { UsageError, VerificationError, VerifyError, type KnownLayer, type Layer } from "../src/errors.js";
+
+/** The key the errors carry their brand under, registered globally so every copy of the package shares it. */
+const BRAND = Symbol.for("@tinfoilsh/verifier.error");
+
+/** A second, independently evaluated copy of the errors module, as a duplicate install of the package would load. */
+async function secondCopy(): Promise<typeof import("../src/errors.js")> {
+  vi.resetModules();
+  const copy = await import("../src/errors.js");
+  expect(copy.UsageError).not.toBe(UsageError);
+  return copy;
+}
+
+describe("instanceof across copies of the package", () => {
+  it("recognizes an error constructed by another copy's class, by its brand", async () => {
+    const other = await secondCopy();
+    const usage = new other.UsageError("bad pin");
+    expect(usage instanceof UsageError).toBe(true);
+    expect(usage instanceof VerifyError).toBe(true);
+    expect(usage instanceof VerificationError).toBe(false);
+    const rejected = new other.VerificationError("quote", "bad report");
+    expect(rejected instanceof VerificationError).toBe(true);
+    expect(rejected instanceof VerifyError).toBe(true);
+    expect(rejected instanceof UsageError).toBe(false);
+    // And the other way round, since both copies check the same brand.
+    expect(new UsageError("x") instanceof other.UsageError).toBe(true);
+    expect(new VerificationError("policy", "x") instanceof other.VerifyError).toBe(true);
+  });
+
+  it("still matches its own instances and subclasses, and nothing unrelated", () => {
+    class Mine extends VerifyError {}
+    const mine = new Mine("mine");
+    expect(mine instanceof VerifyError).toBe(true);
+    expect(mine instanceof UsageError).toBe(false);
+    expect(new UsageError("x") instanceof UsageError).toBe(true);
+    expect(new UsageError("x") instanceof VerifyError).toBe(true);
+    expect(new UsageError("x") instanceof VerificationError).toBe(false);
+    expect(new VerificationError("quote", "x") instanceof UsageError).toBe(false);
+    for (const unrelated of [new Error("x"), { name: "UsageError", message: "x" }, Object.assign(new Error("x"), { name: "UsageError" }), null, undefined, "UsageError", 1]) {
+      expect(unrelated instanceof VerifyError, String(unrelated)).toBe(false);
+      expect(unrelated instanceof UsageError, String(unrelated)).toBe(false);
+      expect(unrelated instanceof VerificationError, String(unrelated)).toBe(false);
+    }
+    // A brand with a value the package never stamps is no brand.
+    expect(Object.assign(new Error("x"), { [BRAND]: "Other" }) instanceof VerifyError).toBe(false);
+  });
+
+  it("stamps the brand so it doesn't show when the error is serialized or enumerated", () => {
+    const usage = new UsageError("x", { cause: "c" });
+    expect((usage as unknown as Record<symbol, unknown>)[BRAND]).toBe("UsageError");
+    expect(Object.keys(usage)).toEqual(["cause", "name"]);
+    expect(Object.getOwnPropertySymbols(usage)).toEqual([BRAND]);
+    expect(JSON.parse(JSON.stringify(usage))).toEqual({ cause: "c", name: "UsageError" });
+    expect(Object.getOwnPropertyDescriptor(usage, BRAND)).toMatchObject({ enumerable: false, writable: false, configurable: false });
+  });
+});
 
 /**
  * How a caller handles a layer: the names it knows, and a default for one a
