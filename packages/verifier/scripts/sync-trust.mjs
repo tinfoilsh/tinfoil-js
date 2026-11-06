@@ -33,7 +33,7 @@
 import { X509Certificate } from "@freedomofpress/sigstore-browser";
 import { TUFClient } from "@freedomofpress/tuf-browser";
 import { createHash } from "node:crypto";
-import { readFileSync, writeFileSync } from "node:fs";
+import { lstatSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -54,15 +54,23 @@ function parseChain(text, what) {
 
 const fingerprint = (cert) => createHash("sha256").update(cert.root.toDER()).digest("hex");
 
-/** The committed chain's certificates, or [] when the module does not exist yet; any other read failure propagates, so that it cannot bypass the pin. */
+/**
+ * The committed chain's certificates, or [] when nothing is at the module's
+ * path yet. Anything else there that is not a regular file (a link, dangling
+ * or not, would read as absent or as another file) and any other failure
+ * propagates, so that neither can bypass the pin.
+ */
 function committedChain(name) {
-  let module;
+  const path = join(out, name);
+  let stat;
   try {
-    module = readFileSync(join(out, name), "utf8");
+    stat = lstatSync(path);
   } catch (err) {
     if (err?.code === "ENOENT") return [];
     throw err;
   }
+  if (!stat.isFile()) throw new Error(`${path}: the committed module is not a regular file`);
+  const module = readFileSync(path, "utf8");
   const text = JSON.parse(module.slice(module.indexOf("= ") + 2, module.lastIndexOf(";")));
   return parseChain(text, name);
 }
