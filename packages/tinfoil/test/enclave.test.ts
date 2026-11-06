@@ -260,6 +260,17 @@ describe.skipIf(!conformanceAvailable())(vectorsTitle("Enclave"), () => {
     expect(urls).toHaveLength(0);
   });
 
+  it("reports a caller's abort during the fetch as the caller's own reason", async () => {
+    // A fetch that fails the way fetch does once its signal aborts: with the reason, which the document fetch reports as a network failure.
+    const fetch: Fetch = (_input, init) => new Promise((_, reject) => init!.signal!.addEventListener("abort", () => reject(init!.signal!.reason), { once: true }));
+    const enclave = await Enclave.create(config({ fetch }));
+    const controller = new AbortController();
+    const pending = enclave.verify(controller.signal);
+    const reason = new Error("gave up");
+    controller.abort(reason);
+    await expect(pending).rejects.toBe(reason);
+  });
+
   describe("VerifiedEnclave", () => {
     it("verifies on first use, serves the cached verification while fresh, and refreshes once it expires", async () => {
       let now = golden.at;
