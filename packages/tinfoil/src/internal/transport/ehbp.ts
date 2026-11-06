@@ -6,8 +6,9 @@
  * nothing after the handshake would be sealed. A request body is sealed as
  * framed chunks and sent in full before the response begins, so a streaming
  * request body is accepted but its response cannot interleave with it. A
- * redirect is handed back to the caller, never followed. This mode works
- * wherever fetch does, browsers included.
+ * redirect is never followed: it is handed back to the caller, or, in a
+ * browser, which hides where it leads, failed as a network error. This mode
+ * works wherever fetch does, browsers included.
  */
 import type { Verification } from "@tinfoilsh/verifier";
 import { Identity, PROTOCOL, type RequestContext } from "ehbp";
