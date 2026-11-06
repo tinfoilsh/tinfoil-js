@@ -54,9 +54,25 @@ export interface CallOptions {
 /**
  * The `ws` client settings a pinned connection owns, so a caller's values
  * for them are dropped: those that choose the peer, check its certificate,
- * or carry the handshake's headers and subprotocol.
+ * or shape the handshake's headers (`headers` itself, `origin`, which is a
+ * header, and `finishRequest`, which hands the caller the request) and
+ * subprotocol.
  */
-export type ReservedWsOption = "agent" | "createConnection" | "followRedirects" | "session" | "socket" | "servername" | "pskCallback" | "checkServerIdentity" | "rejectUnauthorized" | "ca" | "headers" | "protocol";
+export type ReservedWsOption =
+  | "agent"
+  | "createConnection"
+  | "followRedirects"
+  | "session"
+  | "socket"
+  | "servername"
+  | "pskCallback"
+  | "checkServerIdentity"
+  | "rejectUnauthorized"
+  | "ca"
+  | "headers"
+  | "origin"
+  | "finishRequest"
+  | "protocol";
 
 /** The `ws` client settings a caller may set: the library's own, less the {@link ReservedWsOption}s. */
 export type WsOptions = Readonly<Omit<WsClientOptions, ReservedWsOption>>;
@@ -70,8 +86,9 @@ export interface WebSocketOptions {
   /**
    * Settings for the `ws` client on Node, such as `perMessageDeflate` or
    * `maxPayload`. Settings that would change which peer is connected to, how
-   * its certificate is checked, or the handshake's `headers` and `protocol`
-   * are ignored; the handshake's headers come from the top-level `headers`.
+   * its certificate is checked, or the handshake's headers (`headers`,
+   * `origin` and `finishRequest`) and `protocol` are ignored; the
+   * handshake's headers come from the top-level `headers`.
    * Bun's WebSocket takes no such settings, so they are ignored there.
    */
   readonly wsOptions?: WsOptions;

@@ -39,6 +39,8 @@ const RESERVED_WS_OPTIONS: readonly string[] = Object.keys({
   rejectUnauthorized: true,
   ca: true,
   headers: true,
+  origin: true,
+  finishRequest: true,
   protocol: true,
 } satisfies Record<ReservedWsOption, true>);
 
@@ -102,8 +104,11 @@ export async function openPinnedWebSocket(url: URL, key: string, options: WebSoc
 /**
  * The `ws` client with `addEventListener` taking a `signal`, which the
  * library's own ignores: the listener is removed when the signal aborts, and
- * a signal that has already aborted adds none, as on an EventTarget. Defined
- * once the library is loaded.
+ * a signal that has already aborted adds none, as on an EventTarget. The
+ * signal holds a hook only while the listener is registered: the hook goes
+ * when the listener is removed, by a call or by `once`, so a long-lived
+ * signal doesn't keep every listener it was given alive. Defined once the
+ * library is loaded.
  */
 let NodeWebSocket: typeof WS.WebSocket | undefined;
 
@@ -114,12 +119,41 @@ async function nodeWebSocket(): Promise<typeof WS.WebSocket> {
   if (NodeWebSocket !== undefined) return NodeWebSocket;
   const { WebSocket } = await import("ws");
   NodeWebSocket = class extends WebSocket {
+    /** Drops the abort hook of a listener added with a signal, by the function the library registered for it. */
+    readonly #unhook = new Map<object, () => void>();
+    #watchingRemovals = false;
+
     override addEventListener(type: AddListenerParameters[0], listener: AddListenerParameters[1], options?: WebSocketListenerOptions): void {
       const signal = options?.signal;
-      if (signal?.aborted) return;
+      if (signal === undefined) {
+        super.addEventListener(type, listener, options);
+        return;
+      }
+      if (signal.aborted) return;
+      const before = this.listenerCount(type);
       super.addEventListener(type, listener, options);
-      // Removing a listener `once` has already taken off is a no-op.
-      signal?.addEventListener("abort", () => this.removeEventListener(type, listener), { once: true });
+      // The library ignores a listener it already has, as an EventTarget does; the signal is then ignored with it.
+      if (this.listenerCount(type) === before) return;
+      this.#watchRemovals();
+      // The library registers a function of its own for the listener, appended to the emitter's list.
+      const registered = this.listeners(type)[this.listenerCount(type) - 1]!;
+      const onAbort = (): void => this.removeEventListener(type, listener);
+      this.#unhook.set(registered, () => signal.removeEventListener("abort", onAbort));
+      signal.addEventListener("abort", onAbort, { once: true });
+    }
+
+    /** Drops the abort hook of each listener as the emitter removes it: on a call, on abort, or after `once` fired. */
+    #watchRemovals(): void {
+      if (this.#watchingRemovals) return;
+      this.#watchingRemovals = true;
+      this.on("removeListener", (_type: string, removed: { readonly listener?: object }) => {
+        // A listener that `once` fired is reported as the emitter's own wrapper, which names the function it wrapped.
+        const registered = removed.listener ?? removed;
+        const unhook = this.#unhook.get(registered);
+        if (unhook === undefined) return;
+        this.#unhook.delete(registered);
+        unhook();
+      });
     }
   };
   return NodeWebSocket;
