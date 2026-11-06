@@ -412,7 +412,9 @@ const STRING_FIELDS = [
 /**
  * Validates the parsed stdin value against the Input shape: unknown members
  * are ignored, absent or null members take their type's empty value ("" or
- * 0), and a member of the wrong type is malformed.
+ * 0), and a member of the wrong type is malformed. The clock must also lie
+ * within the range that a Date can hold, so that no stage ever appraises
+ * against an invalid time.
  */
 function decodeInput(raw: unknown): Input | undefined {
   if (typeof raw !== "object" || raw === null || Array.isArray(raw)) return undefined;
@@ -439,7 +441,7 @@ function decodeInput(raw: unknown): Input | undefined {
   const t = obj.verification_time_unix;
   if (t === undefined || t === null) {
     out.verification_time_unix = 0;
-  } else if (typeof t === "number" && Number.isSafeInteger(t)) {
+  } else if (typeof t === "number" && Number.isSafeInteger(t) && !Number.isNaN(new Date(t * 1000).getTime())) {
     out.verification_time_unix = t;
   } else {
     return undefined;
