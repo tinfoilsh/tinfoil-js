@@ -43,16 +43,17 @@ export function reachableDeclarations(entries) {
 }
 
 /**
- * Every regular `.d.ts` file under `dir`, as absolute paths. Symbolic links
- * are not followed and not listed, so that a link under the output
- * directory never leads a prune to a file outside it, and anything else
- * that is not a regular file (a pipe, a socket, a device) is not listed
- * either.
+ * Every regular `.d.ts` file under `dir`, as absolute paths whether or not
+ * `dir` is one. Symbolic links are not followed and not listed, so that a
+ * link under the output directory never leads a prune to a file outside
+ * it, and anything else that is not a regular file (a pipe, a socket, a
+ * device) is not listed either.
  */
 export function declarationsUnder(dir) {
+  const root = resolve(dir);
   const out = [];
-  for (const name of readdirSync(dir)) {
-    const path = join(dir, name);
+  for (const name of readdirSync(root)) {
+    const path = join(root, name);
     const stat = lstatSync(path);
     if (stat.isDirectory()) out.push(...declarationsUnder(path));
     else if (stat.isFile() && name.endsWith(".d.ts")) out.push(path);

@@ -8,7 +8,7 @@
 import { execFileSync } from "node:child_process";
 import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, relative } from "node:path";
 import { describe, expect, it } from "vitest";
 import { declarationsUnder, pruneDeclarations, reachableDeclarations } from "../scripts/declarations.mjs";
 
@@ -103,6 +103,8 @@ export function describeDeclarationPrune(): void {
         expect(lstatSync(join(dist, "linked.d.ts")).isSymbolicLink()).toBe(true);
         expect(existsSync(outside)).toBe(true);
         expect(declarationsUnder(dist).sort()).toEqual(pruned.kept.sort());
+        // The listing is absolute even when the directory was given relative to the working directory.
+        expect(declarationsUnder(relative(process.cwd(), dist)).sort()).toEqual(pruned.kept.sort());
       } finally {
         rmSync(tmp, { recursive: true, force: true });
       }
