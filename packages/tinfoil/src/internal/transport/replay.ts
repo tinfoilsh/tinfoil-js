@@ -22,8 +22,8 @@ export function withReplay(next: Fetch, retryable: (err: unknown) => boolean): F
       try {
         return await next(attempts.again, init);
       } catch (retryErr) {
-        // A caller that gave up during the replay gets its own reason back.
-        if (signal?.aborted) throw retryErr;
+        // A caller that gave up during the replay gets its own reason back, not the failure that its abort caused.
+        if (signal?.aborted) throw signal.reason;
         throw withNote(retryErr, `the replay failed too; first attempt: ${messageOf(err)}`);
       }
     }

@@ -157,7 +157,8 @@ describe("replay", () => {
     const abortedReplay = withReplay(async () => {
       if (attempts++ === 0) throw rejected();
       during.abort(reason);
-      throw reason;
+      // The replay's own failure, as a fetch reports an abort, is not what the caller gets back.
+      throw new TypeError("fetch failed");
     }, retryable);
     await expect(abortedReplay("https://x.example/", { signal: during.signal })).rejects.toBe(reason);
   });
