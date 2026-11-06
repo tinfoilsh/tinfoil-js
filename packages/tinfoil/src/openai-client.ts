@@ -91,6 +91,18 @@ const TOKEN = Symbol("OpenAIClient");
  * An OpenAI client for Tinfoil's recommended route: the discovered router,
  * verified before the client is returned. Its `baseURL` is the URL requests
  * go to on that route.
+ *
+ * Errors: the factory rejects with the client's own errors
+ * ({@link ConfigurationError}, {@link NetworkError}, {@link AttestationError}).
+ * A call through the OpenAI API surface, such as
+ * `chat.completions.create(...)`, goes through the OpenAI client's request
+ * loop, which catches whatever the attested `fetch` throws, retries the
+ * request `maxRetries` times (2 by default; a request whose body is a
+ * stream isn't retried) and then throws `APIConnectionError` with the
+ * client's error as its `cause`. An enclave that fails to verify again on a
+ * request thus surfaces as an `APIConnectionError` caused by an
+ * {@link AttestationError}, after three verification attempts; `maxRetries:
+ * 0` on the client or the request shows the first failure.
  */
 export class TinfoilClient extends OpenAI {
   /**
@@ -141,10 +153,6 @@ export function createClient(options?: OpenAIOptions): Promise<TinfoilClient> {
   return TinfoilClient.create(options);
 }
 
-/**
- * An OpenAI client whose requests go through an {@link EnclaveHTTPClient},
- * to the `baseURL` option or, when that is unset, the enclave's `/v1/` API.
- */
 /** The enclave OpenAI factory with its test seams; {@link EnclaveOpenAIClient.create} is this without them. */
 export async function createEnclaveOpenAIClient(
   host: string,
@@ -158,6 +166,11 @@ export async function createEnclaveOpenAIClient(
   return new EnclaveOpenAIClient(TOKEN, httpClient, openaiOptions);
 }
 
+/**
+ * An OpenAI client whose requests go through an {@link EnclaveHTTPClient},
+ * to the `baseURL` option or, when that is unset, the enclave's `/v1/` API.
+ * Errors surface as for {@link TinfoilClient}.
+ */
 export class EnclaveOpenAIClient extends OpenAI {
   /** The enclave client requests go through. */
   declare readonly httpClient: EnclaveHTTPClient;
@@ -186,10 +199,6 @@ export class EnclaveOpenAIClient extends OpenAI {
   }
 }
 
-/**
- * An OpenAI client whose requests go through a {@link RouterHTTPClient}, to
- * the `baseURL` option or, when that is unset, the router's `/v1/` API.
- */
 /** The router OpenAI factory with its test seams; {@link RouterOpenAIClient.create} is this without them. */
 export async function createRouterOpenAIClient(options: RouterOptions, openaiOptions: OpenAIOptions, seams: RouterClientSeams): Promise<RouterOpenAIClient> {
   checkAPIKeyRuntime(openaiOptions.apiKey, seams.globals);
@@ -197,6 +206,11 @@ export async function createRouterOpenAIClient(options: RouterOptions, openaiOpt
   return new RouterOpenAIClient(TOKEN, httpClient, openaiOptions);
 }
 
+/**
+ * An OpenAI client whose requests go through a {@link RouterHTTPClient}, to
+ * the `baseURL` option or, when that is unset, the router's `/v1/` API.
+ * Errors surface as for {@link TinfoilClient}.
+ */
 export class RouterOpenAIClient extends OpenAI {
   /** The router client requests go through. */
   declare readonly httpClient: RouterHTTPClient;
@@ -237,7 +251,7 @@ export async function createGatewayOpenAIClient(options: GatewayOptions, openaiO
 
 /**
  * An OpenAI client whose requests go through a {@link GatewayHTTPClient}, to
- * the gateway's URL.
+ * the gateway's URL. Errors surface as for {@link TinfoilClient}.
  *
  * @experimental The gateway route is new; this API may change without a major version.
  */

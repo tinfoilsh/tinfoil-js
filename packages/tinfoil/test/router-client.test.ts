@@ -4,6 +4,7 @@
  * cache secret spliced into the request body, the failure categories when
  * the route can't be verified, and the recommended client's wiring.
  */
+import { APIConnectionError } from "openai";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { AttestationError, ConfigurationError, NetworkError, TinfoilError } from "../src/errors.js";
 import type { RuntimeGlobals } from "../src/internal/platform.js";
@@ -20,7 +21,7 @@ const BODY = '{"model":"test","messages":[{"role":"user","content":"hi"}],"seed"
 let tls: TlsServer;
 let ehbp: EhbpServer;
 
-function verifier(keys: { tls?: string; hpke?: string }, authorizes = false): Verifier {
+function verifier(keys: { tls?: string; hpke?: string }, authorizes = false, expiresAt: () => Date = () => new Date(Date.now() + 60_000)): Verifier {
   return {
     checkRepoVerifiability: (repo: string) => {
       if (repo === "") throw new UsageError("repo required");
@@ -36,7 +37,7 @@ function verifier(keys: { tls?: string; hpke?: string }, authorizes = false): Ve
         tlsPublicKeyFP: keys.tls,
         hpkePublicKey: keys.hpke,
         codeDigest: "11".repeat(32),
-        freshnessExpiresAt: new Date(Date.now() + 60_000),
+        freshnessExpiresAt: expiresAt(),
       } as unknown as Verification;
     },
   } as unknown as Verifier;
@@ -299,4 +300,53 @@ describe("createClient", () => {
     );
     expect(tokened.apiKey).toBe("t");
   });
+});
+
+describe("errors through the OpenAI API surface", () => {
+  /** A client whose verification has expired and is rejected whenever it verifies again, so every request's fetch throws an AttestationError. */
+  async function expiredClient(): Promise<{ ai: TinfoilClient; checks: () => number }> {
+    let now = Date.now();
+    let checks = 0;
+    const ai = await createTinfoilClient(
+      { apiKey: "k" },
+      { ...seams([tls.host]), clock: () => new Date(now) },
+      {
+        verifier: verifier({ tls: TEST_PIN }, false, () => new Date(now + 60_000)),
+        transportMode: "tls",
+        verificationCheck: () => {
+          if (checks++ > 0) throw new Error("rejected on refresh");
+        },
+      },
+    );
+    expect(checks).toBe(1);
+    now += 120_000;
+    return { ai, checks: () => checks - 1 };
+  }
+  const rejection = (p: Promise<unknown>): Promise<Error> => p.then(() => Promise.reject(new Error("resolved")), (e: unknown) => e as Error);
+  const request = { model: "test", messages: [{ role: "user" as const, content: "hi" }] };
+
+  it("wraps a transport error in APIConnectionError with the error as its cause, after the OpenAI client's retries", async () => {
+    const { ai, checks } = await expiredClient();
+    const failure = await rejection(ai.chat.completions.create(request));
+    expect(failure).toBeInstanceOf(APIConnectionError);
+    expect(failure.cause).toBeInstanceOf(AttestationError);
+    expect((failure.cause as Error).message).toMatch(/rejected on refresh/);
+    // The default maxRetries of 2 means three attempts, each verifying again.
+    expect(checks()).toBe(3);
+  }, 15_000);
+
+  it("retries a streamed completion as well, and makes one attempt with maxRetries 0", async () => {
+    const { ai, checks } = await expiredClient();
+    const streamed = await rejection(ai.chat.completions.create({ ...request, stream: true }));
+    expect(streamed).toBeInstanceOf(APIConnectionError);
+    expect(streamed.cause).toBeInstanceOf(AttestationError);
+    expect(checks()).toBe(3);
+    const once = await rejection(ai.withOptions({ maxRetries: 0 }).chat.completions.create(request));
+    expect(once).toBeInstanceOf(APIConnectionError);
+    expect(once.cause).toBeInstanceOf(AttestationError);
+    expect(checks()).toBe(4);
+    const perRequest = await rejection(ai.chat.completions.create(request, { maxRetries: 0 }));
+    expect(perRequest.cause).toBeInstanceOf(AttestationError);
+    expect(checks()).toBe(5);
+  }, 15_000);
 });
