@@ -20,7 +20,8 @@ export type Fetch = (...args: Parameters<typeof globalThis.fetch>) => ReturnType
  *
  * - `"tls"` pins each connection to the attested TLS key. It protects the
  *   whole request and response and needs a direct connection, so it is the
- *   default where the runtime can inspect the connection (Node and Bun).
+ *   default where the runtime checks the connection before it sends over
+ *   it (Node, and Bun 1.4.0 or later; an older Bun refuses it).
  * - `"ehbp"` seals request and response bodies to the attested HPKE key, so
  *   they stay private through a proxy. The method, URL and headers aren't
  *   sealed, and neither is a request without a body or its response. It
