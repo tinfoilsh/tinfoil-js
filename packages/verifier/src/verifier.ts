@@ -110,6 +110,18 @@ export interface VerifierOptions {
    * Must be non-empty, canonical and without repeats.
    */
   readonly configRegistryIDs?: readonly string[];
+  /**
+   * Caller-trusted reference values, each replacing the document's
+   * endorsement of that component: `config` pins the exact config, as its
+   * bytes (the digest and runtime pin are taken from them) or as its digest
+   * and runtime pin; `runtime` pins the exact runtime manifest, which must
+   * be the one an embedded config pins; `platform` pins a
+   * platform-endorsements/v2 policy artifact. At least one must be present.
+   * An embedded config selects its own trust source, so it conflicts with
+   * `configSigningKeys`, `configAuthorizer` and `configRegistryIDs`; with
+   * both `runtime` and `platform` embedded, `freshnessSigningKeys` has no
+   * endorsed artifact to verify and is refused.
+   */
   readonly embeddedReferences?: EmbeddedReferences;
 }
 
