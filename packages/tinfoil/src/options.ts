@@ -169,6 +169,18 @@ export interface EnclaveOptions {
    * opaque random value, not a raw user ID or API key.
    */
   readonly userCacheSecret?: string;
+  /**
+   * The network implementation that sends the client's requests in the
+   * `"ehbp"` transport mode, for a native HTTP bridge or a trusted relay. It
+   * receives each request after its body is sealed, and the response that it
+   * returns is opened by the client; a request without a body passes through
+   * it unsealed, as the mode leaves it. The method, URL and headers aren't
+   * sealed, so a relay sees them, the API key included. Attestation documents
+   * are still fetched with the runtime's fetch. Undefined selects the
+   * runtime's fetch. Refused with `transportMode: "tls"`, which pins the
+   * connection itself and sends nothing through a caller's fetch.
+   */
+  readonly fetch?: Fetch;
   /** Aborts the verification the factory performs before it returns. */
   readonly signal?: AbortSignal;
 }
@@ -207,6 +219,13 @@ export interface RouterOptions {
    * `user_cache_secret` string in a request's JSON body overrides it.
    */
   readonly userCacheSecret?: string;
+  /**
+   * As {@link EnclaveOptions.fetch}: the network implementation that sends
+   * the client's sealed requests in the `"ehbp"` transport mode. The router
+   * list and attestation documents are still fetched with the runtime's
+   * fetch. Refused with `transportMode: "tls"`.
+   */
+  readonly fetch?: Fetch;
   /** Aborts discovery and the verification the factory performs before it returns. */
   readonly signal?: AbortSignal;
 }
@@ -276,6 +295,12 @@ export interface GatewayOptions {
    * last catalog fetched.
    */
   readonly catalog?: () => Catalog;
+  /**
+   * As {@link EnclaveOptions.fetch}: the network implementation that sends
+   * the client's sealed requests to the gateway. The catalog and attestation
+   * documents are still fetched with the runtime's fetch.
+   */
+  readonly fetch?: Fetch;
   /** Aborts the catalog fetch the factory performs before it returns. */
   readonly signal?: AbortSignal;
 }

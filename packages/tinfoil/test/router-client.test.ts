@@ -4,6 +4,7 @@
  * cache secret spliced into the request body, the failure categories when
  * the route can't be verified, and the recommended client's wiring.
  */
+import { PROTOCOL } from "ehbp";
 import { APIConnectionError } from "openai";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { AttestationError, ConfigurationError, NetworkError, TinfoilError } from "../src/errors.js";
@@ -13,6 +14,7 @@ import type { Fetch, RouterOptions } from "../src/options.js";
 import { createRouterHTTPClient, RouterHTTPClient, type RouterClientSeams } from "../src/router-client.js";
 import { KEY_SPKI_FP_SHA256_V1_FORMAT, KEY_X25519_HPKE_V1_FORMAT, UsageError, type Verification, type Verifier } from "../../verifier/src/index.js";
 import { startEhbpServer, type EhbpServer } from "./helpers/ehbp-server.js";
+import { recordingFetch } from "./helpers/network.js";
 import { startTlsServer, TEST_CERT, TEST_PIN, type TlsServer } from "./helpers/tls-server.js";
 
 const ROUTER_REPO = "tinfoilsh/confidential-model-router";
@@ -80,8 +82,11 @@ afterAll(async () => {
 describe("RouterHTTPClient.create", () => {
   it("checks its options before fetching anything", async () => {
     const s = seams(["r1.example"]);
+    const network = recordingFetch((input, init) => fetch(input, init));
     const cases: RouterOptions[] = [
       { verifier: verifier({ tls: TEST_PIN }), transportMode: "quic" as never },
+      { verifier: verifier({ tls: TEST_PIN }), transportMode: "tls", fetch: network.fetch },
+      { verifier: verifier({ tls: TEST_PIN }), fetch: network.fetch },
       { verifier: verifier({ tls: TEST_PIN }), baseURL: "https://proxy.example/" },
       { verifier: verifier({ tls: TEST_PIN }), transportMode: "tls", baseURL: "https://proxy.example/" },
       { verifier: verifier({ tls: TEST_PIN }), transportMode: "ehbp", baseURL: "http://proxy.example/" },
@@ -92,8 +97,10 @@ describe("RouterHTTPClient.create", () => {
     for (const options of cases) {
       await expect(createRouterHTTPClient(options, s), JSON.stringify(options.baseURL)).rejects.toBeInstanceOf(ConfigurationError);
     }
+    await expect(createRouterHTTPClient({ verifier: verifier({ tls: TEST_PIN }), transportMode: "tls", fetch: network.fetch }, s)).rejects.toThrow(/fetch option .* requires transportMode "ehbp"/);
     expect(s.listCalls).toBe(0);
     expect(s.documentHosts).toEqual([]);
+    expect(network.seen).toHaveLength(0);
   });
 
   it("moves past a router that attests but fails the caller's check, and keeps the next", async () => {
@@ -259,6 +266,46 @@ describe("RouterHTTPClient over EHBP", () => {
     const reply = await ai.chat.completions.create({ model: "test", messages: [{ role: "user", content: "hi" }] });
     expect(reply.choices[0]!.message.content).toBe("sealed");
     expect(ehbp.seen[ehbp.seen.length - 1]!.path).toBe("/chat/completions");
+  });
+
+  it("sends sealed requests through the fetch option, with the secret spliced in before sealing, while discovery keeps its own fetches", async () => {
+    const network = recordingFetch((input, init) => fetch(input, init));
+    const s = seams(["router.example"]);
+    const client = await createRouterHTTPClient(
+      { verifier: verifier({ tls: "ab".repeat(32), hpke: ehbp.publicKeyHex }), transportMode: "ehbp", baseURL: `${ehbp.origin}/`, fetch: network.fetch },
+      s,
+    );
+    expect(s.listCalls).toBe(1);
+    expect(s.documentHosts).toEqual(["router.example"]);
+    expect(network.seen).toHaveLength(0);
+
+    const res = await client.fetch(`${ehbp.origin}/v1/chat/completions`, { method: "POST", body: BODY, headers: { "x-raw": "1", authorization: "Bearer k" } });
+    expect(await res.text()).toBe(`${BODY.slice(0, -1)},"user_cache_secret":"resolved-secret"}`);
+    expect(network.seen).toHaveLength(1);
+    const sealed = network.seen[0]!;
+    expect(sealed.url).toBe(`${ehbp.origin}/v1/chat/completions`);
+    expect(sealed.headers.has(PROTOCOL.ENCAPSULATED_KEY_HEADER)).toBe(true);
+    expect(sealed.headers.get("x-tinfoil-enclave-url")).toBe("https://router.example");
+    expect(sealed.headers.get("authorization")).toBe("Bearer k");
+    expect(sealed.body).not.toContain("resolved-secret");
+    expect(sealed.body).not.toContain("messages");
+
+    const bodiless = await client.fetch(`${ehbp.origin}/v1/echo`, { headers: { "x-raw": "1" } });
+    expect(await bodiless.text()).toBe("");
+    expect(network.seen).toHaveLength(2);
+    expect(network.seen[1]!.headers.has(PROTOCOL.ENCAPSULATED_KEY_HEADER)).toBe(false);
+
+    const ai = await createRouterOpenAIClient(
+      { verifier: verifier({ tls: "ab".repeat(32), hpke: ehbp.publicKeyHex }), transportMode: "ehbp", baseURL: `${ehbp.origin}/`, fetch: network.fetch },
+      { apiKey: "k" },
+      seams(["router.example"]),
+    );
+    const reply = await ai.chat.completions.create({ model: "test", messages: [{ role: "user", content: "hi" }] });
+    expect(reply.choices[0]!.message.content).toBe("sealed");
+    expect(network.seen).toHaveLength(3);
+    expect(network.seen[2]!.url).toBe(`${ehbp.origin}/chat/completions`);
+    expect(network.seen[2]!.headers.get("authorization")).toBe("Bearer k");
+    expect(network.seen[2]!.body).not.toContain("hi");
   });
 });
 
