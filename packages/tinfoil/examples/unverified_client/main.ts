@@ -30,12 +30,11 @@ async function main() {
   }
 
   try {
-    // A trailing slash keeps the base URL's last path segment when relative
-    // request URLs resolve against it.
-    const client = await UnverifiedClient.create({ baseURL: baseURL.replace(/\/?$/, "/") });
+    const client = await UnverifiedClient.create({ baseURL });
 
-    // Relative request URLs resolve against the base URL.
-    const response = await client.fetch("chat/completions", {
+    // Requests take an absolute URL; client.baseURL ends with "/", so a path
+    // resolves under it.
+    const response = await client.fetch(new URL("chat/completions", client.baseURL), {
       method: "POST",
       headers: {
         "Content-Type": "application/json",

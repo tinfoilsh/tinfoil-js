@@ -17,6 +17,7 @@ const EXPORTS = [
   "cryptoMaterialData",
   "parseReference",
   "certPubkeyFP",
+  "PUBLIC_REGISTRY_ID",
   // errors
   "VerifyError",
   "UsageError",
@@ -72,6 +73,7 @@ const VERIFICATION_METHODS = ["cryptoMaterialData", "toJSON"].sort();
 type TypeExports = [
   surface.VerifierOptions,
   surface.EmbeddedReferences,
+  surface.EmbeddedConfigBytes,
   surface.EmbeddedConfigReference,
   surface.RuntimeReference,
   surface.ConfigVerification,

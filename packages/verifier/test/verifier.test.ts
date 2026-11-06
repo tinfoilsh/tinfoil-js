@@ -17,6 +17,7 @@ import { CONFIG_ENDORSEMENT_PREDICATE_TYPE_V2, IN_TOTO_STATEMENT_V1, PUBLIC_REGI
 import { ARTIFACT_FORMAT, ARTIFACT_FORMAT_V2 } from "../src/internal/policy/artifact.js";
 import { endorsementReference, timestampInput } from "../src/internal/sigstore/timestamp.js";
 import type { Expected } from "../src/measurement.js";
+import { PUBLIC_REGISTRY_ID as PUBLIC_REGISTRY_ID_EXPORTED } from "../src/index.js";
 import { Verifier, type EmbeddedConfigReference, type VerifierOptions } from "../src/verifier.js";
 import { VERIFIER_NAME, VERIFIER_VERSION } from "../src/version.js";
 import { buildDocument } from "./helpers/builder.js";
@@ -264,7 +265,7 @@ describe("Verifier.create options", () => {
     const runtime: RuntimeReference = { repo: "tinfoilsh/cvmimage", tag: "v1.2.3", digest: toHex(await sha256(manifest)) };
     const digest = "a".repeat(64);
     const reference: EmbeddedConfigReference = { name: "/org/project/r1", digest, runtime };
-    const v = await Verifier.create({ embeddedReferences: { configReference: reference, runtime: manifest } });
+    const v = await Verifier.create({ embeddedReferences: { config: reference, runtime: manifest } });
     expect(v.callerAuthorizesConfig).toBe(true);
     expect(() => v.checkRepoVerifiability("")).not.toThrow();
     expect(() => v.checkRepoVerifiability(`org/project@r1@sha256:${digest}`)).not.toThrow();
@@ -272,12 +273,22 @@ describe("Verifier.create options", () => {
     expect(() => v.checkRepoVerifiability(`org/project@sha256:${"b".repeat(64)}`)).toThrow(/embedded config does not match/);
     // Without a name the reference has no identity, so any repository reference, which always
     // pins an identity, mismatches even when its digest agrees; only the empty reference fits.
-    const unnamed = await Verifier.create({ embeddedReferences: { configReference: { digest, runtime } } });
+    const unnamed = await Verifier.create({ embeddedReferences: { config: { digest, runtime } } });
     expect(() => unnamed.checkRepoVerifiability(`org/project@sha256:${digest}`)).toThrow(/embedded config does not match/);
     expect(() => unnamed.checkRepoVerifiability("")).not.toThrow();
-    // The two forms of an embedded config are exclusive.
+    // An embedded config is its bytes or its reference, never both: each form excludes the
+    // other's fields, so the combined object fails to compile under the test typecheck.
     const bytes = utf8(`cvm-version: v1.2.3@sha256:${runtime.digest}\n`);
-    await expect(Verifier.create({ embeddedReferences: { config: { bytes }, configReference: reference } })).rejects.toThrow(/mutually exclusive/);
+    // @ts-expect-error The bytes form excludes digest and runtime, and the reference form excludes bytes.
+    const combined: VerifierOptions = { embeddedReferences: { config: { bytes, ...reference } } };
+    void combined;
+    // Untyped code giving both, neither or something other than an object is refused before anything else is checked.
+    for (const bad of [{ bytes, ...reference }, { name: "/org/project/r1" }, {}, "config", null]) {
+      await expect(Verifier.create({ embeddedReferences: { config: bad as unknown as EmbeddedConfigReference } })).rejects.toThrow(UsageError);
+    }
+    const both = { bytes, ...reference } as unknown as EmbeddedConfigReference;
+    await expect(Verifier.create({ embeddedReferences: { config: both } })).rejects.toThrow(/not both or neither/);
+    await expect(Verifier.create({ embeddedReferences: { config: { bytes: "config" as unknown as Uint8Array } } })).rejects.toThrow(/must be a Uint8Array/);
     // The reference is validated like one derived from config bytes, and the embedded manifest must be the one it pins.
     for (const bad of [
       { ...reference, digest: "" },
@@ -289,11 +300,11 @@ describe("Verifier.create options", () => {
       { ...reference, runtime: "v1.2.3" as unknown as RuntimeReference },
       { ...reference, digest: 7 as unknown as string },
     ]) {
-      await expect(Verifier.create({ embeddedReferences: { configReference: bad, runtime: manifest } })).rejects.toThrow(UsageError);
+      await expect(Verifier.create({ embeddedReferences: { config: bad, runtime: manifest } })).rejects.toThrow(UsageError);
     }
     // A later change to the caller's object does not reach the verifier.
     const mutable = { name: "/org/project/r1", digest, runtime: { ...runtime } };
-    const copied = await Verifier.create({ embeddedReferences: { configReference: mutable } });
+    const copied = await Verifier.create({ embeddedReferences: { config: mutable } });
     mutable.digest = "b".repeat(64);
     mutable.runtime.digest = "cd".repeat(32);
     expect(() => copied.checkRepoVerifiability(`org/project@r1@sha256:${digest}`)).not.toThrow();
@@ -305,7 +316,7 @@ describe("Verifier.create options", () => {
     // Like every configured trust source, it needs config collateral.
     if (withoutVectors) return;
     const fixture = loadFixture("golden/golden-happy.json");
-    const embedded = await dangerousTestOnlyVerifier(rootsOf(fixture), { embeddedReferences: { configReference: reference } });
+    const embedded = await dangerousTestOnlyVerifier(rootsOf(fixture), { embeddedReferences: { config: reference } });
     const err = await embedded.verifyV3At(inputBytes(fixture, "document_b64"), hex(fixture.input.nonce_hex ?? ""), "", clockOf(fixture)).catch((e: unknown) => e);
     expect(err).toBeInstanceOf(VerificationError);
     expect((err as VerificationError).layer).toBe("provenance");
@@ -350,7 +361,7 @@ describe("Verifier.create options", () => {
   });
 });
 
-describe("additional config registry IDs", () => {
+describe("config registry IDs beyond the public registry", () => {
   const PRIVATE_REGISTRY_ID = REGISTRY_ID_PREFIX + "9c4a7f21e0b836d56a13c8fe42d907ab";
   const GEN_TIME = new Date("2025-06-15T11:00:00Z");
   const register = "cd".repeat(48);
@@ -362,32 +373,28 @@ describe("additional config registry IDs", () => {
   );
   const platform = utf8(JSON.stringify({ format: ARTIFACT_FORMAT_V2, measurements: {}, machines: {}, policies: {} }));
 
-  it("accepts the public registry plus the given registry IDs, supplied once and validated as one list", async () => {
-    const v = await Verifier.create({ additionalConfigRegistryIDs: [PRIVATE_REGISTRY_ID] });
+  it("accepts the public registry alongside the given registry IDs as one validated list", async () => {
+    expect(PUBLIC_REGISTRY_ID).toBe(PUBLIC_REGISTRY_ID_EXPORTED);
+    const v = await Verifier.create({ configRegistryIDs: [PUBLIC_REGISTRY_ID, PRIVATE_REGISTRY_ID] });
     expect(v.callerAuthorizesConfig).toBe(false);
     expect(() => v.checkRepoVerifiability("org/project@r1")).not.toThrow();
-    await expect(Verifier.create({ additionalConfigRegistryIDs: [] })).rejects.toThrow(/additional config registry IDs must not be empty/);
-    await expect(Verifier.create({ additionalConfigRegistryIDs: [PUBLIC_REGISTRY_ID] })).rejects.toThrow(/duplicate config registry ID/);
-    await expect(Verifier.create({ additionalConfigRegistryIDs: [PRIVATE_REGISTRY_ID, PRIVATE_REGISTRY_ID] })).rejects.toThrow(/duplicate config registry ID/);
-    await expect(Verifier.create({ additionalConfigRegistryIDs: ["https://example.invalid/scope"] })).rejects.toThrow(/canonical registry URI/);
-    await expect(Verifier.create({ additionalConfigRegistryIDs: PRIVATE_REGISTRY_ID as unknown as string[] })).rejects.toThrow(UsageError);
-    await expect(Verifier.create({ additionalConfigRegistryIDs: [PRIVATE_REGISTRY_ID], configRegistryIDs: [PRIVATE_REGISTRY_ID] })).rejects.toThrow(
-      /config registry IDs must be supplied once/,
-    );
-    // The same trust conflicts as an exact registry ID list.
+    await expect(Verifier.create({ configRegistryIDs: [PUBLIC_REGISTRY_ID, PUBLIC_REGISTRY_ID] })).rejects.toThrow(/duplicate config registry ID/);
+    await expect(Verifier.create({ configRegistryIDs: [PUBLIC_REGISTRY_ID, PRIVATE_REGISTRY_ID, PRIVATE_REGISTRY_ID] })).rejects.toThrow(/duplicate config registry ID/);
+    await expect(Verifier.create({ configRegistryIDs: [PUBLIC_REGISTRY_ID, "https://example.invalid/scope"] })).rejects.toThrow(/canonical registry URI/);
+    // The same trust conflicts as any registry ID list.
     const { pem } = await newSigner();
-    await expect(Verifier.create({ additionalConfigRegistryIDs: [PRIVATE_REGISTRY_ID], configSigningKeys: [pem] })).rejects.toThrow(/registry root verification/);
-    await expect(Verifier.create({ additionalConfigRegistryIDs: [PRIVATE_REGISTRY_ID], configAuthorizer: () => undefined })).rejects.toThrow(
+    await expect(Verifier.create({ configRegistryIDs: [PUBLIC_REGISTRY_ID, PRIVATE_REGISTRY_ID], configSigningKeys: [pem] })).rejects.toThrow(/registry root verification/);
+    await expect(Verifier.create({ configRegistryIDs: [PUBLIC_REGISTRY_ID, PRIVATE_REGISTRY_ID], configAuthorizer: () => undefined })).rejects.toThrow(
       /require endorsement verification/,
     );
     const config = { bytes: utf8(`cvm-version: v1.2.3@sha256:${"a".repeat(64)}\n`) };
-    await expect(Verifier.create({ additionalConfigRegistryIDs: [PRIVATE_REGISTRY_ID], embeddedReferences: { config } })).rejects.toThrow(
+    await expect(Verifier.create({ configRegistryIDs: [PUBLIC_REGISTRY_ID, PRIVATE_REGISTRY_ID], embeddedReferences: { config } })).rejects.toThrow(
       /require endorsement verification/,
     );
     // Once pinned, config collateral is required like any configured trust.
     if (withoutVectors) return;
     const fixture = loadFixture("golden/golden-happy.json");
-    const pinned = await dangerousTestOnlyVerifier(rootsOf(fixture), { additionalConfigRegistryIDs: [PRIVATE_REGISTRY_ID] });
+    const pinned = await dangerousTestOnlyVerifier(rootsOf(fixture), { configRegistryIDs: [PUBLIC_REGISTRY_ID, PRIVATE_REGISTRY_ID] });
     const err = await pinned.verifyV3At(inputBytes(fixture, "document_b64"), hex(fixture.input.nonce_hex ?? ""), repoOf(fixture), clockOf(fixture)).catch((e: unknown) => e);
     expect(err).toBeInstanceOf(VerificationError);
     expect((err as VerificationError).layer).toBe("provenance");
@@ -436,10 +443,10 @@ describe("additional config registry IDs", () => {
       return err as VerificationError;
     };
     // The config approval passes and the bogus quote fails next, at the quote layer.
-    expect((await verify({ additionalConfigRegistryIDs: [PRIVATE_REGISTRY_ID] })).layer).toBe("quote");
+    expect((await verify({ configRegistryIDs: [PUBLIC_REGISTRY_ID, PRIVATE_REGISTRY_ID] })).layer).toBe("quote");
     expect((await verify({ configRegistryIDs: [PRIVATE_REGISTRY_ID] })).layer).toBe("quote");
-    // Public-only trust, explicit or default, rejects the registry at the provenance layer.
-    for (const options of [{}, { configRegistryIDs: [PUBLIC_REGISTRY_ID] }, { additionalConfigRegistryIDs: [REGISTRY_ID_PREFIX + "0".repeat(32)] }]) {
+    // A list without the private registry, or the public-only default, rejects it at the provenance layer.
+    for (const options of [{}, { configRegistryIDs: [PUBLIC_REGISTRY_ID] }, { configRegistryIDs: [PUBLIC_REGISTRY_ID, REGISTRY_ID_PREFIX + "0".repeat(32)] }]) {
       const err = await verify(options);
       expect(err.layer).toBe("provenance");
       expect(err.message).toMatch(/registry ID is not accepted by the caller/);
