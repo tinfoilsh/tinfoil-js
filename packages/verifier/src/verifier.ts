@@ -301,7 +301,7 @@ export class Verifier {
     try {
       endorsements = await this.#prov.authenticatePlatformEndorsements(platformRef.bundle, platformRef.repo, platformRef.tag, platformRef.digest, ARTIFACT_FORMAT);
     } catch (err) {
-      throw new Error(`verifying platform endorsements: ${message(err)}`);
+      throw caused(`verifying platform endorsements: ${message(err)}`, err);
     }
     const codeWitnessedAt = await this.#witnessedAt(doc, FRESHNESS_ID_CODE, "code", code, now);
     const platformWitnessedAt = await this.#witnessedAt(doc, FRESHNESS_ID_PLATFORM, "platform", endorsements, now);
@@ -321,7 +321,7 @@ export class Verifier {
       }
       return await authenticateFreshness(this.#prov, freshness.bundle, artifact, now, this.#policy.freshnessMaxAgeMs);
     } catch (err) {
-      throw new Error(`verifying ${what} freshness: ${message(err)}`);
+      throw caused(`verifying ${what} freshness: ${message(err)}`, err);
     }
   }
 
@@ -425,7 +425,7 @@ export class Verifier {
           ? await this.#configVerifier.verifyCertified(material.config, bundle, material.issuer, policy)
           : await this.#configVerifier.verify(material.config, bundle, policy);
     } catch (err) {
-      throw new Error(`verifying config approval: ${message(err)}`);
+      throw caused(`verifying config approval: ${message(err)}`, err);
     }
     if (material.reference !== approved.reference) throw new Error("config endorsement reference does not match the verified approval");
     let expected: RuntimeReference;
@@ -493,7 +493,7 @@ export class Verifier {
       });
       return approved.approvalTime;
     } catch (err) {
-      throw new Error(`verifying ${what} freshness: ${message(err)}`);
+      throw caused(`verifying ${what} freshness: ${message(err)}`, err);
     }
   }
 }
@@ -726,4 +726,11 @@ function configReferenceOf(ref: EmbeddedConfigReference): ConfigReference {
 
 function message(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
+}
+
+/** A plain error with `message` whose `cause` is `err`, for a step that rewords a failure and must not lose it. */
+function caused(message: string, err: unknown): Error {
+  const wrapped = new Error(message);
+  (wrapped as { cause?: unknown }).cause = err;
+  return wrapped;
 }
