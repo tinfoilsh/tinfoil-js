@@ -3,7 +3,9 @@
  * connection (a matching key serves, a mismatch fails in the handshake and
  * no request reaches the server), plaintext refused, response bodies
  * streamed chunk by chunk as the server writes them, request bodies
- * streamed as they are produced, and the replay after a key rotation.
+ * streamed as they are produced, a redirect handed back rather than
+ * followed, a binding retired without cutting a request in flight, and the
+ * replay after a key rotation.
  */
 import { createHash, X509Certificate } from "node:crypto";
 import { readFileSync } from "node:fs";
@@ -67,6 +69,10 @@ beforeAll(async () => {
           break;
         case "/empty":
           res.writeHead(204);
+          res.end();
+          break;
+        case "/redirect":
+          res.writeHead(307, { location: `${origin}/plain` });
           res.end();
           break;
         default:
@@ -195,6 +201,36 @@ describe("tlsMode", () => {
     const early = new AbortController();
     early.abort(new Error("already"));
     await expect(bound.fetch(`${origin}/plain`, { signal: early.signal })).rejects.toThrow(/already/);
+    bound.close?.();
+  });
+
+  it("takes a Request input's own signal, and none when the init says null", async () => {
+    const bound = await mode.bind(verification(PIN));
+    const own = new Error("own signal");
+    await expect(bound.fetch(new Request(`${origin}/plain`, { signal: AbortSignal.abort(own) }))).rejects.toBe(own);
+    const res = await bound.fetch(new Request(`${origin}/plain`, { signal: AbortSignal.abort(own) }), { signal: null });
+    expect(await res.text()).toBe("hello");
+    bound.close?.();
+  });
+
+  it("refuses a request naming a Host of its own, before any network I/O", async () => {
+    expect(() => mode.validateRequest(shapeOf("https://localhost/", { headers: { Host: "other.example" } }))).toThrow(/reserved request header cannot be set by callers: host/);
+    const bound = await mode.bind(verification(PIN));
+    const before = seen.length;
+    await expect(bound.fetch(`${origin}/plain`, { headers: { host: "other.example" } })).rejects.toThrow(ConfigurationError);
+    await expect(bound.fetch(new Request(`${origin}/plain`, { headers: { host: "other.example" } }))).rejects.toThrow(ConfigurationError);
+    expect(seen.length).toBe(before);
+    bound.close?.();
+  });
+
+  it("hands a redirect back as the response it is, never following it", async () => {
+    const bound = await mode.bind(verification(PIN));
+    const before = seen.length;
+    const res = await bound.fetch(`${origin}/redirect`, { redirect: "follow" });
+    expect(res.status).toBe(307);
+    expect(res.headers.get("location")).toBe(`${origin}/plain`);
+    await res.text();
+    expect(seen.slice(before).map((s) => s.path)).toEqual(["/redirect"]);
     bound.close?.();
   });
 });

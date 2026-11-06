@@ -52,7 +52,12 @@ export function allowedOrigins(enclave: string, baseURL: string): Set<string> {
   return origins;
 }
 
-/** `next` behind a guard that refuses requests to any origin other than the enclave and the base URL. */
+/**
+ * `next` behind a guard that refuses requests to any origin other than the
+ * enclave and the base URL. The guard sees every request that leaves the
+ * client: the modes below hand a redirect back rather than following it, so
+ * none goes out to an origin the guard never saw.
+ */
 export function withOriginRestriction(next: Fetch, enclave: string, baseURL: string): Fetch {
   const origins = allowedOrigins(enclave, baseURL);
   return (input, init) => {

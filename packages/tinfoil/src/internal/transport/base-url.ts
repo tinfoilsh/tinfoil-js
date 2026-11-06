@@ -10,7 +10,8 @@ import { originOf } from "./origin.js";
  * Requires an absolute URL that keeps request headers private on the way to
  * the enclave or proxy: HTTPS, or HTTP to a loopback host, whose traffic
  * never leaves the machine. A query string or fragment is refused, since a
- * path resolved against the base would drop it.
+ * path resolved against the base would drop it; so are credentials, which
+ * a request can't be built from, and which the error doesn't repeat.
  */
 export function validateBaseURL(baseURL: string): void {
   let origin: string;
@@ -22,8 +23,12 @@ export function validateBaseURL(baseURL: string): void {
   if (baseURL.includes("?") || baseURL.includes("#")) {
     throw new ConfigurationError(`invalid base URL: a query string or fragment can't be part of a base URL: ${JSON.stringify(baseURL)}`);
   }
+  const url = new URL(baseURL);
+  if (url.username !== "" || url.password !== "") {
+    throw new ConfigurationError("invalid base URL: a username or password can't be part of a base URL");
+  }
   if (origin.startsWith("https://")) return;
-  if (!isLoopback(new URL(baseURL).hostname)) {
+  if (!isLoopback(url.hostname)) {
     throw new ConfigurationError("invalid base URL: HTTP is allowed only for localhost or a loopback IP address; use HTTPS to protect request headers");
   }
 }

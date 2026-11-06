@@ -138,6 +138,40 @@ describe("replay", () => {
     const twice = withReplay(flaky(2).fetch, retryable);
     await expect(twice("https://x.example/")).rejects.toThrow(/^attestation error: stale key; the replay failed too; first attempt: attestation error: stale key$/);
   });
+
+  it("takes a Request input's own signal, none when the init says null, and hands an abort during the replay back as its own reason", async () => {
+    const controller = new AbortController();
+    const viaRequest = withReplay(async () => {
+      controller.abort();
+      throw rejected();
+    }, retryable);
+    await expect(viaRequest(new Request("https://x.example/", { signal: controller.signal }))).rejects.toThrow(/request aborted before it could be replayed/);
+
+    const detached = withReplay(flaky(1).fetch, retryable);
+    expect(await (await detached(new Request("https://x.example/", { signal: AbortSignal.abort() }), { signal: null })).text()).toBe("ok");
+
+    const reason = new Error("gave up");
+    const during = new AbortController();
+    let attempts = 0;
+    const abortedReplay = withReplay(async () => {
+      if (attempts++ === 0) throw rejected();
+      during.abort(reason);
+      throw reason;
+    }, retryable);
+    await expect(abortedReplay("https://x.example/", { signal: during.signal })).rejects.toBe(reason);
+  });
+
+  it("reports a replay that fails outside the client as a network error carrying both failures", async () => {
+    let attempts = 0;
+    const raw = withReplay(async () => {
+      if (attempts++ === 0) throw rejected();
+      throw new TypeError("fetch failed");
+    }, retryable);
+    const err = await raw("https://x.example/").catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(NetworkError);
+    expect((err as Error).message).toBe("network error: fetch failed; the replay failed too; first attempt: attestation error: stale key");
+    expect((err as Error).cause).toBeInstanceOf(TypeError);
+  });
 });
 
 describe("KeyedTransport", () => {
@@ -203,6 +237,22 @@ describe("KeyedTransport", () => {
     expect(await (await t.fetch(`https://${HOST}/v1/models`)).text()).toBe("k1");
     expect(t.current()?.tlsPublicKeyFP).toBe("k1");
     expect((await t.ensureVerified()).tlsPublicKeyFP).toBe("k1");
+  });
+
+  it("takes a Request input's own signal for the verification, and none when the init says null", async () => {
+    let verified = 0;
+    const t = await transport(
+      () => {
+        verified++;
+        return "k1";
+      },
+      () => "k1",
+    );
+    const reason = new Error("gave up");
+    await expect(t.fetch(new Request(`https://${HOST}/v1/models`, { signal: AbortSignal.abort(reason) }))).rejects.toBe(reason);
+    expect(verified).toBe(0);
+    expect(await (await t.fetch(new Request(`https://${HOST}/v1/models`, { signal: AbortSignal.abort(reason) }), { signal: null })).text()).toBe("k1");
+    expect(verified).toBe(1);
   });
 
   it("turns a peer's key rejection into a replayable rejection after invalidating the verification, so the replay goes out under a fresh one", async () => {

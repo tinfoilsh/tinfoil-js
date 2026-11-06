@@ -4,10 +4,12 @@
  * request is refused because no pinned connection carries it. The pin is
  * checked in the TLS handshake, after the normal certificate check, on
  * every connection; a peer whose certificate doesn't carry the key never
- * receives the request. Node makes the connections through its HTTPS
- * client, so request and response bodies stream through; Bun checks the
- * pin through its fetch's TLS options. This module is for Node and Bun
- * only; the browser entry maps it to a stub.
+ * receives the request. A redirect is handed back to the caller as the
+ * response it is, never followed. Node makes the connections through its
+ * HTTPS client, so request and response bodies stream through; Bun checks
+ * the pin through its fetch's TLS options, on a Bun new enough to run that
+ * check before it sends. This module is for Node and Bun only; the browser
+ * entry maps it to a stub.
  */
 import type { Verification } from "@tinfoilsh/verifier";
 import { AttestationError, ConfigurationError, messageOf, NetworkError } from "../../errors.js";
@@ -15,7 +17,7 @@ import type { Fetch } from "../../options.js";
 import { isBun } from "../platform.js";
 import { CERT_MISMATCH, isCertificateError } from "./pin-errors.js";
 import { identityCheck } from "./pin.js";
-import { PeerLacksKeyError, type BoundFetch, type Mode } from "./transport.js";
+import { noFollow, PeerLacksKeyError, shapeOf, signalOf, type BoundFetch, type Mode, type RequestShape } from "./transport.js";
 
 /** Settings of the normal certificate check, which runs before the pin and can only reject. */
 export interface TLSOptions {
@@ -23,13 +25,22 @@ export interface TLSOptions {
   readonly ca?: string | Uint8Array;
 }
 
+/**
+ * Rejects, before any verification or network I/O, a request the mode
+ * can't protect: a plaintext one, which no pinned connection carries, and
+ * one naming a Host of its own, which would address another virtual host
+ * than the one the URL names and the pin was checked for.
+ */
+export function checkTLS(request: RequestShape): void {
+  if (request.url.protocol !== "https:") throw new ConfigurationError("TLS transport mode requires an HTTPS request");
+  if (request.headers.has("host")) throw new ConfigurationError("reserved request header cannot be set by callers: host");
+}
+
 /** A mode that pins each connection's leaf certificate to the TLS key the current verification attests. */
 export function tlsMode(options: TLSOptions = {}): Mode {
   return {
     name: "tls",
-    validateRequest(request) {
-      if (request.url.protocol !== "https:") throw new ConfigurationError("TLS transport mode requires an HTTPS request");
-    },
+    validateRequest: checkTLS,
     async bind(v: Verification) {
       const key = v.tlsPublicKeyFP;
       if (key === undefined) throw new AttestationError('document endorses no "tls" key');
@@ -58,13 +69,15 @@ async function nodePinnedFetch(key: string, options: TLSOptions): Promise<BoundF
   const ca = options.ca === undefined ? undefined : typeof options.ca === "string" ? options.ca : Buffer.from(options.ca);
 
   const fetchImpl: Fetch = async (input, init) => {
+    // The transport validates this too, but the bound fetch can be used alone.
+    checkTLS(shapeOf(input, init));
     const request = input instanceof Request ? input : undefined;
     const url = new URL(request?.url ?? String(input));
-    if (url.protocol !== "https:") throw new ConfigurationError("TLS transport mode requires an HTTPS request");
     const method = (init?.method ?? request?.method ?? "GET").toUpperCase();
     const headers = new Headers(init?.headers ?? request?.headers);
+    // An init body of null leaves a Request input's body in place, as the Request constructor reads it.
     const body = await requestBody(init?.body ?? request, headers);
-    const signal = init?.signal ?? request?.signal;
+    const signal = signalOf(input, init);
     signal?.throwIfAborted();
 
     const res = await new Promise<IncomingMessage>((resolve, reject) => {
@@ -103,6 +116,7 @@ async function nodePinnedFetch(key: string, options: TLSOptions): Promise<BoundF
       }
     });
 
+    // The response is handed back as it came, a redirect included: the client never follows one.
     const responseHeaders = new Headers();
     for (const [name, value] of Object.entries(res.headers)) {
       if (Array.isArray(value)) for (const v of value) responseHeaders.append(name, v);
@@ -148,11 +162,12 @@ async function requestBody(body: BodyInit | Request | null | undefined, headers:
 async function bunPinnedFetch(key: string, options: TLSOptions): Promise<BoundFetch> {
   const checkServerIdentity = await identityCheck(key);
   const fetchImpl: Fetch = async (input, init) => {
-    const url = new URL(input instanceof Request ? input.url : String(input));
-    if (url.protocol !== "https:") throw new ConfigurationError("TLS transport mode requires an HTTPS request");
+    // The transport validates this too, but the bound fetch can be used alone.
+    checkTLS(shapeOf(input, init));
+    const redirect = noFollow(init?.redirect ?? (input instanceof Request ? input.redirect : undefined));
     try {
       // `tls` is the runtime's own fetch option for the connection's TLS settings.
-      return await fetch(input, { ...init, tls: { ca: options.ca, checkServerIdentity } } as RequestInit);
+      return await fetch(input, { ...init, redirect, tls: { ca: options.ca, checkServerIdentity } } as RequestInit);
     } catch (err) {
       if (messageOf(err).includes(CERT_MISMATCH)) throw new PeerLacksKeyError(CERT_MISMATCH, { cause: err });
       throw classify(err);

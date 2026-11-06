@@ -43,6 +43,27 @@ export function shapeOf(input: string | URL | Request, init?: RequestInit): Requ
 }
 
 /**
+ * The signal a fetch call is under: the init's, or a Request input's own
+ * when the init names none. An init signal of null means none, as the
+ * Request constructor reads it.
+ */
+export function signalOf(input: string | URL | Request, init?: RequestInit): AbortSignal | undefined {
+  if (init?.signal !== undefined) return init.signal ?? undefined;
+  return input instanceof Request ? input.signal : undefined;
+}
+
+/**
+ * How a mode's fetch handles a redirect: it is handed back to the caller as
+ * the response it is, never followed, since following would carry the
+ * request wherever the redirect points, past the origin the client is bound
+ * to and the keys the mode protects it with. A request that asked for an
+ * error on a redirect keeps that.
+ */
+export function noFollow(redirect: RequestRedirect | undefined): RequestRedirect {
+  return redirect === "error" ? "error" : "manual";
+}
+
+/**
  * The options a Request carries besides its method, headers, body and
  * signal, for rebuilding it as a new request: a Request can't be rebuilt
  * from itself once its body has been read, so the fields are copied.
@@ -118,7 +139,7 @@ export class KeyedTransport {
   async #send(input: string | URL | Request, init?: RequestInit): Promise<Response> {
     // Validate first, so a request the mode can't protect never triggers a verification.
     this.#mode.validateRequest(shapeOf(input, init));
-    const state = await this.#cache.ensureVerified(init?.signal ?? undefined);
+    const state = await this.#cache.ensureVerified(signalOf(input, init));
     try {
       return await state.bound.fetch(input, init);
     } catch (err) {

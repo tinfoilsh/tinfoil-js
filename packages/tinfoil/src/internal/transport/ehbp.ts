@@ -5,15 +5,16 @@
  * response. A protocol upgrade or a CONNECT tunnel is refused, because
  * nothing after the handshake would be sealed. A request body is sealed as
  * framed chunks and sent in full before the response begins, so a streaming
- * request body is accepted but its response cannot interleave with it.
- * This mode works wherever fetch does, browsers included.
+ * request body is accepted but its response cannot interleave with it. A
+ * redirect is handed back to the caller, never followed. This mode works
+ * wherever fetch does, browsers included.
  */
 import type { Verification } from "@tinfoilsh/verifier";
 import { Identity, PROTOCOL, type RequestContext } from "ehbp";
-import { AttestationError, ConfigurationError, messageOf, NetworkError } from "../../errors.js";
+import { AttestationError, ConfigurationError, messageOf, NetworkError, TinfoilError } from "../../errors.js";
 import type { Fetch } from "../../options.js";
 import { isLoopback } from "./base-url.js";
-import { PeerLacksKeyError, shapeOf, type BoundFetch, type Mode, type RequestShape } from "./transport.js";
+import { noFollow, PeerLacksKeyError, shapeOf, type BoundFetch, type Mode, type RequestShape } from "./transport.js";
 
 /** How the sealed requests are sent; undefined selects the runtime's fetch. */
 export interface EHBPOptions {
@@ -101,12 +102,11 @@ async function sealedFetch(identity: Identity, send: Fetch, input: string | URL 
   } catch (err) {
     throw new NetworkError(`failed to seal the request: ${messageOf(err)}`, { cause: err });
   }
-  // Sealing builds a new Request, so the caller's signal is carried alongside it.
-  if (sealed.context === null) return send(sealed.request, { signal: request.signal });
+  if (sealed.context === null) return deliver(send, sealed.request, request);
 
   let response: Response;
   try {
-    response = await send(sealed.request, { signal: request.signal });
+    response = await deliver(send, sealed.request, request);
   } finally {
     // The response headers mean the upload finished; what the sealing spooled is done.
     await sealed.cleanup?.().catch(() => {});
@@ -126,6 +126,29 @@ async function sealedFetch(identity: Identity, send: Fetch, input: string | URL 
   if (!response.ok) return response;
   await response.body?.cancel().catch(() => {});
   throw new NetworkError(`sealed exchange answered without the ${PROTOCOL.RESPONSE_NONCE_HEADER} header`);
+}
+
+/**
+ * Sends `sealed`, the request built from `request` by the sealing, under
+ * `request`'s signal and redirect handling: a redirect is handed back, not
+ * followed, since following would carry the request wherever it points. A
+ * failure of the fetch itself is a network error; an aborted request
+ * surfaces its own reason.
+ */
+async function deliver(send: Fetch, sealed: Request, request: Request): Promise<Response> {
+  let response: Response;
+  try {
+    response = await send(sealed, { signal: request.signal, redirect: noFollow(request.redirect) });
+  } catch (err) {
+    if (err instanceof TinfoilError || request.signal.aborted) throw err;
+    throw new NetworkError(messageOf(err), { cause: err });
+  }
+  // A runtime that hides redirects (a browser) answers with an opaque response that tells nothing of where the request would have gone.
+  if (response.type === "opaqueredirect") {
+    await response.body?.cancel().catch(() => {});
+    throw new NetworkError("the server redirected the request, which a sealed request does not follow");
+  }
+  return response;
 }
 
 /** A 422 problem-details response naming the key-configuration problem means the peer no longer holds the key. */
