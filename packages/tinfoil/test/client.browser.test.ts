@@ -8,7 +8,7 @@
 import { KEY_SPKI_FP_SHA256_V1_FORMAT, KEY_X25519_HPKE_V1_FORMAT, UsageError, type Verification, type Verifier } from "@tinfoilsh/verifier";
 import { Identity, PROTOCOL } from "ehbp";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
-import { createEnclaveHTTPClient, EnclaveHTTPClient, resolveTransportMode, type EnclaveClientSeams } from "../src/enclave-client.js";
+import { checkNetworkFetch, createEnclaveHTTPClient, EnclaveHTTPClient, resolveTransportMode, type EnclaveClientSeams } from "../src/enclave-client.js";
 import { ConfigurationError } from "../src/errors.js";
 import { resetEphemeralUserCacheSecretForTests, resolveUserCacheSecret } from "../src/internal/cachesecret.js";
 import { loadOrPersistUserCacheSecret } from "../src/internal/cachesecret-store.js";
@@ -158,10 +158,14 @@ describe("EnclaveHTTPClient in a browser", () => {
     expect(network.seen).toHaveLength(2);
     expect(documents.count).toBe(1);
 
+    // The option's own check runs in the browser build too; the factory refuses the TLS mode for the browser's reason before it reaches that check.
+    expect(() => checkNetworkFetch("tls", network.fetch)).toThrow(/fetch option .* requires transportMode "ehbp"/);
+    expect(() => checkNetworkFetch("ehbp", network.fetch)).not.toThrow();
     const before = peer.seen.length;
-    await expect(createEnclaveHTTPClient(ENCLAVE, "tinfoilsh/repo", { verifier: verifier(peer.publicKeyHex), fetch: network.fetch, transportMode: "tls" }, { documentFetch: counting })).rejects.toBeInstanceOf(ConfigurationError);
+    await expect(createEnclaveHTTPClient(ENCLAVE, "tinfoilsh/repo", { verifier: verifier(peer.publicKeyHex), fetch: network.fetch, transportMode: "tls" }, { documentFetch: counting })).rejects.toThrow(/browsers don't expose/);
     expect(documents.count).toBe(1);
     expect(peer.seen.length).toBe(before);
+    expect(network.seen).toHaveLength(2);
   });
 
   it("closes, refusing further use while keeping the last verification, and disposes with the async-dispose symbol", async () => {

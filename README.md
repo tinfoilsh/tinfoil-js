@@ -42,13 +42,13 @@ The request body is still encrypted to the verified enclave's key; the proxy onl
 
 ### Custom network transport
 
-The clients take a `fetch` option: a fetch-compatible network implementation that carries their requests in the EHBP transport mode, for a native HTTP bridge (such as Tauri's) or a trusted relay:
+`RouterHTTPClient.create`, `EnclaveHTTPClient.create` and `GatewayHTTPClient.create`, and the route options of the OpenAI clients over them (`RouterOpenAIClient.create(routerOptions, openaiOptions)` and the enclave and gateway equivalents), take a `fetch` option: a fetch-compatible network implementation that carries their requests in the EHBP transport mode, for a native HTTP bridge (such as Tauri's) or a trusted relay. `createClient` takes only the OpenAI options, so it doesn't take it.
 
 ```typescript
 import { RouterHTTPClient } from "tinfoil";
 
 // nativeFetch: a fetch-compatible function that sends the sealed requests.
-const client = await RouterHTTPClient.create({ fetch: nativeFetch }); // on Node, also transportMode: "ehbp"
+const client = await RouterHTTPClient.create({ fetch: nativeFetch, transportMode: "ehbp" }); // "ehbp" is already the default in browsers
 ```
 
 The client verifies the enclave and seals each request body before calling it, and opens the response that it returns; attestation documents, the router list and the gateway catalog are still fetched with the runtime's fetch. The function must return a standard `Response` and honour the request's signal, and a relay must pass the sealed body and the protocol headers through unchanged. The method, URL and headers aren't sealed, so a relay sees the API key: use only a relay that you trust, over HTTPS. A request without a body passes through it unsealed, as the mode leaves it. The option is refused with `transportMode: "tls"`, which pins the connection itself.
