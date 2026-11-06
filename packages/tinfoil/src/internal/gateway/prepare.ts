@@ -11,7 +11,8 @@
  * @experimental The gateway route is new; this API may change without a major version.
  */
 import { ConfigurationError } from "../../errors.js";
-import { appendMember, firstArrayElement, objectMembers, pathEligible, removeMember, replaceMember, USER_CACHE_SECRET_FIELD } from "../cachesecret.js";
+import { readAll } from "../body.js";
+import { appendMember, firstArrayElement, objectMembers, pathEligible, removeMember, replaceMember, USER_CACHE_SECRET_FIELD, type Member } from "../cachesecret.js";
 import type { RequestShape } from "../transport/transport.js";
 
 export const MODEL_HEADER = "X-Tinfoil-Model";
@@ -72,7 +73,7 @@ export async function prepare(shape: RequestShape, headers: Headers, body: Prepa
     const value = model === undefined ? undefined : (JSON.parse(text.slice(model.valueStart, model.valueEnd)) as unknown);
     if (typeof value === "string" && value !== "") headers.set(MODEL_HEADER, value);
   }
-  if (scoped) text = await scopeCache(headers, text, secret);
+  if (scoped) text = await scope(headers, text, members, secret);
   return { headers, body: text, replayable: true };
 }
 
@@ -89,6 +90,11 @@ export async function prepare(shape: RequestShape, headers: Headers, body: Prepa
 export async function scopeCache(headers: Headers, text: string, clientSecret: string): Promise<string> {
   const members = objectMembers(text);
   if (members === null) return text;
+  return scope(headers, text, members, clientSecret);
+}
+
+/** {@link scopeCache} over `members`, the body's members already parsed, so a body is scanned once. */
+async function scope(headers: Headers, text: string, members: readonly Member[], clientSecret: string): Promise<string> {
   const secretMembers = members.filter((m) => m.key === USER_CACHE_SECRET_FIELD);
   if (secretMembers.length > 1) throw new ConfigurationError(`JSON body carries ${USER_CACHE_SECRET_FIELD} more than once`);
   if (members.filter((m) => m.key === CACHE_SALT_FIELD).length > 1) throw new ConfigurationError(`JSON body carries ${CACHE_SALT_FIELD} more than once`);
@@ -254,58 +260,6 @@ function indexOf(bytes: Uint8Array, needle: ArrayLike<number>, from: number, end
     return i;
   }
   return -1;
-}
-
-/**
- * The body's bytes, within `limit`; a larger body is a {@link ConfigurationError}
- * naming `what`. An abort of `signal` stops the read and rejects with its reason.
- */
-async function readAll(body: BodyInit, limit: number, what: string, signal?: AbortSignal): Promise<Uint8Array<ArrayBuffer>> {
-  signal?.throwIfAborted();
-  if (typeof body === "string") {
-    const encoded = new TextEncoder().encode(body) as Uint8Array<ArrayBuffer>;
-    if (encoded.length > limit) throw new ConfigurationError(`reading ${what}: body exceeds ${limit} bytes`);
-    return encoded;
-  }
-  const response = new Response(body);
-  const reader = response.body?.getReader();
-  if (reader === undefined) return new Uint8Array();
-  const chunks: Uint8Array[] = [];
-  let total = 0;
-  const abort = (): void => void reader.cancel(signal?.reason).catch(() => {});
-  signal?.addEventListener("abort", abort, { once: true });
-  try {
-    for (;;) {
-      const next = await Promise.race([reader.read(), abortedWith(signal)]);
-      signal?.throwIfAborted();
-      const { done, value } = next;
-      if (done) break;
-      total += value.length;
-      if (total > limit) {
-        await reader.cancel();
-        throw new ConfigurationError(`reading ${what}: body exceeds ${limit} bytes`);
-      }
-      chunks.push(value);
-    }
-  } finally {
-    signal?.removeEventListener("abort", abort);
-  }
-  const out = new Uint8Array(new ArrayBuffer(total));
-  let at = 0;
-  for (const chunk of chunks) {
-    out.set(chunk, at);
-    at += chunk.length;
-  }
-  return out;
-}
-
-/** A promise that rejects with the signal's reason when it aborts, and never settles without a signal. */
-function abortedWith(signal: AbortSignal | undefined): Promise<never> {
-  return new Promise((_, reject) => {
-    if (signal === undefined) return;
-    if (signal.aborted) reject(signal.reason as Error);
-    else signal.addEventListener("abort", () => reject(signal.reason as Error), { once: true });
-  });
 }
 
 /** A media type and its parameters, lower-cased, from a Content-Type value. */
