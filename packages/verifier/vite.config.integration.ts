@@ -5,9 +5,11 @@ import { playwright } from "@vitest/browser-playwright";
 /**
  * The live browser lane: the verifier's root entry in Chromium against the
  * live service. A page has no process environment, so the lane's gate is
- * compiled into the bundle. Web security is disabled so the page can fetch
- * the attestation document from the service's origin, as a deployed page
- * would through its own origin's CORS policy.
+ * compiled into the bundle. The browser runs with its same-origin policy
+ * intact: the page is served from a localhost origin and fetches the
+ * attestation document through the service's CORS policy, as a deployed
+ * page does, so a service that stopped allowing a page's requests fails
+ * here.
  */
 export default defineConfig({
   define: {
@@ -20,14 +22,7 @@ export default defineConfig({
       enabled: true,
       provider: playwright(),
       headless: true,
-      instances: [
-        {
-          browser: "chromium",
-          launch: {
-            args: ["--disable-web-security", "--disable-features=IsolateOrigins,site-per-process"],
-          },
-        },
-      ],
+      instances: [{ browser: "chromium" }],
     },
   },
 });
