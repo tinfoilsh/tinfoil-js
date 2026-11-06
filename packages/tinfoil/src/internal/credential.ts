@@ -20,3 +20,24 @@ export function checkAPIKeyRuntime(apiKey: unknown, globals?: RuntimeGlobals): v
   if (apiKey === undefined || apiKey === null || apiKey === "") return;
   if (!isServerRuntime(globals)) throw new ConfigurationError(API_KEY_NEEDS_SERVER);
 }
+
+/**
+ * @internal Resolves the credential a client sends on a connection opened
+ * outside its request loop, such as a realtime session, when that
+ * connection is opened: `null` when the client holds none.
+ */
+export type CredentialResolver = () => string | null | Promise<string | null>;
+
+const credentials = new WeakMap<object, CredentialResolver>();
+
+/** @internal Records how a client its factory constructed, a clone included, resolves its credential. */
+export function registerCredential(client: object, resolve: CredentialResolver): void {
+  credentials.set(client, resolve);
+}
+
+/** @internal The resolver a factory registered for `client`; anything else is refused. */
+export function credentialOf(client: object): CredentialResolver {
+  const found = credentials.get(client);
+  if (found === undefined) throw new ConfigurationError("client was not created by its factory");
+  return found;
+}
