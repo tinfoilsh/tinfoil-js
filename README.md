@@ -33,10 +33,10 @@ Never put `apiKey` in browser code. Route browser requests through a [proxy serv
 ```typescript
 import { RouterOpenAIClient } from "tinfoil";
 
-const client = await RouterOpenAIClient.create({ baseURL: "https://proxy.example.com/" }, { bearerToken: "<SESSION_TOKEN>" });
+const client = await RouterOpenAIClient.create({ baseURL: "https://proxy.example.com/v1/" }, { bearerToken: "<SESSION_TOKEN>" });
 ```
 
-The request body is still encrypted to the verified enclave's key; the proxy only forwards it. Multi-user services must scope prompt caches to each end user with `userCacheSecret` or a per-request `user_cache_secret`; see [Prompt caching](https://docs.tinfoil.sh/sdk/prompt-caching).
+The request body is still encrypted to the verified enclave's key; the proxy only forwards it. `baseURL` is the API root, as for `new OpenAI({ baseURL })`: the client appends `chat/completions` and the other OpenAI paths to it, so a proxy that forwards paths as they are takes the enclave's `/v1/`. Multi-user services must scope prompt caches to each end user with `userCacheSecret` or a per-request `user_cache_secret`; see [Prompt caching](https://docs.tinfoil.sh/sdk/prompt-caching).
 
 ## Documentation
 

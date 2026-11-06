@@ -10,7 +10,7 @@ import { ConfigurationError } from "./errors.js";
 import { resolveUserCacheSecret } from "./internal/cachesecret.js";
 import { asyncDispose } from "./internal/dispose.js";
 import { discoverRouter } from "./internal/router.js";
-import { validateBaseURL } from "./internal/transport/base-url.js";
+import { normalizeBaseURL, validateBaseURL } from "./internal/transport/base-url.js";
 import type { KeyedTransport } from "./internal/transport/transport.js";
 import { registerWebSocketAccess } from "./internal/websocket.js";
 import type { CallOptions, Fetch, RouterOptions } from "./options.js";
@@ -28,12 +28,13 @@ const TOKEN = Symbol("RouterHTTPClient");
 /** The factory with its test seams; {@link RouterHTTPClient.create} is this without them. */
 export async function createRouterHTTPClient(options: RouterOptions, seams: RouterClientSeams): Promise<RouterHTTPClient> {
   const mode = resolveTransportMode(options.transportMode, seams.globals);
-  const baseURL = options.baseURL ?? "";
+  let baseURL = options.baseURL ?? "";
   if (baseURL !== "") {
     validateBaseURL(baseURL);
     if (mode === "tls") {
       throw new ConfigurationError('a base URL is a proxy when discovering the router, which requires transportMode "ehbp"');
     }
+    baseURL = normalizeBaseURL(baseURL);
   }
   if (options.verifier?.callerAuthorizesConfig) {
     throw new ConfigurationError("caller-authorized config requires an explicit enclave");
@@ -67,7 +68,7 @@ export async function createRouterHTTPClient(options: RouterOptions, seams: Rout
 export class RouterHTTPClient {
   /** As {@link EnclaveHTTPClient.fetch}. */
   readonly fetch: Fetch;
-  /** Where requests go: the `baseURL` option, or the router's own origin. */
+  /** Where requests go: the `baseURL` option, or the router's own origin. Always ends with `/`, so a relative path resolves against it with `new URL(path, client.baseURL)`. */
   readonly baseURL: string;
   /** The host of the verified router, even when `baseURL` is a proxy. */
   readonly enclave: string;
