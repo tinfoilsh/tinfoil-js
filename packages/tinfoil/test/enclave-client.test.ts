@@ -405,10 +405,11 @@ describe("EnclaveHTTPClient over EHBP", () => {
     const bodiless = await (await proxied.fetch(`${ehbp.origin}/echo`)).json();
     expect(bodiless.sealed).toBe(false);
     // The enclave's own origin is allowed beside the proxy's: the request leaves sealed, and fails only where the network has no route to it.
-    await expect(proxied.fetch("https://enclave.example/echo", { method: "POST", body: "x" })).rejects.toThrow(/no route to enclave\.example/);
+    const plaintext = "a prompt that only the enclave may read";
+    await expect(proxied.fetch("https://enclave.example/echo", { method: "POST", body: plaintext })).rejects.toThrow(/no route to enclave\.example/);
     expect(network.seen.map((s) => s.url)).toEqual([`${ehbp.origin}/echo`, `${ehbp.origin}/echo`, "https://enclave.example/echo"]);
     expect(network.seen[2]!.headers.has(PROTOCOL.ENCAPSULATED_KEY_HEADER)).toBe(true);
-    expect(network.seen[2]!.body).not.toContain("x");
+    expect(network.seen[2]!.body).not.toContain(plaintext);
     await expect(proxied.fetch("https://other.example/echo")).rejects.toThrow(/client is bound to enclave/);
     expect(network.seen).toHaveLength(3);
   });
