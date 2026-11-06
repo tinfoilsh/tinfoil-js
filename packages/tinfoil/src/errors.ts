@@ -5,10 +5,18 @@
  * types.
  */
 
-/** The categories a {@link TinfoilError} falls into. */
+/**
+ * The categories a {@link TinfoilError} falls into: the stable discriminant
+ * to switch on, carried by every error's `category`.
+ */
 export type ErrorCategory = "configuration" | "network" | "attestation";
 
-/** Base class for every error the client throws. */
+/**
+ * Base class for every error the client throws. Switch on `category`, which
+ * is the stable discriminant; `name` matches the concrete class
+ * (`ConfigurationError`, `NetworkError` or `AttestationError`) for logs and
+ * stack traces.
+ */
 export abstract class TinfoilError extends Error {
   readonly category: ErrorCategory;
   declare readonly cause?: unknown;
