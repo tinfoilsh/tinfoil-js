@@ -368,6 +368,8 @@ export async function promisedLogTime(root: TrustedRoot, entries: readonly TlogE
   const log = root.transparencyLogs.find((l) => l.logId === first.logId);
   if (log === undefined) throw new Error("first log entry names a transparency log the trusted root does not list");
   const at = new Date(Number(first.integratedTime) * 1000);
+  // A time outside the representable range reads as an invalid date, which no window comparison rejects.
+  if (!Number.isFinite(at.getTime())) throw new Error("first log entry's integration time is not a representable time");
   if (at.getTime() < log.validFrom.getTime() || (log.validTo !== undefined && at.getTime() > log.validTo.getTime())) {
     throw new Error("first log entry's integration time is outside the log key's validity");
   }

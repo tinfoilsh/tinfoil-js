@@ -27,6 +27,7 @@ import {
   keyHint,
   MAX_LOG_RECEIPTS,
   pinnedKeys,
+  promisedLogTime,
   verifyKeyedBundle,
   verifyMerkleInclusion,
   type PinnedKey,
@@ -371,6 +372,27 @@ describe.skipIf(!conformanceAvailable())(vectorsTitle("verifyKeyedBundle"), () =
       }
     });
   }
+});
+
+describe("promisedLogTime", () => {
+  it("rejects an integration time beyond the representable range before checking the promise", async () => {
+    // Such a time reads as an invalid date, which no window comparison
+    // rejects; it must not be reported as verified.
+    const log = await newLog("ecdsa");
+    const root = await rootOf([log]);
+    const entry = (integratedTime: bigint) => ({
+      logId: toHex(log.logId),
+      logIndex: 0n,
+      kind: "dsse",
+      version: "0.0.1",
+      integratedTime,
+      canonicalizedBody: new Uint8Array(),
+      inclusionPromise: bytes(0),
+    });
+    await expect(promisedLogTime(root, [entry(9223372036854775807n)])).rejects.toThrow(/not a representable time/);
+    // A representable time inside the window reaches the promise check.
+    await expect(promisedLogTime(root, [entry(1_750_000_000n)])).rejects.toThrow(/inclusion promise does not verify/);
+  });
 });
 
 describe("verifyMerkleInclusion", () => {
