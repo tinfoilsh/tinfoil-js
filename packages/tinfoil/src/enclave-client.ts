@@ -9,7 +9,7 @@ import { ConfigurationError } from "./errors.js";
 import { withCacheSecret } from "./internal/cachesecret.js";
 import { asyncDispose } from "./internal/dispose.js";
 import { Enclave, type EnclaveConfig } from "./internal/enclave.js";
-import { validateBaseURL, validateTLSBaseURL } from "./internal/transport/base-url.js";
+import { normalizeBaseURL, validateBaseURL, validateTLSBaseURL } from "./internal/transport/base-url.js";
 import { ehbpMode, type EHBPOptions } from "./internal/transport/ehbp.js";
 import { withEnclaveURL } from "./internal/transport/header.js";
 import { withOriginRestriction } from "./internal/transport/origin.js";
@@ -75,14 +75,14 @@ export function attestedFetch(transport: KeyedTransport, host: string, baseURL: 
   return withOriginRestriction(chain, host, baseURL);
 }
 
-/** The option checks that need no network I/O, so a misconfigured client fails before anything is fetched. */
+/** The option checks that need no network I/O, so a misconfigured client fails before anything is fetched. The base URL comes back ending with `/`, or empty. */
 export function checkEnclaveOptions(host: string, options: EnclaveOptions, globals?: RuntimeGlobals): { mode: TransportMode; baseURL: string } {
   if (host === "") throw new ConfigurationError("enclave host is required");
   const mode = resolveTransportMode(options.transportMode, globals);
   const baseURL = options.baseURL ?? "";
   if (baseURL !== "") validateBaseURL(baseURL);
   if (mode === "tls") validateTLSBaseURL(baseURL, host);
-  return { mode, baseURL };
+  return { mode, baseURL: baseURL === "" ? "" : normalizeBaseURL(baseURL) };
 }
 
 /** Marks construction by this module's factory; the constructor refuses anything else. */
@@ -121,7 +121,7 @@ export class EnclaveHTTPClient {
    * {@link ConfigurationError}.
    */
   readonly fetch: Fetch;
-  /** Where requests go: the `baseURL` option, or the enclave's own origin. */
+  /** Where requests go: the `baseURL` option, or the enclave's own origin. Always ends with `/`, so a relative path resolves against it with `new URL(path, client.baseURL)`. */
   readonly baseURL: string;
   /** The host of the verified enclave, even when `baseURL` is a proxy. */
   readonly enclave: string;

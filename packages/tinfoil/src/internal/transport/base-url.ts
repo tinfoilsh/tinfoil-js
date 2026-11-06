@@ -9,7 +9,8 @@ import { originOf } from "./origin.js";
 /**
  * Requires an absolute URL that keeps request headers private on the way to
  * the enclave or proxy: HTTPS, or HTTP to a loopback host, whose traffic
- * never leaves the machine.
+ * never leaves the machine. A query string or fragment is refused, since a
+ * path resolved against the base would drop it.
  */
 export function validateBaseURL(baseURL: string): void {
   let origin: string;
@@ -18,10 +19,25 @@ export function validateBaseURL(baseURL: string): void {
   } catch (err) {
     throw new ConfigurationError(`invalid base URL: ${(err as Error).message}`, { cause: err });
   }
+  if (baseURL.includes("?") || baseURL.includes("#")) {
+    throw new ConfigurationError(`invalid base URL: a query string or fragment can't be part of a base URL: ${JSON.stringify(baseURL)}`);
+  }
   if (origin.startsWith("https://")) return;
   if (!isLoopback(new URL(baseURL).hostname)) {
     throw new ConfigurationError("invalid base URL: HTTP is allowed only for localhost or a loopback IP address; use HTTPS to protect request headers");
   }
+}
+
+/**
+ * `baseURL` as the URL parser reads it (surrounding whitespace dropped, the
+ * host lowercased, a default port removed), with its path ending in `/` so
+ * a relative path resolves under it rather than beside its last segment.
+ * The caller has validated it, so it parses.
+ */
+export function normalizeBaseURL(baseURL: string): string {
+  const url = new URL(baseURL);
+  if (!url.pathname.endsWith("/")) url.pathname += "/";
+  return url.href;
 }
 
 /**

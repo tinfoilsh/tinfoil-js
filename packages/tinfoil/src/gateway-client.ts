@@ -14,6 +14,7 @@ import { asyncDispose } from "./internal/dispose.js";
 import { fetchCatalogWith } from "./internal/gateway/catalog.js";
 import { GatewayPolicy } from "./internal/gateway/policy.js";
 import { GatewayTransport } from "./internal/gateway/transport.js";
+import { normalizeBaseURL, validateBaseURL } from "./internal/transport/base-url.js";
 import { withOriginRestriction } from "./internal/transport/origin.js";
 import type { CallOptions, Catalog, Fetch, GatewayOptions, ReplicaVerification } from "./options.js";
 
@@ -43,16 +44,19 @@ const TOKEN = Symbol("GatewayHTTPClient");
  * @experimental The gateway route is new; this API may change without a major version.
  */
 export async function createGatewayHTTPClient(options: GatewayOptions, seams: GatewayClientSeams): Promise<GatewayHTTPClient> {
-  const baseURL = options.url === undefined || options.url === "" ? DEFAULT_GATEWAY_URL : options.url;
+  const given = options.url === undefined || options.url === "" ? DEFAULT_GATEWAY_URL : options.url;
   let base: URL;
   try {
-    base = new URL(baseURL);
+    base = new URL(given);
   } catch {
-    throw new ConfigurationError(`gateway base URL must be an absolute HTTPS URL: ${JSON.stringify(baseURL)}`);
+    throw new ConfigurationError(`gateway base URL must be an absolute HTTPS URL: ${JSON.stringify(given)}`);
   }
-  if (base.protocol !== "https:" || base.host === "") throw new ConfigurationError(`gateway base URL must be an absolute HTTPS URL: ${JSON.stringify(baseURL)}`);
+  if (base.protocol !== "https:" || base.host === "") throw new ConfigurationError(`gateway base URL must be an absolute HTTPS URL: ${JSON.stringify(given)}`);
   // Credentials in the URL would go out in plaintext to the gateway with every request.
   if (base.username !== "" || base.password !== "") throw new ConfigurationError("gateway base URL must not carry a username or password");
+  // The rules every base URL follows, such as no query string or fragment; HTTPS is already required above.
+  validateBaseURL(given);
+  const baseURL = normalizeBaseURL(given);
   const policy = await GatewayPolicy.create(options.modelPins, options.pinnedModelsOnly ?? false, options.verifier);
   const secret = await (seams.resolveSecret ?? resolveUserCacheSecret)(options.userCacheSecret);
   const transport = new GatewayTransport({
@@ -84,7 +88,7 @@ export async function createGatewayHTTPClient(options: GatewayOptions, seams: Ga
 export class GatewayHTTPClient {
   /** As {@link EnclaveHTTPClient.fetch}. */
   readonly fetch: Fetch;
-  /** The gateway's base URL, which requests are sent to. */
+  /** The gateway's base URL, which requests are sent to. Always ends with `/`, so a relative path resolves against it with `new URL(path, client.baseURL)`. */
   readonly baseURL: string;
   readonly #transport: GatewayTransport;
 
