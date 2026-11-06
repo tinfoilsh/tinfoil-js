@@ -293,10 +293,13 @@ describe("createRealtimeWebSocket", () => {
     const ai = await openAIClient({ apiKey: async () => `token-${++calls}` });
     expect(await authorizationOf(await createRealtimeWebSocket(ai, { model: "m" }))).toBe("Bearer token-1");
     expect(await authorizationOf(await createRealtimeWebSocket(ai, { model: "m" }))).toBe("Bearer token-2");
-    const empty = await openAIClient({ apiKey: async () => "" });
-    const before = connections.length;
-    await expect(createRealtimeWebSocket(empty, { model: "m" })).rejects.toBeInstanceOf(ConfigurationError);
-    expect(connections.length).toBe(before);
+    // The function's declared type returns a string; untyped code can return anything, and only a non-empty string is a credential.
+    for (const result of ["", undefined, null, 42]) {
+      const bad = await openAIClient({ apiKey: (async () => result) as () => Promise<string> });
+      const before = connections.length;
+      await expect(createRealtimeWebSocket(bad, { model: "m" })).rejects.toBeInstanceOf(ConfigurationError);
+      expect(connections.length).toBe(before);
+    }
   });
 
   it("refuses a client no factory made, before any connection", async () => {
