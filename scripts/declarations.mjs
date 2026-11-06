@@ -6,11 +6,11 @@
 import { existsSync, lstatSync, readdirSync, readFileSync, unlinkSync } from "node:fs";
 import { dirname, join, resolve, sep } from "node:path";
 
-/** The module specifiers a declaration file imports or re-exports from. */
+/** The module specifiers a declaration file imports or re-exports from, in either quote style: `from`, bare `import`, `import()` and `/// <reference path>`. */
 export function specifiersOf(source) {
   const found = new Set();
-  for (const pattern of [/\bfrom\s+"([^"]+)"/g, /\bimport\s+"([^"]+)"/g, /\bimport\("([^"]+)"\)/g, /<reference\s+path="([^"]+)"/g]) {
-    for (const match of source.matchAll(pattern)) found.add(match[1]);
+  for (const pattern of [/\bfrom\s+(["'])([^"']+)\1/g, /\bimport\s+(["'])([^"']+)\1/g, /\bimport\((["'])([^"']+)\1\)/g, /<reference\s+path=(["'])([^"']+)\1/g]) {
+    for (const match of source.matchAll(pattern)) found.add(match[2]);
   }
   return [...found];
 }

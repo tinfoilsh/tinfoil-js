@@ -72,9 +72,13 @@ export function describeDeclarationPrune(): void {
         const dist = join(tmp, "dist");
         const outside = join(tmp, "outside.d.ts");
         mkdirSync(join(dist, "internal"), { recursive: true });
-        writeFileSync(join(dist, "index.d.ts"), 'export { A } from "./a.js";\nexport type { B } from "./internal/b.js";\n/** @internal */\nexport {};\n');
-        writeFileSync(join(dist, "a.d.ts"), 'import type { B } from "./internal/b.js";\nexport declare class A { b: B; }\n');
+        // Specifiers in either quote style, and through every form: `from`, bare `import`, `import()` and a reference directive.
+        writeFileSync(join(dist, "index.d.ts"), "export { A } from './a.js';\nexport type { B } from \"./internal/b.js\";\n/** @internal */\nexport {};\n");
+        writeFileSync(join(dist, "a.d.ts"), "import type { B } from './internal/b.js';\nimport './side.js';\nexport declare class A { b: B; d: typeof import('./internal/d.js'); }\n");
+        writeFileSync(join(dist, "side.d.ts"), "/// <reference path='./internal/e.d.ts' />\nexport {};\n");
         writeFileSync(join(dist, "internal", "b.d.ts"), "export type B = string;\n");
+        writeFileSync(join(dist, "internal", "d.d.ts"), "export declare const d: number;\n");
+        writeFileSync(join(dist, "internal", "e.d.ts"), "declare const e: number;\n");
         writeFileSync(join(dist, "internal", "c.d.ts"), 'import type { B } from "./b.js";\nexport declare const c: B;\n');
         writeFileSync(join(dist, "internal", "c.d.ts.map"), "{}");
         writeFileSync(join(dist, "a.js"), "export class A {}\n");
@@ -87,7 +91,9 @@ export function describeDeclarationPrune(): void {
         expect(existsSync(join(dist, "internal", "c.d.ts"))).toBe(true);
 
         const pruned = pruneDeclarations(dist, [entry]);
-        expect(pruned.kept.sort()).toEqual([join(dist, "a.d.ts"), join(dist, "index.d.ts"), join(dist, "internal", "b.d.ts")]);
+        expect(pruned.kept.sort()).toEqual(
+          [join(dist, "a.d.ts"), join(dist, "index.d.ts"), join(dist, "internal", "b.d.ts"), join(dist, "internal", "d.d.ts"), join(dist, "internal", "e.d.ts"), join(dist, "side.d.ts")].sort(),
+        );
         expect(pruned.removed).toEqual([join(dist, "internal", "c.d.ts")]);
         expect(pruned.leaking).toEqual([entry]);
         expect(existsSync(join(dist, "internal", "c.d.ts"))).toBe(false);
@@ -107,6 +113,8 @@ export function describeDeclarationPrune(): void {
         expect(() => reachableDeclarations([join(tmp, "missing.d.ts")])).toThrow(/does not exist/);
         writeFileSync(join(tmp, "index.d.ts"), 'export { x } from "./nowhere.js";\n');
         expect(() => reachableDeclarations([join(tmp, "index.d.ts")])).toThrow(/cannot resolve "\.\/nowhere\.js"/);
+        writeFileSync(join(tmp, "single.d.ts"), "export { x } from './nowhere.js';\n");
+        expect(() => reachableDeclarations([join(tmp, "single.d.ts")])).toThrow(/cannot resolve "\.\/nowhere\.js"/);
       } finally {
         rmSync(tmp, { recursive: true, force: true });
       }
