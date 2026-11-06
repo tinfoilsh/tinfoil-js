@@ -91,6 +91,7 @@ type TypeExports = [
   surface.Fetch,
   surface.TransportMode,
   surface.VerificationCheck,
+  surface.CallOptions,
   surface.EnclaveOptions,
   surface.RouterOptions,
   surface.GatewayOptions,

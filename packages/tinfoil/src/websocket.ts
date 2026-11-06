@@ -7,7 +7,7 @@
 import type * as WS from "ws";
 import type { EnclaveHTTPClient } from "./enclave-client.js";
 import { clientWsOptions, openClientWebSocket, webSocketAccessOf } from "./internal/websocket.js";
-import type { PinnedWebSocket, WebSocketOptions } from "./options.js";
+import type { CallOptions, PinnedWebSocket, WebSocketOptions } from "./options.js";
 import type { RouterHTTPClient } from "./router-client.js";
 
 /**
@@ -33,7 +33,7 @@ export async function createWebSocket(client: EnclaveHTTPClient | RouterHTTPClie
  * surfaces as the runtime's error on the library's socket and leaves the
  * verification in place.
  */
-export async function pinnedWebSocketOptions(client: EnclaveHTTPClient | RouterHTTPClient, signal?: AbortSignal): Promise<WS.ClientOptions> {
+export async function pinnedWebSocketOptions(client: EnclaveHTTPClient | RouterHTTPClient, options?: CallOptions): Promise<WS.ClientOptions> {
   const { transport, tls } = webSocketAccessOf(client);
-  return (await clientWsOptions(transport, tls, signal)).options;
+  return (await clientWsOptions(transport, tls, options?.signal)).options;
 }

@@ -14,7 +14,7 @@ import { fetchCatalogWith } from "./internal/gateway/catalog.js";
 import { GatewayPolicy } from "./internal/gateway/policy.js";
 import { GatewayTransport } from "./internal/gateway/transport.js";
 import { withOriginRestriction } from "./internal/transport/origin.js";
-import type { Catalog, Fetch, GatewayOptions, ReplicaVerification } from "./options.js";
+import type { CallOptions, Catalog, Fetch, GatewayOptions, ReplicaVerification } from "./options.js";
 
 /**
  * Tinfoil's gateway, used when no `url` option is given.
@@ -70,7 +70,7 @@ export async function createGatewayHTTPClient(options: GatewayOptions, seams: Ga
   });
   const client = new GatewayHTTPClient(TOKEN, transport, baseURL, withOriginRestriction(transport.fetch, "", baseURL));
   // An unreachable gateway fails here rather than on the first request.
-  await client.models(options.signal);
+  await client.models({ signal: options.signal });
   return client;
 }
 
@@ -111,13 +111,13 @@ export class GatewayHTTPClient {
    * verifying replicas. A failed catalog refresh doesn't fail it; only the
    * first fetch can.
    */
-  models(signal?: AbortSignal): Promise<string[]> {
-    return this.#transport.models(signal);
+  models(options?: CallOptions): Promise<string[]> {
+    return this.#transport.models(options?.signal);
   }
 
   /** A verification valid now of a replica serving `model`, verifying replicas only if needed. */
-  ensureVerified(model: string, signal?: AbortSignal): Promise<Verification> {
-    return this.#transport.ensureVerified(model, signal);
+  ensureVerified(model: string, options?: CallOptions): Promise<Verification> {
+    return this.#transport.ensureVerified(model, options?.signal);
   }
 
   /** The last successful verification of each replica used so far, unchecked: they may have expired or been rejected. A new array on each read. */
@@ -133,6 +133,6 @@ export class GatewayHTTPClient {
  *
  * @experimental The gateway route is new; this API may change without a major version.
  */
-export function fetchCatalog(host: string, signal?: AbortSignal): Promise<Catalog> {
-  return fetchCatalogWith(host, (input, init) => fetch(input, init), signal);
+export function fetchCatalog(host: string, options?: CallOptions): Promise<Catalog> {
+  return fetchCatalogWith(host, (input, init) => fetch(input, init), options?.signal);
 }
