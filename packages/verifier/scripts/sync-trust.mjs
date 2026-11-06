@@ -54,13 +54,14 @@ function parseChain(text, what) {
 
 const fingerprint = (cert) => createHash("sha256").update(cert.root.toDER()).digest("hex");
 
-/** The committed chain's certificates, or [] when the module does not exist yet. */
+/** The committed chain's certificates, or [] when the module does not exist yet; any other read failure propagates, so that it cannot bypass the pin. */
 function committedChain(name) {
   let module;
   try {
     module = readFileSync(join(out, name), "utf8");
-  } catch {
-    return [];
+  } catch (err) {
+    if (err?.code === "ENOENT") return [];
+    throw err;
   }
   const text = JSON.parse(module.slice(module.indexOf("= ") + 2, module.lastIndexOf(";")));
   return parseChain(text, name);
