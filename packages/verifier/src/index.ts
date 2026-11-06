@@ -2,8 +2,8 @@
  * The public surface of the v3 verifier: the verifier and its options, the
  * facts a verification proves, the error types, the measurement types, the
  * document constants a caller needs to fetch a document and read endorsed
- * keys, and the TLS fingerprint helper. Nothing else in this package is
- * supported for direct use.
+ * keys, the TLS fingerprint helper, and the hex helpers for the nonce and
+ * the keys. Nothing else in this package is supported for direct use.
  */
 import { UsageError } from "./errors.js";
 import { PUBLIC_REGISTRY_ID as PUBLIC_REGISTRY_ID_INTERNAL } from "./internal/endorsement/approval.js";
@@ -67,6 +67,8 @@ export {
   type TdxMeasurement,
 } from "./measurement.js";
 export type { Reference };
+// The hex the document endpoint takes its nonce in, and the keys are reported in.
+export { fromHex, toHex } from "./internal/bytes.js";
 
 /**
  * The public registry's ID, the one accepted by default. `configRegistryIDs`

@@ -25,6 +25,8 @@ const EXPORTS = [
   // document
   "randomNonce",
   "NONCE_SIZE",
+  "toHex",
+  "fromHex",
   "CRYPTO_MATERIAL_ID_TLS",
   "CRYPTO_MATERIAL_ID_HPKE",
   "ATTESTATION_V3_FORMAT",

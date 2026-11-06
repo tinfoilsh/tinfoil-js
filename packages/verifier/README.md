@@ -13,15 +13,15 @@ npm install @tinfoilsh/verifier
 ## Quick Start
 
 ```typescript
-import { Verifier, randomNonce } from "@tinfoilsh/verifier";
+import { Verifier, randomNonce, toHex } from "@tinfoilsh/verifier";
 
 // Embedded production trust roots and signing keys, 7-day freshness bound.
 const verifier = await Verifier.create();
 
-// The enclave serves its document for a nonce you choose.
+// The enclave serves its document for a nonce you choose, which the
+// attestation endpoint takes as lowercase hex in the query string.
 const nonce = randomNonce();
-const hex = Array.from(nonce, (b) => b.toString(16).padStart(2, "0")).join("");
-const response = await fetch(`https://inference.tinfoil.sh/.well-known/tinfoil-attestation?nonce=${hex}`);
+const response = await fetch(`https://inference.tinfoil.sh/.well-known/tinfoil-attestation?nonce=${toHex(nonce)}`);
 const document = new Uint8Array(await response.arrayBuffer());
 
 const verification = await verifier.verifyV3(document, nonce, "tinfoilsh/confidential-model-router");
