@@ -1,6 +1,6 @@
 # Migrating from 1.x to 2.0
 
-2.0 replaces the verification protocol and the client API of both packages. Verification now appraises one attestation document the enclave serves for a caller-chosen nonce (hardware quote, code and platform provenance, freshness and policy together), and every attested client verifies before it exists; `UnverifiedClient` from `tinfoil/unsafe`, which never verifies, is the development-only exception. Nothing from 1.x is aliased; the tables map each removed name to its replacement.
+2.0 replaces the verification protocol and the client API of both packages. Verification now appraises one attestation document the enclave serves for a caller-chosen nonce (hardware quote, code and platform provenance, freshness and policy together), and no attested client serves a request that it has not verified for: the router and enclave clients verify before they exist, and the gateway client verifies a model's replica before its first request; `UnverifiedClient` from `tinfoil/unsafe`, which never verifies, is the development-only exception. Nothing from 1.x is aliased; the tables map each removed name to its replacement.
 
 ## `tinfoil`
 
