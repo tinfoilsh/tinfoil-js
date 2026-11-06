@@ -127,7 +127,8 @@ export class Enclave {
         this.#checkFreshness(verified);
         return verified;
       } catch (e) {
-        if (signal?.aborted) throw e;
+        // A caller that gave up gets its own reason back, not the failure its abort caused.
+        if (signal?.aborted) throw signal.reason;
         err = e instanceof TinfoilError ? e : new AttestationError(messageOf(e), { cause: e });
       }
       if (attempt === retries || !retryable(err)) {

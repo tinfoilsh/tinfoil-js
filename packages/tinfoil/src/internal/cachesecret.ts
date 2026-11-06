@@ -21,6 +21,7 @@
  * to the verified enclave.
  */
 import type { Fetch } from "../options.js";
+import { readAll } from "./body.js";
 import { isServerRuntime, type RuntimeGlobals } from "./platform.js";
 import { shapeOf, type RequestShape } from "./transport/transport.js";
 
@@ -114,13 +115,17 @@ export function resetEphemeralUserCacheSecretForTests(): void {
  * non-empty or non-string field already in the body is never overwritten; an
  * empty string is replaced. A body that is not UTF-8 text holding one JSON
  * object, or carries the field more than once, is forwarded untouched. An
- * empty secret returns `next`.
+ * empty secret returns `next`. An abort of the request's signal while its
+ * body is being read stops the read and rejects with the signal's reason.
  */
 export function withCacheSecret(next: Fetch, secret: string): Fetch {
   if (secret === "") return next;
   return async (input, init) => {
     if (!pathEligible(shapeOf(input, init))) return next(input, init);
-    const body = await readBody(input, init);
+    // A Request carries a signal of its own, which the init's replaces, as
+    // fetch has it: an explicit null leaves the request without one.
+    const signal = init?.signal === null ? undefined : (init?.signal ?? (input instanceof Request ? input.signal : undefined));
+    const body = await readBody(input, init, signal);
     if (body === undefined) return next(input, init);
     const injected = body.text === undefined ? null : injectUserCacheSecret(body.text, secret);
     if (injected === null) {
@@ -150,16 +155,17 @@ const asBytes = (text: string): Uint8Array<ArrayBuffer> => new TextEncoder().enc
 /**
  * The request body's bytes, read without consuming the caller's body where
  * the body can be read again. Undefined for a body kind that can't hold a
- * JSON text (form data, URL parameters), which is forwarded untouched.
+ * JSON text (form data, URL parameters), which is forwarded untouched. A
+ * stream, the caller's or a Request's, is read until `signal` aborts.
  */
-async function readBody(input: string | URL | Request, init: RequestInit | undefined): Promise<Body | undefined> {
+async function readBody(input: string | URL | Request, init: RequestInit | undefined, signal: AbortSignal | undefined): Promise<Body | undefined> {
   const source = init?.body;
   let bytes: Uint8Array<ArrayBuffer>;
   let consumed = false;
   let rebuild: Body["rebuild"] = asBytes;
   if (source === undefined || source === null) {
     if (!(input instanceof Request) || input.body === null) return undefined;
-    bytes = new Uint8Array(await input.clone().arrayBuffer());
+    bytes = await readAll(input.clone().body!, Infinity, "request body", signal);
   } else if (typeof source === "string") {
     return { bytes: asBytes(source), text: source, consumed: false, rebuild: (text) => text };
   } else if (source instanceof ArrayBuffer) {
@@ -171,7 +177,7 @@ async function readBody(input: string | URL | Request, init: RequestInit | undef
     const type = source.type;
     rebuild = (text) => new Blob([text], { type });
   } else if (typeof ReadableStream !== "undefined" && source instanceof ReadableStream) {
-    bytes = new Uint8Array(await new Response(source).arrayBuffer());
+    bytes = await readAll(source, Infinity, "request body", signal);
     consumed = true;
   } else {
     return undefined;

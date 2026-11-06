@@ -6,6 +6,7 @@
  * over replicas behind a mocked gateway.
  */
 import { Identity } from "ehbp";
+import { getEventListeners } from "node:events";
 import { beforeAll, describe, expect, it } from "vitest";
 import { AttestationError, ConfigurationError, NetworkError } from "../src/errors.js";
 import { CATALOG_REFRESH_INTERVAL_MS, CatalogCache, fetchCatalogWith, MAX_CATALOG_BYTES, parseCatalog } from "../src/internal/gateway/catalog.js";
@@ -291,6 +292,12 @@ describe("prepare", () => {
     await expect(prepare(shapeOf(url, { method: "POST", body: big }), json(), new Response(big).body, "s", 64)).rejects.toThrow(/exceeds 64 bytes/);
     const form = ['--b', 'Content-Disposition: form-data; name="model"', "", "w".repeat(80), "--b--", ""].join("\r\n");
     await expect(prepare(shapeOf(url, { method: "POST", body: form }), new Headers({ "content-type": "multipart/form-data; boundary=b" }), form, "s", 64)).rejects.toThrow(/multipart upload: body exceeds 64 bytes/);
+    // A source whose cancel fails does not hide the size error.
+    const stubborn = new ReadableStream<Uint8Array>({
+      start: (c) => c.enqueue(utf8("x".repeat(65))),
+      cancel: () => Promise.reject(new Error("cancel failed")),
+    });
+    await expect(prepare(shapeOf(url, { method: "POST", body: stubborn }), json(), stubborn, "s", 64)).rejects.toThrow(/exceeds 64 bytes/);
     const small = '{"model":"m"}';
     expect((await prepare(shapeOf(url, { method: "POST", body: small }), json(), small, "", 64)).headers.get(MODEL_HEADER)).toBe("m");
   });
@@ -310,6 +317,20 @@ describe("prepare", () => {
     const gone = new AbortController();
     gone.abort(new Error("already gone"));
     await expect(prepare(shapeOf(url, { method: "POST", body: "{}" }), new Headers({ "content-type": "application/json" }), '{"model":"m"}', "s", MAX_BODY_BYTES, gone.signal)).rejects.toThrow(/already gone/);
+  });
+
+  it("leaves nothing on the signal once a body has been read, however many chunks it came in", async () => {
+    const controller = new AbortController();
+    const chunks = ['{"model":', '"m",', '"n":1}'];
+    const stream = new ReadableStream<Uint8Array>({
+      start: (c) => {
+        for (const chunk of chunks) c.enqueue(utf8(chunk));
+        c.close();
+      },
+    });
+    const out = await prepare(shapeOf(url, { method: "POST", body: stream }), new Headers({ "content-type": "application/json" }), stream, "s", MAX_BODY_BYTES, controller.signal);
+    expect(out.headers.get(MODEL_HEADER)).toBe("m");
+    expect(getEventListeners(controller.signal, "abort")).toHaveLength(0);
   });
 
   it("passes a request that names its model and needs no cache scope through unread", async () => {
@@ -526,6 +547,14 @@ describe("GatewayTransport", () => {
     const aborted = new AbortController();
     aborted.abort(new Error("stop"));
     await expect(t.ensureVerified("other", aborted.signal)).rejects.toThrow(/stop/);
+  });
+
+  it("rejects a model listing still waiting on the catalog when the transport closes", async () => {
+    const t = transport({ policy: await GatewayPolicy.create(undefined, false, perHost()), gatewayFetch: gateway().fetch });
+    const pending = t.models();
+    t.close();
+    await expect(pending).rejects.toThrow(/closed/);
+    await expect(t.models()).rejects.toThrow(/closed/);
   });
 
   it("replays once after a replica rotates its key, naming the replica on every attempt", async () => {

@@ -1,70 +1,40 @@
 /**
  * Secure Chat Component
- * 
+ *
  * A React component demonstrating the Vercel AI SDK's useChat hook
  * with Tinfoil's secure transport for end-to-end encrypted chat.
- * 
+ *
  * This example shows:
  * - Async transport initialization with loading state
  * - Using useChat with a custom transport
  * - Proper error handling
  * - Streaming message display
+ *
+ * useChat keeps the transport it is first given, so the chat is mounted
+ * only once the transport exists: SecureChat creates it and shows the
+ * progress, and Chat renders the conversation over it.
  */
 
 "use client"; // Required for Next.js App Router
 
 import { useChat } from "@ai-sdk/react";
-import { useEffect, useState } from "react";
-import type { DefaultChatTransport, UIMessage } from "ai";
-import { getTinfoilTransport } from "../lib/tinfoil";
+import { createContext, useContext, useEffect, useState, type FormEvent, type ReactNode } from "react";
+import { getTinfoilTransport, type TinfoilChatTransport } from "../lib/tinfoil";
 
-export function Chat() {
+export function SecureChat() {
   // Transport state - null until initialization completes
-  const [transport, setTransport] = useState<DefaultChatTransport<UIMessage> | null>(null);
+  const [transport, setTransport] = useState<TinfoilChatTransport | null>(null);
   const [initError, setInitError] = useState<Error | null>(null);
 
   // Initialize transport on mount
   useEffect(() => {
     getTinfoilTransport()
       .then(setTransport)
-      .catch((error) => {
+      .catch((error: unknown) => {
         console.error("Failed to initialize secure transport:", error);
-        setInitError(error);
+        setInitError(error instanceof Error ? error : new Error(String(error)));
       });
   }, []);
-
-  // useChat hook with custom transport
-  // Note: transport can be undefined during initialization
-  const { messages, input, handleInputChange, handleSubmit, status, error } = useChat({
-    // Pass transport only when ready (undefined = hook waits)
-    transport: transport ?? undefined,
-    
-    // Model to use - must match your Tinfoil model catalog
-    // See: https://docs.tinfoil.sh/models/catalog
-    body: {
-      model: "gpt-oss-120b",
-    },
-    
-    // Optional: Handle errors
-    onError: (error) => {
-      console.error("Chat error:", error);
-    },
-  });
-
-  // Loading state while transport initializes
-  if (!transport && !initError) {
-    return (
-      <div className="flex items-center justify-center p-8">
-        <div className="text-center">
-          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500 mx-auto mb-4" />
-          <p className="text-gray-600">Establishing secure connection...</p>
-          <p className="text-sm text-gray-400 mt-2">
-            Verifying enclave attestation
-          </p>
-        </div>
-      </div>
-    );
-  }
 
   // Error state if initialization failed
   if (initError) {
@@ -80,6 +50,47 @@ export function Chat() {
         </button>
       </div>
     );
+  }
+
+  // Loading state while transport initializes
+  if (!transport) {
+    return (
+      <div className="flex items-center justify-center p-8">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500 mx-auto mb-4" />
+          <p className="text-gray-600">Establishing secure connection...</p>
+          <p className="text-sm text-gray-400 mt-2">
+            Verifying enclave attestation
+          </p>
+        </div>
+      </div>
+    );
+  }
+
+  return <Chat transport={transport} />;
+}
+
+export function Chat({ transport }: { transport: TinfoilChatTransport }) {
+  const [input, setInput] = useState("");
+
+  // useChat hook with the custom transport; the model is the transport's
+  const { messages, sendMessage, status, error } = useChat({
+    transport,
+
+    // Optional: Handle errors
+    onError: (error) => {
+      console.error("Chat error:", error);
+    },
+  });
+
+  const busy = status === "submitted" || status === "streaming";
+
+  function handleSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const text = input.trim();
+    if (text === "" || busy) return;
+    setInput("");
+    void sendMessage({ text });
   }
 
   return (
@@ -99,7 +110,7 @@ export function Chat() {
             Send a message to start the conversation
           </p>
         )}
-        
+
         {messages.map((message) => (
           <div
             key={message.id}
@@ -113,7 +124,7 @@ export function Chat() {
               {message.role === "user" ? "You" : "Assistant"}
             </div>
             <div className="whitespace-pre-wrap">
-              {message.parts.map((part, i) => 
+              {message.parts.map((part, i) =>
                 part.type === "text" ? <span key={i}>{part.text}</span> : null
               )}
             </div>
@@ -121,7 +132,7 @@ export function Chat() {
         ))}
 
         {/* Streaming indicator */}
-        {status === "streaming" && (
+        {busy && (
           <div className="text-gray-400 text-sm">Assistant is typing...</div>
         )}
       </div>
@@ -139,14 +150,14 @@ export function Chat() {
           <input
             type="text"
             value={input}
-            onChange={handleInputChange}
+            onChange={(event) => setInput(event.target.value)}
             placeholder="Type a message..."
             className="flex-1 px-4 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-            disabled={status === "streaming"}
+            disabled={busy}
           />
           <button
             type="submit"
-            disabled={status === "streaming" || !input.trim()}
+            disabled={busy || !input.trim()}
             className="px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 disabled:opacity-50 disabled:cursor-not-allowed"
           >
             Send
@@ -159,23 +170,23 @@ export function Chat() {
 
 /**
  * Alternative: Chat with Context Provider
- * 
+ *
  * For larger apps, you might want to provide the transport via React Context
  * to avoid prop drilling and ensure consistent initialization across components.
+ * The provider renders its children only once the transport exists, so a
+ * component under it can hand the transport to useChat on its first render.
  */
 
-import { createContext, useContext, type ReactNode } from "react";
-
-const TinfoilContext = createContext<DefaultChatTransport<UIMessage> | null>(null);
+const TinfoilContext = createContext<TinfoilChatTransport | null>(null);
 
 export function TinfoilProvider({ children }: { children: ReactNode }) {
-  const [transport, setTransport] = useState<DefaultChatTransport<UIMessage> | null>(null);
+  const [transport, setTransport] = useState<TinfoilChatTransport | null>(null);
   const [error, setError] = useState<Error | null>(null);
 
   useEffect(() => {
     getTinfoilTransport()
       .then(setTransport)
-      .catch(setError);
+      .catch((error: unknown) => setError(error instanceof Error ? error : new Error(String(error))));
   }, []);
 
   if (error) {
@@ -201,7 +212,7 @@ export function TinfoilProvider({ children }: { children: ReactNode }) {
   );
 }
 
-export function useTinfoilTransport(): DefaultChatTransport<UIMessage> {
+export function useTinfoilTransport(): TinfoilChatTransport {
   const transport = useContext(TinfoilContext);
   if (!transport) {
     throw new Error("useTinfoilTransport must be used within TinfoilProvider");
@@ -211,7 +222,7 @@ export function useTinfoilTransport(): DefaultChatTransport<UIMessage> {
 
 /**
  * Example usage with context:
- * 
+ *
  * ```tsx
  * // app/layout.tsx
  * export default function Layout({ children }) {
@@ -221,11 +232,11 @@ export function useTinfoilTransport(): DefaultChatTransport<UIMessage> {
  *     </TinfoilProvider>
  *   );
  * }
- * 
+ *
  * // app/chat/page.tsx
  * function ChatPage() {
  *   const transport = useTinfoilTransport();
- *   const { messages, ... } = useChat({ transport });
+ *   const { messages, sendMessage } = useChat({ transport });
  *   // ...
  * }
  * ```

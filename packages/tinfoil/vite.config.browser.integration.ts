@@ -6,9 +6,11 @@ import { browserField } from "./vite.config.browser.js";
 /**
  * The live browser lane: the browser build in Chromium against the live
  * service. A page has no process environment, so the lane's gate and the
- * credential are compiled into the bundle. Web security is disabled so the
- * page can reach the service's origins, as a deployed page would through
- * its own origin's CORS policy.
+ * credential are compiled into the bundle. The browser runs with its
+ * same-origin policy intact: the page is served from a localhost origin and
+ * reaches the service's origins through their CORS policy, as a deployed
+ * page does, so a service that stopped allowing a page's requests fails
+ * here.
  */
 export default defineConfig({
   plugins: [browserField()],
@@ -26,14 +28,7 @@ export default defineConfig({
       enabled: true,
       provider: playwright(),
       headless: true,
-      instances: [
-        {
-          browser: "chromium",
-          launch: {
-            args: ["--disable-web-security", "--disable-features=IsolateOrigins,site-per-process"],
-          },
-        },
-      ],
+      instances: [{ browser: "chromium" }],
     },
   },
 });

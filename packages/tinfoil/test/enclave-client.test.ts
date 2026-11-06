@@ -4,6 +4,7 @@
  * proxy in front, the verification facts, the replay after a key rotation,
  * and the OpenAI client bound to the attested fetch.
  */
+import { Agent } from "node:https";
 import { Identity, PROTOCOL } from "ehbp";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { checkEnclaveOptions, createEnclaveHTTPClient, EnclaveHTTPClient, resolveTransportMode, type EnclaveClientSeams } from "../src/enclave-client.js";
@@ -164,6 +165,38 @@ describe("EnclaveHTTPClient.create", () => {
     const pending = createEnclaveHTTPClient(tls.host, "tinfoilsh/repo", { verifier: verifier(() => ({})), transportMode: "tls" }, { documentFetch: docs.fetch, sleep: async () => {} });
     await expect(pending).rejects.toBeInstanceOf(AttestationError);
     expect(docs.calls.length).toBe(2);
+  });
+
+  it("closes the transport when the signal cuts the verification short, so what that verification binds is released when it finishes", async () => {
+    const destroyed = vi.spyOn(Agent.prototype, "destroy");
+    try {
+      let begun!: () => void;
+      let serve!: () => void;
+      const started = new Promise<void>((resolve) => (begun = resolve));
+      const held = new Promise<void>((resolve) => (serve = resolve));
+      const documentFetch: Fetch = async () => {
+        begun();
+        await held;
+        return new Response(new Uint8Array([1]));
+      };
+      const controller = new AbortController();
+      const pending = createEnclaveHTTPClient(
+        tls.host,
+        "tinfoilsh/repo",
+        { verifier: verifier(() => ({ tls: TEST_PIN })), transportMode: "tls", signal: controller.signal },
+        { documentFetch, tls: { ca: TEST_CERT } },
+      );
+      await started;
+      const reason = new Error("gave up");
+      controller.abort(reason);
+      await expect(pending).rejects.toBe(reason);
+      expect(destroyed).not.toHaveBeenCalled();
+      // The verification finishes after the factory rejected; the pool it binds is destroyed rather than kept.
+      serve();
+      await vi.waitFor(() => expect(destroyed).toHaveBeenCalledTimes(1));
+    } finally {
+      destroyed.mockRestore();
+    }
   });
 });
 
@@ -352,10 +385,16 @@ describe("EnclaveHTTPClient.close over TLS", () => {
 describe("EnclaveHTTPClient over EHBP", () => {
   it("seals requests to the enclave's key and reaches the enclave through a proxy with the enclave header", async () => {
     const docs = documents();
+    // The network reaches the proxy and nothing else, so a request to the enclave's own origin is seen leaving and refused here, not sent anywhere.
+    const network = recordingFetch(async (input, init) => {
+      const url = new URL(String(input));
+      if (url.origin === ehbp.origin) return runtimeFetch(input, init);
+      throw new TypeError(`no route to ${url.host}`);
+    });
     const proxied = await createEnclaveHTTPClient(
       "enclave.example",
       "",
-      { verifier: verifier(() => ({ tls: "ab".repeat(32), hpke: ehbp.publicKeyHex })), transportMode: "ehbp", baseURL: `${ehbp.origin}/` },
+      { verifier: verifier(() => ({ tls: "ab".repeat(32), hpke: ehbp.publicKeyHex })), transportMode: "ehbp", baseURL: `${ehbp.origin}/`, fetch: network.fetch },
       { documentFetch: docs.fetch },
     );
     expect(proxied.baseURL).toBe(`${ehbp.origin}/`);
@@ -365,8 +404,14 @@ describe("EnclaveHTTPClient over EHBP", () => {
     expect(await res.json()).toEqual({ path: "/echo", sealed: true, enclave: "https://enclave.example", text: "prompt" });
     const bodiless = await (await proxied.fetch(`${ehbp.origin}/echo`)).json();
     expect(bodiless.sealed).toBe(false);
-    await expect(proxied.fetch("https://enclave.example/echo", { method: "POST", body: "x" })).rejects.toThrow();
+    // The enclave's own origin is allowed beside the proxy's: the request leaves sealed, and fails only where the network has no route to it.
+    const plaintext = "a prompt that only the enclave may read";
+    await expect(proxied.fetch("https://enclave.example/echo", { method: "POST", body: plaintext })).rejects.toThrow(/no route to enclave\.example/);
+    expect(network.seen.map((s) => s.url)).toEqual([`${ehbp.origin}/echo`, `${ehbp.origin}/echo`, "https://enclave.example/echo"]);
+    expect(network.seen[2]!.headers.has(PROTOCOL.ENCAPSULATED_KEY_HEADER)).toBe(true);
+    expect(network.seen[2]!.body).not.toContain(plaintext);
     await expect(proxied.fetch("https://other.example/echo")).rejects.toThrow(/client is bound to enclave/);
+    expect(network.seen).toHaveLength(3);
   });
 
   it("sends sealed requests through the fetch option and opens their responses, while attestation documents keep the runtime's fetch", async () => {

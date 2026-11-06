@@ -31,6 +31,11 @@ export async function startEhbpServer(route: (seen: Seen) => Reply | Promise<Rep
         for await (const chunk of produced.chunks) res.write(Buffer.from(chunk));
         res.end();
       })().catch((err: unknown) => {
+        // Once headers are out, the client already has a status; cut the connection instead.
+        if (res.headersSent) {
+          res.destroy(err instanceof Error ? err : new Error(String(err)));
+          return;
+        }
         res.writeHead(500, { "content-type": "text/plain" });
         res.end(String(err));
       });
