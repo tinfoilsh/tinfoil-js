@@ -240,6 +240,25 @@ describe("public surface", () => {
     expect(typeof surface.fetchCatalog).toBe("function");
   });
 
+  it("refuses the transport options in withOptions at compile time", () => {
+    // Checked by the test typecheck: each call below is a type error, so the clone can't name a transport.
+    const attempts = (tinfoil: surface.TinfoilClient, enclave: surface.EnclaveOpenAIClient, router: surface.RouterOpenAIClient, gateway: surface.GatewayOpenAIClient): void => {
+      // @ts-expect-error `baseURL` belongs to the attested transport.
+      tinfoil.withOptions({ baseURL: "https://evil.example/" });
+      // @ts-expect-error `fetch` belongs to the attested transport.
+      tinfoil.withOptions({ fetch: globalThis.fetch });
+      // @ts-expect-error `baseURL` belongs to the attested transport.
+      enclave.withOptions({ baseURL: "https://evil.example/" });
+      // @ts-expect-error `fetch` belongs to the attested transport.
+      router.withOptions({ fetch: globalThis.fetch });
+      // @ts-expect-error `baseURL` belongs to the attested transport.
+      gateway.withOptions({ baseURL: "https://evil.example/" });
+      // The other OpenAI options and the bearer token remain accepted.
+      tinfoil.withOptions({ timeout: 1, maxRetries: 0, defaultHeaders: { "x-a": "b" }, bearerToken: "t" });
+    };
+    expect(attempts.length).toBe(4);
+  });
+
   it("opens WebSockets through functions that take a client, not through client methods", () => {
     for (const fn of [surface.createWebSocket, surface.pinnedWebSocketOptions, surface.createRealtimeWebSocket]) expect(typeof fn).toBe("function");
     expect(methodsOf(surface.EnclaveHTTPClient)).not.toContain("createWebSocket");
