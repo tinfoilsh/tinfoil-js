@@ -11,7 +11,7 @@
  * @experimental The gateway route is new; this API may change without a major version.
  */
 import { ConfigurationError } from "../../errors.js";
-import { appendMember, firstArrayElement, objectMembers, pathEligible, removeMember, replaceMember, USER_CACHE_SECRET_FIELD } from "../cachesecret.js";
+import { appendMember, firstArrayElement, objectMembers, pathEligible, removeMember, replaceMember, USER_CACHE_SECRET_FIELD, type Member } from "../cachesecret.js";
 import type { RequestShape } from "../transport/transport.js";
 
 export const MODEL_HEADER = "X-Tinfoil-Model";
@@ -72,7 +72,7 @@ export async function prepare(shape: RequestShape, headers: Headers, body: Prepa
     const value = model === undefined ? undefined : (JSON.parse(text.slice(model.valueStart, model.valueEnd)) as unknown);
     if (typeof value === "string" && value !== "") headers.set(MODEL_HEADER, value);
   }
-  if (scoped) text = await scopeCache(headers, text, secret);
+  if (scoped) text = await scope(headers, text, members, secret);
   return { headers, body: text, replayable: true };
 }
 
@@ -89,6 +89,11 @@ export async function prepare(shape: RequestShape, headers: Headers, body: Prepa
 export async function scopeCache(headers: Headers, text: string, clientSecret: string): Promise<string> {
   const members = objectMembers(text);
   if (members === null) return text;
+  return scope(headers, text, members, clientSecret);
+}
+
+/** {@link scopeCache} over `members`, the body's members already parsed, so a body is scanned once. */
+async function scope(headers: Headers, text: string, members: readonly Member[], clientSecret: string): Promise<string> {
   const secretMembers = members.filter((m) => m.key === USER_CACHE_SECRET_FIELD);
   if (secretMembers.length > 1) throw new ConfigurationError(`JSON body carries ${USER_CACHE_SECRET_FIELD} more than once`);
   if (members.filter((m) => m.key === CACHE_SALT_FIELD).length > 1) throw new ConfigurationError(`JSON body carries ${CACHE_SALT_FIELD} more than once`);
