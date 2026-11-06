@@ -69,10 +69,12 @@ export function webSocketURL(host: string, path: string): URL {
 export async function openClientWebSocket(transport: KeyedTransport, path: string, options: WebSocketOptions, tls: TLSOptions): Promise<PinnedWebSocket> {
   checkWebSocketCapability();
   const target = webSocketURL(transport.enclave().host(), path);
+  const { checkPinnedWebSocketCapability, openPinnedWebSocket } = await import("./transport/ws.js");
+  // A runtime that can't pin the connection is refused before any verification I/O.
+  checkPinnedWebSocketCapability();
   const state = await transport.state(options.signal);
   const key = state.verification.tlsPublicKeyFP;
   if (key === undefined) throw new AttestationError('document endorses no "tls" key');
-  const { openPinnedWebSocket } = await import("./transport/ws.js");
   // A peer whose certificate fails the pin no longer holds the keys the connection was opened under.
   const socket = await openPinnedWebSocket(target, key, options, tls, () => transport.invalidate(state));
   // So does one whose certificate the runtime rejected before the pin was consulted.

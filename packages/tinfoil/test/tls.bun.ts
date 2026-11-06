@@ -27,14 +27,18 @@ function verification(fp: string): Verification {
 let server: ReturnType<typeof Bun.serve>;
 let origin: string;
 let requests = 0;
+let plainHits = 0;
 
 beforeAll(() => {
   server = Bun.serve({
     hostname: "localhost",
     port: 0,
     tls: { key, cert },
-    fetch() {
+    fetch(request) {
       requests++;
+      const path = new URL(request.url).pathname;
+      if (path === "/redirect") return Response.redirect(`${origin}/plain`, 307);
+      if (path === "/plain") plainHits++;
       return new Response("hello");
     },
   });
@@ -65,5 +69,15 @@ describe("tlsMode under Bun", () => {
   it("refuses plaintext", async () => {
     const bound = await mode.bind(verification(PIN));
     await expect(bound.fetch("http://localhost/")).rejects.toBeInstanceOf(ConfigurationError);
+  });
+
+  it("hands a redirect back rather than following it", async () => {
+    const bound = await mode.bind(verification(PIN));
+    const before = plainHits;
+    const res = await bound.fetch(`${origin}/redirect`);
+    expect(res.status).toBe(307);
+    expect(res.headers.get("location")).toBe(`${origin}/plain`);
+    await res.text();
+    expect(plainHits).toBe(before);
   });
 });

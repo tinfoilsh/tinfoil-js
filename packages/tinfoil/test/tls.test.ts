@@ -3,14 +3,16 @@
  * connection (a matching key serves, a mismatch fails in the handshake and
  * no request reaches the server), plaintext refused, response bodies
  * streamed chunk by chunk as the server writes them, request bodies
- * streamed as they are produced, and the replay after a key rotation.
+ * streamed as they are produced, a redirect handed back rather than
+ * followed, a binding retired without cutting a request in flight, and the
+ * replay after a key rotation.
  */
 import { createHash, X509Certificate } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { createServer, type Server } from "node:https";
 import type { AddressInfo } from "node:net";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { AttestationError, ConfigurationError } from "../src/errors.js";
+import { AttestationError, ConfigurationError, NetworkError } from "../src/errors.js";
 import { Enclave } from "../src/internal/enclave.js";
 import { withReplay } from "../src/internal/transport/replay.js";
 import { tlsMode } from "../src/internal/transport/tls.js";
@@ -27,8 +29,21 @@ const seen: { path: string; method: string; bodyLength: number; headers: Record<
 let server: Server;
 let origin: string;
 let sseEnded = false;
+/** The TLS connections open right now, pooled ones included. */
+let open = 0;
+/** The TLS connections the server has accepted so far. */
+let accepted = 0;
 /** Called with each piece of a request body to `/echo` as the server receives it. */
 let onEchoData: ((chunk: Buffer) => void) | undefined;
+
+/** Resolves once `cond` holds, polling; fails after `ms`. */
+async function until(cond: () => boolean, ms = 5_000): Promise<void> {
+  const deadline = Date.now() + ms;
+  while (!cond()) {
+    if (Date.now() > deadline) throw new Error("condition not met in time");
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+}
 
 function verification(fp: string): Verification {
   return {
@@ -74,11 +89,20 @@ beforeAll(async () => {
           res.writeHead(204);
           res.end();
           break;
+        case "/redirect":
+          res.writeHead(307, { location: `${origin}/plain` });
+          res.end();
+          break;
         default:
           res.writeHead(200, { "content-type": "text/plain", "x-two": "a", "set-cookie": ["a=1", "b=2"] });
           res.end("hello");
       }
     });
+  });
+  server.on("secureConnection", (socket) => {
+    open++;
+    accepted++;
+    socket.once("close", () => open--);
   });
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   origin = `https://localhost:${(server.address() as AddressInfo).port}`;
@@ -226,6 +250,82 @@ describe("tlsMode", () => {
     early.abort(new Error("already"));
     await expect(bound.fetch(`${origin}/plain`, { signal: early.signal })).rejects.toThrow(/already/);
     bound.close?.();
+  });
+
+  it("takes a Request input's own signal, and none when the init says null", async () => {
+    const bound = await mode.bind(verification(PIN));
+    const own = new Error("own signal");
+    await expect(bound.fetch(new Request(`${origin}/plain`, { signal: AbortSignal.abort(own) }))).rejects.toBe(own);
+    const res = await bound.fetch(new Request(`${origin}/plain`, { signal: AbortSignal.abort(own) }), { signal: null });
+    expect(await res.text()).toBe("hello");
+    bound.close?.();
+  });
+
+  it("refuses a request naming a Host of its own, before any network I/O", async () => {
+    expect(() => mode.validateRequest(shapeOf("https://localhost/", { headers: { Host: "other.example" } }))).toThrow(/reserved request header cannot be set by callers: host/);
+    const bound = await mode.bind(verification(PIN));
+    const before = seen.length;
+    await expect(bound.fetch(`${origin}/plain`, { headers: { host: "other.example" } })).rejects.toThrow(ConfigurationError);
+    await expect(bound.fetch(new Request(`${origin}/plain`, { headers: { host: "other.example" } }))).rejects.toThrow(ConfigurationError);
+    expect(seen.length).toBe(before);
+    bound.close?.();
+  });
+
+  it("hands a redirect back as the response it is, never following it, or fails it when the request asked for that", async () => {
+    const bound = await mode.bind(verification(PIN));
+    const before = seen.length;
+    const res = await bound.fetch(`${origin}/redirect`, { redirect: "follow" });
+    expect(res.status).toBe(307);
+    expect(res.headers.get("location")).toBe(`${origin}/plain`);
+    await res.text();
+    expect(seen.slice(before).map((s) => s.path)).toEqual(["/redirect"]);
+    // A request that asked for an error on a redirect gets one, from either form of input.
+    await expect(bound.fetch(`${origin}/redirect`, { redirect: "error" })).rejects.toBeInstanceOf(NetworkError);
+    await expect(bound.fetch(new Request(`${origin}/redirect`, { redirect: "error" }))).rejects.toBeInstanceOf(NetworkError);
+    expect(seen.slice(before).map((s) => s.path)).toEqual(["/redirect", "/redirect", "/redirect"]);
+    bound.close?.();
+  });
+
+  it("pools a connection across requests, and retires a binding without cutting a request in flight, closing its idle connections and pooling no more", async () => {
+    await until(() => open === 0);
+    const idle = await mode.bind(verification(PIN));
+    const before = accepted;
+    expect(await (await idle.fetch(`${origin}/plain`)).text()).toBe("hello");
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(open).toBe(1);
+    expect(await (await idle.fetch(`${origin}/plain`)).text()).toBe("hello");
+    expect(accepted).toBe(before + 1);
+    idle.retire?.();
+    await until(() => open === 0);
+
+    const busy = await mode.bind(verification(PIN));
+    const res = await busy.fetch(`${origin}/sse`);
+    const reader = res.body!.getReader();
+    const decoder = new TextDecoder();
+    let text = decoder.decode((await reader.read()).value);
+    expect(open).toBe(1);
+    busy.retire?.();
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      text += decoder.decode(value);
+    }
+    expect(text).toBe("data: chunk 1\n\ndata: chunk 2\n\ndata: chunk 3\n\n");
+    // The connection the request used is closed once it is freed, not pooled.
+    await until(() => open === 0);
+    // A request sent to a retired binding still goes out, on a connection that isn't kept.
+    expect(await (await busy.fetch(`${origin}/plain`)).text()).toBe("hello");
+    await until(() => open === 0);
+  });
+
+  it("closes a binding ending a request still in flight on it", async () => {
+    await until(() => open === 0);
+    const bound = await mode.bind(verification(PIN));
+    const reader = (await bound.fetch(`${origin}/sse`)).body!.getReader();
+    expect(new TextDecoder().decode((await reader.read()).value)).toBe("data: chunk 1\n\n");
+    bound.close?.();
+    await expect(reader.read()).rejects.toThrow();
+    await until(() => open === 0);
   });
 });
 

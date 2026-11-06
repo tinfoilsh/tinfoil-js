@@ -10,6 +10,7 @@ import { Enclave } from "../src/internal/enclave.js";
 import { ENCLAVE_URL_HEADER, enclaveURLHeaderValue, withEnclaveURL } from "../src/internal/transport/header.js";
 import { allowedOrigins, normalizedOrigin, originOf, requestURL, withOriginRestriction } from "../src/internal/transport/origin.js";
 import { withReplay } from "../src/internal/transport/replay.js";
+import { openClientWebSocket } from "../src/internal/websocket.js";
 import { isKeyRejection, KeyedTransport, KeyRejectionError, PeerLacksKeyError, type Mode } from "../src/internal/transport/transport.js";
 import type { Fetch } from "../src/options.js";
 import { KEY_SPKI_FP_SHA256_V1_FORMAT, type Verification, type Verifier } from "../../verifier/src/index.js";
@@ -138,6 +139,41 @@ describe("replay", () => {
     const twice = withReplay(flaky(2).fetch, retryable);
     await expect(twice("https://x.example/")).rejects.toThrow(/^attestation error: stale key; the replay failed too; first attempt: attestation error: stale key$/);
   });
+
+  it("takes a Request input's own signal, none when the init says null, and hands an abort during the replay back as its own reason", async () => {
+    const controller = new AbortController();
+    const viaRequest = withReplay(async () => {
+      controller.abort();
+      throw rejected();
+    }, retryable);
+    await expect(viaRequest(new Request("https://x.example/", { signal: controller.signal }))).rejects.toThrow(/request aborted before it could be replayed/);
+
+    const detached = withReplay(flaky(1).fetch, retryable);
+    expect(await (await detached(new Request("https://x.example/", { signal: AbortSignal.abort() }), { signal: null })).text()).toBe("ok");
+
+    const reason = new Error("gave up");
+    const during = new AbortController();
+    let attempts = 0;
+    const abortedReplay = withReplay(async () => {
+      if (attempts++ === 0) throw rejected();
+      during.abort(reason);
+      // The replay's own failure, as a fetch reports an abort, is not what the caller gets back.
+      throw new TypeError("fetch failed");
+    }, retryable);
+    await expect(abortedReplay("https://x.example/", { signal: during.signal })).rejects.toBe(reason);
+  });
+
+  it("reports a replay that fails outside the client as a network error carrying both failures", async () => {
+    let attempts = 0;
+    const raw = withReplay(async () => {
+      if (attempts++ === 0) throw rejected();
+      throw new TypeError("fetch failed");
+    }, retryable);
+    const err = await raw("https://x.example/").catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(NetworkError);
+    expect((err as Error).message).toBe("network error: fetch failed; the replay failed too; first attempt: attestation error: stale key");
+    expect((err as Error).cause).toBeInstanceOf(TypeError);
+  });
 });
 
 describe("KeyedTransport", () => {
@@ -205,6 +241,22 @@ describe("KeyedTransport", () => {
     expect((await t.ensureVerified()).tlsPublicKeyFP).toBe("k1");
   });
 
+  it("takes a Request input's own signal for the verification, and none when the init says null", async () => {
+    let verified = 0;
+    const t = await transport(
+      () => {
+        verified++;
+        return "k1";
+      },
+      () => "k1",
+    );
+    const reason = new Error("gave up");
+    await expect(t.fetch(new Request(`https://${HOST}/v1/models`, { signal: AbortSignal.abort(reason) }))).rejects.toBe(reason);
+    expect(verified).toBe(0);
+    expect(await (await t.fetch(new Request(`https://${HOST}/v1/models`, { signal: AbortSignal.abort(reason) }), { signal: null })).text()).toBe("k1");
+    expect(verified).toBe(1);
+  });
+
   it("turns a peer's key rejection into a replayable rejection after invalidating the verification, so the replay goes out under a fresh one", async () => {
     let verified = 0;
     const peer = { key: "k2" };
@@ -227,6 +279,68 @@ describe("KeyedTransport", () => {
     expect(closed).toEqual(["k1"]);
     expect((await t.reverify()).tlsPublicKeyFP).toBe("k2");
     expect(closed).toEqual(["k1", "k2"]);
+  });
+
+  it("retires a binding a newer verification replaces, so a request still in flight on it finishes, and closes every binding, the retired one included, only when it closes", async () => {
+    const released: string[] = [];
+    let verified = 0;
+    const now = new Date("2026-01-01T00:00:00Z");
+    const enclave = await Enclave.create({
+      host: HOST,
+      repo: "",
+      verifier: keyedVerifier(() => `k${++verified}`, new Date(now.getTime() + 60_000)),
+      fetch: async () => new Response(new Uint8Array([1])),
+      clock: () => now,
+      sleep: async () => {},
+    });
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => (release = resolve));
+    const mode: Mode = {
+      name: "tls",
+      validateRequest: () => {},
+      bind(v) {
+        const key = v.tlsPublicKeyFP!;
+        return {
+          fetch: async () => {
+            await gate;
+            return new Response(key);
+          },
+          close: () => void released.push(`closed ${key}`),
+          retire: () => void released.push(`retired ${key}`),
+        };
+      },
+    };
+    const t = new KeyedTransport(enclave, mode, () => now);
+    const inFlight = t.fetch(`https://${HOST}/v1/chat`);
+    await t.ensureVerified();
+    await t.reverify();
+    expect(released).toEqual(["retired k1"]);
+    release();
+    expect(await (await inFlight).text()).toBe("k1");
+    t.close();
+    expect(released).toEqual(["retired k1", "closed k2", "closed k1"]);
+  });
+
+  it("refuses a pinned WebSocket on a Bun too old to run the check, before any verification I/O", async () => {
+    const fetched: string[] = [];
+    const enclave = await Enclave.create({
+      host: HOST,
+      repo: "",
+      verifier: keyedVerifier(() => "k1", new Date(Date.now() + 60_000)),
+      fetch: async (input) => {
+        fetched.push(String(input));
+        return new Response(new Uint8Array([1]));
+      },
+    });
+    const t = new KeyedTransport(enclave, fakeMode(() => "k1", []));
+    // The runtime's own version record names the Bun that the check reads.
+    Object.defineProperty(process.versions, "bun", { value: "1.4.3", configurable: true, enumerable: true });
+    try {
+      await expect(openClientWebSocket(t, "/v1/realtime", {}, {})).rejects.toThrow(/a pinned WebSocket needs Bun 1.4.4 or later: Bun 1.4.3/);
+    } finally {
+      delete (process.versions as { bun?: string }).bun;
+    }
+    expect(fetched).toEqual([]);
   });
 
   it("closes: releases the current binding, refuses further use, keeps the last verification, and closes again without effect", async () => {

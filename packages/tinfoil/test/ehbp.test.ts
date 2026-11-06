@@ -3,8 +3,9 @@
  * a bodyless request passes through unsealed, a streamed response is
  * opened chunk by chunk as it arrives, a peer that no longer holds the key
  * is reported as such and the request is replayed after re-verification,
- * tunnels and reserved headers are refused, the proxy header travels in
- * plaintext, and the base URL rules.
+ * tunnels and reserved headers are refused, a redirect is handed back
+ * rather than followed, a failing fetch is a network error, the proxy
+ * header travels in plaintext, and the base URL rules.
  */
 import { Identity } from "ehbp";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -16,7 +17,7 @@ import { ENCLAVE_URL_HEADER, withEnclaveURL } from "../src/internal/transport/he
 import { withReplay } from "../src/internal/transport/replay.js";
 import { isKeyRejection, KeyedTransport, KeyRejectionError, PeerLacksKeyError, shapeOf } from "../src/internal/transport/transport.js";
 import { KEY_X25519_HPKE_V1_FORMAT, type Verification, type Verifier } from "../../verifier/src/index.js";
-import { paced, startEhbpServer, type EhbpServer } from "./helpers/ehbp-server.js";
+import { paced, startEhbpServer, type EhbpServer, type Reply } from "./helpers/ehbp-server.js";
 
 let server: EhbpServer;
 let sseEnded = false;
@@ -31,7 +32,7 @@ function verification(hpke: string | undefined): Verification {
 }
 
 beforeAll(async () => {
-  server = await startEhbpServer((seen) => {
+  server = await startEhbpServer((seen): Reply => {
     switch (seen.path) {
       case "/echo":
         return {
@@ -53,6 +54,8 @@ beforeAll(async () => {
         return { plaintext: true, body: "unsealed" };
       case "/error":
         return { plaintext: true, status: 503, body: "busy" };
+      case "/redirect":
+        return { plaintext: true, status: 307, headers: { location: `${server.origin}/plain` }, body: "" };
       default:
         return { status: 404, plaintext: true, body: "" };
     }
@@ -210,6 +213,67 @@ describe("ehbpMode", () => {
     expect((await (await direct(`${server.origin}/echo`, { method: "POST", body: "d" })).json()).enclave).toBeNull();
   });
 
+  it("hands a redirect back rather than following it, and keeps a request's own refusal of one", async () => {
+    const bound = await mode.bind(verification(server.publicKeyHex));
+    const before = server.seen.length;
+    const sealedExchange = await bound.fetch(`${server.origin}/redirect`, { method: "POST", body: "x", redirect: "follow" });
+    expect(sealedExchange.status).toBe(307);
+    expect(sealedExchange.headers.get("location")).toBe(`${server.origin}/plain`);
+    await sealedExchange.text();
+    const plainExchange = await bound.fetch(`${server.origin}/redirect`);
+    expect(plainExchange.status).toBe(307);
+    await plainExchange.text();
+    expect(server.seen.slice(before).map((s) => s.path)).toEqual(["/redirect", "/redirect"]);
+
+    const sent: (string | undefined)[] = [];
+    const observed = await ehbpMode({
+      fetch: async (input, init) => {
+        sent.push(init?.redirect);
+        return fetch(input, init);
+      },
+    }).bind(verification(server.publicKeyHex));
+    await (await observed.fetch(`${server.origin}/plain`)).text();
+    await expect(observed.fetch(`${server.origin}/redirect`, { method: "POST", body: "x", redirect: "error" })).rejects.toBeInstanceOf(NetworkError);
+    await expect(observed.fetch(new Request(`${server.origin}/redirect`, { redirect: "error" }))).rejects.toBeInstanceOf(NetworkError);
+    expect(sent).toEqual(["manual", "error", "error"]);
+  });
+
+  it("reports a failing fetch as a network error, a redirect the runtime hid as one too, and an abort as its own reason", async () => {
+    const failing = await ehbpMode({
+      fetch: async () => {
+        throw new TypeError("fetch failed");
+      },
+    }).bind(verification(server.publicKeyHex));
+    for (const init of [{ method: "POST", body: "x" }, {}]) {
+      const err = await failing.fetch(`${server.origin}/echo`, init).catch((e: unknown) => e);
+      expect(err).toBeInstanceOf(NetworkError);
+      expect((err as Error).message).toBe("network error: fetch failed");
+      expect((err as Error).cause).toBeInstanceOf(TypeError);
+    }
+
+    const hidden = await ehbpMode({
+      fetch: async () => {
+        const response = new Response(null, { status: 200 });
+        Object.defineProperty(response, "type", { value: "opaqueredirect" });
+        return response;
+      },
+    }).bind(verification(server.publicKeyHex));
+    const hiddenErr = await hidden.fetch(`${server.origin}/plain`).catch((e: unknown) => e);
+    expect(hiddenErr).toBeInstanceOf(NetworkError);
+    expect((hiddenErr as Error).message).toMatch(/redirected the request, which a sealed request does not follow/);
+
+    const reason = new Error("caller gave up");
+    const aborting = await ehbpMode({
+      fetch: async (_input, init) => {
+        init?.signal?.throwIfAborted();
+        return new Response("late");
+      },
+    }).bind(verification(server.publicKeyHex));
+    await expect(aborting.fetch(`${server.origin}/echo`, { method: "POST", body: "x", signal: AbortSignal.abort(reason) })).rejects.toBe(reason);
+    await expect(aborting.fetch(new Request(`${server.origin}/echo`, { method: "POST", body: "x", signal: AbortSignal.abort(reason) }))).rejects.toBe(reason);
+    await expect(aborting.fetch(`${server.origin}/plain`, { signal: AbortSignal.abort(reason) })).rejects.toBe(reason);
+  });
+
   it("sends through the fetch it is given", async () => {
     const urls: string[] = [];
     const observed = ehbpMode({
@@ -229,10 +293,31 @@ describe("base URL rules", () => {
     for (const ok of ["https://proxy.example/v1/", "http://localhost:8080/", "http://127.0.0.1/", "http://127.9.9.9:3000/x", "http://[::1]:8443/"]) {
       expect(() => validateBaseURL(ok), ok).not.toThrow();
     }
-    for (const bad of ["http://proxy.example/", "http://10.0.0.1/", "ftp://x/", "/relative", "http://localhost.evil.example/", "https://proxy.example/v1/?key=1", "https://proxy.example/v1/#frag", "https://proxy.example/?"]) {
+    for (const bad of ["http://proxy.example/", "http://10.0.0.1/", "ftp://x/", "/relative", "http://localhost.evil.example/", "https://proxy.example/v1/?key=1", "https://proxy.example/v1/#frag", "https://proxy.example/?", "https://user:pw@proxy.example/v1/", "https://user@proxy.example/", "http://u:p@localhost:8080/"]) {
       expect(() => validateBaseURL(bad), bad).toThrow(ConfigurationError);
     }
     expect(() => validateBaseURL("https://proxy.example/v1?x=1")).toThrow(/query string or fragment/);
+    const credentials = ((): Error => {
+      try {
+        validateBaseURL("https://user:hunter2@proxy.example/v1/");
+      } catch (err) {
+        return err as Error;
+      }
+      throw new Error("accepted");
+    })();
+    expect(credentials.message).toMatch(/a username or password can't be part of a base URL/);
+    expect(credentials.message).not.toContain("hunter2");
+    // Credentials are refused before a query string or fragment is, whose error repeats the URL.
+    const credentialsAndQuery = ((): Error => {
+      try {
+        validateBaseURL("https://user:hunter2@proxy.example/v1/?k=1");
+      } catch (err) {
+        return err as Error;
+      }
+      throw new Error("accepted");
+    })();
+    expect(credentialsAndQuery.message).toMatch(/a username or password can't be part of a base URL/);
+    expect(credentialsAndQuery.message).not.toContain("hunter2");
     expect(isLoopback("LOCALHOST")).toBe(true);
     expect(isLoopback("[::1]")).toBe(true);
     expect(isLoopback("127.0.0.1")).toBe(true);

@@ -15,10 +15,18 @@ import type { Enclave } from "../enclave.js";
 import { VerifiedEnclave, type State } from "../verified.js";
 import { requestURL } from "./origin.js";
 
-/** A fetch tied to one verification's keys, and how to release what it holds (connections) when replaced. */
+/** A fetch tied to one verification's keys, and how to release what it holds (connections). */
 export interface BoundFetch {
   readonly fetch: Fetch;
+  /** Releases everything the binding holds, ending a request still in flight on it: the client is closing. */
   readonly close?: () => void;
+  /**
+   * Retires the binding once a newer verification replaces it: what it
+   * holds idle is released and nothing more is kept, while a request in
+   * flight on it, sent under the keys it checked, finishes. Defaults to
+   * {@link close}.
+   */
+  readonly retire?: () => void;
 }
 
 /** What a mode inspects about a request before any network I/O. */
@@ -40,6 +48,27 @@ export function shapeOf(input: string | URL | Request, init?: RequestInit): Requ
     headers: new Headers(init?.headers ?? request?.headers),
     hasBody,
   };
+}
+
+/**
+ * The signal a fetch call is under: the init's, or a Request input's own
+ * when the init names none. An init signal of null means none, as the
+ * Request constructor reads it.
+ */
+export function signalOf(input: string | URL | Request, init?: RequestInit): AbortSignal | undefined {
+  if (init?.signal !== undefined) return init.signal ?? undefined;
+  return input instanceof Request ? input.signal : undefined;
+}
+
+/**
+ * How a mode's fetch handles a redirect: it is handed back to the caller as
+ * the response it is, never followed, since following would carry the
+ * request wherever the redirect points, past the origin the client is bound
+ * to and the keys the mode protects it with. A request that asked for an
+ * error on a redirect keeps that.
+ */
+export function noFollow(redirect: RequestRedirect | undefined): RequestRedirect {
+  return redirect === "error" ? "error" : "manual";
 }
 
 /**
@@ -106,19 +135,37 @@ export function isKeyRejection(err: unknown): boolean {
 export class KeyedTransport {
   readonly #mode: Mode;
   readonly #cache: VerifiedEnclave<BoundFetch>;
+  #closed = false;
+  /** Bindings retired while the transport was open: a request may still be in flight on one, so each is closed outright when the transport closes. */
+  readonly #retired = new Set<BoundFetch>();
   /** Sends a request over a fetch tied to the current verification's keys, verifying first if needed. */
   readonly fetch: Fetch;
 
   constructor(enclave: Enclave, mode: Mode, clock: () => Date = () => new Date()) {
     this.#mode = mode;
-    this.#cache = new VerifiedEnclave<BoundFetch>(enclave, (v) => mode.bind(v), clock, (bound) => bound.close?.());
+    this.#cache = new VerifiedEnclave<BoundFetch>(enclave, (v) => mode.bind(v), clock, (bound) => this.#release(bound));
     this.fetch = (input, init) => this.#send(input, init);
+  }
+
+  /**
+   * Releases a binding the cache lets go of. A binding replaced while the
+   * transport is open is retired and kept until the transport closes: a
+   * request that received its state may still be in flight on it. Once the
+   * transport closes, every binding is closed outright.
+   */
+  #release(bound: BoundFetch): void {
+    if (this.#closed || bound.retire === undefined) {
+      bound.close?.();
+      return;
+    }
+    bound.retire();
+    this.#retired.add(bound);
   }
 
   async #send(input: string | URL | Request, init?: RequestInit): Promise<Response> {
     // Validate first, so a request the mode can't protect never triggers a verification.
     this.#mode.validateRequest(shapeOf(input, init));
-    const state = await this.#cache.ensureVerified(init?.signal ?? undefined);
+    const state = await this.#cache.ensureVerified(signalOf(input, init));
     try {
       return await state.bound.fetch(input, init);
     } catch (err) {
@@ -169,12 +216,16 @@ export class KeyedTransport {
   }
 
   /**
-   * Releases what the current binding holds (the mode's pooled connections,
-   * if any) and refuses further use: requests and verification calls reject
-   * as closed, while {@link current} still reports the last verification.
+   * Releases what the current binding and every retired one hold (the
+   * mode's pooled connections, if any, requests in flight on them included)
+   * and refuses further use: requests and verification calls reject as
+   * closed, while {@link current} still reports the last verification.
    * Closing again does nothing.
    */
   close(): void {
+    this.#closed = true;
     this.#cache.close();
+    for (const bound of this.#retired) bound.close?.();
+    this.#retired.clear();
   }
 }
