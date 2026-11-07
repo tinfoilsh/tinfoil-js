@@ -31,7 +31,7 @@ import {
 } from "./sigstore.js";
 import { der as strictDER } from "./quote/crypto.js";
 import { canonicalVersion, fullVersion, runtimePin } from "./runtime.js";
-import { freshnessTime, PLATFORM_REPO, type Reference } from "./references.js";
+import { freshnessTime, MAX_FUTURE_SKEW, PLATFORM_REPO, type Reference } from "./references.js";
 export const DEFAULT_SIGNING_KEY = unbase64(
   "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEcadRPBdmNf1LPWYcY9AZ2CrrqxsynqzLE7k3kahjPxIM42bgZbze0GnT/EmGqe1w6So5AhmXci8By8Azt8gAhw==",
 );
@@ -330,7 +330,8 @@ export async function verifyConfigApproval(
     maxAge,
   );
   if (b.signedAt) {
-    freshnessTime(b.signedAt, now, maxAge);
+    if (!Number.isFinite(b.signedAt.getTime()) || b.signedAt.getTime() > now.getTime() + MAX_FUTURE_SKEW)
+      throw new Error("Signature timestamp is in the future");
     if (approvalTime.getTime() > b.signedAt.getTime() + CERTIFICATE_CLOCK_SKEW)
       throw new Error("Approval timestamp follows signature timestamp");
   }

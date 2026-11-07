@@ -116,6 +116,11 @@ describe('portable v3 hardware',()=>{
    if(accept)await expect(authenticate(f)).resolves.toBeDefined();else await expect(authenticate(f)).rejects.toMatchObject({layer:'quote'});
   }
  });
+ it.each(['tcbInfo','enclaveIdentity'] as const)('propagates signed PCS %s expiration',async kind=>{
+  const expiry=new Date((tdx.time+60)*1000);
+  const f=await pcs(tdx,kind,o=>{o.nextUpdate=expiry.toISOString();});
+  expect((await authenticate(f)).expiresAt).toEqual(expiry);
+ });
  it('requires each SNP and TDX policy field in both platform profiles',()=>{
   const required={sev_snp:['minimum_build','minimum_api_version','minimum_abi_version','minimum_guest_svn','minimum_tcb','minimum_launch_tcb','vmpl','image_id','family_id','minimum_launch_mitigation_vector','minimum_current_mitigation_vector'],tdx:['qe_vendor_id','minimum_tee_tcb_svn','mr_seam','td_attributes','xfam','minimum_tcb_evaluation_data_number']};
   for(const base of [sev,tdx])for(const config of [false,true]){

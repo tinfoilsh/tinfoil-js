@@ -3,7 +3,7 @@ import { crlURL, pckExtensions, PCSReplay, signedPCS, verifyPCKCRLChain, type PC
 import { INTEL_SGX } from '../quote/roots.js';
 import { buffer, concat, digest, equal, pemCertificates, requireThat, unhex, verifyChain, verifyCRL, verifyEC } from '../quote/crypto.js';
 
-export interface AuthenticatedTDX { quote: TDXQuote; identity: string; tcbEvaluationDataNumber: number }
+export interface AuthenticatedTDX { quote: TDXQuote; identity: string; tcbEvaluationDataNumber: number; expiresAt: Date }
 function masked(actual: Uint8Array, mask: unknown, expected: unknown): void {
   requireThat(typeof mask === 'string' && typeof expected === 'string', 'missing Intel identity mask');
   const m = unhex(mask, actual.length), e = unhex(expected, actual.length);
@@ -26,16 +26,16 @@ export async function authenticateTDX(raw: Uint8Array, responses: PCSResponse[],
   requireThat(caName === 'Intel SGX PCK Platform CA' || caName === 'Intel SGX PCK Processor CA', 'unsupported PCK issuer');
   for (const cert of chain) requireThat(cert.signatureAlgorithmOid === '1.2.840.10045.4.3.2', 'Intel certificate requires ECDSA SHA-256');
   const anchors = pemCertificates(rootPem ?? INTEL_SGX);
-  await verifyChain(chain, anchors, now);
+  const certExpiresAt = await verifyChain(chain, anchors, now);
   const pckExt = pckExtensions(pck), replay = new PCSReplay(responses);
   const rootCRL = replay.get(crlURL(root)).body;
-  await verifyCRL(rootCRL, root, now, [intermediate]);
+  const rootCRLExpiresAt = await verifyCRL(rootCRL, root, now, [intermediate]);
   const ca = caName === 'Intel SGX PCK Platform CA' ? 'platform' : 'processor';
   const crl = replay.get(`https://api.trustedservices.intel.com/sgx/certification/v4/pckcrl?ca=${ca}&encoding=der`);
-  await verifyPCKCRLChain(crl, anchors, intermediate, now);
-  await verifyCRL(crl.body, intermediate, now, [pck]);
-  const tcb = await signedPCS(replay, `https://api.trustedservices.intel.com/tdx/certification/v4/tcb?fmspc=${pckExt.fmspc}`, 'tcbInfo', anchors, rootCRL, now);
-  const qe = await signedPCS(replay, 'https://api.trustedservices.intel.com/tdx/certification/v4/qe/identity', 'enclaveIdentity', anchors, rootCRL, now);
+  const crlIssuerExpiresAt = await verifyPCKCRLChain(crl, anchors, intermediate, now);
+  const pckCRLExpiresAt = await verifyCRL(crl.body, intermediate, now, [pck]);
+  const { value: tcb, expiresAt: tcbExpiresAt } = await signedPCS(replay, `https://api.trustedservices.intel.com/tdx/certification/v4/tcb?fmspc=${pckExt.fmspc}`, 'tcbInfo', anchors, rootCRL, now);
+  const { value: qe, expiresAt: qeExpiresAt } = await signedPCS(replay, 'https://api.trustedservices.intel.com/tdx/certification/v4/qe/identity', 'enclaveIdentity', anchors, rootCRL, now);
   const attestKey = await crypto.subtle.importKey('raw', buffer(concat(new Uint8Array([4]), quote.attestationKey)), { name: 'ECDSA', namedCurve: 'P-256' }, false, ['verify']);
   await verifyEC(attestKey, quote.signature, quote.bytes.slice(0, 0x278));
   const pckKey = await crypto.subtle.importKey('spki', buffer(pck.publicKey), { name: 'ECDSA', namedCurve: 'P-256' }, false, ['verify']);
@@ -66,5 +66,6 @@ export async function authenticateTDX(raw: Uint8Array, responses: PCSResponse[],
   requireThat(equal(quote.qeReport.slice(0x80, 0xa0), unhex(qe.mrsigner, 32)), 'QE report signer mismatch');
   requireThat(qeView.getUint16(0x100, true) === number(qe.isvprodid), 'QE report product ID mismatch');
   level(qe.tcbLevels, candidate => qeView.getUint16(0x102, true) >= number(candidate.isvsvn), 'QE');
-  return { quote, identity: pckExt.ppid, tcbEvaluationDataNumber: Math.min(tcb.tcbEvaluationDataNumber, qe.tcbEvaluationDataNumber) };
+  const expiresAt = new Date(Math.min(...[certExpiresAt, rootCRLExpiresAt, crlIssuerExpiresAt, pckCRLExpiresAt, tcbExpiresAt, qeExpiresAt].map(t => t.getTime())));
+  return { quote, identity: pckExt.ppid, tcbEvaluationDataNumber: Math.min(tcb.tcbEvaluationDataNumber, qe.tcbEvaluationDataNumber), expiresAt };
 }

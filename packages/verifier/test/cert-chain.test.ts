@@ -6,6 +6,7 @@ import { certificate, der, pemCertificates, verifyChain, verifyCRL } from '../sr
 import { AMD_GENOA, AMD_TURIN } from '../src/quote/roots.js';
 
 const now = new Date('2026-10-24T00:00:00Z');
+const crlExpiry = new Date('2026-11-01T00:00:00Z');
 const data = JSON.parse(readFileSync(new URL('fixtures/hardware-v3/x509-constraints.json', import.meta.url), 'utf8'));
 const bytes = (name: string) => Uint8Array.from(Buffer.from(data[name], 'base64'));
 const cert = (name: string) => certificate(bytes(name));
@@ -13,26 +14,26 @@ const cert = (name: string) => certificate(bytes(name));
 describe('portable certificate authentication', () => {
   it.each([['Genoa', AMD_GENOA], ['Turin', AMD_TURIN]])('validates pinned %s ASK and ARK signatures', async (_, pem) => {
     const [ask, ark] = pemCertificates(pem);
-    await expect(verifyChain([ask, ark], [ark], now, 5)).resolves.toBeUndefined();
+    await expect(verifyChain([ask, ark], [ark], now, 5)).resolves.toEqual(new Date(Math.min(+ask.notAfter, +ark.notAfter)));
   });
 
   it('enforces the certificate use required by the authenticated object', async () => {
     const root = cert('root'), issuer = cert('issuer');
-    await expect(verifyChain([cert('leaf'), issuer, root], [root], now)).resolves.toBeUndefined();
+    await expect(verifyChain([cert('leaf'), issuer, root], [root], now)).resolves.toEqual(cert('leaf').notAfter);
     await expect(verifyChain([cert('wrongUsageLeaf'), issuer, root], [root], now)).rejects.toThrow('key usage');
-    await expect(verifyChain([issuer, root], [root], now, 6)).resolves.toBeUndefined();
+    await expect(verifyChain([issuer, root], [root], now, 6)).resolves.toEqual(issuer.notAfter);
     await expect(verifyChain([issuer, root], [root], now)).rejects.toThrow('key usage');
   });
 
   it('authenticates CRLs containing serials above uint64 and detects exact revocation', async () => {
     const issuer = cert('issuer'), leaf = cert('leaf');
-    await expect(verifyCRL(bytes('otherCRL'), issuer, now, [leaf])).resolves.toBeUndefined();
+    await expect(verifyCRL(bytes('otherCRL'), issuer, now, [leaf])).resolves.toEqual(crlExpiry);
     await expect(verifyCRL(bytes('revokedCRL'), issuer, now, [leaf])).rejects.toThrow('revoked');
   });
   it.each(['leaf', 'issuer', 'root'])('checks both validity endpoints of the %s certificate independently', async narrow => {
     const chain = [cert(`${narrow}WindowLeaf`), cert(`${narrow}WindowIssuer`), cert(`${narrow}WindowRoot`)];
     const start = new Date('2026-10-23T00:00:00Z'), end = new Date('2026-11-01T00:00:00Z');
-    for (const at of [start, end]) await expect(verifyChain(chain, [chain[2]], at)).resolves.toBeUndefined();
+    for (const at of [start, end]) await expect(verifyChain(chain, [chain[2]], at)).resolves.toEqual(end);
     for (const at of [new Date(+start - 1), new Date(+end + 1)]) await expect(verifyChain(chain, [chain[2]], at)).rejects.toThrow('validity window');
   });
 
@@ -61,7 +62,7 @@ it('rejects malformed extensions in authentically signed CRLs', async () => {
       const signature = sign('sha256', tbs.toDER(), key);
       crl.subs[2] = new ASN1Obj(crl.subs[2].tag, Uint8Array.from([0, ...signature]), []);
       const verify = verifyCRL(crl.toDER(), cert('issuer'), now, [cert('leaf')]);
-      if (index < 2) await expect(verify).resolves.toBeUndefined();
+      if (index < 2) await expect(verify).resolves.toEqual(crlExpiry);
       else await expect(verify).rejects.toThrow('invalid CRL extension structure');
     }
   }

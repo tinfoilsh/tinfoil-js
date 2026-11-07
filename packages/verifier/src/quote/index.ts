@@ -15,7 +15,7 @@ export type { PlatformArtifact, Shape } from '../policy/index.js';
 export interface QuoteEvidence { format: string; report: Uint8Array }
 /** Internal per-call test seam. Never accepted by the public verifier options. */
 export interface QuoteTrust { amdRootPem?: string; intelRootPem?: string }
-export interface AuthenticatedQuote { readonly platform: 'sev-snp' | 'tdx'; readonly identity: string; readonly measurement: Measurement }
+export interface AuthenticatedQuote { readonly platform: 'sev-snp' | 'tdx'; readonly identity: string; readonly measurement: Measurement; readonly expiresAt: Date }
 interface State { evidence: QuoteEvidence; sev?: Report; tdx?: AuthenticatedTDX }
 const authenticated = new WeakMap<AuthenticatedQuote, State>();
 export function authenticateQuote(evidence: QuoteEvidence, endorsements: CPUEndorsements, now: Date, privateTrust?: QuoteTrust): Promise<AuthenticatedQuote> {
@@ -26,14 +26,14 @@ export function authenticateQuote(evidence: QuoteEvidence, endorsements: CPUEndo
     switch (evidence.format) {
       case 'https://tinfoil.sh/format/sev-snp-report/v1': {
         requireThat(endorsements.amdVcek && endorsements.amdCrl, 'SEV authentication requires AMD VCEK and CRL collateral');
-        const sev = await authenticateSEV({ report: copied.report, ...endorsements.amdVcek, ...endorsements.amdCrl }, now, privateTrust?.amdRootPem);
-        q = Object.freeze({ platform: 'sev-snp', identity: sev.identity, measurement: Object.freeze({ type: 'sev-snp', launch: sev.launch }) }); state = { evidence: copied, sev }; break;
+        const { report: sev, expiresAt } = await authenticateSEV({ report: copied.report, ...endorsements.amdVcek, ...endorsements.amdCrl }, now, privateTrust?.amdRootPem);
+        q = Object.freeze({ platform: 'sev-snp', identity: sev.identity, measurement: Object.freeze({ type: 'sev-snp', launch: sev.launch }), expiresAt }); state = { evidence: copied, sev }; break;
       }
       case 'https://tinfoil.sh/format/tdx-quote/v1': {
         requireThat(endorsements.intelPcs, 'TDX authentication requires Intel PCS collateral');
         const tdx = await authenticateTDX(copied.report, endorsements.intelPcs.responses, now, privateTrust?.intelRootPem);
         const [rtmr0, rtmr1, rtmr2, rtmr3] = tdx.quote.rtmrs;
-        q = Object.freeze({ platform: 'tdx', identity: tdx.identity, measurement: Object.freeze({ type: 'tdx', mrtd: tdx.quote.mrtd, rtmr0, rtmr1, rtmr2, rtmr3 }) }); state = { evidence: copied, tdx }; break;
+        q = Object.freeze({ platform: 'tdx', identity: tdx.identity, measurement: Object.freeze({ type: 'tdx', mrtd: tdx.quote.mrtd, rtmr0, rtmr1, rtmr2, rtmr3 }), expiresAt: tdx.expiresAt }); state = { evidence: copied, tdx }; break;
       }
       default: throw new Error('unsupported CPU evidence format');
     }

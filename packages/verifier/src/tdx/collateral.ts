@@ -88,15 +88,15 @@ function rawMember(text: string, key: string): string {
   }
   throw new Error(`PCS response missing ${key}`);
 }
-export async function signedPCS(replay: PCSReplay, url: string, name: 'tcbInfo' | 'enclaveIdentity', anchors: X509Certificate[], rootCRL: Uint8Array, now: Date): Promise<any> {
+export async function signedPCS(replay: PCSReplay, url: string, name: 'tcbInfo' | 'enclaveIdentity', anchors: X509Certificate[], rootCRL: Uint8Array, now: Date): Promise<{ value: any; expiresAt: Date }> {
   const response = replay.get(url);
   const text = new TextDecoder('utf-8', { fatal: true }).decode(response.body);
   const parsed = parseJSON(text);
   requireThat(parsed && typeof parsed === 'object' && !Array.isArray(parsed) && Object.keys(parsed).length === 2 && parsed[name] && typeof parsed.signature === 'string', 'invalid signed PCS response');
   const chain = issuerChain(response, name === 'tcbInfo' ? 'Tcb-Info-Issuer-Chain' : 'Sgx-Enclave-Identity-Issuer-Chain');
   requireThat(chain[0].subjectDN.get('CN') === 'Intel SGX TCB Signing', 'unexpected PCS signing certificate');
-  await verifyChain(chain, anchors, now);
-  await verifyCRL(rootCRL, chain[1], now, [chain[0]]);
+  const certExpiresAt = await verifyChain(chain, anchors, now);
+  const crlExpiresAt = await verifyCRL(rootCRL, chain[1], now, [chain[0]]);
   const key = await crypto.subtle.importKey('spki', buffer(chain[0].publicKey), { name: 'ECDSA', namedCurve: 'P-256' }, false, ['verify']);
   await verifyEC(key, unhex(parsed.signature, 64), new TextEncoder().encode(rawMember(text, name)));
   const value = parsed[name];
@@ -104,10 +104,10 @@ export async function signedPCS(replay: PCSReplay, url: string, name: 'tcbInfo' 
   requireThat(typeof value.issueDate === 'string' && typeof value.nextUpdate === 'string', 'missing PCS validity window');
   checkTime(new Date(value.issueDate), new Date(value.nextUpdate), now, name);
   requireThat(Number.isSafeInteger(value.tcbEvaluationDataNumber) && value.tcbEvaluationDataNumber >= 0 && Array.isArray(value.tcbLevels) && value.tcbLevels.length > 0, 'invalid PCS TCB fields');
-  return value;
+  return { value, expiresAt: new Date(Math.min(certExpiresAt.getTime(), crlExpiresAt.getTime(), new Date(value.nextUpdate).getTime())) };
 }
-export async function verifyPCKCRLChain(response: PCSResponse, anchors: X509Certificate[], expectedIssuer: X509Certificate, now: Date): Promise<void> {
+export async function verifyPCKCRLChain(response: PCSResponse, anchors: X509Certificate[], expectedIssuer: X509Certificate, now: Date): Promise<Date> {
   const chain = issuerChain(response, 'Sgx-Pck-Crl-Issuer-Chain');
   requireThat(hex(chain[0].root.toDER()) === hex(expectedIssuer.root.toDER()), 'PCK CRL issuer chain mismatch');
-  await verifyChain(chain, anchors, now, 6);
+  return verifyChain(chain, anchors, now, 6);
 }

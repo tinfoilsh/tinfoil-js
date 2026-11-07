@@ -1,11 +1,13 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createVerifierForConformance, Verifier } from "../src/client.js";
 import { parseJSON, unbase64, unhex, utf8 } from "../src/encoding.js";
-import { KEY_TLS, KEY_HPKE } from "../src/document.js";
+import { KEY_TLS, KEY_HPKE, parseDocument } from "../src/document.js";
+import { authenticateQuote } from "../src/quote/index.js";
 import type { UntrustedConfig, VerifierOptions } from "../src/types.js";
 import embeddedFixture from "./fixtures/registry-v3/snp-golden-all-embedded.json";
 import signedFixture from "./fixtures/registry-v3/snp-golden.json";
 import capture from "./fixtures/production-v3.json";
+import tdxCapture from "./fixtures/production-tdx-v3.json";
 
 function trust(input: typeof signedFixture.input) {
   return {
@@ -53,7 +55,9 @@ describe("immutable caller policy and verification time", () => {
     expect(result.platform?.digest).toBe(
       embeddedFixture.expected.platform.digest,
     );
-    expect(result.freshnessExpiresAt).toBeUndefined();
+    const doc = await parseDocument(unbase64(input.document_b64), unhex(input.nonce_hex));
+    const cpu = await authenticateQuote(doc.evidence, doc.collateral.cpu, result.metadata.verifiedAt, trust(input as any));
+    expect(result.freshnessExpiresAt).toEqual(cpu.expiresAt);
   });
 
   it("invokes concurrent authorizers with detached material and isolates their decisions", async () => {
@@ -186,6 +190,17 @@ describe("immutable caller policy and verification time", () => {
     expect(result.cryptoMaterialData("tls", KEY_HPKE)).toBeUndefined();
     expect(result.cryptoMaterialData("missing", KEY_TLS)).toBeUndefined();
   });
+});
+
+it.each([capture, tdxCapture])("caps cached verification at authenticated hardware expiry: $identity", async sample => {
+  const longMaxAge = 365 * 24 * 60 * 60 * 1000;
+  const verifier = new Verifier({ freshnessMaxAgeMs: longMaxAge });
+  const raw = unbase64(sample.documentBase64), nonce = unhex(sample.nonceHex), now = new Date(sample.capturedAt);
+  const doc = await parseDocument(raw, nonce);
+  const cpu = await authenticateQuote(doc.evidence, doc.collateral.cpu, now);
+  const result = await verifier.verifyDocumentV3At(raw, nonce, sample.identity, now);
+  expect(result.freshnessExpiresAt).toEqual(cpu.expiresAt);
+  await expect(verifier.verifyDocumentV3At(raw, nonce, sample.identity, new Date(cpu.expiresAt.getTime() + 1))).rejects.toMatchObject({ layer: "quote" });
 });
 
 it("uses the default freshness window when zero is supplied", async () => {
