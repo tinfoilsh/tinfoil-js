@@ -1,0 +1,46 @@
+package endorsement_test
+
+import (
+	"crypto/sha256"
+	"crypto/x509"
+	"encoding/json"
+	"os"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/sigstore/sigstore-go/pkg/root"
+	"github.com/stretchr/testify/require"
+	config "github.com/tinfoilsh/tinfoil-go/endorsement/config"
+	"github.com/tinfoilsh/tinfoil-go/internal/sigstoretest"
+	"github.com/tinfoilsh/tinfoil-go/verify/internal/endorsement"
+)
+
+func TestGenerateSignatureTimeFixture(t *testing.T) {
+	f := sigstoretest.New(t)
+	rootKey := f.Key
+	leaf := sigstoretest.New(t).Key
+	certificate := f.SigningCertificate(t, leaf.Public())
+	f.Key = leaf
+	s, err := config.NewDeploymentStatement("/acme/app/v7", config.PublicRegistryID, []byte("cvm-version: 1.2.3@sha256:"+strings.Repeat("ab", sha256.Size)+"\n"))
+	require.NoError(t, err)
+	input, err := s.TimestampInput()
+	require.NoError(t, err)
+	approvalTime := f.Now.Add(config.CertificateClockSkew / 2)
+	payload, err := s.Complete(f.Timestamp(t, input, approvalTime))
+	require.NoError(t, err)
+	trust, err := root.NewTrustedRoot(root.TrustedRootMediaType01, nil, nil, f.Trust.TimestampingAuthorities(), f.Trust.RekorLogs())
+	require.NoError(t, err)
+	trustJSON, err := trust.MarshalJSON()
+	require.NoError(t, err)
+	key, err := x509.MarshalPKIXPublicKey(rootKey.Public())
+	require.NoError(t, err)
+	data, err := json.MarshalIndent(map[string]any{
+		"root": json.RawMessage(trustJSON), "key": key, "issuer": certificate.Issuer,
+		"now": f.Now.Unix(), "approvalTime": approvalTime.Unix(), "scope": config.PublicRegistryID,
+		"bundle":       json.RawMessage(sigstoretest.MarshalBundle(t, f.CertifiedBundle(t, payload, certificate, f.Now))),
+		"futureBundle": json.RawMessage(sigstoretest.MarshalBundle(t, f.CertifiedBundle(t, payload, certificate, f.Now.Add(endorsement.DefaultFutureSkew+time.Second)))),
+	}, "", "  ")
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(os.Getenv("SIGNATURE_TIME_FIXTURE"), append(data, '\n'), 0644))
+}

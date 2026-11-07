@@ -123,7 +123,7 @@ function usage(cert: X509Certificate, bit: number): void {
   // RFC 5280: absence of KeyUsage does not constrain the key.
   requireThat(!value || der(value.value).toBitString()[bit] === 1, 'certificate key usage does not permit operation');
 }
-export async function verifyChain(chain: X509Certificate[], anchors: X509Certificate[], now: Date, leafUsage = 0): Promise<void> {
+export async function verifyChain(chain: X509Certificate[], anchors: X509Certificate[], now: Date, leafUsage = 0): Promise<Date> {
   requireThat(chain.length >= 2 && anchors.some(a => equal(a.root.toDER(), chain[chain.length - 1].root.toDER())), 'certificate chain does not end at a pinned root');
   for (let i = 0; i < chain.length; i++) {
     const cert = chain[i], issuer = chain[Math.min(i + 1, chain.length - 1)];
@@ -140,6 +140,7 @@ export async function verifyChain(chain: X509Certificate[], anchors: X509Certifi
     try { await verifySigned(issuer, cert.root.subs[1], cert.signatureValue, cert.tbsCertificate.toDER()); }
     catch (cause) { throw new Error(`certificate signature verification failed for ${cert.subjectDN.get('CN')}: ${cause instanceof Error ? cause.message : String(cause)}`); }
   }
+  return new Date(Math.min(...chain.map(cert => cert.notAfter.getTime())));
 }
 function validateCRLExtensions(extensions: ASN1Obj): void {
   requireThat(extensions.tag.toDER() === 0x30 && extensions.subs.length > 0, 'invalid CRL extensions');
@@ -151,7 +152,7 @@ function validateCRLExtensions(extensions: ASN1Obj): void {
     requireThat(fields.length === 2 || !fields[1].toBoolean(), 'unsupported critical CRL extension');
   }
 }
-export async function verifyCRL(bytes: Uint8Array, issuer: X509Certificate, now: Date, subjects: X509Certificate[]): Promise<void> {
+export async function verifyCRL(bytes: Uint8Array, issuer: X509Certificate, now: Date, subjects: X509Certificate[]): Promise<Date> {
   const crl = der(bytes);
   requireThat(crl.tag.toDER() === 0x30 && crl.subs.length === 3, 'invalid CRL');
   const tbs = crl.subs[0], fields = tbs.subs;
@@ -159,7 +160,8 @@ export async function verifyCRL(bytes: Uint8Array, issuer: X509Certificate, now:
   if (fields[i].tag.isInteger()) requireThat(integer(fields[i++]) === 1n, 'unsupported CRL version');
   requireThat(equal(fields[i++].toDER(), crl.subs[1].toDER()), 'CRL signature algorithms differ');
   requireThat(equal(fields[i++].value, issuer.subject), 'CRL issuer mismatch');
-  checkTime(fields[i++].toDate(), fields[i++].toDate(), now, 'CRL');
+  const thisUpdate = fields[i++].toDate(), nextUpdate = fields[i++].toDate();
+  checkTime(thisUpdate, nextUpdate, now, 'CRL');
   usage(issuer, 6);
   requireThat(crl.subs[2].tag.isBitString() && crl.subs[2].value[0] === 0, 'invalid CRL signature bit string');
   await verifySigned(issuer, crl.subs[1], crl.subs[2].value.slice(1), tbs.toDER());
@@ -176,6 +178,7 @@ export async function verifyCRL(bytes: Uint8Array, issuer: X509Certificate, now:
     validateCRLExtensions(fields[i++].subs[0]);
   }
   requireThat(i === fields.length, 'unexpected CRL data');
+  return nextUpdate;
 }
 export async function verifyEC(key: CryptoKey, signature: Uint8Array, data: Uint8Array, hash = 'SHA-256'): Promise<void> {
   requireThat(await crypto.subtle.verify({ name: 'ECDSA', hash }, key, buffer(signature), buffer(data)), 'invalid ECDSA signature');

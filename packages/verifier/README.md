@@ -57,6 +57,8 @@ Generate a fresh nonce for each acquisition and pass the same nonce to verificat
 
 A successful `Verification` provides immutable authenticated facts, including `config`, `runtime`, `platform`, and `metadata`. Obtaining a TLS fingerprint does not pin a connection: a custom transport must compare it with the live peer certificate's SPKI on every new TLS connection, in addition to normal hostname and certificate validation. HPKE transports must bind encryption to the verified HPKE key, and live clients must refresh before the authenticated freshness deadline.
 
+`freshnessExpiresAt` is the earliest approval or CPU collateral deadline, including when references are embedded. Signature timestamps establish historical signing-certificate validity; approval freshness is governed by the signed approval timestamp.
+
 See [Attestation architecture](https://docs.tinfoil.sh/verification/attestation-architecture) and [Verification in Tinfoil](https://docs.tinfoil.sh/verification/verification-in-tinfoil) for what gets verified.
 
 ## Development

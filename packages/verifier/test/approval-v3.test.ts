@@ -8,6 +8,7 @@ import { base64, hex, parseJSON, sha256, unbase64, utf8 } from "../src/encoding.
 import { parseReference } from "../src/references.js";
 import boundaries from "./fixtures/approval-v3/boundaries.json";
 import certified from "./fixtures/approval-v3/certified.json";
+import signatureTime from "./fixtures/approval-v3/signature-time.json";
 const input = fixture.input;
 const document = parseJSON(unbase64(input.document_b64));
 const root = parseJSON(unbase64(input.sigstore_trusted_root_json_b64));
@@ -15,6 +16,21 @@ const now = new Date(input.verification_time_unix * 1000);
 const maxAge = 7 * 86400000;
 const material = (id: string) =>
   document.collateral.find((entry: any) => entry.id === id).data;
+
+it("uses signature time for historical certificate validity without a second approval lifetime", async () => {
+  const verify = (at: number, bundle = signatureTime.bundle) => verifyConfigApproval(
+    undefined, bundle, parseReference("acme/app"), [unbase64(signatureTime.key)],
+    signatureTime.root as any, new Date(at), maxAge,
+    { issuer: unbase64(signatureTime.issuer), registryIDs: [signatureTime.scope] },
+  );
+  const approvalDeadline = signatureTime.approvalTime * 1000 + maxAge;
+  const approved = await verify(signatureTime.now * 1000 + maxAge + 1);
+  expect(approved.signatureTime).toEqual(new Date(signatureTime.now * 1000));
+  expect(approved.approvalTime).toEqual(new Date(signatureTime.approvalTime * 1000));
+  await expect(verify(approvalDeadline)).resolves.toBeDefined();
+  await expect(verify(approvalDeadline + 1)).rejects.toThrow("stale");
+  await expect(verify(signatureTime.now * 1000, signatureTime.futureBundle)).rejects.toThrow("Signature timestamp is in the future");
+});
 
 describe.each(["config", "runtime", "platform"] as const)(
   "%s pinned approval profile",

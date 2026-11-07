@@ -312,7 +312,7 @@ export class Verifier {
       codeMeasurement: policy.codeMeasurement,
       enclaveMeasurement: quote.measurement,
       cryptoMaterial: doc.cryptoMaterial,
-      freshnessExpiresAt: refs.expiresAt,
+      freshnessExpiresAt: new Date(Math.min(refs.expiresAt?.getTime() ?? Infinity, quote.expiresAt.getTime())),
       metadata: {
         verifier: { name: VERIFIER_NAME, version: VERIFIER_VERSION },
         verifiedAt: now,
