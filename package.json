@@ -32,7 +32,7 @@
   },
   "dependencies": {
     "@freedomofpress/crypto-browser": "^0.3.0",
-    "@freedomofpress/sigstore-browser": "^0.3.0",
+    "@freedomofpress/sigstore-browser": "^0.3.1",
     "@freedomofpress/tuf-browser": "^0.3.0",
     "ehbp": "^0.5.0"
   },
