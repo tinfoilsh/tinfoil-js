@@ -9,8 +9,10 @@ A TypeScript client for verifiably private AI inference with Tinfoil. It wraps t
 ## Installation
 
 ```bash
-npm install tinfoil
+npm install tinfoil@next
 ```
+
+This README describes the 2.0 API, which is in prerelease, so it is published under the `next` tag. A plain `npm install tinfoil` still installs 1.x, whose API is documented in the [v1.4.0 README](https://github.com/tinfoilsh/tinfoil-js/blob/v1.4.0/README.md).
 
 ## Quick Start
 
