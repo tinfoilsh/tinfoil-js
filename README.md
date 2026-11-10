@@ -42,12 +42,33 @@ Bun pins the TLS connection from Bun 1.4.0, the first release whose `fetch` chec
 
 The request body is still encrypted to the verified enclave's key; the proxy only forwards it. `baseURL` is the API root, as for `new OpenAI({ baseURL })`: the client appends `chat/completions` and the other OpenAI paths to it, so a proxy that forwards paths as they are takes the enclave's `/v1/`. Multi-user services must scope prompt caches to each end user with `userCacheSecret` or a per-request `user_cache_secret`; see [Prompt caching](https://docs.tinfoil.sh/sdk/prompt-caching).
 
+### HTTP-only and lazy imports
+
+If you supply your own API client and need only the verified HTTP transport, import from `tinfoil/http`. It exports the same `RouterHTTPClient`, `EnclaveHTTPClient` and `GatewayHTTPClient` classes, their options, Tinfoil errors, catalog and session-recovery helpers, without importing the OpenAI client or AI SDK adapters. The package's browser mappings still select the browser transport; verification and encryption are unchanged.
+
+```typescript
+import { RouterHTTPClient, type RouterOptions } from "tinfoil/http";
+
+const options: RouterOptions = { transportMode: "ehbp" };
+const client = await RouterHTTPClient.create(options);
+// Pass client.fetch to your API client, and close it when finished.
+```
+
+To defer downloading and evaluating the transport until a user needs it, dynamically import the same entry inside that action:
+
+```typescript
+const { RouterHTTPClient } = await import("tinfoil/http");
+const client = await RouterHTTPClient.create({ transportMode: "ehbp" });
+```
+
+A bundler can put this dynamic import in a separate chunk, provided the transport isn't also imported eagerly elsewhere in the application. The root `tinfoil` imports remain available for the OpenAI-compatible clients and helpers, and `tinfoil/ai-sdk` remains the AI SDK entry.
+
 ### Custom network transport
 
 `RouterHTTPClient.create`, `EnclaveHTTPClient.create` and `GatewayHTTPClient.create`, and the route options of the OpenAI clients over them (`RouterOpenAIClient.create(routerOptions, openaiOptions)` and the enclave and gateway equivalents), take a `fetch` option: a fetch-compatible network implementation that carries their requests in the EHBP transport mode, for a native HTTP bridge (such as Tauri's) or a trusted relay. The AI SDK provider's `createTinfoil` takes it too. `createClient` takes only the OpenAI options, so it doesn't take it.
 
 ```typescript
-import { RouterHTTPClient } from "tinfoil";
+import { RouterHTTPClient } from "tinfoil/http";
 
 // nativeFetch: a fetch-compatible function that sends the sealed requests.
 const client = await RouterHTTPClient.create({ fetch: nativeFetch, transportMode: "ehbp" }); // "ehbp" is already the default in browsers
