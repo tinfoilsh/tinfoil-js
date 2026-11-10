@@ -1,13 +1,12 @@
 /** Exercise the published exports and browser mappings, not aliases to the source tree. */
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { build } from "vite";
 import { describe, expect, it } from "vitest";
 
 const packageRoot = fileURLToPath(new URL("../", import.meta.url));
-const built = existsSync(join(packageRoot, "dist/http.js"));
 
 /** Bundle a consumer through the public subpath, retaining the factory without making a network request. */
 async function bundleConsumer(lazy: boolean) {
@@ -54,7 +53,7 @@ async function bundleConsumer(lazy: boolean) {
   }
 }
 
-describe.skipIf(!built)("the published HTTP entry", () => {
+describe("the published HTTP entry", () => {
   it("loads in Node without resolving an API adapter", () => {
     execFileSync(process.execPath, ["--input-type=module", "--eval", `
       import { registerHooks } from "node:module";

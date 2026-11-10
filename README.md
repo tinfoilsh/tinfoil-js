@@ -99,6 +99,8 @@ npm test                    # unit tests
 npm run test:all            # unit, integration, and browser tests
 ```
 
+Run `npm run build` before testing: the published-entry and bundle tests inspect the emitted package artifacts and fail if they are missing. Rebuild after changing source files or package exports.
+
 ## Reporting Vulnerabilities
 
 Please report security vulnerabilities by either:

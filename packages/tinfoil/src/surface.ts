@@ -1,7 +1,7 @@
 /**
- * The public surface of the client: the names every entry point exports.
- * The Node and browser entries re-export this module; a platform-specific
- * behaviour lives behind the same names.
+ * The package root's public surface, shared by its Node and browser entries.
+ * The `tinfoil/http` entry exposes the HTTP subset through `./http.js`;
+ * platform-specific behaviour lives behind the same client names.
  */
 export * from "./http.js";
 export { TinfoilClient, createClient, EnclaveOpenAIClient, RouterOpenAIClient, GatewayOpenAIClient, type OpenAIOptions } from "./openai-client.js";
