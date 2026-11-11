@@ -63,7 +63,8 @@ The clients throw three error classes, each a `TinfoilError` with a `category`, 
 
 ## Documentation
 
-- [JavaScript SDK documentation](https://docs.tinfoil.sh/sdk/javascript-sdk). Realtime transcription over WebSockets is covered in [Processing audio](https://docs.tinfoil.sh/guides/processing-audio): `createRealtimeWebSocket(client, { model })` opens a session over a WebSocket pinned to the attested key.
+- [JavaScript SDK documentation](https://docs.tinfoil.sh/sdk/javascript-sdk), which describes the 1.x API until 2.0 is released; for 2.0, use this README and the migration guide below.
+- Realtime transcription over WebSockets uses `createRealtimeWebSocket(client, { model })`, which opens a session over a WebSocket pinned to the attested key.
 - [Examples](packages/tinfoil/examples/), including the Vercel AI SDK provider (`createTinfoil` from `tinfoil/ai-sdk`) on the server and in React.
 - [Migrating from 1.x to 2.0](https://github.com/tinfoilsh/tinfoil-js/blob/main/MIGRATION.md).
 - The resources a client exposes, such as `chat`, `responses`, `embeddings`, and `audio`, keep the OpenAI methods and types; see the [OpenAI Node client documentation](https://github.com/openai/openai-node).
