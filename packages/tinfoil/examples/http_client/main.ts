@@ -11,7 +11,7 @@
  * Prerequisites:
  * - Export your API key: export TINFOIL_API_KEY="<YOUR_API_KEY>"
  *
- * Run: npx ts-node main.ts
+ * Run from packages/tinfoil: npx ts-node examples/http_client/main.ts
  */
 import { RouterHTTPClient } from "tinfoil";
 
