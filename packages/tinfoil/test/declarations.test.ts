@@ -12,7 +12,7 @@ const dist = fileURLToPath(new URL("../dist/", import.meta.url));
 
 describePublishedDeclarations({
   dist,
-  entries: ["index.d.ts", "index.browser.d.ts", "ai-sdk.d.ts", "unsafe.d.ts"].map((e) => `${dist}${e}`),
+  entries: ["index.d.ts", "index.browser.d.ts", "http.d.ts", "ai-sdk.d.ts", "unsafe.d.ts"].map((e) => `${dist}${e}`),
   forbidden: [
     /@internal/,
     /KeyedTransport/,

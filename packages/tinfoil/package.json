@@ -21,6 +21,11 @@
       "import": "./dist/index.js",
       "default": "./dist/index.js"
     },
+    "./http": {
+      "types": "./dist/http.d.ts",
+      "import": "./dist/http.js",
+      "default": "./dist/http.js"
+    },
     "./ai-sdk": {
       "types": "./dist/ai-sdk.d.ts",
       "import": "./dist/ai-sdk.js",
@@ -33,7 +38,7 @@
     }
   },
   "scripts": {
-    "build": "node scripts/generate-version.mjs && tsc && node ../../scripts/prune-declarations.mjs dist dist/index.d.ts dist/index.browser.d.ts dist/ai-sdk.d.ts dist/unsafe.d.ts",
+    "build": "node scripts/generate-version.mjs && tsc && node ../../scripts/prune-declarations.mjs dist dist/index.d.ts dist/index.browser.d.ts dist/http.d.ts dist/ai-sdk.d.ts dist/unsafe.d.ts",
     "test": "node scripts/generate-version.mjs && vitest run",
     "test:integration": "RUN_TINFOIL_INTEGRATION=true npm test",
     "test:bun": "node scripts/generate-version.mjs && bun test --timeout 30000 ./test/surface.bun.ts ./test/tls.bun.ts ./test/ws.bun.ts",
