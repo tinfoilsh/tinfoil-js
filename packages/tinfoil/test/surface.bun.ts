@@ -5,6 +5,9 @@
 import { describe, expect, it } from "bun:test";
 import * as aiSdk from "../src/ai-sdk.js";
 import * as surface from "../src/index.js";
+// Resolved through the package's exports map, so these need `npm run build`.
+import * as builtHTTP from "tinfoil/http";
+import * as builtRoot from "tinfoil";
 
 describe("v3 client surface under Bun", () => {
   it("exposes the clients, the errors and the version", () => {
@@ -18,6 +21,14 @@ describe("v3 client surface under Bun", () => {
     expect(Object.keys(aiSdk)).toEqual(["createTinfoil"]);
     expect("createTinfoil" in surface).toBe(false);
     await expect(aiSdk.createTinfoil({})).rejects.toBeInstanceOf(surface.ConfigurationError);
+  });
+
+  it("resolves tinfoil/http to the root's HTTP clients without the OpenAI clients", () => {
+    for (const name of ["EnclaveHTTPClient", "RouterHTTPClient", "GatewayHTTPClient", "TinfoilError"] as const) {
+      expect(builtHTTP[name]).toBe(builtRoot[name]);
+    }
+    expect("createClient" in builtHTTP).toBe(false);
+    expect("createTinfoil" in builtHTTP).toBe(false);
   });
 
   it("checks client options before any network I/O", async () => {
