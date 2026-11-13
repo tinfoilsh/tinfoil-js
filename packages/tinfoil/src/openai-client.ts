@@ -4,7 +4,10 @@
  * replace them, and keeps both fixed afterwards, with `httpClient` beside
  * them: the properties can't be assigned, and `withOptions` doesn't take
  * `fetch` or `baseURL` (a clone ignores one passed from untyped code) and
- * keeps the attested transport. Per-request `fetchOptions` are passed through to the
+ * keeps the attested transport. The OpenAI options that would choose another
+ * transport or base URL (`dataResidency`, `provider`, `workloadIdentity`,
+ * `credential` and `x509Transport`) are refused, by the factories before any
+ * network I/O and by `withOptions`. Per-request `fetchOptions` are passed through to the
  * attested `fetch` and can't bypass it; only a separately constructed OpenAI
  * client sends requests outside the attested client's protections.
  *
@@ -18,16 +21,31 @@ import { ConfigurationError } from "./errors.js";
 import { createGatewayHTTPClient, GatewayHTTPClient, type GatewayClientSeams } from "./gateway-client.js";
 import { checkAPIKeyRuntime, registerCredential, type CredentialResolver } from "./internal/credential.js";
 import { asyncDispose } from "./internal/dispose.js";
+import type { RuntimeGlobals } from "./internal/platform.js";
 import type { EnclaveOptions, GatewayOptions, RouterOptions } from "./options.js";
 import { createRouterHTTPClient, RouterHTTPClient, type RouterClientSeams } from "./router-client.js";
 
 /**
+ * The OpenAI options that would route requests away from the attested
+ * transport: a data residency or a third-party provider picks a base URL
+ * over the client's, and the workload identity options authenticate through
+ * OpenAI's own token exchange or certificate transport. The OpenAI client
+ * refuses each of them alongside Tinfoil's `baseURL`, `apiKey` or `fetch`
+ * today, but they are refused here too, so that the guarantee doesn't depend
+ * on those checks. `OpenAIOptions` omits the same keys.
+ */
+const TRANSPORT_OPTIONS = ["dataResidency", "provider", "workloadIdentity", "credential", "x509Transport"] as const satisfies readonly (keyof ClientOptions)[];
+
+/**
  * The OpenAI options a client takes: everything but the transport it is
- * bound to. An `apiKey` is accepted only where the runtime is a server (Node
- * or Bun); anywhere else, `dangerouslyAllowBrowser` included, it is a
+ * bound to and the options that would choose another one (`dataResidency`,
+ * `provider`, `workloadIdentity`, `credential` and `x509Transport`), which
+ * are a {@link ConfigurationError} when untyped code passes one. An `apiKey`
+ * is accepted only where the runtime is a server (Node or Bun); anywhere
+ * else, `dangerouslyAllowBrowser` included, it is a
  * {@link ConfigurationError} naming `bearerToken` as the credential to give.
  */
-export type OpenAIOptions = Omit<ClientOptions, "fetch" | "baseURL"> & {
+export type OpenAIOptions = Omit<ClientOptions, "fetch" | "baseURL" | "dataResidency" | "provider" | "workloadIdentity" | "credential" | "x509Transport"> & {
   /**
    * A credential a browser page may hold, such as a short-lived token from
    * the application's own sign-in: sent as the API key, and allows browser
@@ -38,11 +56,37 @@ export type OpenAIOptions = Omit<ClientOptions, "fetch" | "baseURL"> & {
 };
 
 /**
+ * Refuses an option in {@link TRANSPORT_OPTIONS} that the caller set, which
+ * untyped code can pass whatever the type says. An option the caller holds
+ * as `undefined` or `null` is unset, as the OpenAI client treats it, and
+ * passes; so does one the options only inherit, which a spread doesn't copy.
+ */
+function refuseTransportOptions(options: object): void {
+  for (const key of TRANSPORT_OPTIONS) {
+    if (Object.prototype.hasOwnProperty.call(options, key) && (options as Record<string, unknown>)[key] != null) {
+      throw new ConfigurationError(`the ${key} option is not supported: the Tinfoil client owns the transport and base URL that requests go to`);
+    }
+  }
+}
+
+/**
+ * Checks the OpenAI options a factory is given before any network I/O: the
+ * options that would choose another transport, and an `apiKey` outside a
+ * server.
+ */
+function checkOpenAIOptions(options: OpenAIOptions, globals: RuntimeGlobals | undefined): void {
+  refuseTransportOptions(options);
+  checkAPIKeyRuntime(options.apiKey, globals);
+}
+
+/**
  * The options as the OpenAI client takes them, with a bearer token applied.
- * An `apiKey` outside a server is refused here too, so a clone made with
- * `withOptions` applies the rule as the factories do.
+ * The options that would choose another transport, and an `apiKey` outside a
+ * server, are refused here too, so that every constructor, and a clone made
+ * with `withOptions`, applies the rules as the factories do.
  */
 function openAIClientOptions(options: OpenAIOptions): Omit<ClientOptions, "fetch" | "baseURL"> {
+  refuseTransportOptions(options);
   const { bearerToken, ...rest } = options;
   checkAPIKeyRuntime(rest.apiKey);
   if (bearerToken === undefined || bearerToken === "") return rest;
@@ -162,7 +206,8 @@ export class TinfoilClient extends OpenAI {
   /**
    * A client with `options` applied over this one's, on the same attested
    * transport. `fetch` and `baseURL` aren't options here: the transport owns
-   * them, and one passed from untyped code is ignored.
+   * them, and one passed from untyped code is ignored. An option that would
+   * choose another transport, such as `provider`, is a {@link ConfigurationError}.
    */
   override withOptions(options: Partial<OpenAIOptions>): this {
     return new TinfoilClient(TOKEN, this.httpClient, inherit(this, options)) as this;
@@ -184,8 +229,8 @@ export class TinfoilClient extends OpenAI {
  * {@link createClient} is this with the default router options and no seams.
  */
 export async function createTinfoilClient(openaiOptions: OpenAIOptions, seams: RouterClientSeams, routerOptions: RouterOptions = {}): Promise<TinfoilClient> {
-  // The credential is checked first, so a client with the wrong one fails before any network I/O.
-  checkAPIKeyRuntime(openaiOptions.apiKey, seams.globals);
+  // The OpenAI options are checked first, so a client with the wrong ones fails before any network I/O.
+  checkOpenAIOptions(openaiOptions, seams.globals);
   const httpClient = await createRouterHTTPClient(routerOptions, seams);
   return constructTinfoil(httpClient, openaiOptions);
 }
@@ -203,7 +248,7 @@ export async function createEnclaveOpenAIClient(
   openaiOptions: OpenAIOptions,
   seams: EnclaveClientSeams,
 ): Promise<EnclaveOpenAIClient> {
-  checkAPIKeyRuntime(openaiOptions.apiKey, seams.globals);
+  checkOpenAIOptions(openaiOptions, seams.globals);
   const httpClient = await createEnclaveHTTPClient(host, repo, options, seams);
   return constructEnclave(httpClient, openaiOptions);
 }
@@ -232,7 +277,8 @@ export class EnclaveOpenAIClient extends OpenAI {
   /**
    * A client with `options` applied over this one's, on the same attested
    * transport. `fetch` and `baseURL` aren't options here: the transport owns
-   * them, and one passed from untyped code is ignored.
+   * them, and one passed from untyped code is ignored. An option that would
+   * choose another transport, such as `provider`, is a {@link ConfigurationError}.
    */
   override withOptions(options: Partial<OpenAIOptions>): this {
     return new EnclaveOpenAIClient(TOKEN, this.httpClient, inherit(this, options)) as this;
@@ -251,7 +297,7 @@ export class EnclaveOpenAIClient extends OpenAI {
 
 /** @internal The router OpenAI factory with its test seams; {@link RouterOpenAIClient.create} is this without them. */
 export async function createRouterOpenAIClient(options: RouterOptions, openaiOptions: OpenAIOptions, seams: RouterClientSeams): Promise<RouterOpenAIClient> {
-  checkAPIKeyRuntime(openaiOptions.apiKey, seams.globals);
+  checkOpenAIOptions(openaiOptions, seams.globals);
   const httpClient = await createRouterHTTPClient(options, seams);
   return constructRouter(httpClient, openaiOptions);
 }
@@ -279,7 +325,8 @@ export class RouterOpenAIClient extends OpenAI {
   /**
    * A client with `options` applied over this one's, on the same attested
    * transport. `fetch` and `baseURL` aren't options here: the transport owns
-   * them, and one passed from untyped code is ignored.
+   * them, and one passed from untyped code is ignored. An option that would
+   * choose another transport, such as `provider`, is a {@link ConfigurationError}.
    */
   override withOptions(options: Partial<OpenAIOptions>): this {
     return new RouterOpenAIClient(TOKEN, this.httpClient, inherit(this, options)) as this;
@@ -298,7 +345,7 @@ export class RouterOpenAIClient extends OpenAI {
 
 /** @internal The gateway OpenAI factory with its test seams; {@link GatewayOpenAIClient.create} is this without them. */
 export async function createGatewayOpenAIClient(options: GatewayOptions, openaiOptions: OpenAIOptions, seams: GatewayClientSeams): Promise<GatewayOpenAIClient> {
-  checkAPIKeyRuntime(openaiOptions.apiKey, seams.globals);
+  checkOpenAIOptions(openaiOptions, seams.globals);
   const httpClient = await createGatewayHTTPClient(options, seams);
   return constructGateway(httpClient, openaiOptions);
 }
@@ -327,7 +374,8 @@ export class GatewayOpenAIClient extends OpenAI {
   /**
    * A client with `options` applied over this one's, on the same attested
    * transport. `fetch` and `baseURL` aren't options here: the transport owns
-   * them, and one passed from untyped code is ignored.
+   * them, and one passed from untyped code is ignored. An option that would
+   * choose another transport, such as `provider`, is a {@link ConfigurationError}.
    */
   override withOptions(options: Partial<OpenAIOptions>): this {
     return new GatewayOpenAIClient(TOKEN, this.httpClient, inherit(this, options)) as this;

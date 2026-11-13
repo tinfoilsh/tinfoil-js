@@ -13,9 +13,10 @@ import * as surface from "../src/index.js";
 import * as unsafeEntry from "../src/unsafe.js";
 import { createEnclaveHTTPClient } from "../src/enclave-client.js";
 import { createGatewayHTTPClient } from "../src/gateway-client.js";
-import { createEnclaveOpenAIClient, createGatewayOpenAIClient, createRouterOpenAIClient } from "../src/openai-client.js";
+import { createEnclaveOpenAIClient, createGatewayOpenAIClient, createRouterOpenAIClient, createTinfoilClient } from "../src/openai-client.js";
 import { createRouterHTTPClient } from "../src/router-client.js";
 import type { Fetch } from "../src/options.js";
+import { refusal, TRANSPORT_OPTIONS } from "./helpers/transport-options.js";
 
 /** Every runtime export, sorted. Type-only exports are checked by compiling this file. */
 const EXPORTS = [
@@ -285,6 +286,26 @@ describe("public surface", () => {
     expect(attempts.length).toBe(4);
   });
 
+  it("refuses the OpenAI options that would choose another transport at compile time", () => {
+    // Checked by the test typecheck: each option below is a type error, in the factories and in withOptions.
+    const attempts = (tinfoil: surface.TinfoilClient): void => {
+      // @ts-expect-error `dataResidency` would pick a regional base URL over the client's.
+      void surface.createClient({ apiKey: "k", dataResidency: "eu" });
+      // @ts-expect-error `provider` would pick a third-party base URL over the client's.
+      void surface.RouterOpenAIClient.create({}, { apiKey: "k", provider: {} as never });
+      // @ts-expect-error `workloadIdentity` authenticates through OpenAI's own token exchange.
+      void surface.EnclaveOpenAIClient.create("h", "o/r", {}, { workloadIdentity: {} as never });
+      // @ts-expect-error `credential` would use OpenAI's own certificate transport.
+      void surface.GatewayOpenAIClient.create({}, { credential: {} as never });
+      // @ts-expect-error `x509Transport` would use OpenAI's own certificate transport.
+      tinfoil.withOptions({ x509Transport: {} as never });
+      // A type that omits them is still a valid argument.
+      const options: surface.OpenAIOptions = { apiKey: "k", organization: "o", defaultQuery: { q: "1" }, fetchOptions: {} };
+      void surface.createClient(options);
+    };
+    expect(attempts.length).toBe(1);
+  });
+
   it("opens WebSockets through functions that take a client, not through client methods", () => {
     for (const fn of [surface.createWebSocket, surface.pinnedWebSocketOptions, surface.createRealtimeWebSocket]) expect(typeof fn).toBe("function");
     expect(methodsOf(surface.EnclaveHTTPClient)).not.toContain("createWebSocket");
@@ -334,6 +355,25 @@ describe("public surface", () => {
       surface.ConfigurationError,
     );
     await expect(surface.RouterOpenAIClient.create({ baseURL: "http://proxy.example/" })).rejects.toBeInstanceOf(surface.ConfigurationError);
+  });
+
+  it("refuses the OpenAI options that would choose another transport before any network I/O", async () => {
+    const fetches = countingFetch();
+    const router = { routersFetch: fetches.fetch, documentFetch: fetches.fetch };
+    const factories: Record<string, (options: surface.OpenAIOptions) => Promise<unknown>> = {
+      createClient: (options) => createTinfoilClient(options, router),
+      RouterOpenAIClient: (options) => createRouterOpenAIClient({}, options, router),
+      EnclaveOpenAIClient: (options) => createEnclaveOpenAIClient("enclave.example", "tinfoilsh/repo", {}, options, { documentFetch: fetches.fetch }),
+      GatewayOpenAIClient: (options) => createGatewayOpenAIClient({}, options, { catalogFetch: fetches.fetch, documentFetch: fetches.fetch }),
+    };
+    for (const [name, factory] of Object.entries(factories)) {
+      for (const [key, value] of Object.entries(TRANSPORT_OPTIONS)) {
+        const failure = factory({ apiKey: "k", [key]: value } as surface.OpenAIOptions);
+        await expect(failure, `${name} ${key}`).rejects.toBeInstanceOf(surface.ConfigurationError);
+        await expect(failure, `${name} ${key}`).rejects.toThrow(refusal(key));
+      }
+    }
+    expect(fetches.calls).toBe(0);
   });
 
   it("fetches nothing before rejecting router client options", async () => {

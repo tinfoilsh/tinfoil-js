@@ -12,6 +12,7 @@ import type { Catalog, Fetch, GatewayOptions } from "../src/options.js";
 import { KEY_SPKI_FP_SHA256_V1_FORMAT, KEY_X25519_HPKE_V1_FORMAT, UsageError, type Verification, type Verifier } from "../../verifier/src/index.js";
 import { startEhbpServer, type EhbpServer } from "./helpers/ehbp-server.js";
 import { recordingFetch } from "./helpers/network.js";
+import { expectWithOptionsRefusesTransportOptions } from "./helpers/transport-options.js";
 
 const GATEWAY_URL = "https://gateway.example/v1/";
 const CATALOG = { "test-model": { repo: "tinfoilsh/test", hosts: ["replica-a.example", "replica-b.example"] }, other: { repo: "tinfoilsh/other", hosts: ["o.example"] } };
@@ -265,5 +266,6 @@ describe("GatewayOpenAIClient", () => {
     expect(sent.cache_salt).toMatch(/^[A-Za-z0-9_-]{43}$/);
     expect(sent.user_cache_secret).toBeUndefined();
     expect(() => new (GatewayOpenAIClient as any)(Symbol("x"), ai.httpClient, {})).toThrow(ConfigurationError);
+    expectWithOptionsRefusesTransportOptions(ai);
   });
 });
