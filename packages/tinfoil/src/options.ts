@@ -216,9 +216,9 @@ export interface RouterOptions {
   /**
    * The default prompt-cache scope. A non-empty `user_cache_secret` string
    * in a request's JSON body overrides it. Undefined or empty selects a
-   * random secret that is generated in memory once per process and shared
-   * by every client in it, so prompt-cache hits aren't shared across
-   * processes; pass a secret here to keep one that is stable across
+   * random secret that is generated in memory once for the current runtime
+   * (the process, or the page in a browser) and shared by every client in
+   * it, so prompt-cache hits aren't shared across processes; pass a secret here to keep one that is stable across
    * processes or machines. The SDK reads no environment variable or file
    * for it. Use an opaque random value, not a raw user ID or API key.
    */

@@ -10,8 +10,9 @@
  *
  *  1. a non-empty `user_cache_secret` string in the request body,
  *  2. the client's `userCacheSecret` option,
- *  3. a random secret that is generated in memory once per process and
- *     shared by every client in it.
+ *  3. a random secret that is generated in memory once for the current
+ *     runtime (the process, or the page in a browser) and shared by every
+ *     client in it.
  *
  * The SDK reads no environment variable or file for it: an application that
  * wants a secret that is stable across processes or machines passes
