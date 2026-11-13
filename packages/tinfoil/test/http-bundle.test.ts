@@ -84,7 +84,7 @@ describe("the published HTTP entry", () => {
     expect(modules.some((id) => id.endsWith("/internal/transport/ehbp.js"))).toBe(true);
     expect(modules.filter((id) => /\/node_modules\/(?:openai|ai|@ai-sdk)\//.test(id))).toEqual([]);
     expect(modules.filter((id) => /\/(?:openai-client|ai-sdk|realtime)\.js$/.test(id))).toEqual([]);
-    expect(modules.filter((id) => /\/internal\/(?:platform|transport\/tls|cachesecret-store)\.js$/.test(id))).toEqual([]);
+    expect(modules.filter((id) => /\/internal\/(?:platform|transport\/tls)\.js$/.test(id))).toEqual([]);
     if (lazy) {
       expect(dynamicImports).toHaveLength(1);
       expect(entryModules.filter((id) => /\/(?:packages\/tinfoil\/dist|node_modules)\//.test(id))).toEqual([]);

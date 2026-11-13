@@ -114,9 +114,9 @@ export class RouterHTTPClient {
 
   /**
    * A client for the discovered router. Options are checked before any
-   * network I/O; the router is verified before the client is returned. The
-   * user cache secret is resolved, when the option is empty, from the
-   * environment and then the persisted secret.
+   * network I/O; the router is verified before the client is returned. When
+   * the user cache secret option is empty, the client uses the process's
+   * generated secret.
    */
   static create(options?: RouterOptions): Promise<RouterHTTPClient> {
     return createRouterHTTPClient(options ?? {}, {});

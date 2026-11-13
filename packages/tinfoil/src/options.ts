@@ -214,10 +214,13 @@ export interface RouterOptions {
    */
   readonly verificationCheck?: VerificationCheck;
   /**
-   * The default prompt-cache scope; empty resolves it from the
-   * `TINFOIL_USER_CACHE_SECRET` environment variable, then the secret
-   * persisted at `~/.tinfoil/user_cache_secret`. A non-empty
-   * `user_cache_secret` string in a request's JSON body overrides it.
+   * The default prompt-cache scope. A non-empty `user_cache_secret` string
+   * in a request's JSON body overrides it. Undefined or empty selects a
+   * random secret that is generated in memory once per process and shared
+   * by every client in it, so prompt-cache hits aren't shared across
+   * processes; pass a secret here to keep one that is stable across
+   * processes or machines. The SDK reads no environment variable or file
+   * for it. Use an opaque random value, not a raw user ID or API key.
    */
   readonly userCacheSecret?: string;
   /**

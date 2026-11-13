@@ -8,7 +8,6 @@
   "sideEffects": false,
   "browser": {
     "./dist/index.js": "./dist/index.browser.js",
-    "./dist/internal/cachesecret-store.js": "./dist/internal/cachesecret-store.browser.js",
     "./dist/internal/platform.js": "./dist/internal/platform.browser.js",
     "./dist/internal/transport/tls.js": "./dist/internal/transport/tls.browser.js",
     "./dist/realtime.js": "./dist/realtime.browser.js",

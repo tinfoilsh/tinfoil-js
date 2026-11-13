@@ -4,7 +4,10 @@
  * cache secret spliced into the request body, the failure categories when
  * the route can't be verified, and the recommended client's wiring.
  */
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { Agent } from "node:https";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { PROTOCOL } from "ehbp";
 import { APIConnectionError } from "openai";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
@@ -237,6 +240,53 @@ describe("RouterHTTPClient over TLS", () => {
     expect(() => new (RouterOpenAIClient as any)(Symbol("x"), ai.httpClient, {})).toThrow(ConfigurationError);
     expect(() => new (RouterHTTPClient as any)(Symbol("x"))).toThrow(ConfigurationError);
     expectWithOptionsRefusesTransportOptions(ai);
+  });
+});
+
+describe("the router clients' default cache secret", () => {
+  const saved = { HOME: process.env.HOME, USERPROFILE: process.env.USERPROFILE, secret: process.env.TINFOIL_USER_CACHE_SECRET };
+  let home: string;
+
+  beforeAll(() => {
+    // A secret in the environment and one in a file under the home directory, neither of which the clients may use.
+    home = mkdtempSync(join(tmpdir(), "tinfoil-secret-"));
+    process.env.HOME = home;
+    process.env.USERPROFILE = home;
+    process.env.TINFOIL_USER_CACHE_SECRET = "from-env";
+    mkdirSync(join(home, ".tinfoil"), { mode: 0o700 });
+    writeFileSync(join(home, ".tinfoil", "user_cache_secret"), "from-file", { mode: 0o600 });
+  });
+
+  afterAll(() => {
+    for (const name of ["HOME", "USERPROFILE"] as const) {
+      if (saved[name] === undefined) delete process.env[name];
+      else process.env[name] = saved[name];
+    }
+    if (saved.secret === undefined) delete process.env.TINFOIL_USER_CACHE_SECRET;
+    else process.env.TINFOIL_USER_CACHE_SECRET = saved.secret;
+    rmSync(home, { recursive: true, force: true });
+  });
+
+  async function sent(client: RouterHTTPClient, body: string): Promise<string> {
+    return (await client.fetch(`${tls.origin}/v1/chat/completions`, { method: "POST", body, headers: { "x-raw": "1" } })).text();
+  }
+
+  it("is one in-memory secret that every client in the process shares, ignoring the environment and the home directory", async () => {
+    const options = { verifier: verifier({ tls: TEST_PIN }), transportMode: "tls" } as const;
+    const first = await createRouterHTTPClient(options, seams([tls.host], { resolveSecret: undefined }));
+    const second = await createRouterHTTPClient(options, seams([tls.host], { resolveSecret: undefined }));
+    const a = JSON.parse(await sent(first, BODY)).user_cache_secret as string;
+    expect(a).toMatch(/^[0-9a-f]{64}$/);
+    expect(JSON.parse(await sent(second, BODY)).user_cache_secret).toBe(a);
+    expect(await sent(second, BODY)).toBe(`${BODY.slice(0, -1)},"user_cache_secret":"${a}"}`);
+    // A body's own secret still wins, and the option still overrides the generated one.
+    const own = '{"user_cache_secret":"per-user"}';
+    expect(await sent(first, own)).toBe(own);
+    const pinned = await createRouterHTTPClient({ ...options, userCacheSecret: "option-secret" }, seams([tls.host], { resolveSecret: undefined }));
+    expect(JSON.parse(await sent(pinned, BODY)).user_cache_secret).toBe("option-secret");
+    expect(readFileSync(join(home, ".tinfoil", "user_cache_secret"), "utf8")).toBe("from-file");
+    expect(readdirSync(join(home, ".tinfoil"))).toEqual(["user_cache_secret"]);
+    for (const c of [first, second, pinned]) await c.close();
   });
 });
 
