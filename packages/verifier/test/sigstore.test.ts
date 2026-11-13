@@ -22,13 +22,19 @@ import {
   parseBundleBytes,
 } from "../src/internal/sigstore/bundle.js";
 import {
+  allowsCodeSigning,
+  codeSigningRoot,
   GITHUB_OIDC_ISSUER,
   RUNNER_ENVIRONMENT_GITHUB_HOSTED,
   verifyCertificateBundle,
   workflowIdentityPattern,
 } from "../src/internal/sigstore/certificate.js";
 import { embeddedTrustedRoot, parseTrustedRoot, TRUSTED_ROOT_MEDIA_TYPE, type TrustedRoot } from "../src/internal/sigstore/trusted-root.js";
+import { extension as certificateExtension, parseCertificate, type Certificate } from "../src/internal/x509/certificate.js";
 import { SIGSTORE_TRUSTED_ROOT_JSON } from "../src/trust/sigstore-trusted-root.js";
+import { newSigner, type Signer } from "./helpers/keyed.js";
+import { OID_KP_ANY, OID_KP_CODE_SIGNING, OID_KP_SERVER_AUTH } from "./helpers/registry.js";
+import { boolTrue, certificate, extension, integer, name, oid, seq, tlv } from "./helpers/tsa.js";
 import {
   conformanceAvailable,
   decodeDocument,
@@ -125,6 +131,140 @@ function loadShared(): void {
 async function rejects(p: Promise<unknown>, pattern: RegExp): Promise<void> {
   await expect(p).rejects.toThrow(pattern);
 }
+
+// Minted certificates for the extended key usage checks of the Fulcio path.
+const OID_BASIC_CONSTRAINTS = "2.5.29.19";
+const OID_KEY_USAGE = "2.5.29.15";
+const OID_EXT_KEY_USAGE = "2.5.29.37";
+const OID_SUBJECT_KEY_ID = "2.5.29.14";
+const toBase64 = (b: Uint8Array): string => Buffer.from(b).toString("base64");
+
+/** An extended key usage extension naming `purposes`. */
+const ekuExtension = (...purposes: string[]): Uint8Array => extension(OID_EXT_KEY_USAGE, false, seq(...purposes.map(oid)));
+
+interface MintOptions {
+  readonly subject: Uint8Array;
+  readonly issuer: Uint8Array;
+  readonly spki: Uint8Array;
+  readonly issuerKey: CryptoKey;
+  /** A certificate authority (keyCertSign, cRLSign) rather than an end entity (digitalSignature). */
+  readonly ca: boolean;
+  readonly extensions?: readonly Uint8Array[];
+}
+
+/** A certificate valid over 2025, with basic constraints and key usage for its kind and `extensions` after them. */
+function mint(o: MintOptions): Promise<Uint8Array> {
+  return certificate(
+    {
+      subject: o.subject,
+      issuer: o.issuer,
+      serial: o.ca ? 2 : 3,
+      notBefore: new Date("2024-12-01T00:00:00Z"),
+      notAfter: new Date("2026-01-01T00:00:00Z"),
+      spki: o.spki,
+      extensions: [
+        extension(OID_BASIC_CONSTRAINTS, true, o.ca ? seq(boolTrue()) : seq()),
+        extension(OID_KEY_USAGE, true, o.ca ? tlv(0x03, [0x01, 0x06]) : tlv(0x03, [0x07, 0x80])),
+        ...(o.extensions ?? []),
+      ],
+    },
+    o.issuerKey,
+  );
+}
+
+/** A self-signed certificate authority under a fresh key. */
+async function selfSigned(commonName: string, extensions: readonly Uint8Array[] = []): Promise<{ key: Signer; name: Uint8Array; der: Uint8Array }> {
+  const key = await newSigner();
+  const subject = name(commonName);
+  const der = await mint({ subject, issuer: subject, spki: key.spki, issuerKey: key.pair.privateKey, ca: true, extensions });
+  return { key, name: subject, der };
+}
+
+/** A trusted root of no logs whose certificate authorities have the given chains (issuing certificate first). */
+function authoritiesRoot(chains: readonly (readonly Uint8Array[])[]): Promise<TrustedRoot> {
+  return parseTrustedRoot(
+    utf8(
+      JSON.stringify({
+        mediaType: TRUSTED_ROOT_MEDIA_TYPE,
+        tlogs: [],
+        ctlogs: [],
+        timestampAuthorities: [],
+        certificateAuthorities: chains.map((chain) => ({
+          subject: { organization: "test", commonName: "test" },
+          uri: "https://fulcio.test.invalid",
+          certChain: { certificates: chain.map((der) => ({ rawBytes: toBase64(der) })) },
+          validFor: { start: "2024-12-01T00:00:00Z" },
+        })),
+      }),
+    ),
+  );
+}
+
+describe("extended key usage on the Fulcio path", () => {
+  let key: Signer;
+  beforeAll(async () => {
+    key = await newSigner();
+  });
+
+  const endEntity = async (...extensions: Uint8Array[]): Promise<Certificate> =>
+    parseCertificate(await mint({ subject: name("leaf"), issuer: name("leaf"), spki: key.spki, issuerKey: key.pair.privateKey, ca: false, extensions }));
+
+  it.each([
+    { label: "allows code signing without an extended key usage", extensions: (): Uint8Array[] => [], allowed: true },
+    { label: "allows code signing when it is named", extensions: (): Uint8Array[] => [ekuExtension(OID_KP_CODE_SIGNING)], allowed: true },
+    {
+      label: "allows code signing when it is named among other purposes",
+      extensions: (): Uint8Array[] => [ekuExtension(OID_KP_SERVER_AUTH, OID_KP_CODE_SIGNING)],
+      allowed: true,
+    },
+    { label: "allows code signing under any purpose", extensions: (): Uint8Array[] => [ekuExtension(OID_KP_ANY)], allowed: true },
+    { label: "rejects server authentication only", extensions: (): Uint8Array[] => [ekuExtension(OID_KP_SERVER_AUTH)], allowed: false },
+    { label: "rejects an unrecognised purpose only", extensions: (): Uint8Array[] => [ekuExtension("1.2.3.4")], allowed: false },
+    { label: "rejects an empty purpose list", extensions: (): Uint8Array[] => [extension(OID_EXT_KEY_USAGE, false, seq())], allowed: false },
+    {
+      label: "rejects a value that is not a SEQUENCE",
+      extensions: (): Uint8Array[] => [extension(OID_EXT_KEY_USAGE, false, integer(1))],
+      allowed: false,
+    },
+  ])("$label", async ({ extensions, allowed }) => {
+    expect(allowsCodeSigning(await endEntity(...extensions()))).toBe(allowed);
+  });
+
+  it("leaves out of the library's root the certificate-authority certificates that do not allow code signing", async () => {
+    const rootA = await selfSigned("root A");
+    const intermediateA = await mint({
+      subject: name("intermediate A"),
+      issuer: rootA.name,
+      spki: (await newSigner()).spki,
+      issuerKey: rootA.key.pair.privateKey,
+      ca: true,
+      extensions: [ekuExtension(OID_KP_SERVER_AUTH)],
+    });
+    const rootB = await selfSigned("root B", [ekuExtension(OID_KP_SERVER_AUTH)]);
+    const intermediateB = await mint({
+      subject: name("intermediate B"),
+      issuer: rootB.name,
+      spki: (await newSigner()).spki,
+      issuerKey: rootB.key.pair.privateKey,
+      ca: true,
+      extensions: [ekuExtension(OID_KP_CODE_SIGNING)],
+    });
+    const rootC = await selfSigned("root C", [ekuExtension(OID_KP_ANY)]);
+    const library = codeSigningRoot(await authoritiesRoot([[intermediateA, rootA.der], [intermediateB, rootB.der], [rootC.der]]));
+    expect(library.excluded).toBe(2);
+    const kept = (library.json as Record<string, any>).certificateAuthorities.map((ca: Record<string, any>) =>
+      ca.certChain.certificates.map((c: { rawBytes: string }) => c.rawBytes),
+    );
+    expect(kept).toEqual([[toBase64(rootA.der)], [toBase64(intermediateB)], [toBase64(rootC.der)]]);
+  });
+
+  it("keeps every certificate of the production root", async () => {
+    const root = await embeddedTrustedRoot();
+    const library = codeSigningRoot(root);
+    expect(library.excluded).toBe(0);
+    expect(library.json).toEqual(JSON.parse(SIGSTORE_TRUSTED_ROOT_JSON));
+  });
+});
 
 describe("trusted root", () => {
   const embeddedJson = JSON.parse(SIGSTORE_TRUSTED_ROOT_JSON) as Record<string, any>;
@@ -453,6 +593,66 @@ describe.skipIf(withoutVectors)(vectorsTitle("verifyCertificateBundle"), () => {
       }),
     );
     await rejects(verifyCertificateBundle(await goldenRoot, bundle, codeIdentity(golden.repo), goldenCode.data.digest!), /no signing certificate/);
+  });
+
+  describe("extended key usage", () => {
+    /** The golden code bundle with its signing certificate replaced by one carrying `extensions`. */
+    async function withLeaf(...extensions: Uint8Array[]): Promise<ReturnType<typeof parseBundle>> {
+      const key = await newSigner();
+      const der = await mint({ subject: seq(), issuer: name("leaf issuer"), spki: key.spki, issuerKey: key.pair.privateKey, ca: false, extensions });
+      return parseBundle(mutated(goldenCode.data.sigstore_bundle, (w) => (w.verificationMaterial.certificate.rawBytes = toBase64(der))));
+    }
+
+    it("rejects a signing certificate whose extended key usage does not allow code signing", async () => {
+      await rejects(
+        verifyCertificateBundle(await goldenRoot, await withLeaf(ekuExtension(OID_KP_SERVER_AUTH)), codeIdentity(golden.repo), goldenCode.data.digest!),
+        /signing certificate's extended key usage does not allow code signing/,
+      );
+      // The same substitution with code signing reaches the library, which rejects it for other reasons.
+      const allowed = verifyCertificateBundle(await goldenRoot, await withLeaf(ekuExtension(OID_KP_CODE_SIGNING)), codeIdentity(golden.repo), goldenCode.data.digest!);
+      await rejects(allowed, /verifying bundle/);
+      await expect(allowed).rejects.not.toThrow(/extended key usage/);
+    });
+
+    /**
+     * The golden root with its certificate authority reissued: a fresh root
+     * certifies the golden intermediate's name and key, so the golden leaf
+     * still chains, now through certificates carrying the given extensions.
+     */
+    async function reissuedRoot(intermediateExtensions: readonly Uint8Array[], rootExtensions: readonly Uint8Array[] = []): Promise<TrustedRoot> {
+      const json = structuredClone(golden.trusted_root) as Record<string, any>;
+      const chain = json.certificateAuthorities[0].certChain.certificates;
+      const intermediate = parseCertificate(decode(chain[0].rawBytes));
+      const keyId = certificateExtension(intermediate, OID_SUBJECT_KEY_ID);
+      if (keyId === undefined) throw new Error("golden intermediate has no subject key identifier");
+      const root = await selfSigned("reissuing test root", rootExtensions);
+      const reissued = await mint({
+        subject: intermediate.subject,
+        issuer: root.name,
+        spki: intermediate.spki,
+        issuerKey: root.key.pair.privateKey,
+        ca: true,
+        extensions: [extension(OID_SUBJECT_KEY_ID, false, keyId.value), ...intermediateExtensions],
+      });
+      json.certificateAuthorities[0].certChain.certificates = [{ rawBytes: toBase64(reissued) }, { rawBytes: toBase64(root.der) }];
+      return parseTrustedRoot(utf8(JSON.stringify(json)));
+    }
+
+    const verifyUnder = async (root: TrustedRoot) =>
+      verifyCertificateBundle(root, parseBundle(bundleOf(golden, "sigstore-code")), codeIdentity(golden.repo), goldenCode.data.digest!);
+
+    it("accepts a chain whose certificate authorities carry no extended key usage or allow code signing", async () => {
+      await expect(verifyUnder(await reissuedRoot([]))).resolves.toBeDefined();
+      await expect(verifyUnder(await reissuedRoot([ekuExtension(OID_KP_CODE_SIGNING)], [ekuExtension(OID_KP_ANY)]))).resolves.toBeDefined();
+    });
+
+    it("rejects a chain whose intermediate's extended key usage does not allow code signing", async () => {
+      await rejects(verifyUnder(await reissuedRoot([ekuExtension(OID_KP_SERVER_AUTH)])), /verifying bundle: .*certificate chain.*1 certificate authority certificate\(s\) not used/);
+    });
+
+    it("rejects a chain whose root's extended key usage does not allow code signing", async () => {
+      await rejects(verifyUnder(await reissuedRoot([], [ekuExtension(OID_KP_SERVER_AUTH)])), /verifying bundle: .*certificate chain.*1 certificate authority certificate\(s\) not used/);
+    });
   });
 
   it("rejects a bundle whose signing time is only the bundle's own claim", async () => {

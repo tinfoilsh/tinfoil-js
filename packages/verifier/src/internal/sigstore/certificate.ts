@@ -20,6 +20,11 @@
  * exactly one DSSE signature, verified over the pre-authentication encoding
  * under the certificate key; every entry of kind "dsse".
  *
+ * The library does not check extended key usage, so it is checked here for
+ * code signing along the whole path: the leaf before the library runs, and
+ * the certificate authorities by leaving out of the root handed to the
+ * library any certificate whose extended key usage does not allow it.
+ *
  * The library accepts the anchoring promise on any entry of a known log and
  * does not report which entries it verified, so `verifiedLogTime` is proven
  * here: the first entry's promise is verified under its log's key from the
@@ -29,6 +34,8 @@ import { SigstoreVerifier, type SigstoreBundle, type TrustedRoot as LibraryTrust
 import { map, object, str } from "../json/decode.js";
 import { serialize, strictParse, type JsonObject, type JsonValue } from "../json/index.js";
 import { IN_TOTO_PAYLOAD_TYPE, type Bundle } from "./bundle.js";
+import { expectSequence, extension, parseCertificate, X509Error, type Certificate } from "../x509/certificate.js";
+import { decode, DerError, oid } from "../x509/der.js";
 import { promisedLogTime } from "./keyed.js";
 import type { TrustedRoot } from "./trusted-root.js";
 
@@ -57,7 +64,8 @@ export interface VerifiedBundle {
 
 /**
  * Verifies a certificate-signed DSSE bundle against `root`: the certificate
- * chain, at least one SCT, at least one log entry with inclusion proven, a
+ * chain, extended key usage allowing code signing on every certificate of
+ * the chain that carries one, at least one SCT, at least one log entry with inclusion proven, a
  * verified observer timestamp (the first entry's inclusion promise or an
  * RFC 3161 timestamp), the DSSE signature, that no two SCTs come from the
  * same log, that the SAN matches `sanPattern`, the issuer is GitHub and the
@@ -77,9 +85,18 @@ export async function verifyCertificateBundle(
   }
   if (!SHA256_HEX.test(digestHex)) throw new Error("expected artifact digest is not hex SHA-256");
 
+  let leaf: Certificate;
+  try {
+    leaf = parseCertificate(bundle.certificate);
+  } catch (err) {
+    throw new Error(`parsing signing certificate: ${message(err)}`);
+  }
+  if (!allowsCodeSigning(leaf)) throw new Error("signing certificate's extended key usage does not allow code signing");
+
+  const libraryRoot = codeSigningRoot(root);
   const verifier = new SigstoreVerifier({ ctlogThreshold: 1, tlogThreshold: 1, tsaThreshold: 0 });
   try {
-    await verifier.loadSigstoreRoot(plain(root.json) as LibraryTrustedRoot);
+    await verifier.loadSigstoreRoot(libraryRoot.json as LibraryTrustedRoot);
   } catch (err) {
     throw new Error(`loading trusted root: ${message(err)}`);
   }
@@ -87,7 +104,11 @@ export async function verifyCertificateBundle(
   try {
     await verifier.verifyDsse(plain(bundle.json) as SigstoreBundle, policy);
   } catch (err) {
-    throw new Error(`verifying bundle: ${message(err)}`);
+    const note =
+      libraryRoot.excluded === 0
+        ? ""
+        : ` (${libraryRoot.excluded} certificate authority certificate(s) not used: extended key usage does not allow code signing)`;
+    throw new Error(`verifying bundle: ${message(err)}${note}`);
   }
   const identity = policy.identity;
   if (identity === undefined) throw new Error("verifying bundle: the signing certificate was not checked");
@@ -239,6 +260,59 @@ function enforceSubject(subjects: readonly Subject[], digestHex: string, subject
 
 function sameDigest(a: string, b: string): boolean {
   return a.toLowerCase() === b.toLowerCase();
+}
+
+const OID_EXT_KEY_USAGE = "2.5.29.37";
+const OID_KP_CODE_SIGNING = "1.3.6.1.5.5.7.3.3";
+const OID_KP_ANY = "2.5.29.37.0";
+
+/**
+ * Whether `cert` may stand on a code-signing certificate path: it carries no
+ * extended key usage, or one naming code signing or any purpose. This is the
+ * per-certificate rule of Go's crypto/x509 chain verification with code
+ * signing as the requested usage. A malformed or empty extension rejects.
+ */
+export function allowsCodeSigning(cert: Certificate): boolean {
+  const ext = extension(cert, OID_EXT_KEY_USAGE);
+  if (ext === undefined) return true;
+  let purposes: string[];
+  try {
+    purposes = expectSequence(decode(ext.value), "ExtKeyUsage").map(oid);
+  } catch (err) {
+    if (err instanceof DerError || err instanceof X509Error) return false;
+    throw err;
+  }
+  return purposes.some((p) => p === OID_KP_CODE_SIGNING || p === OID_KP_ANY);
+}
+
+/**
+ * The library's form of `root`, with every certificate-authority certificate
+ * whose extended key usage does not allow code signing left out of its
+ * chain, so that no certificate path the library builds passes through one.
+ * A certificate authority left with no certificates is dropped by the
+ * library. Returns the number of certificates left out.
+ */
+export function codeSigningRoot(root: TrustedRoot): { json: unknown; excluded: number } {
+  const json = plain(root.json) as { certificateAuthorities?: { certChain: { certificates: unknown[] } }[] };
+  let excluded = 0;
+  root.certificateAuthorities.forEach((authority, i) => {
+    const chain = json.certificateAuthorities?.[i]?.certChain;
+    if (chain === undefined) throw new Error("trusted root certificate authorities do not match their parsed form");
+    // chainDer is root first; the wire order is the issuing certificate first.
+    const wire = [...authority.chainDer].reverse();
+    chain.certificates = chain.certificates.filter((_, j) => {
+      let cert: Certificate;
+      try {
+        cert = parseCertificate(wire[j]);
+      } catch (err) {
+        throw new Error(`parsing trusted root certificate authority: ${message(err)}`);
+      }
+      if (allowsCodeSigning(cert)) return true;
+      excluded++;
+      return false;
+    });
+  });
+  return { json, excluded };
 }
 
 /** The plain-object form of a parsed value (trusted root or bundle), as the library reads it. */
