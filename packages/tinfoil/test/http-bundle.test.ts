@@ -51,21 +51,29 @@ async function bundleConsumer(source: string) {
   }
 }
 
+/**
+ * Import the published `entry` in a fresh Node process whose resolver throws on
+ * any specifier that matches `banned` (a regular expression source), then
+ * check that `factory` is a function on the loaded module.
+ */
+function assertLoadsWithout(entry: string, banned: string, factory: string) {
+  execFileSync(process.execPath, ["--input-type=module", "--eval", `
+    import { registerHooks } from "node:module";
+    const banned = new RegExp(${JSON.stringify(banned)});
+    registerHooks({
+      resolve(specifier, context, nextResolve) {
+        if (banned.test(specifier)) throw new Error(${JSON.stringify(entry)} + " loaded " + specifier);
+        return nextResolve(specifier, context);
+      },
+    });
+    const loaded = await import(${JSON.stringify(entry)});
+    if (typeof loaded${factory} !== "function") throw new Error("Missing " + ${JSON.stringify(factory)});
+  `], { cwd: packageRoot, stdio: "pipe" });
+}
+
 describe("the published HTTP entry", () => {
   it("loads in Node without resolving an API adapter", () => {
-    execFileSync(process.execPath, ["--input-type=module", "--eval", `
-      import { registerHooks } from "node:module";
-      registerHooks({
-        resolve(specifier, context, nextResolve) {
-          if (specifier === "openai" || specifier.startsWith("openai/") || specifier === "ai" || specifier.startsWith("@ai-sdk/")) {
-            throw new Error("HTTP entry loaded an API adapter: " + specifier);
-          }
-          return nextResolve(specifier, context);
-        },
-      });
-      const { RouterHTTPClient } = await import("tinfoil/http");
-      if (typeof RouterHTTPClient.create !== "function") throw new Error("Missing HTTP factory");
-    `], { cwd: packageRoot, stdio: "pipe" });
+    assertLoadsWithout("tinfoil/http", "^(?:openai|ai)(?:/|$)|^@ai-sdk/", ".RouterHTTPClient.create");
   });
   it.each([false, true])("keeps API adapters out of a consumer (lazy: %s)", async (lazy) => {
     const { modules, entryModules, dynamicImports } = await bundleConsumer(lazy
@@ -88,19 +96,7 @@ describe("the published HTTP entry", () => {
 // `tinfoil/ai-sdk` needs, so the root entry must load and bundle without them.
 describe("the published root entry", () => {
   it("loads in Node without resolving the AI SDK", () => {
-    execFileSync(process.execPath, ["--input-type=module", "--eval", `
-      import { registerHooks } from "node:module";
-      registerHooks({
-        resolve(specifier, context, nextResolve) {
-          if (specifier === "ai" || specifier.startsWith("@ai-sdk/")) {
-            throw new Error("Root entry loaded the AI SDK: " + specifier);
-          }
-          return nextResolve(specifier, context);
-        },
-      });
-      const { createClient } = await import("tinfoil");
-      if (typeof createClient !== "function") throw new Error("Missing client factory");
-    `], { cwd: packageRoot, stdio: "pipe" });
+    assertLoadsWithout("tinfoil", "^ai(?:/|$)|^@ai-sdk/", ".createClient");
   });
   it("keeps the AI SDK out of a consumer", async () => {
     const { modules } = await bundleConsumer('export { createClient, RouterOpenAIClient } from "tinfoil";\n');

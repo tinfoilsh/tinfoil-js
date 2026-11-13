@@ -21,7 +21,7 @@ What to install depends on the entry point that you import:
 | `tinfoil` (the OpenAI clients), `tinfoil/http` and `tinfoil/unsafe` | `npm install tinfoil@next` |
 | `tinfoil/ai-sdk` (the Vercel AI SDK provider) | `npm install tinfoil@next ai @ai-sdk/openai-compatible` |
 
-`ai` and `@ai-sdk/openai-compatible` are optional peer dependencies, so installing `tinfoil` doesn't install them, and only `tinfoil/ai-sdk` imports them. Importing `tinfoil/ai-sdk` without them fails with a module-not-found error that names the missing package.
+`ai` and `@ai-sdk/openai-compatible` are optional peer dependencies, so installing `tinfoil` doesn't install them. `tinfoil/ai-sdk` imports `@ai-sdk/openai-compatible`; `ai` is what your own code calls with the provider. Importing `tinfoil/ai-sdk` without `@ai-sdk/openai-compatible` fails with a module-not-found error that names the package.
 
 ## Quick Start
 
