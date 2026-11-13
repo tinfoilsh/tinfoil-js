@@ -4,7 +4,7 @@
  * signature; this module adds the signing-identity policy and reads the
  * source-repository claims the verifier binds artifacts to.
  *
- * What the library's `verifyDsse` enforces, so this module does not repeat it:
+ * What the library's `verifyDsse` enforces:
  * a bundle of media type version 0.2 or 0.3 with at least one log entry and
  * no more than 32; the signing-identity policy before any proof; for every
  * entry from a log of the root, an inclusion proof (Merkle path and signed
@@ -19,6 +19,9 @@
  * log twice, and every SCT verifies against a CT log valid at its time;
  * exactly one DSSE signature, verified over the pre-authentication encoding
  * under the certificate key; every entry of kind "dsse".
+ *
+ * Timestamp verification here also checks the signed certificate identifiers
+ * and the timestamp signer's certificate profile before the library runs.
  *
  * The library does not check extended key usage, so it is checked here for
  * code signing along the whole path: the leaf before the library runs, and
@@ -69,7 +72,8 @@ export interface VerifiedBundle {
  * the chain that carries one, at least one SCT, at least one log entry with inclusion proven, a
  * verified observer timestamp (the first entry's inclusion promise or an
  * RFC 3161 timestamp), the DSSE signature, that no two SCTs come from the
- * same log, that the SAN matches `sanPattern`, the issuer is GitHub and the
+ * same log, that each timestamp binds its signer certificate, that the SAN
+ * matches `sanPattern`, the issuer is GitHub and the
  * runner is GitHub-hosted, and that the statement's subject carries
  * `digestHex` (as subject 0, or as the subject named `subjectName`).
  */
