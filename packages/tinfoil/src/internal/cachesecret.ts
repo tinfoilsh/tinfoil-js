@@ -10,25 +10,25 @@
  *
  *  1. a non-empty `user_cache_secret` string in the request body,
  *  2. the client's `userCacheSecret` option,
- *  3. the TINFOIL_USER_CACHE_SECRET environment variable,
- *  4. a generated secret persisted at ~/.tinfoil/user_cache_secret (0600),
- *     shared with the other Tinfoil SDKs on the machine; where nothing can
- *     be persisted, a secret kept for the life of the process.
+ *  3. a random secret that is generated in memory once for the current
+ *     runtime (the process, or the page in a browser) and shared by every
+ *     client in it.
  *
- * The field is spliced into the body's text, so every other byte the caller
- * wrote reaches the enclave unchanged. Injection happens below the origin
- * guard and above the sealing transport, so the secret is only ever visible
- * to the verified enclave.
+ * The SDK reads no environment variable or file for it: an application that
+ * wants a secret that is stable across processes or machines passes
+ * `userCacheSecret` itself.
+ *
+ * The field is spliced into the body's text, so every other byte that the
+ * caller wrote reaches the enclave unchanged. Injection happens below the
+ * origin guard and above the sealing transport, so the secret is only ever
+ * visible to the verified enclave.
  */
 import type { Fetch } from "../options.js";
 import { readAll } from "./body.js";
-import { isServerRuntime, type RuntimeGlobals } from "./platform.js";
 import { shapeOf, type RequestShape } from "./transport/transport.js";
 
 /** The request-body field. A non-empty string scopes the prompt cache to that secret. */
 export const USER_CACHE_SECRET_FIELD = "user_cache_secret";
-/** Provisions the secret through the environment; an empty value is unset. */
-export const USER_CACHE_SECRET_ENV = "TINFOIL_USER_CACHE_SECRET";
 
 /**
  * The endpoints whose bodies carry the field, matched by path suffix so a
@@ -42,22 +42,14 @@ export function pathEligible(request: RequestShape): boolean {
   return request.method === "POST" && request.hasBody && ELIGIBLE_PATHS.some((p) => request.url.pathname.endsWith(p));
 }
 
-/** The globals the resolution reads: the runtime's identity and, on a server, its environment. */
-type SecretGlobals = RuntimeGlobals & { readonly process?: { readonly env?: Record<string, string | undefined> } };
-
 /**
- * Resolves the client-level secret: a non-empty explicit option wins, then a
- * non-empty environment value, then the persisted (or generated) secret.
- * The environment and the persisted file exist only on a server runtime,
- * as the transport default decides it; a page or a worker gets the
- * in-memory secret. Never throws; "" means no secret could be provisioned.
+ * Resolves the client-level secret: a non-empty explicit option wins, then
+ * the process's generated secret, on every runtime. Never throws; "" means
+ * that no secret could be generated.
  */
-export async function resolveUserCacheSecret(explicit: string | undefined, globals: SecretGlobals = globalThis as SecretGlobals): Promise<string> {
+export async function resolveUserCacheSecret(explicit: string | undefined): Promise<string> {
   if (explicit !== undefined && explicit !== "") return explicit;
-  const server = isServerRuntime(globals);
-  const env = server ? globals.process?.env?.[USER_CACHE_SECRET_ENV] : undefined;
-  if (env !== undefined && env !== "") return env;
-  return loadOrGenerateUserCacheSecret(server);
+  return processUserCacheSecret();
 }
 
 /** A fresh 256-bit random secret, hex-encoded; "" when no secure randomness is available. */
@@ -73,41 +65,19 @@ export function newUserCacheSecret(): string {
 }
 
 /**
- * The fallback for when the secret cannot be persisted: one secret for the
- * life of the process. It still isolates this process's cache namespace, but
- * continuity resets on restart, which is worth a warning where persistence
- * was expected (not in browsers, where nothing persists).
+ * One secret for the life of the process (or page), generated on first use
+ * and shared by every client in it. It isolates this process's cache
+ * namespace; continuity resets when the process exits.
  */
-let ephemeral: string | undefined;
-function ephemeralUserCacheSecret(server: boolean): string {
-  if (ephemeral === undefined) {
-    ephemeral = newUserCacheSecret();
-    if (ephemeral !== "" && server) {
-      console.warn(
-        `[tinfoil] could not persist the user cache secret; using an in-memory secret, so prompt-cache continuity resets when this process exits (set ${USER_CACHE_SECRET_ENV} or the userCacheSecret option to pin one)`,
-      );
-    }
-  }
-  return ephemeral;
-}
-
-async function loadOrGenerateUserCacheSecret(server: boolean): Promise<string> {
-  if (server) {
-    try {
-      // The store needs a filesystem; the browser build maps it to a stub.
-      const { loadOrPersistUserCacheSecret } = await import("./cachesecret-store.js");
-      const secret = loadOrPersistUserCacheSecret(newUserCacheSecret);
-      if (secret !== null) return secret;
-    } catch {
-      // No usable filesystem in this runtime.
-    }
-  }
-  return ephemeralUserCacheSecret(server);
+let processSecret: string | undefined;
+function processUserCacheSecret(): string {
+  if (processSecret === undefined) processSecret = newUserCacheSecret();
+  return processSecret;
 }
 
 /** Resets the process-lifetime secret; for tests. */
-export function resetEphemeralUserCacheSecretForTests(): void {
-  ephemeral = undefined;
+export function resetProcessUserCacheSecretForTests(): void {
+  processSecret = undefined;
 }
 
 /**

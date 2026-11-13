@@ -1,18 +1,18 @@
 /**
  * The user cache secret: splicing it into request bodies with every other
  * byte preserved, the bodies and requests left untouched, and resolution
- * from the option, the environment, and the persisted file.
+ * from the option, then a secret generated once per process, with no
+ * environment variable or file read.
  */
-import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   injectUserCacheSecret,
   pathEligible,
-  resetEphemeralUserCacheSecretForTests,
+  resetProcessUserCacheSecretForTests,
   resolveUserCacheSecret,
-  USER_CACHE_SECRET_ENV,
   withCacheSecret,
 } from "../src/internal/cachesecret.js";
 import type { Fetch } from "../src/options.js";
@@ -163,14 +163,13 @@ describe("withCacheSecret", () => {
 describe("resolveUserCacheSecret", () => {
   let home: string;
   // The home directory is redirected under both names, so the tests never touch the real one.
-  const saved = { HOME: process.env.HOME, USERPROFILE: process.env.USERPROFILE, secret: process.env[USER_CACHE_SECRET_ENV] };
+  const saved = { HOME: process.env.HOME, USERPROFILE: process.env.USERPROFILE, secret: process.env.TINFOIL_USER_CACHE_SECRET };
 
   beforeEach(() => {
     home = mkdtempSync(join(tmpdir(), "tinfoil-secret-"));
     process.env.HOME = home;
     process.env.USERPROFILE = home;
-    delete process.env[USER_CACHE_SECRET_ENV];
-    resetEphemeralUserCacheSecretForTests();
+    resetProcessUserCacheSecretForTests();
   });
 
   afterEach(() => {
@@ -178,66 +177,38 @@ describe("resolveUserCacheSecret", () => {
       if (saved[name] === undefined) delete process.env[name];
       else process.env[name] = saved[name];
     }
-    if (saved.secret === undefined) delete process.env[USER_CACHE_SECRET_ENV];
-    else process.env[USER_CACHE_SECRET_ENV] = saved.secret;
+    if (saved.secret === undefined) delete process.env.TINFOIL_USER_CACHE_SECRET;
+    else process.env.TINFOIL_USER_CACHE_SECRET = saved.secret;
     rmSync(home, { recursive: true, force: true });
     vi.restoreAllMocks();
   });
 
-  it("prefers the option, then the environment, then the persisted secret", async () => {
-    process.env[USER_CACHE_SECRET_ENV] = "from-env";
+  it("prefers a non-empty option, then one generated secret for the process", async () => {
     expect(await resolveUserCacheSecret("from-option")).toBe("from-option");
-    expect(await resolveUserCacheSecret("")).toBe("from-env");
-    expect(await resolveUserCacheSecret(undefined)).toBe("from-env");
-    process.env[USER_CACHE_SECRET_ENV] = "";
-    const persisted = await resolveUserCacheSecret(undefined);
-    expect(persisted).toMatch(/^[0-9a-f]{64}$/);
-    expect(readFileSync(join(home, ".tinfoil", "user_cache_secret"), "utf8")).toBe(persisted);
+    const generated = await resolveUserCacheSecret("");
+    expect(generated).toMatch(/^[0-9a-f]{64}$/);
+    expect(await resolveUserCacheSecret(undefined)).toBe(generated);
+    expect(await resolveUserCacheSecret("from-option")).toBe("from-option");
   });
 
-  it("persists a generated secret with private permissions and reuses it", async () => {
-    const first = await resolveUserCacheSecret(undefined);
-    expect(await resolveUserCacheSecret(undefined)).toBe(first);
-    if (process.platform !== "win32") {
-      expect(statSync(join(home, ".tinfoil")).mode & 0o777).toBe(0o700);
-      expect(statSync(join(home, ".tinfoil", "user_cache_secret")).mode & 0o777).toBe(0o600);
-    }
-  });
-
-  it("reads a secret another SDK wrote, trimming surrounding whitespace", async () => {
-    mkdirSync(join(home, ".tinfoil"), { mode: 0o700 });
-    writeFileSync(join(home, ".tinfoil", "user_cache_secret"), "  shared-secret\n", { mode: 0o600 });
-    expect(await resolveUserCacheSecret(undefined)).toBe("shared-secret");
-  });
-
-  // Creating a symbolic link needs a privilege on Windows that CI runners lack.
-  it.skipIf(process.platform === "win32")("falls back to one in-memory secret per process, with a warning, when the file is unusable", async () => {
+  it("reads neither the environment variable nor a secret file under the home directory, and warns about neither", async () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    process.env.TINFOIL_USER_CACHE_SECRET = "from-env";
     mkdirSync(join(home, ".tinfoil"), { mode: 0o700 });
-    writeFileSync(join(home, "elsewhere"), "planted");
-    symlinkSync(join(home, "elsewhere"), join(home, ".tinfoil", "user_cache_secret"));
-    const first = await resolveUserCacheSecret(undefined);
-    expect(first).toMatch(/^[0-9a-f]{64}$/);
-    expect(await resolveUserCacheSecret(undefined)).toBe(first);
-    expect(warn).toHaveBeenCalledTimes(1);
-    expect(lstatSync(join(home, ".tinfoil", "user_cache_secret")).isSymbolicLink()).toBe(true);
-  });
-
-  it("keeps the secret in memory, without a warning, where the runtime isn't a server, such as a worker", async () => {
-    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
-    process.env[USER_CACHE_SECRET_ENV] = "from-env";
-    const worker = { self: {}, process: { env: process.env } } as unknown as Parameters<typeof resolveUserCacheSecret>[1];
-    const first = await resolveUserCacheSecret(undefined, worker);
-    expect(first).toMatch(/^[0-9a-f]{64}$/);
-    expect(first).not.toBe("from-env");
-    expect(await resolveUserCacheSecret(undefined, worker)).toBe(first);
-    expect(existsSync(join(home, ".tinfoil"))).toBe(false);
+    writeFileSync(join(home, ".tinfoil", "user_cache_secret"), "from-file", { mode: 0o600 });
+    const secret = await resolveUserCacheSecret(undefined);
+    expect(secret).toMatch(/^[0-9a-f]{64}$/);
+    expect(secret).not.toBe("from-env");
+    expect(secret).not.toBe("from-file");
+    // The file that was there is left as it was, and nothing else is written.
+    expect(readFileSync(join(home, ".tinfoil", "user_cache_secret"), "utf8")).toBe("from-file");
+    expect(readdirSync(join(home, ".tinfoil"))).toEqual(["user_cache_secret"]);
     expect(warn).not.toHaveBeenCalled();
   });
 
-  it("falls back when the directory can't be created", async () => {
-    vi.spyOn(console, "warn").mockImplementation(() => {});
-    writeFileSync(join(home, ".tinfoil"), "not a directory");
-    expect(await resolveUserCacheSecret(undefined)).toMatch(/^[0-9a-f]{64}$/);
+  it("creates nothing under the home directory", async () => {
+    await resolveUserCacheSecret(undefined);
+    expect(existsSync(join(home, ".tinfoil"))).toBe(false);
+    expect(readdirSync(home)).toEqual([]);
   });
 });

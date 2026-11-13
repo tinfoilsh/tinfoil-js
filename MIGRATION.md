@@ -26,8 +26,9 @@
 | `createUnverifiedEncryptedBodyFetch` | removed: `UnverifiedClient.fetch` |
 | a relative request URL passed to a client's `fetch` | every client's `fetch` takes an absolute URL; `client.baseURL` (always slash-terminated) is the base to resolve a path against, `new URL(path, client.baseURL)` |
 | `tinfoil/v3`, `tinfoil/v3/ai-sdk`, `tinfoil/v3/unsafe` (pre-release entries) | `tinfoil`, `tinfoil/ai-sdk`, `tinfoil/unsafe` |
+| the router's user cache secret resolved from the `TINFOIL_USER_CACHE_SECRET` environment variable, then a secret persisted at `~/.tinfoil/user_cache_secret` | neither is read: without a non-empty `userCacheSecret` option or a non-empty per-request `user_cache_secret`, each process (or browser page) uses a random secret that is generated in memory, so prompt-cache hits are no longer shared across processes. An empty value counts as unset: an empty option falls back to that generated secret, and an empty body field is replaced. Pass a non-empty `userCacheSecret` to keep a secret that is stable across processes or machines. |
 
-Unchanged: `userCacheSecret` and the per-request `user_cache_secret` field, their resolution from `TINFOIL_USER_CACHE_SECRET` and `~/.tinfoil/user_cache_secret` for the router, the session recovery helpers (`sessionRecoveryToken(response)` replaces reading the token off a response), and the OpenAI types and errors re-exported from the root.
+Unchanged: `userCacheSecret` and the per-request `user_cache_secret` field (the field still overrides the option), the session recovery helpers (`sessionRecoveryToken(response)` replaces reading the token off a response), and the OpenAI types and errors re-exported from the root.
 
 ## `@tinfoilsh/verifier`
 

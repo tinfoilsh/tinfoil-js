@@ -10,8 +10,7 @@ import { Identity, PROTOCOL } from "ehbp";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { checkNetworkFetch, createEnclaveHTTPClient, EnclaveHTTPClient, resolveTransportMode, type EnclaveClientSeams } from "../src/enclave-client.js";
 import { ConfigurationError } from "../src/errors.js";
-import { resetEphemeralUserCacheSecretForTests, resolveUserCacheSecret } from "../src/internal/cachesecret.js";
-import { loadOrPersistUserCacheSecret } from "../src/internal/cachesecret-store.js";
+import { resetProcessUserCacheSecretForTests, resolveUserCacheSecret } from "../src/internal/cachesecret.js";
 import { PLATFORM } from "../src/internal/platform.js";
 import { isCertificateError } from "../src/internal/transport/pin-errors.js";
 import { tlsMode } from "../src/internal/transport/tls.js";
@@ -90,7 +89,6 @@ describe("the browser entry", () => {
     expect(PLATFORM).toBe("browser");
     expect(WS_PLATFORM).toBe("browser");
     expect(() => tlsMode()).toThrow(/not available in browsers/);
-    expect(loadOrPersistUserCacheSecret(() => "generated")).toBeNull();
   });
 
   it("resolves the WebSocket modules without the runtime's TLS support", () => {
@@ -116,7 +114,7 @@ describe("the browser entry", () => {
 
   it("keeps one in-memory cache secret for the page, without warning", async () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
-    resetEphemeralUserCacheSecretForTests();
+    resetProcessUserCacheSecretForTests();
     const first = await resolveUserCacheSecret(undefined);
     expect(first).toMatch(/^[0-9a-f]{64}$/);
     expect(await resolveUserCacheSecret(undefined)).toBe(first);
