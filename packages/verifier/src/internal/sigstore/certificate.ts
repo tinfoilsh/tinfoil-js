@@ -286,11 +286,14 @@ export function allowsCodeSigning(cert: Certificate): boolean {
 }
 
 /**
- * The library's form of `root`, with every certificate-authority certificate
- * whose extended key usage does not allow code signing left out of its
- * chain, so that no certificate path the library builds passes through one.
- * A certificate authority left with no certificates is dropped by the
- * library. Returns the number of certificates left out.
+ * The library's form of `root`, keeping only the certificate-authority
+ * certificates whose extended key usage allows code signing, so that no
+ * certificate path the library builds passes through one that does not.
+ * When a certificate authority's root does not allow it, every path through
+ * that authority fails, so the whole authority is left out; the library
+ * drops an authority with no certificates. Otherwise only the intermediates
+ * that do not allow it are left out. Returns the number of certificates left
+ * out.
  */
 export function codeSigningRoot(root: TrustedRoot): { json: unknown; excluded: number } {
   const json = plain(root.json) as { certificateAuthorities?: { certChain: { certificates: unknown[] } }[] };
@@ -299,15 +302,23 @@ export function codeSigningRoot(root: TrustedRoot): { json: unknown; excluded: n
     const chain = json.certificateAuthorities?.[i]?.certChain;
     if (chain === undefined) throw new Error("trusted root certificate authorities do not match their parsed form");
     // chainDer is root first; the wire order is the issuing certificate first.
-    const wire = [...authority.chainDer].reverse();
-    chain.certificates = chain.certificates.filter((_, j) => {
+    const allowed = authority.chainDer.map((der) => {
       let cert: Certificate;
       try {
-        cert = parseCertificate(wire[j]);
+        cert = parseCertificate(der);
       } catch (err) {
         throw new Error(`parsing trusted root certificate authority: ${message(err)}`);
       }
-      if (allowsCodeSigning(cert)) return true;
+      return allowsCodeSigning(cert);
+    });
+    if (allowed[0] === false) {
+      excluded += chain.certificates.length;
+      chain.certificates = [];
+      return;
+    }
+    allowed.reverse();
+    chain.certificates = chain.certificates.filter((_, j) => {
+      if (allowed[j]) return true;
       excluded++;
       return false;
     });

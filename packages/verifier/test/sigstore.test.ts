@@ -251,11 +251,13 @@ describe("extended key usage on the Fulcio path", () => {
     });
     const rootC = await selfSigned("root C", [ekuExtension(OID_KP_ANY)]);
     const library = codeSigningRoot(await authoritiesRoot([[intermediateA, rootA.der], [intermediateB, rootB.der], [rootC.der]]));
-    expect(library.excluded).toBe(2);
+    expect(library.excluded).toBe(3);
     const kept = (library.json as Record<string, any>).certificateAuthorities.map((ca: Record<string, any>) =>
       ca.certChain.certificates.map((c: { rawBytes: string }) => c.rawBytes),
     );
-    expect(kept).toEqual([[toBase64(rootA.der)], [toBase64(intermediateB)], [toBase64(rootC.der)]]);
+    // A root that does not allow code signing takes its whole authority with
+    // it, so intermediate B is not left as the end of a chain.
+    expect(kept).toEqual([[toBase64(rootA.der)], [], [toBase64(rootC.der)]]);
   });
 
   it("keeps every certificate of the production root", async () => {
@@ -651,7 +653,8 @@ describe.skipIf(withoutVectors)(vectorsTitle("verifyCertificateBundle"), () => {
     });
 
     it("rejects a chain whose root's extended key usage does not allow code signing", async () => {
-      await rejects(verifyUnder(await reissuedRoot([], [ekuExtension(OID_KP_SERVER_AUTH)])), /verifying bundle: .*certificate chain.*1 certificate authority certificate\(s\) not used/);
+      // The root takes its intermediate with it, so both are left out.
+      await rejects(verifyUnder(await reissuedRoot([], [ekuExtension(OID_KP_SERVER_AUTH)])), /verifying bundle: .*2 certificate authority certificate\(s\) not used/);
     });
   });
 
