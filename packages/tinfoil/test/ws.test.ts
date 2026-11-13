@@ -13,7 +13,9 @@ import { Identity } from "ehbp";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import OpenAI from "openai";
 import type { OpenAIRealtimeWS } from "openai/realtime/ws";
-import { WebSocket as WsWebSocket, WebSocketServer } from "ws";
+import { LiveWS } from "openai/resources/live/ws";
+import { ResponsesWS } from "openai/resources/responses/ws";
+import { type ClientOptions as WsClientOptions, WebSocket as WsWebSocket, WebSocketServer } from "ws";
 import { createEnclaveHTTPClient, type EnclaveHTTPClient } from "../src/enclave-client.js";
 import { AttestationError, ConfigurationError } from "../src/errors.js";
 import { PeerLacksKeyError } from "../src/internal/transport/transport.js";
@@ -281,6 +283,66 @@ describe("pinnedWebSocketOptions", () => {
     expect(docs.calls).toBe(1);
     await pinnedWebSocketOptions(c);
     expect(docs.calls).toBe(2);
+  });
+
+  describe("given to the OpenAI WebSocket clients that take ws settings", () => {
+    /** What the tests use of an OpenAI WebSocket client. */
+    interface Session {
+      on(event: "error", listener: (err: Error) => void): unknown;
+      close(): void;
+    }
+
+    /** The OpenAI WebSocket clients that build their own `ws` WebSocket to the client's base URL with the client's key. */
+    const libraries = [
+      { name: "ResponsesWS", path: "/v1/responses", open: (ai: EnclaveOpenAIClient, options: WsClientOptions): Session => new ResponsesWS(ai, options) },
+      { name: "LiveWS", path: "/v1/live/sessions", open: (ai: EnclaveOpenAIClient, options: WsClientOptions): Session => new LiveWS(ai, options) },
+    ];
+
+    async function openAIClient(pin: () => string, docs = documents()): Promise<EnclaveOpenAIClient> {
+      return createEnclaveOpenAIClient(host, "tinfoilsh/repo", { verifier: verifier(pin), transportMode: "tls" }, { apiKey: "k" }, { documentFetch: docs.fetch, tls: { ca: TEST_CERT } });
+    }
+
+    /** Resolves with the next connection that the server accepts after `before`, or rejects with the session's error. */
+    function nextConnection(session: Session, before: number): Promise<Connection> {
+      return new Promise((resolve, reject) => {
+        const poll = setInterval(() => {
+          if (connections.length > before) {
+            clearInterval(poll);
+            resolve(connections[before]!);
+          }
+        }, 5);
+        session.on("error", (err) => {
+          clearInterval(poll);
+          reject(err);
+        });
+      });
+    }
+
+    for (const library of libraries) {
+      it(`pins ${library.name} to the attested key, authenticated with the client's key`, async () => {
+        const ai = await openAIClient(() => TEST_PIN);
+        const before = connections.length;
+        const session = library.open(ai, await pinnedWebSocketOptions(ai.httpClient));
+        const connection = await nextConnection(session, before);
+        expect(connection.path).toBe(library.path);
+        expect(connection.headers.authorization).toBe("Bearer k");
+        session.close();
+      });
+
+      it(`fails ${library.name}'s handshake when the certificate carries another key, and reaches the server with nothing`, async () => {
+        const docs = documents();
+        const ai = await openAIClient(() => OTHER_PIN, docs);
+        const before = connections.length;
+        const session = library.open(ai, await pinnedWebSocketOptions(ai.httpClient));
+        const err = await nextConnection(session, before).catch((e: unknown) => e);
+        expect(String((err as Error).message)).toMatch(/does not match the attested key/);
+        expect(connections.length).toBe(before);
+        session.close();
+        // The pin failure retired the verification the settings were pinned to.
+        await pinnedWebSocketOptions(ai.httpClient);
+        expect(docs.calls).toBe(2);
+      });
+    }
   });
 });
 
