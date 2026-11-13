@@ -51,6 +51,14 @@ Browsers use the EHBP transport, the default and the only one available there. T
 
 Bun pins the TLS connection from Bun 1.4.0, the first release whose `fetch` checks the server certificate before it sends the request; on an older Bun the default transport mode is `"ehbp"` and `transportMode: "tls"` is refused with a `ConfigurationError`. `createWebSocket` needs Bun 1.4.4 or later, the first release whose WebSocket runs the certificate check at all, and is refused on an older Bun before anything is sent. `pinnedWebSocketOptions` and `createRealtimeWebSocket` hand settings to the `ws` library, which Bun replaces with its own WebSocket, so they are available on Node only.
 
+**WebSockets from the `openai` package aren't pinned.** The `openai` package's WebSocket classes (`ResponsesWS`, `LiveWS` and its sideband and forks, `OpenAIRealtimeWS`, `OpenAIRealtimeWebSocket` and `OpenAIRealtimeTranslationWS`) take an OpenAI client and open their own WebSocket. Given a Tinfoil client, they connect to its base URL with its API key or bearer token, but without the TLS pin, so the connection isn't bound to the verified enclave. With an enclave or router client:
+
+- For a realtime session, use `createRealtimeWebSocket` instead of `OpenAIRealtimeWS`. It always connects to the verified enclave, even when the client sends its requests through a proxy `baseURL`.
+- For a WebSocket that you drive yourself, `createWebSocket` opens a raw pinned WebSocket to a path on the verified enclave.
+- `ResponsesWS`, `LiveWS` and its sideband and forks, and `OpenAIRealtimeTranslationWS` have no Tinfoil replacement. On Node, pass them the pinned settings, for example `new ResponsesWS(client, await pinnedWebSocketOptions(client.httpClient))`. That pins the connection only when the client has no `baseURL` option, because the class connects to the client's base URL: then it connects to the enclave itself over `wss://`. Behind a proxy `baseURL`, the pinned handshake fails, because the proxy doesn't hold the enclave's key, and over an `http://` base URL there is no TLS to pin at all.
+
+`OpenAIRealtimeWebSocket` uses the runtime's built-in WebSocket and can't be pinned. The gateway client offers no pinned WebSocket, so don't give it to any of these classes.
+
 The request body is still encrypted to the verified enclave's key; the proxy only forwards it. `baseURL` is the API root, as for `new OpenAI({ baseURL })`: the client appends `chat/completions` and the other OpenAI paths to it, so a proxy that forwards paths as they are takes the enclave's `/v1/`. Multi-user services must scope prompt caches to each end user with `userCacheSecret` or a per-request `user_cache_secret`; see [Prompt caching](https://docs.tinfoil.sh/sdk/prompt-caching).
 
 ### HTTP-only and lazy imports
