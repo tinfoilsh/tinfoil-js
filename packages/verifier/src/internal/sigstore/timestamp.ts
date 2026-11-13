@@ -41,7 +41,6 @@ const OID_CONTENT_TYPE = "1.2.840.113549.1.9.3";
 const OID_MESSAGE_DIGEST = "1.2.840.113549.1.9.4";
 const OID_SIGNING_CERTIFICATE = "1.2.840.113549.1.9.16.2.12";
 const OID_SIGNING_CERTIFICATE_V2 = "1.2.840.113549.1.9.16.2.47";
-const OID_SHA1 = "1.3.14.3.2.26";
 const DIRECTORY_NAME_TAG = 4;
 const OID_SHA256 = "2.16.840.1.101.3.4.2.1";
 const OID_SHA384 = "2.16.840.1.101.3.4.2.2";
@@ -406,7 +405,7 @@ async function checkSigningCertificates(ts: TimestampResponse, signer: Certifica
         throw new Error("invalid certificate hash algorithm parameters");
       }
       const id = oid(algorithm[0]);
-      hash = id === OID_SHA1 ? "SHA-1" : HASHES[id];
+      hash = HASHES[id];
       if (hash === undefined) throw new Error(`unsupported certificate hash algorithm ${id}`);
     }
     if (fields.length < 1 || fields.length > 2 || !isUniversal(fields[0], TAG.OCTET_STRING)) {
@@ -420,7 +419,7 @@ async function checkSigningCertificates(ts: TimestampResponse, signer: Certifica
         throw new Error("timestamp certificate serial does not match signer");
       }
       const names = expectSequence(issuerSerial[0], "GeneralNames");
-      if (!names.some((name) => isContext(name, DIRECTORY_NAME_TAG) && bytesEqual(explicit(name, DIRECTORY_NAME_TAG, "directoryName").raw, signer.issuer))) {
+      if (names.length !== 1 || !isContext(names[0], DIRECTORY_NAME_TAG) || !bytesEqual(explicit(names[0], DIRECTORY_NAME_TAG, "directoryName").raw, signer.issuer)) {
         throw new Error("timestamp certificate issuer does not match signer");
       }
     }

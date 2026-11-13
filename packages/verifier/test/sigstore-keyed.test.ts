@@ -514,6 +514,9 @@ const TIMESTAMP_REJECTIONS: Readonly<Record<string, RegExp>> = {
   "signing-certificate-wrong-hash": /certificate hash does not match signer/,
   "signing-certificate-wrong-issuer": /certificate issuer does not match signer/,
   "signing-certificate-wrong-serial": /certificate serial does not match signer/,
+  "signing-certificate-extra-issuer": /certificate issuer does not match signer/,
+  "signing-certificate-legacy-extra-issuer": /certificate issuer does not match signer/,
+  "signing-certificate-v2-sha1": /unsupported certificate hash algorithm/,
   "wrong-encapsulated-content-type": /must encapsulate a TSTInfo/,
   "wrong-signed-content-type": /signed content-type attribute is not TSTInfo/,
 };
