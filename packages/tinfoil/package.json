@@ -41,7 +41,7 @@
     "build": "node scripts/generate-version.mjs && tsc && node ../../scripts/prune-declarations.mjs dist dist/index.d.ts dist/index.browser.d.ts dist/http.d.ts dist/ai-sdk.d.ts dist/unsafe.d.ts",
     "test": "node scripts/generate-version.mjs && vitest run",
     "test:integration": "RUN_TINFOIL_INTEGRATION=true npm test",
-    "test:bun": "node scripts/generate-version.mjs && bun test --timeout 30000 ./test/surface.bun.ts ./test/tls.bun.ts ./test/ws.bun.ts",
+    "test:bun": "node scripts/generate-version.mjs && bun test --timeout 30000 ./test/surface.bun.ts ./test/tls.bun.ts ./test/fetch-options.bun.ts ./test/ws.bun.ts",
     "test:bun:integration": "node scripts/generate-version.mjs && RUN_TINFOIL_INTEGRATION=true bun test --timeout 180000 ./test/integration.bun.ts",
     "test:browser": "vitest run --config vite.config.browser.ts",
     "test:browser:integration": "node scripts/generate-version.mjs && RUN_TINFOIL_INTEGRATION=true vitest run --config vite.config.browser.integration.ts",
