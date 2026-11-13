@@ -127,7 +127,7 @@ export class Verification {
   readonly runtime?: ArtifactVerification;
   /** The verified platform endorsements, for a config-based document. */
   readonly platform?: ArtifactVerification;
-  /** When the freshness proofs stop vouching for the document; undefined when none applies. */
+  /** Earliest approval/freshness timestamp plus the maximum age, capped by CPU collateral validity. */
   readonly freshnessExpiresAt?: Date;
   /** The verifier's name and version, and when it ran. */
   readonly metadata: VerificationMetadata;

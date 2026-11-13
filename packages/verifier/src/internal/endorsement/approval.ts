@@ -394,7 +394,7 @@ export class ConfigVerifier {
     if (issuerDer !== undefined) {
       if (s.predicateType !== CONFIG_ENDORSEMENT_PREDICATE_TYPE_V2) throw new Error("certified registry endorsement requires a v2 statement");
       signatureTime = await signedTimestamp(this.root, bundle);
-      checkTime(window, signatureTime);
+      if (signatureTime > window.latest) throw new Error("signature timestamp is in the future");
       if (bundle.certificate === undefined) throw new Error("certified approval bundle must carry a signing certificate");
       const signing = await verifySigningCertificate(bundle.certificate, issuerDer, this.#rootKeys, signatureTime, validateRegistryID);
       registryID = signing.registryID;
