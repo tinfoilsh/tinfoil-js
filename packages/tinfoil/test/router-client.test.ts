@@ -17,6 +17,7 @@ import { KEY_SPKI_FP_SHA256_V1_FORMAT, KEY_X25519_HPKE_V1_FORMAT, UsageError, ty
 import { startEhbpServer, type EhbpServer } from "./helpers/ehbp-server.js";
 import { recordingFetch } from "./helpers/network.js";
 import { startTlsServer, TEST_CERT, TEST_PIN, type TlsServer } from "./helpers/tls-server.js";
+import { expectWithOptionsRefusesTransportOptions } from "./helpers/transport-options.js";
 
 const ROUTER_REPO = "tinfoilsh/confidential-model-router";
 const BODY = '{"model":"test","messages":[{"role":"user","content":"hi"}],"seed":9223372036854775807,"metadata":{"a":{"b":[1,2.50]}}}';
@@ -235,6 +236,7 @@ describe("RouterHTTPClient over TLS", () => {
     expect(last.headers.authorization).toBe("Bearer k");
     expect(() => new (RouterOpenAIClient as any)(Symbol("x"), ai.httpClient, {})).toThrow(ConfigurationError);
     expect(() => new (RouterHTTPClient as any)(Symbol("x"))).toThrow(ConfigurationError);
+    expectWithOptionsRefusesTransportOptions(ai);
   });
 });
 
@@ -351,6 +353,7 @@ describe("createClient", () => {
     expect(reply.choices[0]!.message.content).toBe("pinned");
     expect(JSON.parse(new TextDecoder().decode(tls.seen[tls.seen.length - 1]!.body)).user_cache_secret).toBe("resolved-secret");
     expect(() => new (TinfoilClient as any)(Symbol("x"), ai.httpClient, {})).toThrow(ConfigurationError);
+    expectWithOptionsRefusesTransportOptions(ai);
   });
 
   it("accepts an API key on a server and refuses one anywhere else before fetching anything", async () => {

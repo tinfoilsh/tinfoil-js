@@ -17,6 +17,7 @@ import { createWebSocket, pinnedWebSocketOptions } from "../src/websocket.js";
 import { startEhbpServer, type EhbpServer } from "./helpers/ehbp-server.js";
 import { recordingFetch } from "./helpers/network.js";
 import { paced, startTlsServer, TEST_CERT, TEST_PIN, type TlsServer } from "./helpers/tls-server.js";
+import { expectWithOptionsRefusesTransportOptions } from "./helpers/transport-options.js";
 
 let tls: TlsServer;
 let ehbp: EhbpServer;
@@ -302,6 +303,29 @@ describe("EnclaveHTTPClient over TLS", () => {
     expect(tls.seen[tls.seen.length - 1]!.headers["x-custom"]).toBe("changed");
     expect(tls.seen[tls.seen.length - 1]!.headers["x-added"]).toBe("new");
     expect(fetchOf(again)).toBe(fetchOf(ai));
+  });
+
+  it("refuses the options that would choose another transport in withOptions, and keeps the others", async () => {
+    const options = { verifier: verifier(() => ({ tls: TEST_PIN })), transportMode: "tls" as const };
+    // An option the caller holds as undefined or null is unset, as the OpenAI client takes it.
+    const unset = { dataResidency: undefined, provider: null, workloadIdentity: undefined, credential: null, x509Transport: null };
+    const ai = await createEnclaveOpenAIClient(
+      tls.host,
+      "tinfoilsh/repo",
+      options,
+      { apiKey: "k", organization: "org", defaultQuery: { q: "1" }, defaultHeaders: { "x-custom": "kept" }, timeout: 1234, maxRetries: 0, ...unset } as Parameters<typeof createEnclaveOpenAIClient>[3],
+      { documentFetch: docs.fetch, tls: { ca: TEST_CERT } },
+    );
+    expectWithOptionsRefusesTransportOptions(ai);
+    const clone = ai.withOptions({ timeout: 5_000, organization: "org2" });
+    for (const [client, organization] of [[ai, "org"], [clone, "org2"]] as const) {
+      // The server echoes the path it was sent on the pinned connection.
+      expect(await client.get("/echo")).toEqual({ path: "/v1/echo?q=1", enclave: null });
+      const last = tls.seen[tls.seen.length - 1]!;
+      expect(last.headers["openai-organization"]).toBe(organization);
+      expect(last.headers["x-custom"]).toBe("kept");
+    }
+    expect([ai.timeout, ai.maxRetries, clone.timeout, clone.maxRetries]).toEqual([1234, 0, 5_000, 0]);
   });
 
   it("lets a clone replace the credential in either form", async () => {
