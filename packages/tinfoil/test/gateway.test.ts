@@ -272,17 +272,47 @@ describe("prepare", () => {
     expect(prompt.get(CACHE_PREFIX_HEADER)).toMatch(/^[0-9a-f]{64}$/);
   });
 
-  it("refuses a body that names its model, its secret, or its cache salt more than once", async () => {
-    const json = new Headers({ "content-type": "application/json" });
-    await expect(prepare(shapeOf(url, { method: "POST", body: "{}" }), json, '{"model":"a","model":"b"}', "s")).rejects.toThrow(/names a model more than once/);
-    await expect(scopeCache(new Headers(), '{"model":"m","user_cache_secret":"a","user_cache_secret":"b"}', "s")).rejects.toThrow(/user_cache_secret more than once/);
-    await expect(scopeCache(new Headers(), '{"model":"m","cache_salt":"a","cache_salt":"b"}', "s")).rejects.toThrow(/cache_salt more than once/);
+  it("refuses a body that repeats its model, its secret, or its cache salt, on any path and whatever the model header", async () => {
+    const refused: [string, string][] = [
+      ['{"model":"a","model":"b"}', 'request body repeats the "model" member'],
+      ['{"model":"a","mod\\u0065l":"b"}', 'request body repeats the "model" member'],
+      ['{"model":"m","user_cache_secret":"a","user_cache_secret":"b"}', 'request body repeats the "user_cache_secret" member'],
+      ['{"model":"m","cache_salt":"a","cache_salt":"b"}', 'request body repeats the "cache_salt" member'],
+      ['{"cache_salt":"a","model":"x","cache_salt":"b","model":"y"}', 'request body repeats the "model", "cache_salt" members'],
+    ];
+    for (const [body, message] of refused) {
+      for (const path of [url, "https://gateway.example/v1/embeddings"]) {
+        for (const model of [undefined, "set"]) {
+          const headers = new Headers({ "content-type": "application/json" });
+          if (model !== undefined) headers.set(MODEL_HEADER, model);
+          for (const sent of [body, utf8(body), new Blob([body])]) {
+            const pending = prepare(shapeOf(path, { method: "POST", body: sent }), headers, sent, "s");
+            await expect(pending, `${path} ${body}`).rejects.toThrow(ConfigurationError);
+            await expect(pending, `${path} ${body}`).rejects.toThrow(message);
+          }
+        }
+      }
+    }
+    await expect(scopeCache(new Headers(), '{"model":"m","user_cache_secret":"a","user_cache_secret":"b"}', "s")).rejects.toThrow('request body repeats the "user_cache_secret" member');
+    await expect(scopeCache(new Headers(), '{"model":"m","cache_salt":"a","cache_salt":"b"}', "s")).rejects.toThrow('request body repeats the "cache_salt" member');
     const replaced = await scopeCache(new Headers(), '{"cache_salt":"stale","model":"m"}', "s");
     expect(replaced).toMatch(/^\{"cache_salt":"[A-Za-z0-9_-]{43}","model":"m"\}$/);
     expect(replaced).not.toContain("stale");
-    const explicit = new Headers({ "content-type": "application/json", [MODEL_HEADER]: "set" });
-    const out = await prepare(shapeOf(url, { method: "POST", body: "{}" }), explicit, '{"model":"a","model":"b"}', "");
-    expect(out.body).toBe('{"model":"a","model":"b"}');
+  });
+
+  it("forwards a body that repeats another member, or that isn't one JSON object, as it was sent", async () => {
+    const embeddings = "https://gateway.example/v1/embeddings";
+    for (const body of ['{"model":"m","temperature":0,"temperature":1}', '{"model":"m","n":{"model":"a","model":"b"}}']) {
+      const out = await prepare(shapeOf(embeddings, { method: "POST", body }), new Headers({ "content-type": "application/json" }), body, "s");
+      expect(out.body).toBe(body);
+      expect(out.headers.get(MODEL_HEADER)).toBe("m");
+    }
+    for (const body of ['[{"model":"a"},{"model":"b"}]', '"model"', '{"model":"a","model":"b"', '{"model":"a","model":"b"} {}']) {
+      for (const path of [url, embeddings]) {
+        const out = await prepare(shapeOf(path, { method: "POST", body }), new Headers({ "content-type": "application/json", [MODEL_HEADER]: "set" }), body, "s");
+        expect(new TextDecoder().decode(out.body as Uint8Array)).toBe(body);
+      }
+    }
   });
 
   it("bounds what it reads of a body, counting a string's encoded bytes", async () => {
@@ -450,6 +480,27 @@ describe("GatewayTransport", () => {
     for (const host of [...HOSTS, "only.example"]) {
       peers.set(host, await createEhbpPeer((seen) => ({ headers: { "content-type": "application/json" }, body: JSON.stringify({ path: seen.path, host, sealed: seen.sealed, text: new TextDecoder().decode(seen.body) }) })));
     }
+  });
+
+  it("refuses a body that repeats a routed member before reading the catalog or touching a replica", async () => {
+    let catalogReads = 0;
+    const gw = gateway();
+    const t = transport({
+      policy: await GatewayPolicy.create(undefined, false, perHost()),
+      gatewayFetch: gw.fetch,
+      documentFetch: async () => {
+        throw new Error("a request with a repeated member fetched an attestation");
+      },
+      catalog: () => {
+        catalogReads++;
+        return catalogOf({ [MODEL]: { repo: "tinfoilsh/test", hosts: HOSTS } });
+      },
+    });
+    for (const body of [`{"model":"${MODEL}","model":"other"}`, `{"model":"${MODEL}","user_cache_secret":"a","user_cache_secret":"b"}`, `{"model":"${MODEL}","cache_salt":"a","cache_salt":"b"}`]) {
+      await expect(t.fetch("https://gateway.example/v1/chat/completions", { method: "POST", body, headers: { "content-type": "application/json" } })).rejects.toThrow(ConfigurationError);
+    }
+    expect(catalogReads).toBe(0);
+    expect(gw.seen).toHaveLength(0);
   });
 
   it("refuses an upgrade before reading the catalog or touching a replica", async () => {

@@ -37,9 +37,13 @@ export interface Prepared {
  * The headers and body to send: a JSON body with the model header set from
  * its `model` field and, on a prefix-caching endpoint, its cache scope
  * applied; a multipart upload with the model header set from its `model`
- * part. A request that already names its model and needs no cache scope
- * passes through unread, as does any other request. Reading a body makes
- * it replayable; a body over `limit` bytes is refused.
+ * part. A JSON object body that repeats its `model`, `user_cache_secret`
+ * or `cache_salt` member is refused, since a server could read a different
+ * repeat from the one that the client routed on, whether or not the caller
+ * set the model header. A streamed request that already names its model
+ * and needs no cache scope passes through unread, as does any other
+ * request. Reading a body makes it replayable; a body over `limit` bytes is
+ * refused.
  *
  * @experimental The gateway route is new; this API may change without a major version.
  */
@@ -56,7 +60,8 @@ export async function prepare(shape: RequestShape, headers: Headers, body: Prepa
   }
   if (mediaType.type !== "application/json") return passthrough;
   const scoped = pathEligible(shape);
-  if (explicitModel && !scoped) return passthrough;
+  // A body in memory is read to check it for repeats; a stream keeps streaming.
+  if (explicitModel && !scoped && body instanceof ReadableStream) return passthrough;
   const bytes = await readAll(body, limit, "JSON body", signal);
   let text: string | undefined;
   try {
@@ -66,10 +71,9 @@ export async function prepare(shape: RequestShape, headers: Headers, body: Prepa
   }
   const members = objectMembers(text);
   if (members === null) return { headers, body: bytes, replayable: true };
+  refuseRepeatedMembers(members, ["model", USER_CACHE_SECRET_FIELD, CACHE_SALT_FIELD]);
   if (!explicitModel) {
-    const models = members.filter((m) => m.key === "model");
-    if (models.length > 1) throw new ConfigurationError("JSON body names a model more than once");
-    const model = models[0];
+    const model = members.find((m) => m.key === "model");
     const value = model === undefined ? undefined : (JSON.parse(text.slice(model.valueStart, model.valueEnd)) as unknown);
     if (typeof value === "string" && value !== "") headers.set(MODEL_HEADER, value);
   }
@@ -95,10 +99,8 @@ export async function scopeCache(headers: Headers, text: string, clientSecret: s
 
 /** {@link scopeCache} over `members`, the body's members already parsed, so a body is scanned once. */
 async function scope(headers: Headers, text: string, members: readonly Member[], clientSecret: string): Promise<string> {
-  const secretMembers = members.filter((m) => m.key === USER_CACHE_SECRET_FIELD);
-  if (secretMembers.length > 1) throw new ConfigurationError(`JSON body carries ${USER_CACHE_SECRET_FIELD} more than once`);
-  if (members.filter((m) => m.key === CACHE_SALT_FIELD).length > 1) throw new ConfigurationError(`JSON body carries ${CACHE_SALT_FIELD} more than once`);
-  const secretMember = secretMembers[0];
+  refuseRepeatedMembers(members, [USER_CACHE_SECRET_FIELD, CACHE_SALT_FIELD]);
+  const secretMember = members.find((m) => m.key === USER_CACHE_SECRET_FIELD);
   let secret = "";
   if (secretMember !== undefined) {
     const value = JSON.parse(text.slice(secretMember.valueStart, secretMember.valueEnd)) as unknown;
@@ -123,6 +125,14 @@ async function scope(headers: Headers, text: string, members: readonly Member[],
   const saltJSON = JSON.stringify(base64url(salt));
   const existing = remaining.find((m) => m.key === CACHE_SALT_FIELD);
   return existing === undefined ? appendMember(out, remaining, CACHE_SALT_FIELD, saltJSON) : replaceMember(out, existing, saltJSON);
+}
+
+/** Throws a {@link ConfigurationError} that names each of `keys` that appears more than once among `members`. */
+function refuseRepeatedMembers(members: readonly Member[], keys: readonly string[]): void {
+  const repeated = keys.filter((key) => members.filter((m) => m.key === key).length > 1);
+  if (repeated.length === 0) return;
+  const names = repeated.map((key) => `"${key}"`).join(", ");
+  throw new ConfigurationError(`request body repeats the ${names} member${repeated.length > 1 ? "s" : ""}`);
 }
 
 /** The first element of a conversation, which later turns share: the instructions, or the first message, input or prompt item. */
