@@ -1,6 +1,6 @@
 {
   "name": "@tinfoilsh/verifier",
-  "version": "2.0.0-rc.1",
+  "version": "2.0.0-rc.2",
   "description": "Tinfoil attestation document verifier (AMD SEV-SNP and Intel TDX) for Node.js and browsers",
   "type": "module",
   "main": "dist/index.js",
