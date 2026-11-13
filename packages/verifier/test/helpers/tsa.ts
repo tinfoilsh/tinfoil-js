@@ -95,6 +95,7 @@ const OID_SIGNED_DATA = "1.2.840.113549.1.7.2";
 const OID_TST_INFO = "1.2.840.113549.1.9.16.1.4";
 const OID_CONTENT_TYPE = "1.2.840.113549.1.9.3";
 const OID_MESSAGE_DIGEST = "1.2.840.113549.1.9.4";
+const OID_SIGNING_CERTIFICATE_V2 = "1.2.840.113549.1.9.16.2.47";
 const OID_BASIC_CONSTRAINTS = "2.5.29.19";
 const OID_KEY_USAGE = "2.5.29.15";
 const OID_EXT_KEY_USAGE = "2.5.29.37";
@@ -232,6 +233,7 @@ export async function timestampResponse(tsa: TimestampAuthority, input: Uint8Arr
   const signedAttrs = [
     seq(oid(OID_CONTENT_TYPE), set(oid(OID_TST_INFO))),
     seq(oid(OID_MESSAGE_DIGEST), set(octetString(await sha256(info)))),
+    seq(oid(OID_SIGNING_CERTIFICATE_V2), set(seq(seq(seq(octetString(await sha256(tsa.leafDer))))))),
   ];
   const attrsSet = set(...signedAttrs);
   const signature = await signP256Der(tsa.leafKey.privateKey, attrsSet);

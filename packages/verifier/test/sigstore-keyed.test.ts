@@ -504,6 +504,18 @@ const TIMESTAMP_REJECTIONS: Readonly<Record<string, RegExp>> = {
   "trailing-bytes": /trailing bytes after/,
   "unknown-authority": /authority 0: the token's signer is not the authority's signing certificate/,
   "wrong-policy": /unexpected timestamp policy/,
+  "signing-certificate-both-one-wrong": /certificate hash does not match signer/,
+  "signing-certificate-duplicate": /duplicate timestamp signed attribute/,
+  "signing-certificate-empty": /signing-certificate attribute has no certificates/,
+  "signing-certificate-legacy-wrong-hash": /certificate hash does not match signer/,
+  "signing-certificate-missing": /lacks a signing-certificate attribute/,
+  "signing-certificate-multiple-values": /must have exactly one value/,
+  "signing-certificate-unsupported-hash": /unsupported certificate hash algorithm/,
+  "signing-certificate-wrong-hash": /certificate hash does not match signer/,
+  "signing-certificate-wrong-issuer": /certificate issuer does not match signer/,
+  "signing-certificate-wrong-serial": /certificate serial does not match signer/,
+  "wrong-encapsulated-content-type": /must encapsulate a TSTInfo/,
+  "wrong-signed-content-type": /signed content-type attribute is not TSTInfo/,
 };
 
 describe.skipIf(!conformanceAvailable())(vectorsTitle("verifyTimestamp"), () => {

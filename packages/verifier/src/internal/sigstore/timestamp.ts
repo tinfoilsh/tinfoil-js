@@ -39,6 +39,10 @@ const OID_SIGNED_DATA = "1.2.840.113549.1.7.2";
 const OID_TST_INFO = "1.2.840.113549.1.9.16.1.4";
 const OID_CONTENT_TYPE = "1.2.840.113549.1.9.3";
 const OID_MESSAGE_DIGEST = "1.2.840.113549.1.9.4";
+const OID_SIGNING_CERTIFICATE = "1.2.840.113549.1.9.16.2.12";
+const OID_SIGNING_CERTIFICATE_V2 = "1.2.840.113549.1.9.16.2.47";
+const OID_SHA1 = "1.3.14.3.2.26";
+const DIRECTORY_NAME_TAG = 4;
 const OID_SHA256 = "2.16.840.1.101.3.4.2.1";
 const OID_SHA384 = "2.16.840.1.101.3.4.2.2";
 const OID_SHA512 = "2.16.840.1.101.3.4.2.3";
@@ -104,6 +108,7 @@ export interface TimestampResponse {
   readonly signedAttributes: Uint8Array;
   /** The message-digest attribute's value. */
   readonly messageDigest: Uint8Array;
+  readonly signingCertificates: readonly { v2: boolean; value: DerElement }[];
   /** The signer's digest algorithm, which hashes the TSTInfo. */
   readonly digestAlgorithm: HashName;
   readonly signatureAlgorithm: string;
@@ -209,6 +214,7 @@ interface SignerInfo {
   readonly signerSerial: bigint;
   readonly signedAttributes: Uint8Array;
   readonly messageDigest: Uint8Array;
+  readonly signingCertificates: readonly { v2: boolean; value: DerElement }[];
   readonly digestAlgorithm: HashName;
   readonly signatureAlgorithm: string;
   readonly signature: Uint8Array;
@@ -224,7 +230,7 @@ function parseSignerInfo(el: DerElement): SignerInfo {
   const digestAlgorithm = hashAlgorithm(fields[2], "SignerInfo digestAlgorithm");
   const attrs = fields[3];
   if (!isContext(attrs, 0) || !attrs.constructed) throw new Error("SignerInfo must carry signed attributes");
-  const { contentType, messageDigest } = parseSignedAttributes(attrs);
+  const { contentType, messageDigest, signingCertificates } = parseSignedAttributes(attrs);
   if (contentType !== OID_TST_INFO) throw new Error("signed content-type attribute is not TSTInfo");
   const signatureAlgorithm = parseSignatureAlgorithm(fields[4]);
   if (!isUniversal(fields[5], TAG.OCTET_STRING)) throw new Error("SignerInfo signature must be an OCTET STRING");
@@ -237,6 +243,7 @@ function parseSignerInfo(el: DerElement): SignerInfo {
     signerSerial: integer(sid[1]),
     signedAttributes,
     messageDigest,
+    signingCertificates,
     digestAlgorithm,
     signatureAlgorithm,
     signature: fields[5].value,
@@ -244,28 +251,35 @@ function parseSignerInfo(el: DerElement): SignerInfo {
 }
 
 /** The content-type and message-digest attributes; each must appear exactly once with one value. */
-function parseSignedAttributes(attrs: DerElement): { contentType: string; messageDigest: Uint8Array } {
+function parseSignedAttributes(attrs: DerElement): { contentType: string; messageDigest: Uint8Array; signingCertificates: { v2: boolean; value: DerElement }[] } {
   let contentType: string | undefined;
   let messageDigest: Uint8Array | undefined;
+  const signingCertificates: { v2: boolean; value: DerElement }[] = [];
+  const seen = new Set<string>();
   for (const attr of children(attrs)) {
     const parts = expectSequence(attr, "Attribute");
     if (parts.length !== 2 || !isUniversal(parts[1], TAG.SET)) throw new Error("Attribute must hold a type and a SET of values");
     const type = oid(parts[0]);
-    if (type !== OID_CONTENT_TYPE && type !== OID_MESSAGE_DIGEST) continue;
+    if (![OID_CONTENT_TYPE, OID_MESSAGE_DIGEST, OID_SIGNING_CERTIFICATE, OID_SIGNING_CERTIFICATE_V2].includes(type)) continue;
+    if (seen.has(type)) throw new Error(`duplicate timestamp signed attribute ${type}`);
+    seen.add(type);
     const values = children(parts[1]);
     if (values.length !== 1) throw new Error(`attribute ${type} must have exactly one value`);
     if (type === OID_CONTENT_TYPE) {
       if (contentType !== undefined) throw new Error("duplicate content-type attribute");
       contentType = oid(values[0]);
-    } else {
+    } else if (type === OID_MESSAGE_DIGEST) {
       if (messageDigest !== undefined) throw new Error("duplicate message-digest attribute");
       if (!isUniversal(values[0], TAG.OCTET_STRING)) throw new Error("message-digest attribute must be an OCTET STRING");
       messageDigest = values[0].value;
+    } else {
+      signingCertificates.push({ v2: type === OID_SIGNING_CERTIFICATE_V2, value: values[0] });
     }
   }
   if (contentType === undefined) throw new Error("signed attributes lack content-type");
   if (messageDigest === undefined) throw new Error("signed attributes lack message-digest");
-  return { contentType, messageDigest };
+  if (signingCertificates.length === 0) throw new Error("timestamp lacks a signing-certificate attribute");
+  return { contentType, messageDigest, signingCertificates };
 }
 
 interface TstInfo {
@@ -358,9 +372,45 @@ async function verifyUnderAuthority(authority: CertificateAuthority, ts: Timesta
   }
   if (basicConstraints(leaf)?.ca === true) throw new Error("the signing certificate is a certificate authority");
   if (!canSignData(leaf)) throw new Error("the signing certificate's key usage does not permit signing");
+  await checkSigningCertificates(ts, leaf);
   checkTimestampingUsage(chain);
   await verifyChain(chain, [chain[chain.length - 1]], ts.genTime);
   if (!(await verifySignature(ts, leaf.spki))) throw new Error("the timestamp signature does not verify");
+}
+
+async function checkSigningCertificates(ts: TimestampResponse, signer: Certificate): Promise<void> {
+  for (const binding of ts.signingCertificates) {
+    const value = expectSequence(binding.value, "SigningCertificate");
+    if (value.length < 1 || value.length > 2) throw new Error("invalid signing-certificate attribute");
+    const certs = expectSequence(value[0], "SigningCertificate certs");
+    if (certs.length === 0) throw new Error("signing-certificate attribute has no certificates");
+    const fields = expectSequence(certs[0], "ESSCertID");
+    let hash: string = binding.v2 ? "SHA-256" : "SHA-1";
+    if (binding.v2 && fields.length > 0 && isUniversal(fields[0], TAG.SEQUENCE)) {
+      const algorithm = expectSequence(fields.shift()!, "ESSCertIDv2 hashAlgorithm");
+      if (algorithm.length < 1 || algorithm.length > 2 || (algorithm[1] !== undefined && !isUniversal(algorithm[1], TAG.NULL))) {
+        throw new Error("invalid certificate hash algorithm parameters");
+      }
+      const id = oid(algorithm[0]);
+      hash = id === OID_SHA1 ? "SHA-1" : HASHES[id];
+      if (hash === undefined) throw new Error(`unsupported certificate hash algorithm ${id}`);
+    }
+    if (fields.length < 1 || fields.length > 2 || !isUniversal(fields[0], TAG.OCTET_STRING)) {
+      throw new Error("invalid timestamp certificate identifier");
+    }
+    const digest = new Uint8Array(await crypto.subtle.digest(hash, asBuffer(signer.raw)));
+    if (!bytesEqual(fields[0].value, digest)) throw new Error("timestamp certificate hash does not match signer");
+    if (fields.length === 2) {
+      const issuerSerial = expectSequence(fields[1], "IssuerSerial");
+      if (issuerSerial.length !== 2 || integer(issuerSerial[1]) !== signer.serialNumber) {
+        throw new Error("timestamp certificate serial does not match signer");
+      }
+      const names = expectSequence(issuerSerial[0], "GeneralNames");
+      if (!names.some((name) => isContext(name, DIRECTORY_NAME_TAG) && bytesEqual(explicit(name, DIRECTORY_NAME_TAG, "directoryName").raw, signer.issuer))) {
+        throw new Error("timestamp certificate issuer does not match signer");
+      }
+    }
+  }
 }
 
 /**
