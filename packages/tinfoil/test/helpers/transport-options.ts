@@ -8,7 +8,7 @@ import { expect } from "vitest";
 import { ConfigurationError } from "../../src/errors.js";
 
 /** Each refused option with a value that sets it; the values pass no type check, as an untyped caller's wouldn't. */
-export const TRANSPORT_OPTIONS: Readonly<Record<string, unknown>> = {
+export const FORBIDDEN_TRANSPORT_OPTIONS: Readonly<Record<string, unknown>> = {
   dataResidency: "eu",
   provider: { baseURL: "https://provider.example/v1" },
   workloadIdentity: { clientId: "id", identityProviderId: "idp", serviceAccountId: "sa" },
@@ -23,15 +23,13 @@ export function refusal(key: string): RegExp {
 
 /**
  * Expects `withOptions` to refuse each option with a {@link ConfigurationError}
- * naming it, and not to refuse one held as `undefined` or `null`, which is
- * unset: the OpenAI client takes each as unset but a `credential` of `null`,
- * which it refuses itself.
+ * naming it, and to accept one held as `undefined` or `null`, which is unset.
  */
 export function expectWithOptionsRefusesTransportOptions(client: OpenAI): void {
-  for (const [key, value] of Object.entries(TRANSPORT_OPTIONS)) {
+  for (const [key, value] of Object.entries(FORBIDDEN_TRANSPORT_OPTIONS)) {
     expect(() => client.withOptions({ [key]: value } as never)).toThrow(ConfigurationError);
     expect(() => client.withOptions({ [key]: value } as never)).toThrow(refusal(key));
     expect(client.withOptions({ [key]: undefined } as never).baseURL).toBe(client.baseURL);
-    expect(() => client.withOptions({ [key]: null } as never)).not.toThrow(ConfigurationError);
+    expect(client.withOptions({ [key]: null } as never).baseURL).toBe(client.baseURL);
   }
 }

@@ -34,7 +34,7 @@ import { createRouterHTTPClient, RouterHTTPClient, type RouterClientSeams } from
  * today, but they are refused here too, so that the guarantee doesn't depend
  * on those checks. `OpenAIOptions` omits the same keys.
  */
-const TRANSPORT_OPTIONS = ["dataResidency", "provider", "workloadIdentity", "credential", "x509Transport"] as const satisfies readonly (keyof ClientOptions)[];
+const FORBIDDEN_TRANSPORT_OPTIONS = ["dataResidency", "provider", "workloadIdentity", "credential", "x509Transport"] as const satisfies readonly (keyof ClientOptions)[];
 
 /**
  * The OpenAI options a client takes: everything but the transport it is
@@ -56,13 +56,14 @@ export type OpenAIOptions = Omit<ClientOptions, "fetch" | "baseURL" | "dataResid
 };
 
 /**
- * Refuses an option in {@link TRANSPORT_OPTIONS} that the caller set, which
+ * Refuses an option in {@link FORBIDDEN_TRANSPORT_OPTIONS} that the caller set, which
  * untyped code can pass whatever the type says. An option the caller holds
- * as `undefined` or `null` is unset, as the OpenAI client treats it, and
- * passes; so does one the options only inherit, which a spread doesn't copy.
+ * as `undefined` or `null` is unset and passes; {@link openAIClientOptions}
+ * then drops it, so that the OpenAI client never sees it. One that the
+ * options only inherit passes too, since a spread doesn't copy it.
  */
 function refuseTransportOptions(options: object): void {
-  for (const key of TRANSPORT_OPTIONS) {
+  for (const key of FORBIDDEN_TRANSPORT_OPTIONS) {
     if (Object.prototype.hasOwnProperty.call(options, key) && (options as Record<string, unknown>)[key] != null) {
       throw new ConfigurationError(`the ${key} option is not supported: the Tinfoil client owns the transport and base URL that requests go to`);
     }
@@ -87,7 +88,11 @@ function checkOpenAIOptions(options: OpenAIOptions, globals: RuntimeGlobals | un
  */
 function openAIClientOptions(options: OpenAIOptions): Omit<ClientOptions, "fetch" | "baseURL"> {
   refuseTransportOptions(options);
-  const { bearerToken, ...rest } = options;
+  const { bearerToken, ...given } = options;
+  // What is left of these options is unset; the OpenAI client takes most of
+  // them as unset but refuses a null `credential`, so none of them reach it.
+  const rest: Omit<ClientOptions, "fetch" | "baseURL"> = { ...given };
+  for (const key of FORBIDDEN_TRANSPORT_OPTIONS) delete (rest as Record<string, unknown>)[key];
   checkAPIKeyRuntime(rest.apiKey);
   if (bearerToken === undefined || bearerToken === "") return rest;
   return { ...rest, apiKey: bearerToken, dangerouslyAllowBrowser: true };

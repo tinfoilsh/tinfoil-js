@@ -308,7 +308,7 @@ describe("EnclaveHTTPClient over TLS", () => {
   it("refuses the options that would choose another transport in withOptions, and keeps the others", async () => {
     const options = { verifier: verifier(() => ({ tls: TEST_PIN })), transportMode: "tls" as const };
     // An option the caller holds as undefined or null is unset, as the OpenAI client takes it.
-    const unset = { dataResidency: undefined, provider: null, workloadIdentity: undefined, credential: undefined, x509Transport: null };
+    const unset = { dataResidency: undefined, provider: null, workloadIdentity: undefined, credential: null, x509Transport: null };
     const ai = await createEnclaveOpenAIClient(
       tls.host,
       "tinfoilsh/repo",

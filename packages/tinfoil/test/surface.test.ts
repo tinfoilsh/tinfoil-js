@@ -16,7 +16,7 @@ import { createGatewayHTTPClient } from "../src/gateway-client.js";
 import { createEnclaveOpenAIClient, createGatewayOpenAIClient, createRouterOpenAIClient, createTinfoilClient } from "../src/openai-client.js";
 import { createRouterHTTPClient } from "../src/router-client.js";
 import type { Fetch } from "../src/options.js";
-import { refusal, TRANSPORT_OPTIONS } from "./helpers/transport-options.js";
+import { refusal, FORBIDDEN_TRANSPORT_OPTIONS } from "./helpers/transport-options.js";
 
 /** Every runtime export, sorted. Type-only exports are checked by compiling this file. */
 const EXPORTS = [
@@ -367,7 +367,7 @@ describe("public surface", () => {
       GatewayOpenAIClient: (options) => createGatewayOpenAIClient({}, options, { catalogFetch: fetches.fetch, documentFetch: fetches.fetch }),
     };
     for (const [name, factory] of Object.entries(factories)) {
-      for (const [key, value] of Object.entries(TRANSPORT_OPTIONS)) {
+      for (const [key, value] of Object.entries(FORBIDDEN_TRANSPORT_OPTIONS)) {
         const failure = factory({ apiKey: "k", [key]: value } as surface.OpenAIOptions);
         await expect(failure, `${name} ${key}`).rejects.toBeInstanceOf(surface.ConfigurationError);
         await expect(failure, `${name} ${key}`).rejects.toThrow(refusal(key));
