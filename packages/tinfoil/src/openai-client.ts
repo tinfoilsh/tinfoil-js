@@ -16,12 +16,15 @@
  * `OpenAIRealtimeWebSocket` and `OpenAIRealtimeTranslationWS`). Given one of
  * these clients, those classes open their own WebSocket to its base URL with
  * its credential, without the TLS pin, and nothing here can stop them. With
- * an enclave or router client, use `createRealtimeWebSocket` or
- * `createWebSocket` instead, which always connect to the verified enclave. Or,
- * when the client's base URL is the enclave itself and not a proxy, pass a
- * `ws`-based class the settings from `pinnedWebSocketOptions(client.httpClient)`.
- * The gateway client has no pinned WebSocket, so don't give it to those
- * classes at all.
+ * an enclave or router client, `createRealtimeWebSocket` replaces
+ * `OpenAIRealtimeWS`, and `createWebSocket` opens a raw pinned WebSocket; both
+ * always connect to the verified enclave. The other `ws`-based classes need
+ * the settings from `pinnedWebSocketOptions(client.httpClient)`, and they are
+ * pinned only when the client has no `baseURL` option, so that they connect
+ * to the enclave itself over `wss://`. Behind a proxy `baseURL` the pinned
+ * handshake fails, and over an `http://` one there is no TLS to pin.
+ * `OpenAIRealtimeWebSocket` can't be pinned, and the gateway client has no
+ * pinned WebSocket, so don't give it to those classes at all.
  *
  * The HTTP client owns the lifecycle: `httpClient.close()` releases it, and
  * an `await using` of the OpenAI client does the same, for its clones too,
