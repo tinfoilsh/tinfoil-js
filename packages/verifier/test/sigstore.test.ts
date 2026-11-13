@@ -32,9 +32,9 @@ import {
 import { embeddedTrustedRoot, parseTrustedRoot, TRUSTED_ROOT_MEDIA_TYPE, type TrustedRoot } from "../src/internal/sigstore/trusted-root.js";
 import { extension as certificateExtension, parseCertificate, type Certificate } from "../src/internal/x509/certificate.js";
 import { SIGSTORE_TRUSTED_ROOT_JSON } from "../src/trust/sigstore-trusted-root.js";
-import { newSigner, type Signer } from "./helpers/keyed.js";
+import { b64, newSigner, rootJson, type Signer } from "./helpers/keyed.js";
 import { OID_KP_ANY, OID_KP_CODE_SIGNING, OID_KP_SERVER_AUTH } from "./helpers/registry.js";
-import { boolTrue, certificate, extension, integer, name, oid, seq, tlv } from "./helpers/tsa.js";
+import { authorityJson, boolTrue, certificate, extension, integer, name, newTimestampAuthority, oid, seq, timestampResponse, tlv } from "./helpers/tsa.js";
 import {
   conformanceAvailable,
   decodeDocument,
@@ -543,6 +543,25 @@ describe.skipIf(withoutVectors)(vectorsTitle("verifyCertificateBundle"), () => {
     expect(v.identity.sourceRepositoryOwnerIdentifier).toBe("");
     expect(v.payload).toEqual(decode((goldenCode.data.sigstore_bundle as Record<string, any>).dsseEnvelope.payload));
     expect(v.verifiedLogTime).toEqual(new Date("2025-01-01T00:00:01Z"));
+  });
+
+  it("checks the signed certificate binding of provenance timestamps", async () => {
+    const tsa = await newTimestampAuthority();
+    const rootWire = structuredClone(golden.trusted_root) as Record<string, unknown>;
+    rootWire.timestampAuthorities = (rootJson([], [authorityJson(tsa)]) as Record<string, unknown>).timestampAuthorities;
+    const root = await parseTrustedRoot(utf8(JSON.stringify(rootWire)));
+    const wire = structuredClone(goldenCode.data.sigstore_bundle) as Record<string, any>;
+    const signature = parseBundle(toJson(wire)).dsse.signature;
+    for (const certificateBinding of ["valid", "missing", "wrong"] as const) {
+      const response = await timestampResponse(tsa, signature, new Date("2025-01-01T00:00:01Z"), { certificateBinding, policy: "1.2.3" });
+      wire.verificationMaterial.timestampVerificationData = { rfc3161Timestamps: [{ signedTimestamp: b64(response) }] };
+      const verification = verifyCertificateBundle(root, parseBundle(toJson(wire)), codeIdentity(golden.repo), goldenCode.data.digest!);
+      if (certificateBinding === "valid") {
+        expect((await verification).identity.sourceRepositoryRef).toBe(`refs/tags/${goldenCode.data.tag}`);
+      } else {
+        await expect(verification).rejects.toThrow(/signing-certificate attribute|certificate hash does not match signer/);
+      }
+    }
   });
 
   it("verifies the platform bundle under the platform identity only", async () => {

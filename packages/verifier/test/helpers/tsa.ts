@@ -214,6 +214,7 @@ export interface ResponseOptions {
   readonly serial?: number;
   /** The message imprint to state instead of SHA-256 of the input. */
   readonly imprint?: Uint8Array;
+  readonly certificateBinding?: "valid" | "missing" | "wrong";
 }
 
 /** TSTInfo ::= SEQUENCE { version 1, policy, messageImprint, serialNumber, genTime }. */
@@ -233,8 +234,12 @@ export async function timestampResponse(tsa: TimestampAuthority, input: Uint8Arr
   const signedAttrs = [
     seq(oid(OID_CONTENT_TYPE), set(oid(OID_TST_INFO))),
     seq(oid(OID_MESSAGE_DIGEST), set(octetString(await sha256(info)))),
-    seq(oid(OID_SIGNING_CERTIFICATE_V2), set(seq(seq(seq(octetString(await sha256(tsa.leafDer))))))),
   ];
+  if (opts.certificateBinding !== "missing") {
+    const digest = await sha256(tsa.leafDer);
+    if (opts.certificateBinding === "wrong") digest[0] ^= 1;
+    signedAttrs.push(seq(oid(OID_SIGNING_CERTIFICATE_V2), set(seq(seq(seq(octetString(digest)))))));
+  }
   const attrsSet = set(...signedAttrs);
   const signature = await signP256Der(tsa.leafKey.privateKey, attrsSet);
   const signerInfo = seq(

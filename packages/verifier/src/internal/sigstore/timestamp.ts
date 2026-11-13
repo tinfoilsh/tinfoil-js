@@ -149,6 +149,20 @@ export async function verifyTimestamp(root: TrustedRoot, response: Uint8Array, i
   if (ts.policy !== SIGSTORE_TIMESTAMP_POLICY) {
     throw new Error(`unexpected timestamp policy ${ts.policy}`);
   }
+  return verifyParsedTimestamp(root, ts);
+}
+
+/** Authenticates a bundle-signature timestamp without imposing an approval policy OID. */
+export async function verifySignatureTimestamp(root: TrustedRoot, response: Uint8Array, signature: Uint8Array): Promise<Date> {
+  const ts = parseTimestampResponse(response);
+  const hash = HASHES[ts.imprintAlgorithm];
+  if (hash === undefined || !bytesEqual(ts.imprint, new Uint8Array(await crypto.subtle.digest(hash, asBuffer(signature))))) {
+    throw new Error("timestamp response does not match the signature");
+  }
+  return verifyParsedTimestamp(root, ts);
+}
+
+async function verifyParsedTimestamp(root: TrustedRoot, ts: TimestampResponse): Promise<Date> {
   const digest = new Uint8Array(await crypto.subtle.digest(ts.digestAlgorithm, asBuffer(ts.tstInfo)));
   if (!bytesEqual(digest, ts.messageDigest)) {
     throw new Error("timestamp signed attributes do not commit to the TSTInfo");

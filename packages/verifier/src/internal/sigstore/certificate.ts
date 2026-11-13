@@ -37,6 +37,7 @@ import { IN_TOTO_PAYLOAD_TYPE, type Bundle } from "./bundle.js";
 import { expectSequence, extension, parseCertificate, X509Error, type Certificate } from "../x509/certificate.js";
 import { decode, DerError, oid } from "../x509/der.js";
 import { promisedLogTime } from "./keyed.js";
+import { verifySignatureTimestamp } from "./timestamp.js";
 import type { TrustedRoot } from "./trusted-root.js";
 
 export const GITHUB_OIDC_ISSUER = "https://token.actions.githubusercontent.com";
@@ -92,6 +93,10 @@ export async function verifyCertificateBundle(
     throw new Error(`parsing signing certificate: ${message(err)}`);
   }
   if (!allowsCodeSigning(leaf)) throw new Error("signing certificate's extended key usage does not allow code signing");
+
+  for (const timestamp of bundle.rfc3161Timestamps) {
+    await verifySignatureTimestamp(root, timestamp, bundle.dsse.signature);
+  }
 
   const libraryRoot = codeSigningRoot(root);
   const verifier = new SigstoreVerifier({ ctlogThreshold: 1, tlogThreshold: 1, tsaThreshold: 0 });
