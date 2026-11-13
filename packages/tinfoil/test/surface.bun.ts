@@ -24,11 +24,16 @@ describe("v3 client surface under Bun", () => {
   });
 
   it("resolves tinfoil/http to the root's HTTP clients without the OpenAI clients", () => {
-    for (const name of ["EnclaveHTTPClient", "RouterHTTPClient", "GatewayHTTPClient", "TinfoilError"] as const) {
-      expect(builtHTTP[name]).toBe(builtRoot[name]);
+    for (const name of ["EnclaveHTTPClient", "RouterHTTPClient", "GatewayHTTPClient", "TinfoilError", "ConfigurationError", "NetworkError", "AttestationError"]) {
+      expect(name in builtHTTP).toBe(true);
     }
-    expect("createClient" in builtHTTP).toBe(false);
-    expect("createTinfoil" in builtHTTP).toBe(false);
+    // Every export is the root's own object, so instanceof works across both entries.
+    for (const [name, value] of Object.entries(builtHTTP as Record<string, unknown>)) {
+      expect(value).toBe((builtRoot as Record<string, unknown>)[name]);
+    }
+    for (const name of ["createClient", "TinfoilClient", "EnclaveOpenAIClient", "RouterOpenAIClient", "GatewayOpenAIClient", "createTinfoil"]) {
+      expect(name in builtHTTP).toBe(false);
+    }
   });
 
   it("checks client options before any network I/O", async () => {
