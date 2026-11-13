@@ -104,6 +104,11 @@ afterAll(async () => {
   await new Promise<void>((resolve) => server.close(() => resolve()));
 });
 
+/** An enclave OpenAI client in TLS mode, verified against `pin`, with documents from `docs`. */
+async function openAIClient(openaiOptions: OpenAIOptions, pin: () => string = () => TEST_PIN, docs = documents()): Promise<EnclaveOpenAIClient> {
+  return createEnclaveOpenAIClient(host, "tinfoilsh/repo", { verifier: verifier(pin), transportMode: "tls" }, openaiOptions, { documentFetch: docs.fetch, tls: { ca: TEST_CERT } });
+}
+
 describe("webSocketURL", () => {
   it("resolves a path against the enclave as wss and accepts a URL on the enclave's origin", () => {
     expect(webSocketURL("enclave.example", "/v1/realtime?model=m").toString()).toBe("wss://enclave.example/v1/realtime?model=m");
@@ -298,10 +303,6 @@ describe("pinnedWebSocketOptions", () => {
       { name: "LiveWS", path: "/v1/live/sessions", open: (ai: EnclaveOpenAIClient, options: WsClientOptions): Session => new LiveWS(ai, options) },
     ];
 
-    async function openAIClient(pin: () => string, docs = documents()): Promise<EnclaveOpenAIClient> {
-      return createEnclaveOpenAIClient(host, "tinfoilsh/repo", { verifier: verifier(pin), transportMode: "tls" }, { apiKey: "k" }, { documentFetch: docs.fetch, tls: { ca: TEST_CERT } });
-    }
-
     /** Resolves with the next connection that the server accepts after `before`, or rejects with the session's error. */
     function nextConnection(session: Session, before: number): Promise<Connection> {
       return new Promise((resolve, reject) => {
@@ -320,7 +321,7 @@ describe("pinnedWebSocketOptions", () => {
 
     for (const library of libraries) {
       it(`pins ${library.name} to the attested key, authenticated with the client's key`, async () => {
-        const ai = await openAIClient(() => TEST_PIN);
+        const ai = await openAIClient({ apiKey: "k" });
         const before = connections.length;
         const session = library.open(ai, await pinnedWebSocketOptions(ai.httpClient));
         const connection = await nextConnection(session, before);
@@ -331,13 +332,14 @@ describe("pinnedWebSocketOptions", () => {
 
       it(`fails ${library.name}'s handshake when the certificate carries another key, and reaches the server with nothing`, async () => {
         const docs = documents();
-        const ai = await openAIClient(() => OTHER_PIN, docs);
+        const ai = await openAIClient({ apiKey: "k" }, () => OTHER_PIN, docs);
         const before = connections.length;
         const session = library.open(ai, await pinnedWebSocketOptions(ai.httpClient));
         const err = await nextConnection(session, before).catch((e: unknown) => e);
         expect(String((err as Error).message)).toMatch(/does not match the attested key/);
         expect(connections.length).toBe(before);
         session.close();
+        expect(docs.calls).toBe(1);
         // The pin failure retired the verification the settings were pinned to.
         await pinnedWebSocketOptions(ai.httpClient);
         expect(docs.calls).toBe(2);
@@ -347,10 +349,6 @@ describe("pinnedWebSocketOptions", () => {
 });
 
 describe("createRealtimeWebSocket", () => {
-  async function openAIClient(openaiOptions: OpenAIOptions): Promise<EnclaveOpenAIClient> {
-    return createEnclaveOpenAIClient(host, "tinfoilsh/repo", { verifier: verifier(() => TEST_PIN), transportMode: "tls" }, openaiOptions, { documentFetch: documents().fetch, tls: { ca: TEST_CERT } });
-  }
-
   /** Resolves when the session's socket opens, or rejects with its error. */
   function sessionOpened(session: OpenAIRealtimeWS): Promise<void> {
     return new Promise((resolve, reject) => {
