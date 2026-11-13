@@ -32,6 +32,7 @@ export interface QuoteOptions {
 
 /** A quote whose signature chain was authenticated to the vendor root. */
 export interface Authenticated {
+  readonly expiresAt: Date;
   readonly platform: Platform;
   /** CHIP_ID (SEV-SNP) or PPID (TDX), lowercase hex. */
   readonly identity: string;
@@ -96,6 +97,7 @@ export async function authenticate(evidence: CpuEvidence, endorsements: CpuEndor
       );
       return {
         platform: PLATFORM_SEV_SNP,
+        expiresAt: q.expiresAt,
         identity: q.identity,
         measurement: cloneMeasurement(q.measurement),
         evidence: { format: evidence.format, report: evidence.report.slice() },
@@ -112,6 +114,7 @@ export async function authenticate(evidence: CpuEvidence, endorsements: CpuEndor
       );
       return {
         platform: PLATFORM_TDX,
+        expiresAt: q.expiresAt,
         identity: q.identity,
         measurement: q.measurement,
         evidence: { format: evidence.format, report: evidence.report.slice() },

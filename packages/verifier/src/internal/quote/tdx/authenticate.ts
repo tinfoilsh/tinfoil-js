@@ -73,6 +73,7 @@ export interface TdxEvidence {
 
 /** An authenticated quote. */
 export interface TdxQuote {
+  readonly expiresAt: Date;
   /** PPID, lowercase hex. */
   readonly identity: string;
   readonly measurement: TdxMeasurement;
@@ -160,6 +161,11 @@ export async function authenticateTdx(evidence: TdxEvidence, now: Date, opts?: T
   const eval1 = info.statement.tcbEvaluationDataNumber;
   const eval2 = qe.statement.tcbEvaluationDataNumber;
   return {
+    expiresAt: new Date(Math.min(
+      ...[...chain, root, crl.signing, crl.root, info.signing, info.root, qe.signing, qe.root].map((cert) => cert.notAfter.getTime()),
+      rootList.nextUpdate.getTime(), pckList.nextUpdate.getTime(),
+      info.statement.nextUpdate.getTime(), qe.statement.nextUpdate.getTime(),
+    )),
     identity: identity(leaf),
     measurement: {
       platform: "tdx",

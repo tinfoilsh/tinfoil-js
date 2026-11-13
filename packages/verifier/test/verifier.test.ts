@@ -111,6 +111,22 @@ describe.skipIf(withoutVectors)(vectorsTitle("verifyV3At on the full-verify vect
   }
 });
 
+describe.skipIf(withoutVectors)(vectorsTitle("hardware expiration"), () => {
+  const extendedApprovalAgeMs = 20 * 365 * 24 * 60 * 60 * 1000;
+  it.each([
+    ["golden/golden-happy.json", "2034-12-30T00:00:00.000Z"],
+    ["golden-tdx/tdx-golden-happy.json", "2030-01-01T00:00:00.000Z"],
+  ])("caps cached verification at the hardware deadline for %s", async (path, deadline) => {
+    const fixture = loadFixture(path);
+    const c = await caseOf(fixture);
+    const verifier = await dangerousTestOnlyVerifier(rootsOf(fixture), { freshnessMaxAgeMs: extendedApprovalAgeMs });
+    const verified = await verifier.verifyV3At(c.doc, c.nonce, c.repo, c.at);
+    expect(verified.freshnessExpiresAt).toEqual(new Date(deadline));
+    const afterExpiry = new Date(new Date(deadline).getTime() + 1);
+    await expect(verifier.verifyV3At(c.doc, c.nonce, c.repo, afterExpiry)).rejects.toMatchObject({ layer: "quote" });
+  });
+});
+
 describe.skipIf(withoutVectors)(vectorsTitle("the JSON form of a verification"), () => {
   it("pins the shape of the golden vector's facts", async () => {
     const c = await caseOf(loadFixture("golden/golden-happy.json"));

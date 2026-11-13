@@ -44,6 +44,7 @@ export interface SevEvidence {
 
 /** An authenticated report. */
 export interface SevQuote {
+  readonly expiresAt: Date;
   /** CHIP_ID, lowercase hex. */
   readonly identity: string;
   readonly measurement: SevSnpMeasurement;
@@ -152,6 +153,7 @@ export async function authenticateSev(evidence: SevEvidence, now: Date, opts?: S
 
   if (report.signer.maskChipKey) throw new Error("report masks CHIP_ID; masked platform identities are unsupported");
   return {
+    expiresAt: new Date(Math.min(...[vcek.notAfter, roots.ask.notAfter, roots.ark.notAfter, crl.nextUpdate].map((t) => t.getTime()))),
     identity: identity(report.chipId),
     measurement: { platform: "sev-snp", launch: report.measurement.slice() },
     report,

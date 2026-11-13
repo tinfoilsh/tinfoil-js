@@ -294,7 +294,7 @@ export class Verifier {
       config: refs.config,
       runtime: refs.config === undefined ? undefined : refs.artifact,
       platform: refs.platform,
-      freshnessExpiresAt: refs.freshnessExpiresAt,
+      freshnessExpiresAt: new Date(Math.min(refs.freshnessExpiresAt?.getTime() ?? Infinity, authenticated.expiresAt.getTime())),
       metadata: { verifier: { name: VERIFIER_NAME, version: VERIFIER_VERSION }, verifiedAt: now },
     });
   }

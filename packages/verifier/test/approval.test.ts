@@ -349,6 +349,20 @@ describe("certified config approvals", () => {
     expect((await verifier.verifyCertified(undefined, toJson(json), registry.rootDer, policy())).registryID).toBe(PUBLIC_REGISTRY_ID);
   });
 
+  it("uses the signature timestamp for historical certificate validity, not approval age", async () => {
+    const certificate = await leaf();
+    const inner = new Date(GEN_TIME.getTime() + CERTIFICATE_CLOCK_SKEW_MS);
+    const { json, config } = await configBundle({ v2: true, certificate, genTime: inner });
+    const now = new Date(inner.getTime() + DEFAULT_MAX_AGE_MS);
+    const verified = await verifier.verifyCertified(config, toJson(json), registry.rootDer, policy({ now }));
+    expect(verified.approvalTime).toEqual(inner);
+    expect(verified.signatureTime).toEqual(GEN_TIME);
+    await expect(verifier.verifyCertified(config, toJson(json), registry.rootDer, policy({ now: new Date(now.getTime() + 1) })))
+      .rejects.toThrow(/outside the accepted window/);
+    await expect(verifier.verifyCertified(config, toJson(json), registry.rootDer, policy({ now: new Date(GEN_TIME.getTime() - DEFAULT_FUTURE_SKEW_MS - 1) })))
+      .rejects.toThrow(/signature timestamp is in the future/);
+  });
+
   it("accepts a private registry ID only when the certificate, the statement and the caller agree", async () => {
     const certificate = await leaf({ registryID: PRIVATE_REGISTRY_ID });
     const { json, config } = await configBundle({ v2: true, registryID: PRIVATE_REGISTRY_ID, certificate });
@@ -389,7 +403,7 @@ describe("certified config approvals", () => {
   it("fixes the signing time by the bundle timestamp and bounds the inner timestamp by it", async () => {
     const certificate = await leaf();
     const stale = await configBundle({ v2: true, certificate, signedAt: new Date(NOW.getTime() - DEFAULT_MAX_AGE_MS - 1000) });
-    await expect(verifier.verifyCertified(stale.config, toJson(stale.json), registry.rootDer, policy())).rejects.toThrow(/outside the accepted window/);
+    await expect(verifier.verifyCertified(stale.config, toJson(stale.json), registry.rootDer, policy())).rejects.toThrow(/certificate.*not valid/);
     const unstamped = await configBundle({ v2: true, certificate, noSignatureTimestamp: true });
     await expect(verifier.verifyCertified(unstamped.config, toJson(unstamped.json), registry.rootDer, policy())).rejects.toThrow(/one bounded signature timestamp/);
     // The approval's inner timestamp may follow the signature by the allowed skew, not more.
