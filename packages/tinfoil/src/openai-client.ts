@@ -8,8 +8,16 @@
  * transport or base URL (`dataResidency`, `provider`, `workloadIdentity`,
  * `credential` and `x509Transport`) are refused, by the factories before any
  * network I/O and by `withOptions`. Per-request `fetchOptions` are passed through to the
- * attested `fetch` and can't bypass it; only a separately constructed OpenAI
- * client sends requests outside the attested client's protections.
+ * attested `fetch` and can't bypass it.
+ *
+ * Two things send outside the attested client's protections: a separately
+ * constructed OpenAI client, and the openai package's WebSocket classes
+ * (`ResponsesWS`, `LiveWS` and its sideband and forks, `OpenAIRealtimeWS`,
+ * `OpenAIRealtimeWebSocket` and `OpenAIRealtimeTranslationWS`). Given one of
+ * these clients, those classes open their own WebSocket to its base URL with
+ * its credential, without the TLS pin, and nothing here can stop them. Use
+ * `createRealtimeWebSocket` or `createWebSocket` instead, or pass a `ws`-based
+ * class the settings from `pinnedWebSocketOptions(client.httpClient)`.
  *
  * The HTTP client owns the lifecycle: `httpClient.close()` releases it, and
  * an `await using` of the OpenAI client does the same, for its clones too,
