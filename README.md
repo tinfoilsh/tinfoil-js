@@ -14,6 +14,15 @@ npm install tinfoil@next
 
 This README describes the 2.0 API, which is in prerelease, so it is published under the `next` tag. A plain `npm install tinfoil` still installs 1.x, whose API is documented in the [v1.4.0 README](https://github.com/tinfoilsh/tinfoil-js/blob/v1.4.0/README.md).
 
+What to install depends on the entry point that you import:
+
+| Entry point | Install |
+|---|---|
+| `tinfoil` (the OpenAI clients), `tinfoil/http` and `tinfoil/unsafe` | `npm install tinfoil@next` |
+| `tinfoil/ai-sdk` (the Vercel AI SDK provider) | `npm install tinfoil@next ai @ai-sdk/openai-compatible` |
+
+`ai` and `@ai-sdk/openai-compatible` are optional peer dependencies, so installing `tinfoil` doesn't install them, and only `tinfoil/ai-sdk` imports them. Importing `tinfoil/ai-sdk` without them fails with a module-not-found error that names the missing package.
+
 ## Quick Start
 
 ```typescript
