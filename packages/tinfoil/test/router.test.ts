@@ -8,20 +8,20 @@ import { describe, expect, it, vi } from "vitest";
 import { ConfigurationError } from "../src/errors.js";
 import { DEFAULT_ROUTER_URL, discoverRouter, FALLBACK_ROUTER_HOST, fetchRouters, MAX_ROUTER_BYTES, type DiscoveryConfig } from "../src/internal/router.js";
 import { tlsMode } from "../src/internal/transport/tls.js";
-import type { Fetch } from "../src/options.js";
+import type { Fetch, Pin } from "../src/options.js";
 import { KEY_SPKI_FP_SHA256_V1_FORMAT, UsageError, type Verification, type Verifier } from "../../verifier/src/index.js";
 
 const PIN = "ab".repeat(32);
 
-/** A verifier that accepts every document, recording the repo it was asked to verify. */
-function verifier(repos: string[] = []): Verifier {
+/** A verifier that accepts every document, recording the pin it was asked to verify. */
+function verifier(pins: Pin[] = []): Verifier {
   return {
-    checkRepoVerifiability: (repo: string) => {
+    checkPinVerifiability: ({ repo = "" }: { repo?: string }) => {
       if (repo === "") throw new UsageError("repo required");
     },
     callerAuthorizesConfig: false,
-    verifyV3At: async (_doc: Uint8Array, _nonce: Uint8Array, repo: string) => {
-      repos.push(repo);
+    verifyV3At: async (_doc: Uint8Array, _nonce: Uint8Array, pin: Pin) => {
+      pins.push(pin);
       const material = [{ id: "tls", format: KEY_SPKI_FP_SHA256_V1_FORMAT, data: PIN }];
       return {
         cryptoMaterial: material.map((m) => ({ ...m })),
@@ -67,15 +67,15 @@ describe("discoverRouter", () => {
   it("tries routers in list order and keeps the first that verifies, already verified", async () => {
     const docs = documents(["r1.example"]);
     const list = routerList(["r1.example", "r2.example", "r3.example"]);
-    const repos: string[] = [];
-    const transport = await discoverRouter(config({ verifier: verifier(repos), routersFetch: list.fetch, documentFetch: docs.fetch }));
+    const pins: Pin[] = [];
+    const transport = await discoverRouter(config({ verifier: verifier(pins), routersFetch: list.fetch, documentFetch: docs.fetch }));
     expect(list.calls).toEqual([DEFAULT_ROUTER_URL]);
     expect(transport.enclave().host()).toBe("r2.example");
-    expect(transport.enclave().repo()).toBe("tinfoilsh/confidential-model-router");
+    expect(transport.enclave().pin()).toEqual({ repo: "tinfoilsh/confidential-model-router", project: "tinfoilsh/confidential-model-router" });
     expect(transport.current()?.tlsPublicKeyFP).toBe(PIN);
     expect(docs.hosts.filter((h) => h !== "r1.example")).toEqual(["r2.example"]);
     expect(docs.hosts[0]).toBe("r1.example");
-    expect(repos).toEqual(["tinfoilsh/confidential-model-router"]);
+    expect(pins).toEqual([{ repo: "tinfoilsh/confidential-model-router", project: "tinfoilsh/confidential-model-router" }]);
   });
 
   it("moves past a router the verification check rejects", async () => {
@@ -145,7 +145,7 @@ describe("discoverRouter", () => {
 
   it("stops with a configuration error before fetching anything when the policy is unusable", async () => {
     const list = routerList(["r1.example"]);
-    const broken = { ...verifier(), checkRepoVerifiability: () => {
+    const broken = { ...verifier(), checkPinVerifiability: () => {
       throw new UsageError("unusable policy");
     } } as unknown as Verifier;
     await expect(discoverRouter(config({ verifier: broken, routersFetch: list.fetch }))).rejects.toBeInstanceOf(ConfigurationError);

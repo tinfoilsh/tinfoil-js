@@ -80,7 +80,7 @@ function stubVerifier(material: { id: string; format: string; data: string }[], 
     freshnessExpiresAt: new Date(expiresAt.getTime()),
   } as unknown as Verification;
   return {
-    checkRepoVerifiability: () => {},
+    checkPinVerifiability: () => {},
     verifyV3At: async () => verification,
   } as unknown as Verifier;
 }
@@ -122,7 +122,7 @@ describe.skipIf(!conformanceAvailable())(vectorsTitle("Enclave"), () => {
   function config(overrides: Partial<EnclaveConfig> & { fetch: Fetch }): EnclaveConfig {
     return {
       host: HOST,
-      repo: golden.fixture.input.repo as string,
+      pin: { repo: golden.fixture.input.repo as string },
       verifier: golden.verifier,
       clock: () => golden.at,
       nonce: () => golden.nonce,
@@ -141,7 +141,7 @@ describe.skipIf(!conformanceAvailable())(vectorsTitle("Enclave"), () => {
     expect(v.hpkePublicKey).toBe(golden.expected.hpke);
     expect(v.freshnessExpiresAt!.getTime()).toBeGreaterThan(golden.at.getTime());
     expect(enclave.host()).toBe(HOST);
-    expect(enclave.repo()).toBe(golden.fixture.input.repo);
+    expect(enclave.pin()).toEqual({ repo: golden.fixture.input.repo, project: "" });
     expect(enclave.verifier()).toBe(golden.verifier);
   });
 
@@ -218,13 +218,22 @@ describe.skipIf(!conformanceAvailable())(vectorsTitle("Enclave"), () => {
     expect(down.urls).toHaveLength(2);
   });
 
+  it("rejects the repository's document when only a registry project of that name is pinned", async () => {
+    const { fetch } = serving([() => new Response(golden.document)]);
+    const enclave = await Enclave.create(config({ fetch, pin: { project: (golden.fixture.input.repo as string).toLowerCase() } }));
+    await expect(enclave.verifyOnce()).rejects.toThrow(/no GitHub repository is pinned/);
+    await expect(enclave.verifyOnce()).rejects.toBeInstanceOf(AttestationError);
+  });
+
   it("does not retry without the retry, and does not retry a bad repository pin at all", async () => {
     const down = serving([() => new Response("", { status: 503 })]);
     await expect((await Enclave.create(config({ fetch: down.fetch }))).verifyOnce()).rejects.toBeInstanceOf(NetworkError);
     expect(down.urls).toHaveLength(1);
 
     const { fetch, urls } = serving([() => new Response(golden.document)]);
-    await expect(Enclave.create(config({ fetch, repo: "not a repository" }))).rejects.toBeInstanceOf(ConfigurationError);
+    await expect(Enclave.create(config({ fetch, pin: { repo: "not a repository" } }))).rejects.toBeInstanceOf(ConfigurationError);
+    // A bare reference from untyped code is refused instead of being read as an empty pin.
+    await expect(Enclave.create(config({ fetch, pin: golden.fixture.input.repo as unknown as EnclaveConfig["pin"] }))).rejects.toBeInstanceOf(ConfigurationError);
     await expect(Enclave.create(config({ fetch, host: "" }))).rejects.toThrow(/enclave host is required/);
     expect(urls).toHaveLength(0);
   });
@@ -367,7 +376,7 @@ describe.skipIf(!conformanceAvailable())(vectorsTitle("Enclave"), () => {
 
 describe("Enclave against a live enclave", () => {
   it.skipIf(!RUN_INTEGRATION)("verifies inference.tinfoil.sh under the embedded roots", async () => {
-    const enclave = await Enclave.create({ host: "inference.tinfoil.sh", repo: "tinfoilsh/confidential-model-router" });
+    const enclave = await Enclave.create({ host: "inference.tinfoil.sh", pin: { repo: "tinfoilsh/confidential-model-router", project: "tinfoilsh/confidential-model-router" } });
     const v = await enclave.verify();
     expect(v.tlsPublicKeyFP).toMatch(/^[0-9a-f]{64}$/);
     expect(v.hpkePublicKey).toMatch(/^[0-9a-f]{64}$/);

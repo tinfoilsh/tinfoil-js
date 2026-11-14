@@ -48,7 +48,7 @@ const EXPORTS = [
   "formatMeasurement",
 ].sort();
 
-const VERIFIER_METHODS = ["verifyV3", "verifyV3At", "checkRepoVerifiability"].sort();
+const VERIFIER_METHODS = ["verifyV3", "verifyV3At", "checkPinVerifiability"].sort();
 /** The policy a verifier carries as own properties, in declaration order. */
 const VERIFIER_PROPERTIES = ["freshnessMaxAgeMs", "pinnedRegisters", "callerAuthorizesConfig"];
 /** The facts a verification carries as own properties, in declaration order. */
@@ -171,7 +171,7 @@ describe("public surface", () => {
     expect(v).toBeInstanceOf(surface.Verifier);
     expect(Object.keys(v)).toEqual(VERIFIER_PROPERTIES);
     expect(v.freshnessMaxAgeMs).toBe(7 * 24 * 60 * 60 * 1000);
-    await expect(v.verifyV3At(new Uint8Array(), new Uint8Array(32), "org/repo", new Date(Number.NaN))).rejects.toBeInstanceOf(surface.UsageError);
+    await expect(v.verifyV3At(new Uint8Array(), new Uint8Array(32), { repo: "org/repo" }, new Date(Number.NaN))).rejects.toBeInstanceOf(surface.UsageError);
   });
 
   it("classifies errors under one supertype", () => {

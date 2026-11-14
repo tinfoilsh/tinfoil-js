@@ -18,7 +18,7 @@ import { parseReference } from "../src/internal/endorsement/reference.js";
 import { ARTIFACT_FORMAT } from "../src/internal/policy/artifact.js";
 import * as quote from "../src/internal/quote/quote.js";
 import { registerHex, type Expected, type Measurement as V3Measurement, type Register } from "../src/measurement.js";
-import { Verifier } from "../src/index.js";
+import { Verifier, type Pin } from "../src/index.js";
 import { checkTime, newTimePolicy } from "../src/internal/endorsement/time.js";
 import { parseBundleBytes } from "../src/internal/sigstore/bundle.js";
 import { pinnedKeys, verifyKeyedBundle } from "../src/internal/sigstore/keyed.js";
@@ -62,6 +62,8 @@ export interface Input {
   document_b64: string;
   nonce_hex: string;
   repo: string;
+  /** Absent in inputs that predate separate pins, where repo names the workload in either namespace. */
+  project?: string;
   amd_root_ca_pem?: string;
   ask_pem?: string;
   intel_sgx_root_pem?: string;
@@ -164,7 +166,7 @@ async function runStage(stage: string, raw: unknown): Promise<Result> {
 
   switch (stage) {
     case Stage.Verify:
-      return verifyFull(doc, nonce, in_.repo, roots, appraisal);
+      return verifyFull(doc, nonce, { repo: in_.repo, project: in_.project ?? in_.repo }, roots, appraisal);
 
     case Stage.CheckEnvelope:
       return layer(stage, "ENVELOPE_REJECTED", async () => {
@@ -281,7 +283,7 @@ async function verifyTimestampStage(in_: Input, roots: DangerousTestOnlyRoots, a
 async function verifyFull(
   doc: Uint8Array,
   nonce: Uint8Array,
-  repo: string,
+  pin: Pin,
   roots: DangerousTestOnlyRoots,
   appraisal: Date,
 ): Promise<Result> {
@@ -292,7 +294,7 @@ async function verifyFull(
     // injected anchors go through the test-only seam of the same verifier.
     const injected = roots.amd !== undefined || roots.intel !== undefined || roots.sigstore !== undefined;
     const verifier = injected ? await dangerousTestOnlyVerifier(roots) : await Verifier.create();
-    verified = await verifier.verifyV3At(doc, nonce, repo, appraisal);
+    verified = await verifier.verifyV3At(doc, nonce, pin, appraisal);
   } catch (err) {
     const mapped = rejectionCode(err);
     if (mapped === undefined) return { output: { stage, accepted: false }, exitCode: ExitCode.Internal };
@@ -412,7 +414,8 @@ const STRING_FIELDS = [
 /**
  * Validates the parsed stdin value against the Input shape: unknown members
  * are ignored, absent or null members take their type's empty value ("" or
- * 0), and a member of the wrong type is malformed. The clock must also lie
+ * 0) except `project`, which stays absent, and a member of the wrong type is
+ * malformed. The clock must also lie
  * within the range that a Date can hold, so that no stage ever appraises
  * against an invalid time.
  */
@@ -429,6 +432,11 @@ function decodeInput(raw: unknown): Input | undefined {
     } else {
       return undefined;
     }
+  }
+  if (typeof obj.project === "string") {
+    out.project = obj.project;
+  } else if (obj.project !== undefined && obj.project !== null) {
+    return undefined;
   }
   const keys = obj.signing_keys_pem;
   if (keys === undefined || keys === null) {

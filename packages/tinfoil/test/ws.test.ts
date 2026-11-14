@@ -44,7 +44,7 @@ const connections: Connection[] = [];
 
 function verifier(pin: () => string): Verifier {
   return {
-    checkRepoVerifiability: (repo: string) => {
+    checkPinVerifiability: ({ repo = "" }: { repo?: string }) => {
       if (repo.includes(" ")) throw new UsageError(`bad repo ${repo}`);
     },
     verifyV3At: async () =>
@@ -70,7 +70,7 @@ function documents(): { fetch: Fetch; calls: number } {
 }
 
 async function client(pin: () => string, docs = documents()): Promise<EnclaveHTTPClient> {
-  return createEnclaveHTTPClient(host, "tinfoilsh/repo", { verifier: verifier(pin), transportMode: "tls" }, { documentFetch: docs.fetch, tls: { ca: TEST_CERT } });
+  return createEnclaveHTTPClient(host, { repo: "tinfoilsh/repo" }, { verifier: verifier(pin), transportMode: "tls" }, { documentFetch: docs.fetch, tls: { ca: TEST_CERT } });
 }
 
 /** Resolves on the socket's open event, or rejects with its error. */
@@ -106,7 +106,7 @@ afterAll(async () => {
 
 /** An enclave OpenAI client in TLS mode, verified against `pin`, with documents from `docs`. */
 async function openAIClient(openaiOptions: OpenAIOptions, pin: () => string = () => TEST_PIN, docs = documents()): Promise<EnclaveOpenAIClient> {
-  return createEnclaveOpenAIClient(host, "tinfoilsh/repo", { verifier: verifier(pin), transportMode: "tls" }, openaiOptions, { documentFetch: docs.fetch, tls: { ca: TEST_CERT } });
+  return createEnclaveOpenAIClient(host, { repo: "tinfoilsh/repo" }, { verifier: verifier(pin), transportMode: "tls" }, openaiOptions, { documentFetch: docs.fetch, tls: { ca: TEST_CERT } });
 }
 
 describe("webSocketURL", () => {
@@ -212,7 +212,7 @@ describe("createWebSocket", () => {
 
   it("fails closed when the normal certificate check fails, and verifies again afterwards", async () => {
     const docs = documents();
-    const c = await createEnclaveHTTPClient(host, "tinfoilsh/repo", { verifier: verifier(() => TEST_PIN), transportMode: "tls" }, { documentFetch: docs.fetch });
+    const c = await createEnclaveHTTPClient(host, { repo: "tinfoilsh/repo" }, { verifier: verifier(() => TEST_PIN), transportMode: "tls" }, { documentFetch: docs.fetch });
     const before = connections.length;
     const socket = await createWebSocket(c, "/x");
     const err = (await opened(socket).catch((e: unknown) => e)) as { code?: string };
@@ -249,7 +249,7 @@ describe("createWebSocket", () => {
           freshnessExpiresAt: new Date(Date.now() + 60_000),
         }) as unknown as Verification,
     } as unknown as Verifier;
-    const c = await createEnclaveHTTPClient(host, "tinfoilsh/repo", { verifier: sealing, transportMode: "ehbp" }, { documentFetch: documents().fetch, tls: { ca: TEST_CERT } });
+    const c = await createEnclaveHTTPClient(host, { repo: "tinfoilsh/repo" }, { verifier: sealing, transportMode: "ehbp" }, { documentFetch: documents().fetch, tls: { ca: TEST_CERT } });
     const socket = await createWebSocket(c, "/x");
     await opened(socket);
     socket.close();

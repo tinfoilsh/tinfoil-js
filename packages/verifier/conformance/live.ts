@@ -20,10 +20,12 @@ const MAX_REDIRECTS = 10;
 /** Back-off between attempts when the service rate-limits (HTTP 429), in milliseconds. */
 const RETRY_DELAYS_MS = [2_000, 4_000, 8_000];
 
-/** The stdin JSON of the lane: the enclave host (optionally with a port) and the repository pin. */
+/** The stdin JSON of the lane: the enclave host (optionally with a port) and the pin. */
 export interface LiveRequest {
   readonly host: string;
   readonly repo: string;
+  /** Absent in requests that predate separate pins, where repo names the workload in either namespace. */
+  readonly project?: string;
 }
 
 /** Decodes the request; a missing or empty field, or a host that is not a bare authority, is malformed input. */
@@ -31,7 +33,8 @@ export function decodeLiveRequest(raw: unknown): LiveRequest | undefined {
   if (typeof raw !== "object" || raw === null || Array.isArray(raw)) return undefined;
   const o = raw as Record<string, unknown>;
   if (typeof o.host !== "string" || typeof o.repo !== "string" || o.repo === "" || !isAuthority(o.host)) return undefined;
-  return { host: o.host, repo: o.repo };
+  if (o.project !== undefined && o.project !== null && typeof o.project !== "string") return undefined;
+  return { host: o.host, repo: o.repo, ...(typeof o.project === "string" ? { project: o.project } : {}) };
 }
 
 /** Runs the lane; a thrown error is an internal failure (exit 1), a rejection is reported in the output. */
@@ -42,7 +45,7 @@ export async function liveVerify(req: LiveRequest, log: (line: string) => void =
 
   let verified: Verification;
   try {
-    verified = await verifier.verifyV3(doc, nonce, req.repo);
+    verified = await verifier.verifyV3(doc, nonce, { repo: req.repo, project: req.project ?? req.repo });
   } catch (err) {
     log(`live verification: ${err instanceof Error ? err.message : String(err)}`);
     const mapped = rejectionCode(err);

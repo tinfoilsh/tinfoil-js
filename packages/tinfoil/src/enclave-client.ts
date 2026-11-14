@@ -4,7 +4,7 @@
  * when the verification expires or is rejected, and refuses requests to any
  * origin other than the one it is bound to.
  */
-import type { Verification } from "@tinfoilsh/verifier";
+import type { Pin, Verification } from "@tinfoilsh/verifier";
 import { ConfigurationError } from "./errors.js";
 import { withCacheSecret } from "./internal/cachesecret.js";
 import { asyncDispose } from "./internal/dispose.js";
@@ -110,11 +110,11 @@ const TOKEN: unique symbol = Symbol("EnclaveHTTPClient");
 let construct: (transport: KeyedTransport, baseURL: string, openAIURL: string, fetchImpl: Fetch) => EnclaveHTTPClient;
 
 /** @internal The factory with its test seams; {@link EnclaveHTTPClient.create} is this without them. */
-export async function createEnclaveHTTPClient(host: string, repo: string, options: EnclaveOptions, seams: EnclaveClientSeams): Promise<EnclaveHTTPClient> {
+export async function createEnclaveHTTPClient(host: string, pin: Pin, options: EnclaveOptions, seams: EnclaveClientSeams): Promise<EnclaveHTTPClient> {
   const { mode, baseURL } = checkEnclaveOptions(host, options, seams.globals);
   const enclave = await Enclave.create({
     host,
-    repo,
+    pin,
     verifier: options.verifier,
     verificationCheck: options.verificationCheck,
     fetch: seams.documentFetch,
@@ -162,8 +162,8 @@ export class EnclaveHTTPClient {
   readonly baseURL: string;
   /** The host of the verified enclave, even when `baseURL` is a proxy. */
   readonly enclave: string;
-  /** The repository pin, empty when the verifier authorizes the config instead. */
-  readonly repo: string;
+  /** The repository and registry project the enclave is verified against, each "" when unset; both are unset when the verifier authorizes the config instead. */
+  readonly pin: Required<Pin>;
   readonly #transport: KeyedTransport;
 
   private constructor(token: typeof TOKEN, transport: KeyedTransport, baseURL: string, openAIURL: string, fetchImpl: Fetch) {
@@ -172,7 +172,7 @@ export class EnclaveHTTPClient {
     this.fetch = fetchImpl;
     this.baseURL = baseURL;
     this.enclave = transport.enclave().host();
-    this.repo = transport.enclave().repo();
+    this.pin = transport.enclave().pin();
     setOpenAIURL(this, openAIURL);
     // The client's state lives in the transport; the client itself never changes once created.
     Object.freeze(this);
@@ -183,13 +183,17 @@ export class EnclaveHTTPClient {
   }
 
   /**
-   * A client for the enclave at `host`, verified against `repo`
-   * (`owner/name[@tag][@sha256:digest]`). An empty `repo` accepts configs
-   * authorized by the verifier option. Options are checked before any network
+   * A client for the enclave at `host`, verified against `pin`: a GitHub
+   * repository (`repo`, `owner/name[@tag][@sha256:digest]`), a config
+   * registry project (`project`, `org/project[@revision][@sha256:digest]`),
+   * or both, which accepts either. The two namespaces have unrelated owners,
+   * so a `repo` is never satisfied by a registry approval or a `project` by a
+   * repository's release. An empty `pin` accepts configs authorized by the
+   * verifier option. Options are checked before any network
    * I/O; the enclave is verified before the client is returned.
    */
-  static create(host: string, repo: string, options?: EnclaveOptions): Promise<EnclaveHTTPClient> {
-    return createEnclaveHTTPClient(host, repo, options ?? {}, {});
+  static create(host: string, pin: Pin, options?: EnclaveOptions): Promise<EnclaveHTTPClient> {
+    return createEnclaveHTTPClient(host, pin, options ?? {}, {});
   }
 
   /** The last successful verification, unchecked: it may have expired or been rejected. */

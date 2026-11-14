@@ -331,14 +331,14 @@ describe("tlsMode", () => {
 
 describe("KeyedTransport over TLS", () => {
   function verifier(keys: () => string): Verifier {
-    return { checkRepoVerifiability: () => {}, verifyV3At: async () => verification(keys()) } as unknown as Verifier;
+    return { checkPinVerifiability: () => {}, verifyV3At: async () => verification(keys()) } as unknown as Verifier;
   }
 
   it("replays once after a key rotation, re-verifying in between, and refuses other origins", async () => {
     let verified = 0;
     const enclave = await Enclave.create({
       host: "localhost",
-      repo: "",
+      pin: {},
       verifier: verifier(() => (verified++ === 0 ? OTHER : PIN)),
       fetch: async () => new Response(new Uint8Array([1])),
       sleep: async () => {},

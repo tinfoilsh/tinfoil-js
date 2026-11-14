@@ -77,7 +77,7 @@ const ATTESTED_CLIENT_MEMBERS: Members<surface.EnclaveHTTPClient> & Members<surf
   fetch: "property",
   baseURL: "property",
   enclave: "property",
-  repo: "property",
+  pin: "property",
   current: "getter",
   ensureVerified: "method",
   reverify: "method",
@@ -331,12 +331,12 @@ describe("public surface", () => {
 
   it("checks enclave client options before any network I/O", async () => {
     const fetches = countingFetch();
-    await expect(createEnclaveHTTPClient("", "tinfoilsh/repo", {}, { documentFetch: fetches.fetch })).rejects.toBeInstanceOf(surface.ConfigurationError);
-    await expect(createEnclaveOpenAIClient("enclave.example", "tinfoilsh/repo", { baseURL: "http://proxy.example/" }, {}, { documentFetch: fetches.fetch })).rejects.toBeInstanceOf(
+    await expect(createEnclaveHTTPClient("", { repo: "tinfoilsh/repo" }, {}, { documentFetch: fetches.fetch })).rejects.toBeInstanceOf(surface.ConfigurationError);
+    await expect(createEnclaveOpenAIClient("enclave.example", { repo: "tinfoilsh/repo" }, { baseURL: "http://proxy.example/" }, {}, { documentFetch: fetches.fetch })).rejects.toBeInstanceOf(
       surface.ConfigurationError,
     );
     // The fetch option carries sealed requests, so it is refused with the TLS mode before either fetch is called.
-    await expect(createEnclaveHTTPClient("enclave.example", "tinfoilsh/repo", { transportMode: "tls", fetch: fetches.fetch }, { documentFetch: fetches.fetch })).rejects.toBeInstanceOf(
+    await expect(createEnclaveHTTPClient("enclave.example", { repo: "tinfoilsh/repo" }, { transportMode: "tls", fetch: fetches.fetch }, { documentFetch: fetches.fetch })).rejects.toBeInstanceOf(
       surface.ConfigurationError,
     );
     expect(fetches.calls).toBe(0);
@@ -363,7 +363,7 @@ describe("public surface", () => {
     const factories: Record<string, (options: surface.OpenAIOptions) => Promise<unknown>> = {
       createClient: (options) => createTinfoilClient(options, router),
       RouterOpenAIClient: (options) => createRouterOpenAIClient({}, options, router),
-      EnclaveOpenAIClient: (options) => createEnclaveOpenAIClient("enclave.example", "tinfoilsh/repo", {}, options, { documentFetch: fetches.fetch }),
+      EnclaveOpenAIClient: (options) => createEnclaveOpenAIClient("enclave.example", { repo: "tinfoilsh/repo" }, {}, options, { documentFetch: fetches.fetch }),
       GatewayOpenAIClient: (options) => createGatewayOpenAIClient({}, options, { catalogFetch: fetches.fetch, documentFetch: fetches.fetch }),
     };
     for (const [name, factory] of Object.entries(factories)) {

@@ -7,7 +7,7 @@
 import { beforeAll, describe, expect, it } from "vitest";
 import { expectedOf, measurementOf } from "../conformance/adapter.js";
 import { dangerousTestOnlyVerifier } from "../conformance/testing.js";
-import { CONFIG_ENDORSEMENT_V2_FORMAT, CONFIG_ID, FORMAT_V3, ROLE_REFERENCE_VALUES } from "../src/document/collateral/collateral.js";
+import { CONFIG_ENDORSEMENT_V2_FORMAT, CONFIG_ID, FORMAT_V2, FORMAT_V3, ROLE_REFERENCE_VALUES, SIGSTORE_CODE_V1_FORMAT } from "../src/document/collateral/collateral.js";
 import type { ConfigEndorsement } from "../src/document/collateral/config.js";
 import type { RuntimeReference } from "../src/document/collateral/runtime.js";
 import { KEY_SPKI_FP_SHA256_V1_FORMAT, KEY_X25519_HPKE_V1_FORMAT, NONCE_SIZE, SEV_SNP_REPORT_V1_FORMAT } from "../src/document/document.js";
@@ -18,7 +18,7 @@ import { ARTIFACT_FORMAT, ARTIFACT_FORMAT_V2 } from "../src/internal/policy/arti
 import { endorsementReference, timestampInput } from "../src/internal/sigstore/timestamp.js";
 import type { Expected } from "../src/measurement.js";
 import { PUBLIC_REGISTRY_ID as PUBLIC_REGISTRY_ID_EXPORTED } from "../src/index.js";
-import { Verifier, type EmbeddedConfigReference, type VerifierOptions } from "../src/verifier.js";
+import { Verifier, type EmbeddedConfigReference, type Pin, type VerifierOptions } from "../src/verifier.js";
 import { VERIFIER_NAME, VERIFIER_VERSION } from "../src/version.js";
 import { buildDocument } from "./helpers/builder.js";
 import { conformanceAvailable, inputBytes, loadFixture, loadFixtures, repoOf, vectorsTitle, type ConformanceFixture } from "./helpers/conformance.js";
@@ -66,7 +66,7 @@ describe.skipIf(withoutVectors)(vectorsTitle("verifyV3At on the full-verify vect
     const { expected } = fixture;
     it(`${fixture.id}: ${expected.accepted ? "accepts" : `rejects at ${LAYER_OF[expected.code ?? ""] ?? expected.code}`}`, async () => {
       const c = await caseOf(fixture);
-      const run = c.verifier.verifyV3At(c.doc, c.nonce, c.repo, c.at);
+      const run = c.verifier.verifyV3At(c.doc, c.nonce, { repo: c.repo }, c.at);
       if (!expected.accepted) {
         if (expected.code === "MALFORMED_INPUT") {
           await expect(run).rejects.toBeInstanceOf(UsageError);
@@ -120,17 +120,17 @@ describe.skipIf(withoutVectors)(vectorsTitle("hardware expiration"), () => {
     const fixture = loadFixture(path);
     const c = await caseOf(fixture);
     const verifier = await dangerousTestOnlyVerifier(rootsOf(fixture), { freshnessMaxAgeMs: extendedApprovalAgeMs });
-    const verified = await verifier.verifyV3At(c.doc, c.nonce, c.repo, c.at);
+    const verified = await verifier.verifyV3At(c.doc, c.nonce, { repo: c.repo }, c.at);
     expect(verified.freshnessExpiresAt).toEqual(new Date(deadline));
     const afterExpiry = new Date(new Date(deadline).getTime() + 1);
-    await expect(verifier.verifyV3At(c.doc, c.nonce, c.repo, afterExpiry)).rejects.toMatchObject({ layer: "quote" });
+    await expect(verifier.verifyV3At(c.doc, c.nonce, { repo: c.repo }, afterExpiry)).rejects.toMatchObject({ layer: "quote" });
   });
 });
 
 describe.skipIf(withoutVectors)(vectorsTitle("the JSON form of a verification"), () => {
   it("pins the shape of the golden vector's facts", async () => {
     const c = await caseOf(loadFixture("golden/golden-happy.json"));
-    const v = await c.verifier.verifyV3At(c.doc, c.nonce, c.repo, c.at);
+    const v = await c.verifier.verifyV3At(c.doc, c.nonce, { repo: c.repo }, c.at);
     const launch = "11".repeat(48);
     const json = {
       codeDigest: "3b29117bcc96bb282879514cc03c32f3f7eb8a7bd031b829dd3864c591b87c50",
@@ -157,61 +157,78 @@ describe.skipIf(withoutVectors)(vectorsTitle("verifyV3At caller mistakes"), () =
   });
 
   it("rejects a nonce of the wrong length as a usage error, not an envelope rejection", async () => {
-    await expect(c.verifier.verifyV3At(c.doc, c.nonce.subarray(1), c.repo, c.at)).rejects.toThrow(UsageError);
-    await expect(c.verifier.verifyV3At(c.doc, c.nonce.subarray(1), c.repo, c.at)).rejects.toThrow(/expected nonce must be 32 bytes/);
+    await expect(c.verifier.verifyV3At(c.doc, c.nonce.subarray(1), { repo: c.repo }, c.at)).rejects.toThrow(UsageError);
+    await expect(c.verifier.verifyV3At(c.doc, c.nonce.subarray(1), { repo: c.repo }, c.at)).rejects.toThrow(/expected nonce must be 32 bytes/);
   });
 
   it("rejects an invalid verification time", async () => {
-    await expect(c.verifier.verifyV3At(c.doc, c.nonce, c.repo, new Date(NaN))).rejects.toThrow(UsageError);
-    await expect(c.verifier.verifyV3At(c.doc, c.nonce, c.repo, "2025-01-01" as unknown as Date)).rejects.toThrow(UsageError);
+    await expect(c.verifier.verifyV3At(c.doc, c.nonce, { repo: c.repo }, new Date(NaN))).rejects.toThrow(UsageError);
+    await expect(c.verifier.verifyV3At(c.doc, c.nonce, { repo: c.repo }, "2025-01-01" as unknown as Date)).rejects.toThrow(UsageError);
   });
 
-  it("rejects a malformed repository reference as a usage error", async () => {
-    await expect(c.verifier.verifyV3At(c.doc, c.nonce, "not a repo", c.at)).rejects.toThrow(UsageError);
+  it("rejects a malformed repository or project reference as a usage error", async () => {
+    await expect(c.verifier.verifyV3At(c.doc, c.nonce, { repo: "not a repo" }, c.at)).rejects.toThrow(UsageError);
+    await expect(c.verifier.verifyV3At(c.doc, c.nonce, { repo: c.repo, project: "not a project" }, c.at)).rejects.toThrow(UsageError);
+  });
+
+  it("rejects a pin that is not an object of strings as a usage error", async () => {
+    // A bare reference from untyped code must not be read as an empty pin.
+    for (const bad of [c.repo, null, undefined, { repo: 7 }, { repo: c.repo, project: null }]) {
+      await expect(c.verifier.verifyV3At(c.doc, c.nonce, bad as unknown as Pin, c.at)).rejects.toThrow(UsageError);
+      expect(() => c.verifier.checkPinVerifiability(bad as unknown as Pin)).toThrow(UsageError);
+    }
+  });
+
+  it("does not let a project pin stand in for the repository", async () => {
+    const err = await c.verifier.verifyV3At(c.doc, c.nonce, { project: c.repo.toLowerCase() }, c.at).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(VerificationError);
+    expect((err as VerificationError).layer).toBe("provenance");
+    expect((err as Error).message).toMatch(/no GitHub repository is pinned/);
+    await expect(c.verifier.verifyV3At(c.doc, c.nonce, { repo: c.repo, project: "org/other" }, c.at)).resolves.toBeDefined();
   });
 
   it("rejects a different nonce at the envelope layer", async () => {
     const other = new Uint8Array(NONCE_SIZE).fill(7);
-    const err = await c.verifier.verifyV3At(c.doc, other, c.repo, c.at).catch((e: unknown) => e);
+    const err = await c.verifier.verifyV3At(c.doc, other, { repo: c.repo }, c.at).catch((e: unknown) => e);
     expect(err).toBeInstanceOf(VerificationError);
     expect((err as VerificationError).layer).toBe("envelope");
   });
 
   it("rejects another repository at the provenance layer", async () => {
-    const err = await c.verifier.verifyV3At(c.doc, c.nonce, "tinfoilsh/other-repo", c.at).catch((e: unknown) => e);
+    const err = await c.verifier.verifyV3At(c.doc, c.nonce, { repo: "tinfoilsh/other-repo" }, c.at).catch((e: unknown) => e);
     expect(err).toBeInstanceOf(VerificationError);
     expect((err as VerificationError).layer).toBe("provenance");
   });
 
   it("requires config collateral once the policy pins config trust", async () => {
     const verifier = await dangerousTestOnlyVerifier(rootsOf(c.fixture), { configAuthorizer: () => undefined });
-    const err = await verifier.verifyV3At(c.doc, c.nonce, c.repo, c.at).catch((e: unknown) => e);
+    const err = await verifier.verifyV3At(c.doc, c.nonce, { repo: c.repo }, c.at).catch((e: unknown) => e);
     expect(err).toBeInstanceOf(VerificationError);
     expect((err as VerificationError).layer).toBe("provenance");
     expect((err as Error).message).toMatch(/configured trust requires/);
   });
 
   it("applies pinned registers: a matching pin passes, a conflicting or foreign one rejects at the policy layer", async () => {
-    const v = await c.verifier.verifyV3At(c.doc, c.nonce, c.repo, c.at);
+    const v = await c.verifier.verifyV3At(c.doc, c.nonce, { repo: c.repo }, c.at);
     const launch = v.enclaveMeasurement;
     if (launch.platform !== "sev-snp") throw new Error("golden-happy is an SEV-SNP document");
     const matching = await dangerousTestOnlyVerifier(rootsOf(c.fixture), { pinnedRegisters: { platform: "sev-snp", launch: launch.launch } });
-    await expect(matching.verifyV3At(c.doc, c.nonce, c.repo, c.at)).resolves.toBeDefined();
+    await expect(matching.verifyV3At(c.doc, c.nonce, { repo: c.repo }, c.at)).resolves.toBeDefined();
     expect(matching.pinnedRegisters).toEqual({ platform: "sev-snp", launch: launch.launch });
     // The pins are one frozen copy: every read is the same object, and the policy keeps its own.
     expect(matching.pinnedRegisters).toBe(matching.pinnedRegisters);
     expect(Object.isFrozen(matching.pinnedRegisters)).toBe(true);
     (matching.pinnedRegisters as { launch: Uint8Array }).launch[0] ^= 0xff;
-    await expect(matching.verifyV3At(c.doc, c.nonce, c.repo, c.at)).resolves.toBeDefined();
+    await expect(matching.verifyV3At(c.doc, c.nonce, { repo: c.repo }, c.at)).resolves.toBeDefined();
 
     const conflicting = await dangerousTestOnlyVerifier(rootsOf(c.fixture), { pinnedRegisters: { platform: "sev-snp", launch: new Uint8Array(48).fill(9) } });
-    const err = await conflicting.verifyV3At(c.doc, c.nonce, c.repo, c.at).catch((e: unknown) => e);
+    const err = await conflicting.verifyV3At(c.doc, c.nonce, { repo: c.repo }, c.at).catch((e: unknown) => e);
     expect(err).toBeInstanceOf(VerificationError);
     expect((err as VerificationError).layer).toBe("policy");
     expect((err as Error).message).toMatch(/pinned launch measurement does not match/);
 
     const foreign = await dangerousTestOnlyVerifier(rootsOf(c.fixture), { pinnedRegisters: { platform: "tdx", rtmr3: new Uint8Array(48) } });
-    const err2 = await foreign.verifyV3At(c.doc, c.nonce, c.repo, c.at).catch((e: unknown) => e);
+    const err2 = await foreign.verifyV3At(c.doc, c.nonce, { repo: c.repo }, c.at).catch((e: unknown) => e);
     expect((err2 as VerificationError).layer).toBe("policy");
     expect((err2 as Error).message).toMatch(/pinned registers are for tdx, but the enclave is sev-snp/);
   });
@@ -222,8 +239,8 @@ describe.skipIf(withoutVectors)(vectorsTitle("verifyV3At caller mistakes"), () =
     const tight = await dangerousTestOnlyVerifier(rootsOf(c.fixture), { freshnessMaxAgeMs: 1 });
     expect(tight.freshnessMaxAgeMs).toBe(1);
     const later = new Date(c.at.getTime() + 1000);
-    await expect(c.verifier.verifyV3At(c.doc, c.nonce, c.repo, later)).resolves.toBeDefined();
-    const err = await tight.verifyV3At(c.doc, c.nonce, c.repo, later).catch((e: unknown) => e);
+    await expect(c.verifier.verifyV3At(c.doc, c.nonce, { repo: c.repo }, later)).resolves.toBeDefined();
+    const err = await tight.verifyV3At(c.doc, c.nonce, { repo: c.repo }, later).catch((e: unknown) => e);
     expect(err).toBeInstanceOf(VerificationError);
     expect((err as VerificationError).layer).toBe("provenance");
     expect((err as Error).message).toMatch(/freshness/);
@@ -240,8 +257,8 @@ describe("Verifier.create options", () => {
     expect(v.callerAuthorizesConfig).toBe(false);
     // The policy can't be reported differently from how it is enforced.
     expect(() => ((v as { callerAuthorizesConfig: boolean }).callerAuthorizesConfig = true)).toThrow(TypeError);
-    expect(() => v.checkRepoVerifiability("tinfoilsh/repo@v1.0.0")).not.toThrow();
-    expect(() => v.checkRepoVerifiability("no slash")).toThrow(UsageError);
+    expect(() => v.checkPinVerifiability({ repo: "tinfoilsh/repo@v1.0.0" })).not.toThrow();
+    expect(() => v.checkPinVerifiability({ repo: "no slash" })).toThrow(UsageError);
   });
 
   it("rejects invalid options as usage errors", async () => {
@@ -265,8 +282,8 @@ describe("Verifier.create options", () => {
     const config = utf8(`name: app\ncvm-version: v1.2.3@sha256:${"a".repeat(64)}\n`);
     const embedded = await Verifier.create({ embeddedReferences: { config: { name: "/org/project/r1", bytes: config } } });
     expect(embedded.callerAuthorizesConfig).toBe(true);
-    expect(() => embedded.checkRepoVerifiability("org/project@r1")).not.toThrow();
-    expect(() => embedded.checkRepoVerifiability("org/other@r1")).toThrow(/embedded config does not match/);
+    expect(() => embedded.checkPinVerifiability({ project: "org/project@r1" })).not.toThrow();
+    expect(() => embedded.checkPinVerifiability({ project: "org/other@r1" })).toThrow(/embedded config does not match/);
     await expect(Verifier.create({ embeddedReferences: { config: { name: "bad name", bytes: config } } })).rejects.toThrow(UsageError);
   });
 
@@ -283,15 +300,15 @@ describe("Verifier.create options", () => {
     const reference: EmbeddedConfigReference = { name: "/org/project/r1", digest, runtime };
     const v = await Verifier.create({ embeddedReferences: { config: reference, runtime: manifest } });
     expect(v.callerAuthorizesConfig).toBe(true);
-    expect(() => v.checkRepoVerifiability("")).not.toThrow();
-    expect(() => v.checkRepoVerifiability(`org/project@r1@sha256:${digest}`)).not.toThrow();
-    expect(() => v.checkRepoVerifiability("org/project@r2")).toThrow(/embedded config does not match/);
-    expect(() => v.checkRepoVerifiability(`org/project@sha256:${"b".repeat(64)}`)).toThrow(/embedded config does not match/);
+    expect(() => v.checkPinVerifiability({})).not.toThrow();
+    expect(() => v.checkPinVerifiability({ project: `org/project@r1@sha256:${digest}` })).not.toThrow();
+    expect(() => v.checkPinVerifiability({ project: "org/project@r2" })).toThrow(/embedded config does not match/);
+    expect(() => v.checkPinVerifiability({ project: `org/project@sha256:${"b".repeat(64)}` })).toThrow(/embedded config does not match/);
     // Without a name the reference has no identity, so any repository reference, which always
     // pins an identity, mismatches even when its digest agrees; only the empty reference fits.
     const unnamed = await Verifier.create({ embeddedReferences: { config: { digest, runtime } } });
-    expect(() => unnamed.checkRepoVerifiability(`org/project@sha256:${digest}`)).toThrow(/embedded config does not match/);
-    expect(() => unnamed.checkRepoVerifiability("")).not.toThrow();
+    expect(() => unnamed.checkPinVerifiability({ project: `org/project@sha256:${digest}` })).toThrow(/embedded config does not match/);
+    expect(() => unnamed.checkPinVerifiability({})).not.toThrow();
     // An embedded config is its bytes or its reference, never both: each form excludes the
     // other's fields, so the combined object fails to compile under the test typecheck.
     const bytes = utf8(`cvm-version: v1.2.3@sha256:${runtime.digest}\n`);
@@ -323,17 +340,17 @@ describe("Verifier.create options", () => {
     const copied = await Verifier.create({ embeddedReferences: { config: mutable } });
     mutable.digest = "b".repeat(64);
     mutable.runtime.digest = "cd".repeat(32);
-    expect(() => copied.checkRepoVerifiability(`org/project@r1@sha256:${digest}`)).not.toThrow();
+    expect(() => copied.checkPinVerifiability({ project: `org/project@r1@sha256:${digest}` })).not.toThrow();
     // Nor does a later change to embedded config bytes: the reference was settled from a copy.
     const fromBytes = await Verifier.create({ embeddedReferences: { config: { name: "/org/project/r1", bytes } } });
     const bytesDigest = toHex(await sha256(bytes));
     bytes.fill(0);
-    expect(() => fromBytes.checkRepoVerifiability(`org/project@r1@sha256:${bytesDigest}`)).not.toThrow();
+    expect(() => fromBytes.checkPinVerifiability({ project: `org/project@r1@sha256:${bytesDigest}` })).not.toThrow();
     // Like every configured trust source, it needs config collateral.
     if (withoutVectors) return;
     const fixture = loadFixture("golden/golden-happy.json");
     const embedded = await dangerousTestOnlyVerifier(rootsOf(fixture), { embeddedReferences: { config: reference } });
-    const err = await embedded.verifyV3At(inputBytes(fixture, "document_b64"), hex(fixture.input.nonce_hex ?? ""), "", clockOf(fixture)).catch((e: unknown) => e);
+    const err = await embedded.verifyV3At(inputBytes(fixture, "document_b64"), hex(fixture.input.nonce_hex ?? ""), {}, clockOf(fixture)).catch((e: unknown) => e);
     expect(err).toBeInstanceOf(VerificationError);
     expect((err as VerificationError).layer).toBe("provenance");
     expect((err as Error).message).toMatch(/configured trust requires/);
@@ -343,7 +360,7 @@ describe("Verifier.create options", () => {
     const privateRegistryID = "https://registry.tinfoil.sh/scopes/9c4a7f21e0b836d56a13c8fe42d907ab";
     const pinned = await Verifier.create({ configRegistryIDs: [privateRegistryID, "https://registry.tinfoil.sh/scopes/public"] });
     expect(pinned.callerAuthorizesConfig).toBe(false);
-    expect(() => pinned.checkRepoVerifiability("org/project@r1")).not.toThrow();
+    expect(() => pinned.checkPinVerifiability({ project: "org/project@r1" })).not.toThrow();
     await expect(Verifier.create({ configRegistryIDs: [] })).rejects.toThrow(/must not be empty/);
     await expect(Verifier.create({ configRegistryIDs: [privateRegistryID, privateRegistryID] })).rejects.toThrow(/duplicate/);
     await expect(Verifier.create({ configRegistryIDs: ["https://example.invalid/scope"] })).rejects.toThrow(/canonical registry URI/);
@@ -359,7 +376,7 @@ describe("Verifier.create options", () => {
     if (withoutVectors) return;
     const fixture = loadFixture("golden/golden-happy.json");
     const pinned = await dangerousTestOnlyVerifier(rootsOf(fixture), { configRegistryIDs: ["https://registry.tinfoil.sh/scopes/public"] });
-    const err = await pinned.verifyV3At(inputBytes(fixture, "document_b64"), hex(fixture.input.nonce_hex ?? ""), repoOf(fixture), clockOf(fixture)).catch((e: unknown) => e);
+    const err = await pinned.verifyV3At(inputBytes(fixture, "document_b64"), hex(fixture.input.nonce_hex ?? ""), { repo: repoOf(fixture) }, clockOf(fixture)).catch((e: unknown) => e);
     expect(err).toBeInstanceOf(VerificationError);
     expect((err as VerificationError).layer).toBe("provenance");
     expect((err as Error).message).toMatch(/configured trust requires/);
@@ -372,8 +389,97 @@ describe("Verifier.create options", () => {
     await expect(Verifier.create({ configAuthorizer: () => undefined, configSigningKeys: [pem] })).rejects.toThrow(UsageError);
     const authorizer = await Verifier.create({ configAuthorizer: () => undefined });
     expect(authorizer.callerAuthorizesConfig).toBe(true);
-    expect(() => authorizer.checkRepoVerifiability("org/project")).toThrow(/enforce them in caller policy/);
-    expect(() => authorizer.checkRepoVerifiability("")).not.toThrow();
+    expect(() => authorizer.checkPinVerifiability({ project: "org/project" })).toThrow(/enforce them in caller policy/);
+    expect(() => authorizer.checkPinVerifiability({})).not.toThrow();
+  });
+});
+
+describe("the document's collateral selects the part of the pin that applies", () => {
+  const nonce = new Uint8Array(NONCE_SIZE);
+  const repositoryOnly = "only a GitHub repository is pinned";
+  const projectOnly = "no GitHub repository is pinned";
+  const repo: Pin = { repo: "org/project" };
+  const project: Pin = { project: "org/project" };
+  const both: Pin = { repo: "org/project", project: "org/project" };
+  // A document without collateral: a pin its collateral format accepts gets as
+  // far as the missing code or config entry, and any other stops before it.
+  const document = async (collateralFormat: string): Promise<Uint8Array> =>
+    (await buildDocument({ nonce, collateralFormat }, () => ({ format: SEV_SNP_REPORT_V1_FORMAT, report: utf8("quote") }))).bytes;
+
+  it.each([
+    ["repository collateral, repository", FORMAT_V2, repo, SIGSTORE_CODE_V1_FORMAT],
+    ["unversioned collateral, repository", "", repo, SIGSTORE_CODE_V1_FORMAT],
+    ["repository collateral, project", FORMAT_V2, project, projectOnly],
+    ["unversioned collateral, project", "", project, projectOnly],
+    ["repository collateral, no pin", FORMAT_V2, {}, projectOnly],
+    ["repository collateral, both", FORMAT_V2, both, SIGSTORE_CODE_V1_FORMAT],
+    ["registry collateral, project", FORMAT_V3, project, CONFIG_ID],
+    ["registry collateral, repository", FORMAT_V3, repo, repositoryOnly],
+    ["registry collateral, no pin", FORMAT_V3, {}, CONFIG_ID],
+    ["registry collateral, both", FORMAT_V3, both, CONFIG_ID],
+  ])("%s", async (_name, format, pin, want) => {
+    const v = await Verifier.create();
+    const err = await v.verifyV3(await document(format), nonce, pin).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(VerificationError);
+    expect((err as VerificationError).layer).toBe("provenance");
+    expect((err as Error).message).toContain(want);
+  });
+
+  it("rejects a malformed pin as a usage error whichever collateral the document carries", async () => {
+    const v = await Verifier.create();
+    for (const format of [FORMAT_V2, FORMAT_V3]) {
+      const doc = await document(format);
+      for (const pin of [{ repo: "not a reference" }, { project: "not a reference" }, { repo: "org/project", project: "not a reference" }, { repo: "not a reference", project: "org/project" }]) {
+        await expect(v.verifyV3(doc, nonce, pin)).rejects.toThrow(UsageError);
+      }
+    }
+  });
+
+  it("keeps the configured-trust rejection for repository collateral under registry-only trust", async () => {
+    const v = await Verifier.create({ configRegistryIDs: [PUBLIC_REGISTRY_ID] });
+    for (const pin of [{}, project, both]) {
+      const err = await v.verifyV3(await document(FORMAT_V2), nonce, pin).catch((e: unknown) => e);
+      expect(err).toBeInstanceOf(VerificationError);
+      expect((err as VerificationError).layer).toBe("provenance");
+      expect((err as Error).message).toMatch(/configured trust requires/);
+    }
+  });
+
+  it("holds registry collateral to the config identity rules a pin check cannot apply without the document", async () => {
+    const v = await Verifier.create();
+    expect(() => v.checkPinVerifiability({ project: "Org/My_Repo" })).not.toThrow();
+    const run = v.verifyV3(await document(FORMAT_V3), nonce, { project: "Org/My_Repo" });
+    await expect(run).rejects.toThrow(UsageError);
+  });
+});
+
+describe("checkPinVerifiability", () => {
+  const config = utf8(`name: app\ncvm-version: v1.2.3@sha256:${"a".repeat(64)}\n`);
+  const embedded: VerifierOptions = { embeddedReferences: { config: { name: "/org/project/v1", bytes: config } } };
+  const authorizer: VerifierOptions = { configAuthorizer: () => undefined };
+
+  it.each<[string, VerifierOptions, Pin, boolean]>([
+    ["defaults with a project", {}, { project: "org/repo@v1" }, true],
+    ["defaults with a repository", {}, { repo: "Org/My_Repo" }, true],
+    ["defaults with both", {}, { repo: "Org/My_Repo", project: "org/project" }, true],
+    ["defaults without a pin", {}, {}, true],
+    ["defaults with empty parts", {}, { repo: "", project: "" }, true],
+    ["defaults with a malformed project", {}, { project: "not a reference" }, false],
+    ["defaults with a malformed repository", {}, { repo: "not a reference" }, false],
+    ["embedded config without a pin", embedded, {}, true],
+    ["embedded config with its own project", embedded, { project: "org/project@v1" }, true],
+    ["embedded config with another project", embedded, { project: "org/repo" }, false],
+    ["embedded config with a repository alone", embedded, { repo: "org/project" }, false],
+    ["embedded config with its own project and a repository", embedded, { repo: "org/project", project: "org/project@v1" }, true],
+    ["registry IDs with a repository alone", { configRegistryIDs: [PUBLIC_REGISTRY_ID] }, { repo: "org/project" }, false],
+    ["registry IDs with a repository and a project", { configRegistryIDs: [PUBLIC_REGISTRY_ID] }, { repo: "org/project", project: "org/project" }, true],
+    ["config authorizer without a pin", authorizer, {}, true],
+    ["config authorizer with a project", authorizer, { project: "org/repo" }, false],
+    ["config authorizer with a repository", authorizer, { repo: "org/repo" }, false],
+  ])("%s", async (_name, options, pin, valid) => {
+    const v = await Verifier.create(options);
+    if (valid) expect(() => v.checkPinVerifiability(pin)).not.toThrow();
+    else expect(() => v.checkPinVerifiability(pin)).toThrow(UsageError);
   });
 });
 
@@ -393,7 +499,7 @@ describe("config registry IDs beyond the public registry", () => {
     expect(PUBLIC_REGISTRY_ID).toBe(PUBLIC_REGISTRY_ID_EXPORTED);
     const v = await Verifier.create({ configRegistryIDs: [PUBLIC_REGISTRY_ID, PRIVATE_REGISTRY_ID] });
     expect(v.callerAuthorizesConfig).toBe(false);
-    expect(() => v.checkRepoVerifiability("org/project@r1")).not.toThrow();
+    expect(() => v.checkPinVerifiability({ project: "org/project@r1" })).not.toThrow();
     await expect(Verifier.create({ configRegistryIDs: [PUBLIC_REGISTRY_ID, PUBLIC_REGISTRY_ID] })).rejects.toThrow(/duplicate config registry ID/);
     await expect(Verifier.create({ configRegistryIDs: [PUBLIC_REGISTRY_ID, PRIVATE_REGISTRY_ID, PRIVATE_REGISTRY_ID] })).rejects.toThrow(/duplicate config registry ID/);
     await expect(Verifier.create({ configRegistryIDs: [PUBLIC_REGISTRY_ID, "https://example.invalid/scope"] })).rejects.toThrow(/canonical registry URI/);
@@ -411,7 +517,7 @@ describe("config registry IDs beyond the public registry", () => {
     if (withoutVectors) return;
     const fixture = loadFixture("golden/golden-happy.json");
     const pinned = await dangerousTestOnlyVerifier(rootsOf(fixture), { configRegistryIDs: [PUBLIC_REGISTRY_ID, PRIVATE_REGISTRY_ID] });
-    const err = await pinned.verifyV3At(inputBytes(fixture, "document_b64"), hex(fixture.input.nonce_hex ?? ""), repoOf(fixture), clockOf(fixture)).catch((e: unknown) => e);
+    const err = await pinned.verifyV3At(inputBytes(fixture, "document_b64"), hex(fixture.input.nonce_hex ?? ""), { repo: repoOf(fixture) }, clockOf(fixture)).catch((e: unknown) => e);
     expect(err).toBeInstanceOf(VerificationError);
     expect((err as VerificationError).layer).toBe("provenance");
     expect((err as Error).message).toMatch(/configured trust requires/);
@@ -454,7 +560,7 @@ describe("config registry IDs beyond the public registry", () => {
     const at = new Date(GEN_TIME.getTime() + 60 * 60 * 1000);
     const verify = async (options: VerifierOptions): Promise<VerificationError> => {
       const v = await dangerousTestOnlyVerifier(roots, { embeddedReferences: { runtime: manifest, platform }, ...options });
-      const err = await v.verifyV3At(bytes, nonce, "org/project@r1", at).catch((e: unknown) => e);
+      const err = await v.verifyV3At(bytes, nonce, { project: "org/project@r1" }, at).catch((e: unknown) => e);
       expect(err).toBeInstanceOf(VerificationError);
       return err as VerificationError;
     };
@@ -497,7 +603,7 @@ describe("config authorizer", () => {
         seen = endorsement;
       },
     });
-    const err = await v.verifyV3At(bytes, nonce, "", new Date()).catch((e: unknown) => e);
+    const err = await v.verifyV3At(bytes, nonce, {}, new Date()).catch((e: unknown) => e);
     expect(seen?.bundle).toBe(bundleText);
     const member = utf8(seen!.bundle!);
     const marker = utf8(`"sigstore_bundle":`);

@@ -16,6 +16,7 @@ import {
   randomNonce,
   UsageError,
   Verifier,
+  type Pin,
   type Verification,
 } from "@tinfoilsh/verifier";
 import { AttestationError, ConfigurationError, messageOf, NetworkError, stripCategory, TinfoilError, withMessage } from "../errors.js";
@@ -34,8 +35,8 @@ export interface EnclaveConfig {
   readonly host: string;
   /** When set, a host that fetches attestation from the enclave on the client's behalf. */
   readonly relay?: string;
-  /** Pins a repository or registry project, `org/project[@revision][@sha256:digest]`; empty accepts configs the verifier authorizes. */
-  readonly repo: string;
+  /** The GitHub repository, the registry project, or both, that the enclave is verified against; neither accepts configs the verifier authorizes. */
+  readonly pin: Pin;
   /** The policy, which several enclaves can share; undefined selects the defaults. */
   readonly verifier?: Verifier;
   /** Called with each verification that passes the verifier; a throw rejects it without a retry. */
@@ -58,7 +59,7 @@ export class RejectedError extends AttestationError {
 export class Enclave {
   readonly #host: string;
   readonly #relay: string | undefined;
-  readonly #repo: string;
+  readonly #pin: Required<Pin>;
   readonly #verifier: Verifier;
   readonly #check: VerificationCheck | undefined;
   readonly #fetch: Fetch;
@@ -69,7 +70,7 @@ export class Enclave {
   private constructor(config: EnclaveConfig, verifier: Verifier) {
     this.#host = config.host;
     this.#relay = config.relay;
-    this.#repo = config.repo;
+    this.#pin = Object.freeze({ repo: config.pin.repo ?? "", project: config.pin.project ?? "" });
     this.#verifier = verifier;
     this.#check = config.verificationCheck;
     this.#fetch = config.fetch ?? ((input, init) => fetch(input, init));
@@ -78,12 +79,12 @@ export class Enclave {
     this.#sleep = config.sleep ?? sleep;
   }
 
-  /** Checks the repository pin against the verifier's rules; no network I/O. */
+  /** Checks the pin against the verifier's rules; no network I/O. */
   static async create(config: EnclaveConfig): Promise<Enclave> {
     if (config.host === "") throw new ConfigurationError("enclave host is required");
     try {
       const verifier = config.verifier ?? (await Verifier.create());
-      verifier.checkRepoVerifiability(config.repo);
+      verifier.checkPinVerifiability(config.pin);
       return new Enclave(config, verifier);
     } catch (err) {
       throw fromVerify(err);
@@ -94,9 +95,9 @@ export class Enclave {
     return this.#host;
   }
 
-  /** The trusted repository or registry reference, including version and digest pins. */
-  repo(): string {
-    return this.#repo;
+  /** The trusted repository and registry project references, including version and digest pins; an unset part is "". */
+  pin(): Required<Pin> {
+    return this.#pin;
   }
 
   /** The verification policy, which several enclaves can share. */
@@ -147,7 +148,7 @@ export class Enclave {
     const doc = await fetchDocument(this.#host, this.#relay, nonce, this.#fetch, signal);
     let verified: Verification;
     try {
-      verified = await this.#verifier.verifyV3At(doc, nonce, this.#repo, this.#clock());
+      verified = await this.#verifier.verifyV3At(doc, nonce, this.#pin, this.#clock());
     } catch (err) {
       throw fromVerify(err);
     }

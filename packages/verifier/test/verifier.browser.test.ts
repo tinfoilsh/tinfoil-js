@@ -26,7 +26,7 @@ describe("verifier in a browser", () => {
 
   it("rejects bytes that are not an attestation document at the envelope layer", async () => {
     const v = await verifier.Verifier.create();
-    const err: unknown = await v.verifyV3(new TextEncoder().encode("{}"), verifier.randomNonce(), "tinfoilsh/confidential-model-router").then(
+    const err: unknown = await v.verifyV3(new TextEncoder().encode("{}"), verifier.randomNonce(), { repo: "tinfoilsh/confidential-model-router" }).then(
       () => undefined,
       (e: unknown) => e,
     );
@@ -36,7 +36,7 @@ describe("verifier in a browser", () => {
 
   it("reports invalid inputs as usage errors", async () => {
     const v = await verifier.Verifier.create();
-    await expect(v.verifyV3At(new Uint8Array(), new Uint8Array(verifier.NONCE_SIZE), "org/repo", new Date(Number.NaN))).rejects.toBeInstanceOf(verifier.UsageError);
+    await expect(v.verifyV3At(new Uint8Array(), new Uint8Array(verifier.NONCE_SIZE), { repo: "org/repo" }, new Date(Number.NaN))).rejects.toBeInstanceOf(verifier.UsageError);
     expect(() => verifier.parseReference("no slash")).toThrow(verifier.UsageError);
     await expect(verifier.certPubkeyFP(new Uint8Array([1, 2, 3]))).rejects.toBeInstanceOf(verifier.UsageError);
   });

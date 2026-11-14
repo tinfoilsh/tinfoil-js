@@ -19,7 +19,7 @@ import {
   type Register,
 } from "./measurement.js";
 
-export { Verifier, type EmbeddedConfigBytes, type EmbeddedConfigReference, type EmbeddedReferences, type VerifierOptions } from "./verifier.js";
+export { Verifier, type EmbeddedConfigBytes, type EmbeddedConfigReference, type EmbeddedReferences, type Pin, type VerifierOptions } from "./verifier.js";
 export {
   cryptoMaterialData,
   Verification,
