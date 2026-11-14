@@ -24,7 +24,7 @@ const nonce = randomNonce();
 const response = await fetch(`https://inference.tinfoil.sh/.well-known/tinfoil-attestation?nonce=${toHex(nonce)}`);
 const document = new Uint8Array(await response.arrayBuffer());
 
-const verification = await verifier.verifyV3(document, nonce, "tinfoilsh/confidential-model-router");
+const verification = await verifier.verifyV3(document, nonce, { repo: "tinfoilsh/confidential-model-router" });
 
 verification.codeDigest;         // the verified release
 verification.enclaveMeasurement; // the quote's authenticated registers
@@ -33,7 +33,7 @@ verification.hpkePublicKey;      // the endorsed HPKE key, if any
 verification.freshnessExpiresAt; // when a cached verification stops authorizing requests
 ```
 
-`verifyV3` samples the clock once and judges every time-bound check at that instant; `verifyV3At(document, nonce, repo, when)` uses `when` instead. The `repo` pin is `owner/name[@tag][@sha256:digest]` (`parseReference` validates one), and `checkRepoVerifiability(repo)` rejects a pin the verifier could never accept, without a document.
+`verifyV3` samples the clock once and judges every time-bound check at that instant; `verifyV3At(document, nonce, pin, when)` uses `when` instead. A pin names the workload in one namespace: `repo` is a GitHub repository, `owner/name[@tag][@sha256:digest]`, satisfied only by that repository's signed release, and `project` is a config registry project, `org/project[@revision][@sha256:digest]`, satisfied only by a registry approval. The same name can belong to different owners in each, so set the one the enclave is published under; setting both accepts either, and a document whose collateral the pin does not cover is rejected at the `provenance` layer. `parseReference` validates a reference, and `checkPinVerifiability(pin)` rejects a pin the verifier could never accept, without a document.
 
 `Verifier.create(options)` configures the policy: `pinnedRegisters` must match the enclave's registers, `freshnessMaxAgeMs` bounds witness age, `configSigningKeys` and `freshnessSigningKeys` replace the public trust in the config and approval signers, `configRegistryIDs` names exactly the registries whose certified config approvals are accepted in place of the public registry alone (list `PUBLIC_REGISTRY_ID` among them, `[PUBLIC_REGISTRY_ID, ...mine]`, to keep accepting the public one), `configAuthorizer` lets the caller authorize the config itself, and `embeddedReferences` supplies caller-trusted reference values for the config (`config` is either `{ bytes, name? }` or, when the bytes are not disclosed, `{ digest, runtime, name? }` with the config's SHA-256 and the runtime release it pins), runtime or platform. An option that cannot be honoured is a `UsageError`.
 

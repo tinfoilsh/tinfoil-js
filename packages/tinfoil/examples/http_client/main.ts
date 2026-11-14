@@ -6,7 +6,7 @@
  * request goes to that enclave over the pinned (or sealed) transport. Use it
  * when you need more control than the OpenAI client, or when calling
  * endpoints the OpenAI client does not cover. EnclaveHTTPClient.create(host,
- * repo) does the same for one named enclave.
+ * { repo }) does the same for one named enclave.
  *
  * Prerequisites:
  * - Export your API key: export TINFOIL_API_KEY="<YOUR_API_KEY>"

@@ -90,6 +90,22 @@ export interface EmbeddedReferences {
   readonly platform?: Uint8Array;
 }
 
+/**
+ * Names the workload a caller trusts and the namespace that vouches for it.
+ * The two namespaces are unrelated: the same name can belong to different
+ * owners in each, so a pin in one is never satisfied by the other.
+ *
+ * Setting both accepts a document that satisfies either. A pin with neither
+ * accepts any config authorized by the verifier's registry trust, embedded
+ * config or config authorizer. An absent part and "" are the same.
+ */
+export interface Pin {
+  /** A GitHub repository, `owner/name[@tag][@sha256:digest]`. Only a document carrying that repository's signed release satisfies it. */
+  readonly repo?: string;
+  /** A config registry project, `org/project[@revision][@sha256:digest]`. Only a document carrying a registry approval of that project satisfies it. */
+  readonly project?: string;
+}
+
 export interface VerifierOptions {
   /** Registers the enclave must match in addition to the release's. */
   readonly pinnedRegisters?: Expected;
@@ -237,24 +253,46 @@ export class Verifier {
     return buildVerifier(options, {});
   }
 
-  /** Throws UsageError when `repo` cannot be verified under this verifier's policy. */
-  checkRepoVerifiability(repo: string): void {
-    this.#referencePins(repo);
+  /**
+   * Throws UsageError when `pin` cannot be verified under this verifier's
+   * policy, whatever the document: a malformed `repo` or `project`; a `repo`
+   * set alone when the verifier verifies registry collateral only, through
+   * an embedded reference, explicit signing keys, registry IDs or a config
+   * authorizer; a `project` when a config authorizer is set; or a `project`
+   * that an embedded config's name or digest doesn't match. No document or
+   * network I/O. Verification can still refuse a pin that passes: registry
+   * collateral also requires the project and revision to be valid config
+   * identity components, and that check waits for the document.
+   */
+  checkPinVerifiability(pin: Pin): void {
+    const { repo, project } = pinOf(pin);
+    if (repo !== "") {
+      usage(() => parseReference(repo));
+      if (project === "" && this.#requiresConfigCollateral()) {
+        throw new UsageError("configured trust verifies registry collateral only, which a GitHub repository pin cannot match");
+      }
+    }
+    this.#referencePins(project);
   }
 
-  /** Appraises a nonce-bound v3 document against the pinned `repo` at the current time. */
-  async verifyV3(docBytes: Uint8Array, nonce: Uint8Array, repo: string): Promise<Verification> {
-    return this.verifyV3At(docBytes, nonce, repo, new Date());
+  /**
+   * Appraises a nonce-bound v3 document against `pin` at the current time.
+   * The document's collateral decides which part of `pin` applies, and a
+   * document whose collateral `pin` does not cover is rejected.
+   */
+  async verifyV3(docBytes: Uint8Array, nonce: Uint8Array, pin: Pin): Promise<Verification> {
+    return this.verifyV3At(docBytes, nonce, pin, new Date());
   }
 
   /**
    * Like {@link verifyV3}, but `verificationTime` replaces the clock in every
    * time-bound check (freshness, vendor certificate and CRL validity).
    */
-  async verifyV3At(docBytes: Uint8Array, nonce: Uint8Array, repo: string, verificationTime: Date): Promise<Verification> {
+  async verifyV3At(docBytes: Uint8Array, nonce: Uint8Array, pin: Pin, verificationTime: Date): Promise<Verification> {
     if (!(verificationTime instanceof Date) || !Number.isFinite(verificationTime.getTime())) {
       throw new UsageError("verification time must be a valid date");
     }
+    const { repo, project } = pinOf(pin);
     const now = new Date(verificationTime.getTime());
 
     const doc = await at("envelope", async () => {
@@ -267,10 +305,19 @@ export class Verifier {
     });
 
     const refs = await at("provenance", async () => {
+      // A malformed pin is the caller's mistake whichever collateral the document carries.
+      if (repo !== "") usage(() => parseReference(repo));
+      this.#referencePins(project);
       switch (doc.collateralFormat()) {
         case FORMAT_V3:
-          return this.#configReferences(doc, repo, now);
+          if (project === "" && repo !== "") {
+            throw new Error("document carries config registry collateral, but only a GitHub repository is pinned");
+          }
+          return this.#configReferences(doc, project, now);
         case FORMAT_V2:
+          if (repo === "" && !this.#requiresConfigCollateral()) {
+            throw new Error("document carries GitHub repository collateral, but no GitHub repository is pinned");
+          }
           return this.#codeReferences(doc, repo, now);
         default:
           throw new Error(`unsupported collateral format ${JSON.stringify(doc.collateralFormat())}`);
@@ -351,7 +398,7 @@ export class Verifier {
   // ---------------------------------------------------------------- config-pinned runtimes (collateral v3)
 
   /**
-   * The config pins `repo` imposes, as a config policy without a clock. The
+   * The config pins the project reference `ref` imposes, as a config policy without a clock. The
    * accepted registry IDs are the caller's, or the public registry alone
    * under the registry roots; caller-pinned keys leave the registry ID
    * unpinned.
@@ -384,8 +431,8 @@ export class Verifier {
     return pinned;
   }
 
-  async #configReferences(doc: Document, repo: string, now: Date): Promise<References> {
-    const pins = this.#referencePins(repo);
+  async #configReferences(doc: Document, project: string, now: Date): Promise<References> {
+    const pins = this.#referencePins(project);
     // Config identities and revisions are stricter than the repository
     // references legacy collateral accepts, so only config collateral checks
     // them; a pin that can never match is the caller's mistake.
@@ -586,6 +633,18 @@ interface ConfigPins {
   readonly revision: string;
   readonly digest: string;
   readonly registryIDs?: readonly string[];
+}
+
+/**
+ * The parts of `pin` as strings, "" for one that is unset. A pin that is not
+ * an object of strings is refused, so that a bare reference string from
+ * untyped code is not read as an empty pin.
+ */
+function pinOf(pin: Pin): { repo: string; project: string } {
+  if (typeof pin !== "object" || pin === null) throw new UsageError("pin must be an object with a repo, a project, or both");
+  const { repo = "", project = "" } = pin;
+  if (typeof repo !== "string" || typeof project !== "string") throw new UsageError("pin repo and project must be strings");
+  return { repo, project };
 }
 
 /** Validates and copies the caller's registry ID list: the exact accepted set. */

@@ -180,7 +180,7 @@ describe("KeyedTransport", () => {
   /** A verifier whose verifications carry the TLS fingerprint `keys` yields, one per verification. */
   function keyedVerifier(keys: () => string, expiresAt: Date): Verifier {
     return {
-      checkRepoVerifiability: () => {},
+      checkPinVerifiability: () => {},
       verifyV3At: async () => {
         const key = keys();
         return {
@@ -218,7 +218,7 @@ describe("KeyedTransport", () => {
     const now = new Date("2026-01-01T00:00:00Z");
     const enclave = await Enclave.create({
       host: HOST,
-      repo: "",
+      pin: {},
       verifier: keyedVerifier(keys, new Date(now.getTime() + 60_000)),
       fetch: async () => new Response(new Uint8Array([1])),
       clock: () => now,
@@ -287,7 +287,7 @@ describe("KeyedTransport", () => {
     const now = new Date("2026-01-01T00:00:00Z");
     const enclave = await Enclave.create({
       host: HOST,
-      repo: "",
+      pin: {},
       verifier: keyedVerifier(() => `k${++verified}`, new Date(now.getTime() + 60_000)),
       fetch: async () => new Response(new Uint8Array([1])),
       clock: () => now,
@@ -325,7 +325,7 @@ describe("KeyedTransport", () => {
     const fetched: string[] = [];
     const enclave = await Enclave.create({
       host: HOST,
-      repo: "",
+      pin: {},
       verifier: keyedVerifier(() => "k1", new Date(Date.now() + 60_000)),
       fetch: async (input) => {
         fetched.push(String(input));
@@ -370,7 +370,7 @@ describe("KeyedTransport", () => {
     const now = new Date("2026-01-01T00:00:00Z");
     const enclave = await Enclave.create({
       host: HOST,
-      repo: "",
+      pin: {},
       verifier: keyedVerifier(() => "k1", new Date(now.getTime() + 60_000)),
       fetch: async () => {
         await gate;

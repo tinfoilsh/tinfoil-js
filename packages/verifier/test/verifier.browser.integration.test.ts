@@ -10,7 +10,8 @@ import { randomNonce, Verifier } from "../src/index.js";
 
 const RUN_INTEGRATION = process.env.RUN_TINFOIL_INTEGRATION === "true";
 const HOST = "inference.tinfoil.sh";
-const REPO = "tinfoilsh/confidential-model-router";
+const ROUTER = "tinfoilsh/confidential-model-router";
+const PIN = { repo: ROUTER, project: ROUTER };
 const SHA256_HEX = /^[0-9a-f]{64}$/;
 /** Back-off between attempts when the service rate-limits (HTTP 429), in milliseconds. */
 const RETRY_DELAYS_MS = [2_000, 4_000, 8_000];
@@ -36,7 +37,7 @@ describe("the verifier in a browser against the live service", () => {
     const nonce = randomNonce();
     const doc = await fetchDocument(nonce);
     const verifier = await Verifier.create();
-    const verified = await verifier.verifyV3(doc, nonce, REPO);
+    const verified = await verifier.verifyV3(doc, nonce, PIN);
     expect(verified.codeDigest).toMatch(SHA256_HEX);
     expect(verified.tlsPublicKeyFP).toMatch(SHA256_HEX);
     expect(verified.hpkePublicKey).toMatch(SHA256_HEX);

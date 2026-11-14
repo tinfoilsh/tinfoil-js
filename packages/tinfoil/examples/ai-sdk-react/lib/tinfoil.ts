@@ -125,10 +125,11 @@ async function initializeTransport(): Promise<TinfoilChatTransport> {
 export async function createTinfoilTransport(options: {
   proxyUrl: string;
   enclaveHost: string;
-  repo: string;
+  repo?: string;
+  project?: string;
   model?: string;
 }): Promise<TinfoilChatTransport> {
-  const client = await EnclaveHTTPClient.create(options.enclaveHost, options.repo, {
+  const client = await EnclaveHTTPClient.create(options.enclaveHost, { repo: options.repo, project: options.project }, {
     baseURL: options.proxyUrl,
   });
 

@@ -31,7 +31,7 @@ let sseEnded = false;
 
 function verifier(keys: { tls?: string; hpke?: string }): Verifier {
   return {
-    checkRepoVerifiability: (repo: string) => {
+    checkPinVerifiability: ({ repo = "" }: { repo?: string }) => {
       if (repo === "") throw new UsageError("repo required");
     },
     callerAuthorizesConfig: false,
@@ -146,10 +146,11 @@ describe("createTinfoil's option checks", () => {
     expect(s.documentFetches).toBe(0);
     // A bearer token over sealed bodies is accepted there; the server runtime accepts either credential and either mode.
     const sealed = await createTinfoilProvider(
-      { bearerToken: "t", enclave: { host: "enclave.example", repo: "tinfoilsh/repo" }, baseURL: `${ehbp.origin}/`, verifier: verifier({ tls: "ab".repeat(32), hpke: ehbp.publicKeyHex }) },
+      { bearerToken: "t", enclave: { host: "enclave.example", repo: "tinfoilsh/repo", project: "tinfoilsh/project" }, baseURL: `${ehbp.origin}/`, verifier: verifier({ tls: "ab".repeat(32), hpke: ehbp.publicKeyHex }) },
       { ...seams([]), globals: worker },
     );
     expect(sealed.httpClient).toBeInstanceOf(EnclaveHTTPClient);
+    expect(sealed.httpClient.pin).toEqual({ repo: "tinfoilsh/repo", project: "tinfoilsh/project" });
     const node = { process: { versions: { node: "22.0.0" } } } as RuntimeGlobals;
     await expect(createTinfoilProvider({ apiKey: "k", transportMode: "tls", verifier: verifier({ tls: TEST_PIN }) }, { ...s, globals: node })).resolves.toBeDefined();
   });
@@ -184,7 +185,7 @@ describe("the provider over the discovered router", () => {
     const client = tinfoil.httpClient;
     expect(client).toBeInstanceOf(RouterHTTPClient);
     expect(client.enclave).toBe(tls.host);
-    expect(client.repo).toBe(ROUTER_REPO);
+    expect(client.pin).toEqual({ repo: ROUTER_REPO, project: ROUTER_REPO });
     expect(client.current?.tlsPublicKeyFP).toBe(TEST_PIN);
     expect(Object.getOwnPropertyDescriptor(tinfoil, "httpClient")?.writable).toBe(false);
   });

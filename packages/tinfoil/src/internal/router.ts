@@ -5,13 +5,15 @@
  * fetch and every probe share one 30-second budget, so a long list of
  * unreachable routers can't hold up a client before it falls back.
  */
-import type { Verifier } from "@tinfoilsh/verifier";
+import type { Pin, Verifier } from "@tinfoilsh/verifier";
 import type { Fetch, VerificationCheck } from "../options.js";
 import { Enclave, type EnclaveConfig } from "./enclave.js";
 import { getFollowingRedirects, isAuthority, readBounded } from "./fetch.js";
 import { KeyedTransport, type Mode } from "./transport/transport.js";
 
-export const DEFAULT_ROUTER_REPO = "tinfoilsh/confidential-model-router";
+// The router is published under one name in both namespaces, each owned by Tinfoil.
+export const DEFAULT_ROUTER_NAME = "tinfoilsh/confidential-model-router";
+export const DEFAULT_ROUTER_PIN: Pin = Object.freeze({ repo: DEFAULT_ROUTER_NAME, project: DEFAULT_ROUTER_NAME });
 export const DEFAULT_ROUTER_URL = "https://atc.tinfoil.sh/routers";
 export const FALLBACK_ROUTER_HOST = "inference.tinfoil.sh";
 export const ROUTER_FETCH_TIMEOUT_MS = 30_000;
@@ -43,7 +45,7 @@ export async function discoverRouter(config: DiscoveryConfig): Promise<KeyedTran
   const enclaveFor = (host: string): Promise<Enclave> =>
     Enclave.create({
       host,
-      repo: DEFAULT_ROUTER_REPO,
+      pin: DEFAULT_ROUTER_PIN,
       verifier: config.verifier,
       verificationCheck: config.verificationCheck,
       fetch: config.documentFetch,

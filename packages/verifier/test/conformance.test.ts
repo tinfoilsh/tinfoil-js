@@ -12,6 +12,9 @@ import { join, relative } from "node:path";
 import { describe, expect, it } from "vitest";
 import { ExitCode, run, Stage, type Measurement } from "../conformance/adapter.js";
 import { decodeLiveRequest, isAuthority } from "../conformance/live.js";
+import { FORMAT_V2, FORMAT_V3 } from "../src/document/collateral/collateral.js";
+import { NONCE_SIZE, SEV_SNP_REPORT_V1_FORMAT } from "../src/document/document.js";
+import { buildDocument } from "./helpers/builder.js";
 
 interface Fixture {
   id: string;
@@ -89,12 +92,42 @@ describe("input decoding", () => {
   });
 });
 
+describe("the pin of a full-verify input", () => {
+  const nonce = new Uint8Array(NONCE_SIZE);
+  const input = async (collateralFormat: string, pin: { repo: string; project?: string | null }) => {
+    const { bytes } = await buildDocument({ nonce, collateralFormat }, () => ({ format: SEV_SNP_REPORT_V1_FORMAT, report: new Uint8Array(1) }));
+    return { schema_version: "1", document_b64: Buffer.from(bytes).toString("base64"), nonce_hex: Buffer.from(nonce).toString("hex"), ...pin };
+  };
+  const code = async (collateralFormat: string, pin: { repo: string; project?: string | null }) => (await run(Stage.Verify, await input(collateralFormat, pin))).output.rejection?.code;
+
+  it("uses repo in both namespaces when the input has no project member", async () => {
+    // A name that is a valid repository but not a valid config identity is the
+    // caller's mistake only when it is read as a project.
+    expect(await code(FORMAT_V3, { repo: "Org/My_Repo" })).toBe("MALFORMED_INPUT");
+    expect(await code(FORMAT_V3, { repo: "Org/My_Repo", project: null })).toBe("MALFORMED_INPUT");
+    expect(await code(FORMAT_V2, { repo: "Org/My_Repo" })).toBe("PROVENANCE_REJECTED");
+  });
+
+  it("uses the two values as given when the project member is present, even empty", async () => {
+    expect(await code(FORMAT_V3, { repo: "Org/My_Repo", project: "" })).toBe("PROVENANCE_REJECTED");
+    expect(await code(FORMAT_V3, { repo: "Org/My_Repo", project: "org/project" })).toBe("PROVENANCE_REJECTED");
+    expect(await code(FORMAT_V2, { repo: "org/project", project: "Org/My_Repo" })).toBe("PROVENANCE_REJECTED");
+    expect(await code(FORMAT_V2, { repo: "org/project", project: "not a reference" })).toBe("MALFORMED_INPUT");
+    const wrongType = await run(Stage.Verify, { ...(await input(FORMAT_V2, { repo: "org/project" })), project: 7 });
+    expect(wrongType.exitCode).toBe(ExitCode.Malformed);
+  });
+});
+
 describe("live request decoding", () => {
   it("accepts a host in either case, with or without a port", () => {
     for (const host of ["enclave.example.com", "Enclave.Example.COM", "ENCLAVE.EXAMPLE.COM:8443", "example.com:443", "[2001:DB8::1]:8443"]) {
       expect(isAuthority(host), host).toBe(true);
     }
     expect(decodeLiveRequest({ host: "Enclave.Example.COM", repo: "org/repo" })).toEqual({ host: "Enclave.Example.COM", repo: "org/repo" });
+    expect(decodeLiveRequest({ host: "example.com", repo: "org/repo", project: null })).toEqual({ host: "example.com", repo: "org/repo" });
+    expect(decodeLiveRequest({ host: "example.com", repo: "org/repo", project: "" })).toEqual({ host: "example.com", repo: "org/repo", project: "" });
+    expect(decodeLiveRequest({ host: "example.com", repo: "org/repo", project: "org/project" })).toEqual({ host: "example.com", repo: "org/repo", project: "org/project" });
+    expect(decodeLiveRequest({ host: "example.com", repo: "org/repo", project: 7 })).toBeUndefined();
   });
 
   it("rejects anything but a bare authority", () => {

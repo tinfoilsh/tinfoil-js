@@ -19,8 +19,10 @@ import { createRouterHTTPClient, RouterHTTPClient, type RouterClientSeams } from
 /** The enclave a provider is bound to instead of the discovered router. */
 export interface TinfoilProviderEnclave {
   readonly host: string;
-  /** `owner/name[@tag][@sha256:digest]`; empty accepts configs the verifier option authorizes. */
-  readonly repo: string;
+  /** A GitHub repository, `owner/name[@tag][@sha256:digest]`. */
+  readonly repo?: string;
+  /** A config registry project, `org/project[@revision][@sha256:digest]`. With neither, the verifier option authorizes the config. */
+  readonly project?: string;
 }
 
 /**
@@ -82,7 +84,7 @@ export async function createTinfoilProvider(options: TinfoilProviderOptions, sea
     signal: options.signal,
     fetch: options.fetch,
   };
-  const client = options.enclave === undefined ? await createRouterHTTPClient(clientOptions, seams) : await createEnclaveHTTPClient(options.enclave.host, options.enclave.repo, clientOptions, seams);
+  const client = options.enclave === undefined ? await createRouterHTTPClient(clientOptions, seams) : await createEnclaveHTTPClient(options.enclave.host, { repo: options.enclave.repo, project: options.enclave.project }, clientOptions, seams);
   const provider = createOpenAICompatible({
     name: "tinfoil",
     baseURL: openAIURLOf(client),
