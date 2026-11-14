@@ -157,6 +157,24 @@ describe("tlsMode", () => {
     untrusting.close?.();
   });
 
+  it("keeps both checks when the environment turns certificate checking off", async () => {
+    const before = seen.length;
+    const previous = process.env.NODE_TLS_REJECT_UNAUTHORIZED;
+    process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0";
+    try {
+      const wrongKey = await mode.bind(verification(OTHER));
+      expect(await wrongKey.fetch(`${origin}/never`).catch((e: unknown) => e)).toBeInstanceOf(PeerLacksKeyError);
+      wrongKey.close?.();
+      const untrusting = await tlsMode().bind(verification(PIN));
+      expect(await untrusting.fetch(`${origin}/never`).catch((e: unknown) => e)).toBeInstanceOf(PeerLacksKeyError);
+      untrusting.close?.();
+    } finally {
+      if (previous === undefined) delete process.env.NODE_TLS_REJECT_UNAUTHORIZED;
+      else process.env.NODE_TLS_REJECT_UNAUTHORIZED = previous;
+    }
+    expect(seen.length).toBe(before);
+  });
+
   it("streams a response chunk by chunk as the server writes it", async () => {
     const bound = await mode.bind(verification(PIN));
     const res = await bound.fetch(`${origin}/sse`);

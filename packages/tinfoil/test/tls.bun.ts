@@ -66,6 +66,20 @@ describe("tlsMode under Bun", () => {
     expect(requests).toBe(before);
   });
 
+  it("keeps the check when the environment turns certificate checking off", async () => {
+    const before = requests;
+    const previous = process.env.NODE_TLS_REJECT_UNAUTHORIZED;
+    process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0";
+    try {
+      const bound = await mode.bind(verification("ab".repeat(32)));
+      expect(await bound.fetch(`${origin}/never`).catch((e: unknown) => e)).toBeInstanceOf(PeerLacksKeyError);
+    } finally {
+      if (previous === undefined) delete process.env.NODE_TLS_REJECT_UNAUTHORIZED;
+      else process.env.NODE_TLS_REJECT_UNAUTHORIZED = previous;
+    }
+    expect(requests).toBe(before);
+  });
+
   it("refuses plaintext", async () => {
     const bound = await mode.bind(verification(PIN));
     await expect(bound.fetch("http://localhost/")).rejects.toBeInstanceOf(ConfigurationError);
