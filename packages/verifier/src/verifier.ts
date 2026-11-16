@@ -278,7 +278,9 @@ export class Verifier {
   /**
    * Appraises a nonce-bound v3 document against `pin` at the current time.
    * The document's collateral decides which part of `pin` applies, and a
-   * document whose collateral `pin` does not cover is rejected.
+   * document whose collateral `pin` does not cover is rejected. With neither
+   * part set, a document carrying repository collateral is a UsageError: it
+   * needs a repository to verify against.
    */
   async verifyV3(docBytes: Uint8Array, nonce: Uint8Array, pin: Pin): Promise<Verification> {
     return this.verifyV3At(docBytes, nonce, pin, new Date());
