@@ -102,7 +102,7 @@ export interface EmbeddedReferences {
 export interface Pin {
   /** A GitHub repository, `owner/name[@tag][@sha256:digest]`. Only a document carrying that repository's signed release satisfies it. */
   readonly repo?: string;
-  /** A config registry project, `org/project[@revision][@sha256:digest]`. Only a document carrying a registry approval of that project satisfies it. */
+  /** A config registry project, `org/project[@revision][@sha256:digest]`. Only a document carrying a registry approval of that project, or a matching config the caller embedded, satisfies it. */
   readonly project?: string;
 }
 
@@ -315,8 +315,8 @@ export class Verifier {
           }
           return this.#configReferences(doc, project, now);
         case FORMAT_V2:
-          if (repo === "" && !this.#requiresConfigCollateral()) {
-            throw new Error("document carries GitHub repository collateral, but no GitHub repository is pinned");
+          if (repo === "" && project !== "" && !this.#requiresConfigCollateral()) {
+            throw new Error("document carries GitHub repository collateral, but only a registry project is pinned");
           }
           return this.#codeReferences(doc, repo, now);
         default:

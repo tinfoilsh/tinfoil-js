@@ -127,6 +127,8 @@ describe("live request decoding", () => {
     expect(decodeLiveRequest({ host: "example.com", repo: "org/repo", project: null })).toEqual({ host: "example.com", repo: "org/repo" });
     expect(decodeLiveRequest({ host: "example.com", repo: "org/repo", project: "" })).toEqual({ host: "example.com", repo: "org/repo", project: "" });
     expect(decodeLiveRequest({ host: "example.com", repo: "org/repo", project: "org/project" })).toEqual({ host: "example.com", repo: "org/repo", project: "org/project" });
+    expect(decodeLiveRequest({ host: "example.com", project: "org/project" })).toEqual({ host: "example.com", repo: "", project: "org/project" });
+    expect(decodeLiveRequest({ host: "example.com", repo: "", project: "" })).toBeUndefined();
     expect(decodeLiveRequest({ host: "example.com", repo: "org/repo", project: 7 })).toBeUndefined();
   });
 

@@ -183,7 +183,7 @@ describe.skipIf(withoutVectors)(vectorsTitle("verifyV3At caller mistakes"), () =
     const err = await c.verifier.verifyV3At(c.doc, c.nonce, { project: c.repo.toLowerCase() }, c.at).catch((e: unknown) => e);
     expect(err).toBeInstanceOf(VerificationError);
     expect((err as VerificationError).layer).toBe("provenance");
-    expect((err as Error).message).toMatch(/no GitHub repository is pinned/);
+    expect((err as Error).message).toMatch(/only a registry project is pinned/);
     await expect(c.verifier.verifyV3At(c.doc, c.nonce, { repo: c.repo, project: "org/other" }, c.at)).resolves.toBeDefined();
   });
 
@@ -397,7 +397,7 @@ describe("Verifier.create options", () => {
 describe("the document's collateral selects the part of the pin that applies", () => {
   const nonce = new Uint8Array(NONCE_SIZE);
   const repositoryOnly = "only a GitHub repository is pinned";
-  const projectOnly = "no GitHub repository is pinned";
+  const projectOnly = "only a registry project is pinned";
   const repo: Pin = { repo: "org/project" };
   const project: Pin = { project: "org/project" };
   const both: Pin = { repo: "org/project", project: "org/project" };
@@ -411,7 +411,6 @@ describe("the document's collateral selects the part of the pin that applies", (
     ["unversioned collateral, repository", "", repo, SIGSTORE_CODE_V1_FORMAT],
     ["repository collateral, project", FORMAT_V2, project, projectOnly],
     ["unversioned collateral, project", "", project, projectOnly],
-    ["repository collateral, no pin", FORMAT_V2, {}, projectOnly],
     ["repository collateral, both", FORMAT_V2, both, SIGSTORE_CODE_V1_FORMAT],
     ["registry collateral, project", FORMAT_V3, project, CONFIG_ID],
     ["registry collateral, repository", FORMAT_V3, repo, repositoryOnly],

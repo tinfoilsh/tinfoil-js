@@ -221,7 +221,7 @@ describe.skipIf(!conformanceAvailable())(vectorsTitle("Enclave"), () => {
   it("rejects the repository's document when only a registry project of that name is pinned", async () => {
     const { fetch } = serving([() => new Response(golden.document)]);
     const enclave = await Enclave.create(config({ fetch, pin: { project: (golden.fixture.input.repo as string).toLowerCase() } }));
-    await expect(enclave.verifyOnce()).rejects.toThrow(/no GitHub repository is pinned/);
+    await expect(enclave.verifyOnce()).rejects.toThrow(/only a registry project is pinned/);
     await expect(enclave.verifyOnce()).rejects.toBeInstanceOf(AttestationError);
   });
 
