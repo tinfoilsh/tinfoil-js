@@ -176,7 +176,7 @@ describe("ehbpMode", () => {
 
     let verified = 0;
     const verifier = { checkPinVerifiability: () => {}, verifyV3At: async () => verification(verified++ === 0 ? other : server.publicKeyHex) } as unknown as Verifier;
-    const enclave = await Enclave.create({ host: "127.0.0.1", pin: { unpinned: true }, verifier, fetch: async () => new Response(new Uint8Array([1])), sleep: async () => {} });
+    const enclave = await Enclave.create({ host: "127.0.0.1", pin: {}, verifier, fetch: async () => new Response(new Uint8Array([1])), sleep: async () => {} });
     const transport = new KeyedTransport(enclave, mode);
     const rejected = await transport.fetch(`${server.origin}/echo`, { method: "POST", body: "y" }).catch((e: unknown) => e);
     expect(rejected).toBeInstanceOf(KeyRejectionError);

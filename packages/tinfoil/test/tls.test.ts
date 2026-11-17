@@ -354,7 +354,7 @@ describe("KeyedTransport over TLS", () => {
     let verified = 0;
     const enclave = await Enclave.create({
       host: "localhost",
-      pin: { unpinned: true },
+      pin: {},
       verifier: verifier(() => (verified++ === 0 ? OTHER : PIN)),
       fetch: async () => new Response(new Uint8Array([1])),
       sleep: async () => {},

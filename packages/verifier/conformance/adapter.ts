@@ -165,7 +165,7 @@ async function runStage(stage: string, raw: unknown): Promise<Result> {
 
   switch (stage) {
     case Stage.Verify:
-      return verifyFull(doc, nonce, { repo: in_.repo, project: in_.project, unpinned: in_.repo === "" && in_.project === "" }, roots, appraisal);
+      return verifyFull(doc, nonce, { repo: in_.repo, project: in_.project }, roots, appraisal);
 
     case Stage.CheckEnvelope:
       return layer(stage, "ENVELOPE_REJECTED", async () => {

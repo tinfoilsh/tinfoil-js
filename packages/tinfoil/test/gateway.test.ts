@@ -590,7 +590,7 @@ describe("GatewayTransport", () => {
     const v = await t.ensureVerified(MODEL);
     expect(v.hpkePublicKey).toBe(keyOf(order[1]!));
     expect([...new Set(attempts)]).toEqual([order[0], order[1]]);
-    expect(pins).toEqual([{ repo: "tinfoilsh/test@v1", project: "tinfoilsh/test@v1", unpinned: false }]);
+    expect(pins).toEqual([{ repo: "tinfoilsh/test@v1", project: "tinfoilsh/test@v1" }]);
     await t.ensureVerified(MODEL);
     expect(pins).toHaveLength(1);
     expect(t.verifications()[0]).toMatchObject({ host: order[1], reference: "tinfoilsh/test@v1", pinnedModel: MODEL, models: [] });

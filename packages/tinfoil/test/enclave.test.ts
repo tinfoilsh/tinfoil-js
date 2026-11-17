@@ -141,7 +141,7 @@ describe.skipIf(!conformanceAvailable())(vectorsTitle("Enclave"), () => {
     expect(v.hpkePublicKey).toBe(golden.expected.hpke);
     expect(v.freshnessExpiresAt!.getTime()).toBeGreaterThan(golden.at.getTime());
     expect(enclave.host()).toBe(HOST);
-    expect(enclave.pin()).toEqual({ repo: golden.fixture.input.repo, project: "", unpinned: false });
+    expect(enclave.pin()).toEqual({ repo: golden.fixture.input.repo, project: "" });
     expect(enclave.verifier()).toBe(golden.verifier);
   });
 
@@ -232,10 +232,6 @@ describe.skipIf(!conformanceAvailable())(vectorsTitle("Enclave"), () => {
 
     const { fetch, urls } = serving([() => new Response(golden.document)]);
     await expect(Enclave.create(config({ fetch, pin: { repo: "not a repository" } }))).rejects.toBeInstanceOf(ConfigurationError);
-    // A pin that names nothing is refused unless it says it is unpinned, and an unpinned pin names nothing.
-    for (const pin of [{}, { repo: "" }, { repo: undefined, project: "" }, { unpinned: false }, { unpinned: true, repo: golden.fixture.input.repo as string }]) {
-      await expect(Enclave.create(config({ fetch, pin }))).rejects.toBeInstanceOf(ConfigurationError);
-    }
     // A bare reference from untyped code is refused instead of being read as an empty pin.
     await expect(Enclave.create(config({ fetch, pin: golden.fixture.input.repo as unknown as EnclaveConfig["pin"] }))).rejects.toBeInstanceOf(ConfigurationError);
     await expect(Enclave.create(config({ fetch, host: "" }))).rejects.toThrow(/enclave host is required/);

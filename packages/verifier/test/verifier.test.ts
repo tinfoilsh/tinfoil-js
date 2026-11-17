@@ -173,21 +173,10 @@ describe.skipIf(withoutVectors)(vectorsTitle("verifyV3At caller mistakes"), () =
 
   it("rejects a pin that is not an object of strings as a usage error", async () => {
     // A bare reference from untyped code must not be read as an empty pin.
-    for (const bad of [c.repo, null, undefined, { repo: 7 }, { repo: c.repo, project: null }, { unpinned: "yes" }]) {
+    for (const bad of [c.repo, null, undefined, { repo: 7 }, { repo: c.repo, project: null }]) {
       await expect(c.verifier.verifyV3At(c.doc, c.nonce, bad as unknown as Pin, c.at)).rejects.toThrow(UsageError);
       expect(() => c.verifier.checkPinVerifiability(bad as unknown as Pin)).toThrow(UsageError);
     }
-  });
-
-  it("rejects a pin that names nothing unless it is unpinned, before reading the document", async () => {
-    const garbage = utf8("not a document");
-    for (const bad of [{}, { repo: "" }, { repo: undefined, project: "" }, { unpinned: false }]) {
-      await expect(c.verifier.verifyV3At(garbage, c.nonce, bad, c.at)).rejects.toThrow(/pin names nothing/);
-    }
-    await expect(c.verifier.verifyV3At(garbage, c.nonce, { repo: c.repo, unpinned: true }, c.at)).rejects.toThrow(/unpinned pin cannot also name/);
-    const err = await c.verifier.verifyV3At(garbage, c.nonce, { unpinned: true }, c.at).catch((e: unknown) => e);
-    expect(err).toBeInstanceOf(VerificationError);
-    expect((err as VerificationError).layer).toBe("envelope");
   });
 
   it("does not let a project pin stand in for the repository", async () => {
@@ -311,7 +300,7 @@ describe("Verifier.create options", () => {
     const reference: EmbeddedConfigReference = { name: "/org/project/r1", digest, runtime };
     const v = await Verifier.create({ embeddedReferences: { config: reference, runtime: manifest } });
     expect(v.callerAuthorizesConfig).toBe(true);
-    expect(() => v.checkPinVerifiability({ unpinned: true })).not.toThrow();
+    expect(() => v.checkPinVerifiability({})).not.toThrow();
     expect(() => v.checkPinVerifiability({ project: `org/project@r1@sha256:${digest}` })).not.toThrow();
     expect(() => v.checkPinVerifiability({ project: "org/project@r2" })).toThrow(/embedded config does not match/);
     expect(() => v.checkPinVerifiability({ project: `org/project@sha256:${"b".repeat(64)}` })).toThrow(/embedded config does not match/);
@@ -319,7 +308,7 @@ describe("Verifier.create options", () => {
     // pins an identity, mismatches even when its digest agrees; only the empty reference fits.
     const unnamed = await Verifier.create({ embeddedReferences: { config: { digest, runtime } } });
     expect(() => unnamed.checkPinVerifiability({ project: `org/project@sha256:${digest}` })).toThrow(/embedded config does not match/);
-    expect(() => unnamed.checkPinVerifiability({ unpinned: true })).not.toThrow();
+    expect(() => unnamed.checkPinVerifiability({})).not.toThrow();
     // An embedded config is its bytes or its reference, never both: each form excludes the
     // other's fields, so the combined object fails to compile under the test typecheck.
     const bytes = utf8(`cvm-version: v1.2.3@sha256:${runtime.digest}\n`);
@@ -361,7 +350,7 @@ describe("Verifier.create options", () => {
     if (withoutVectors) return;
     const fixture = loadFixture("golden/golden-happy.json");
     const embedded = await dangerousTestOnlyVerifier(rootsOf(fixture), { embeddedReferences: { config: reference } });
-    const err = await embedded.verifyV3At(inputBytes(fixture, "document_b64"), hex(fixture.input.nonce_hex ?? ""), { unpinned: true }, clockOf(fixture)).catch((e: unknown) => e);
+    const err = await embedded.verifyV3At(inputBytes(fixture, "document_b64"), hex(fixture.input.nonce_hex ?? ""), {}, clockOf(fixture)).catch((e: unknown) => e);
     expect(err).toBeInstanceOf(VerificationError);
     expect((err as VerificationError).layer).toBe("provenance");
     expect((err as Error).message).toMatch(/configured trust requires/);
@@ -401,7 +390,7 @@ describe("Verifier.create options", () => {
     const authorizer = await Verifier.create({ configAuthorizer: () => undefined });
     expect(authorizer.callerAuthorizesConfig).toBe(true);
     expect(() => authorizer.checkPinVerifiability({ project: "org/project" })).toThrow(/enforce them in caller policy/);
-    expect(() => authorizer.checkPinVerifiability({ unpinned: true })).not.toThrow();
+    expect(() => authorizer.checkPinVerifiability({})).not.toThrow();
   });
 });
 
@@ -425,7 +414,6 @@ describe("the document's collateral selects the part of the pin that applies", (
     ["repository collateral, both", FORMAT_V2, both, SIGSTORE_CODE_V1_FORMAT],
     ["registry collateral, project", FORMAT_V3, project, CONFIG_ID],
     ["registry collateral, repository", FORMAT_V3, repo, repositoryOnly],
-    ["registry collateral, no pin", FORMAT_V3, { unpinned: true }, CONFIG_ID],
     ["registry collateral, both", FORMAT_V3, both, CONFIG_ID],
   ])("%s", async (_name, format, pin, want) => {
     const v = await Verifier.create();
@@ -447,7 +435,7 @@ describe("the document's collateral selects the part of the pin that applies", (
 
   it("keeps the configured-trust rejection for repository collateral under registry-only trust", async () => {
     const v = await Verifier.create({ configRegistryIDs: [PUBLIC_REGISTRY_ID] });
-    for (const pin of [{ unpinned: true }, project, both]) {
+    for (const pin of [{}, project, both]) {
       const err = await v.verifyV3(await document(FORMAT_V2), nonce, pin).catch((e: unknown) => e);
       expect(err).toBeInstanceOf(VerificationError);
       expect((err as VerificationError).layer).toBe("provenance");
@@ -472,22 +460,19 @@ describe("checkPinVerifiability", () => {
     ["defaults with a project", {}, { project: "org/repo@v1" }, true],
     ["defaults with a repository", {}, { repo: "Org/My_Repo" }, true],
     ["defaults with both", {}, { repo: "Org/My_Repo", project: "org/project" }, true],
-    ["defaults unpinned", {}, { unpinned: true }, true],
-    ["defaults with a pin that names nothing", {}, {}, false],
+    ["defaults without a pin", {}, {}, false],
     ["defaults with empty parts", {}, { repo: "", project: "" }, false],
-    ["defaults with an undefined repository", {}, { repo: undefined }, false],
-    ["defaults unpinned with a repository", {}, { repo: "org/project", unpinned: true }, false],
-    ["defaults unpinned with a project", {}, { project: "org/project", unpinned: true }, false],
+    ["registry IDs without a pin", { configRegistryIDs: [PUBLIC_REGISTRY_ID] }, {}, true],
     ["defaults with a malformed project", {}, { project: "not a reference" }, false],
     ["defaults with a malformed repository", {}, { repo: "not a reference" }, false],
-    ["embedded config unpinned", embedded, { unpinned: true }, true],
+    ["embedded config without a pin", embedded, {}, true],
     ["embedded config with its own project", embedded, { project: "org/project@v1" }, true],
     ["embedded config with another project", embedded, { project: "org/repo" }, false],
     ["embedded config with a repository alone", embedded, { repo: "org/project" }, false],
     ["embedded config with its own project and a repository", embedded, { repo: "org/project", project: "org/project@v1" }, true],
     ["registry IDs with a repository alone", { configRegistryIDs: [PUBLIC_REGISTRY_ID] }, { repo: "org/project" }, false],
     ["registry IDs with a repository and a project", { configRegistryIDs: [PUBLIC_REGISTRY_ID] }, { repo: "org/project", project: "org/project" }, true],
-    ["config authorizer unpinned", authorizer, { unpinned: true }, true],
+    ["config authorizer without a pin", authorizer, {}, true],
     ["config authorizer with a project", authorizer, { project: "org/repo" }, false],
     ["config authorizer with a repository", authorizer, { repo: "org/repo" }, false],
   ])("%s", async (_name, options, pin, valid) => {
@@ -617,7 +602,7 @@ describe("config authorizer", () => {
         seen = endorsement;
       },
     });
-    const err = await v.verifyV3At(bytes, nonce, { unpinned: true }, new Date()).catch((e: unknown) => e);
+    const err = await v.verifyV3At(bytes, nonce, {}, new Date()).catch((e: unknown) => e);
     expect(seen?.bundle).toBe(bundleText);
     const member = utf8(seen!.bundle!);
     const marker = utf8(`"sigstore_bundle":`);

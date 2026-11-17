@@ -71,11 +71,11 @@ describe("discoverRouter", () => {
     const transport = await discoverRouter(config({ verifier: verifier(pins), routersFetch: list.fetch, documentFetch: docs.fetch }));
     expect(list.calls).toEqual([DEFAULT_ROUTER_URL]);
     expect(transport.enclave().host()).toBe("r2.example");
-    expect(transport.enclave().pin()).toEqual({ repo: "tinfoilsh/confidential-model-router", project: "tinfoilsh/confidential-model-router", unpinned: false });
+    expect(transport.enclave().pin()).toEqual({ repo: "tinfoilsh/confidential-model-router", project: "tinfoilsh/confidential-model-router" });
     expect(transport.current()?.tlsPublicKeyFP).toBe(PIN);
     expect(docs.hosts.filter((h) => h !== "r1.example")).toEqual(["r2.example"]);
     expect(docs.hosts[0]).toBe("r1.example");
-    expect(pins).toEqual([{ repo: "tinfoilsh/confidential-model-router", project: "tinfoilsh/confidential-model-router", unpinned: false }]);
+    expect(pins).toEqual([{ repo: "tinfoilsh/confidential-model-router", project: "tinfoilsh/confidential-model-router" }]);
   });
 
   it("moves past a router the verification check rejects", async () => {
