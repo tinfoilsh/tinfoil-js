@@ -15,7 +15,7 @@
  *   export TINFOIL_UNVERIFIED_URL="http://localhost:8080/v1/"
  * - Export the credential that server expects: export TINFOIL_API_KEY="<KEY>"
  *
- * Run: npx ts-node main.ts
+ * Run from packages/tinfoil: npx ts-node examples/unverified_client/main.ts
  */
 import { UnverifiedClient } from "tinfoil/unsafe";
 
