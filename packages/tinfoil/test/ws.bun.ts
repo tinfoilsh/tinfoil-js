@@ -19,7 +19,7 @@ const PIN = createHash("sha256").update(new X509Certificate(cert).publicKey.expo
 
 function verifier(pin: string): Verifier {
   return {
-    checkRepoVerifiability: () => {},
+    checkPinVerifiability: () => {},
     verifyV3At: async () =>
       ({
         cryptoMaterial: [{ id: "tls", format: "https://tinfoil.sh/key/spki-fp-sha256/v1", data: pin }],
@@ -61,7 +61,7 @@ afterAll(() => {
 });
 
 function client(pin: string): Promise<EnclaveHTTPClient> {
-  return createEnclaveHTTPClient(host, "tinfoilsh/repo", { verifier: verifier(pin), transportMode: "tls" }, { documentFetch, tls: { ca: cert } });
+  return createEnclaveHTTPClient(host, { repo: "tinfoilsh/repo" }, { verifier: verifier(pin), transportMode: "tls" }, { documentFetch, tls: { ca: cert } });
 }
 
 function opened(socket: PinnedWebSocket): Promise<void> {

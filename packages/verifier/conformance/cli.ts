@@ -6,7 +6,7 @@
  *
  *   tinfoil-conformance <stage>        Input JSON on stdin → Output JSON on stdout
  *   tinfoil-conformance capabilities   capabilities JSON on stdout
- *   tinfoil-conformance live-verify    {"host","repo"} on stdin → Output JSON on stdout
+ *   tinfoil-conformance live-verify    {"host","repo"[,"project"]} on stdin → Output JSON on stdout
  *   tinfoil-conformance capture        (not yet supported)
  *
  * The exit code is the verdict (see ExitCode in adapter.ts).

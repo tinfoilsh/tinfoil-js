@@ -23,6 +23,7 @@ export type {
   RouterOptions,
   GatewayOptions,
   ModelPin,
+  Pin,
   Catalog,
   CatalogEntry,
   ReplicaVerification,

@@ -8,7 +8,7 @@
  */
 import { describe, expect, it } from "vitest";
 import { createClient, RouterHTTPClient, TinfoilClient } from "../src/index.browser.js";
-import { completeChat, LIVE_REPO, SHA256_HEX, streamChat } from "./helpers/live.js";
+import { completeChat, LIVE_PIN, SHA256_HEX, streamChat } from "./helpers/live.js";
 
 const RUN_INTEGRATION = process.env.RUN_TINFOIL_INTEGRATION === "true";
 const bearerToken = process.env.TINFOIL_API_KEY ?? "";
@@ -19,7 +19,7 @@ describe("the browser build on the live router", () => {
     expect(ai).toBeInstanceOf(TinfoilClient);
     const router = ai.httpClient;
     expect(router).toBeInstanceOf(RouterHTTPClient);
-    expect(router.repo).toBe(LIVE_REPO);
+    expect(router.pin).toEqual(LIVE_PIN);
     expect(router.current?.hpkePublicKey).toMatch(SHA256_HEX);
     expect(ai.baseURL).toBe(`https://${router.enclave}/v1/`);
 

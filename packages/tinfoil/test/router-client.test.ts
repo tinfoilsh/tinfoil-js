@@ -30,7 +30,7 @@ let ehbp: EhbpServer;
 
 function verifier(keys: { tls?: string; hpke?: string }, authorizes = false, expiresAt: () => Date = () => new Date(Date.now() + 60_000)): Verifier {
   return {
-    checkRepoVerifiability: (repo: string) => {
+    checkPinVerifiability: ({ repo = "" }: { repo?: string }) => {
       if (repo === "") throw new UsageError("repo required");
     },
     callerAuthorizesConfig: authorizes,
@@ -191,10 +191,10 @@ describe("RouterHTTPClient over TLS", () => {
   });
 
   it("binds to the first router that verifies without verifying it again", () => {
-    expect(Object.keys(client)).toEqual(["fetch", "baseURL", "enclave", "repo"]);
+    expect(Object.keys(client)).toEqual(["fetch", "baseURL", "enclave", "pin"]);
     expect(() => ((client as { enclave: string }).enclave = "evil.example")).toThrow(TypeError);
     expect(client.enclave).toBe(tls.host);
-    expect(client.repo).toBe(ROUTER_REPO);
+    expect(client.pin).toEqual({ repo: ROUTER_REPO, project: ROUTER_REPO });
     expect(client.baseURL).toBe(`https://${tls.host}/`);
     expect(client.current?.tlsPublicKeyFP).toBe(TEST_PIN);
     expect(s.documentHosts.filter((h) => h === tls.host)).toHaveLength(1);
@@ -398,7 +398,7 @@ describe("createClient", () => {
     expect(ai).toBeInstanceOf(TinfoilClient);
     expect(ai.baseURL).toBe(`https://${tls.host}/v1/`);
     expect(ai.httpClient).toBeInstanceOf(RouterHTTPClient);
-    expect(ai.httpClient.repo).toBe(ROUTER_REPO);
+    expect(ai.httpClient.pin).toEqual({ repo: ROUTER_REPO, project: ROUTER_REPO });
     const reply = await ai.chat.completions.create({ model: "test", messages: [{ role: "user", content: "hi" }] });
     expect(reply.choices[0]!.message.content).toBe("pinned");
     expect(JSON.parse(new TextDecoder().decode(tls.seen[tls.seen.length - 1]!.body)).user_cache_secret).toBe("resolved-secret");

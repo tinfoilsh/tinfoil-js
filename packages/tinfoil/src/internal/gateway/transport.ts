@@ -223,7 +223,8 @@ export class GatewayTransport {
     const enclave = await Enclave.create({
       host: r.host,
       relay: c.relay,
-      repo: r.ref,
+      // Tinfoil owns model names in both namespaces.
+      pin: { repo: r.ref, project: r.ref },
       verifier: c.policy.verifierFor(r),
       verificationCheck: c.verificationCheck,
       fetch: c.documentFetch,

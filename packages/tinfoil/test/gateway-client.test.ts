@@ -20,7 +20,7 @@ let gateway: EhbpServer;
 
 function verifier(hpke: string, authorizes = false): Verifier {
   return {
-    checkRepoVerifiability: (repo: string) => {
+    checkPinVerifiability: ({ repo = "" }: { repo?: string }) => {
       if (repo === "") throw new UsageError("repo required");
     },
     callerAuthorizesConfig: authorizes,

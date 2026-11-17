@@ -4,6 +4,8 @@
  * client fails at creation rather than on its first request.
  */
 import type { Verification, Verifier } from "@tinfoilsh/verifier";
+
+export type { Pin } from "@tinfoilsh/verifier";
 import type { ClientOptions as WsClientOptions } from "ws";
 
 /**

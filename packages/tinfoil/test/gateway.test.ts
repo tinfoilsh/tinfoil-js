@@ -14,7 +14,7 @@ import { GatewayPolicy } from "../src/internal/gateway/policy.js";
 import { bearerCredential, CACHE_PREFIX_HEADER, MAX_BODY_BYTES, MODEL_HEADER, multipartModel, prepare, scopeCache } from "../src/internal/gateway/prepare.js";
 import { GatewayTransport, MAX_SEAL_REDIRECTS, rank, SEAL_HEADER, type GatewayTransportConfig } from "../src/internal/gateway/transport.js";
 import { shapeOf } from "../src/internal/transport/transport.js";
-import type { Catalog, Fetch } from "../src/options.js";
+import type { Catalog, Fetch, Pin } from "../src/options.js";
 import { KEY_SPKI_FP_SHA256_V1_FORMAT, KEY_X25519_HPKE_V1_FORMAT, UsageError, type Verification, type Verifier } from "../../verifier/src/index.js";
 import { createEhbpPeer, fetchOf, type EhbpPeer } from "./helpers/ehbp-peer.js";
 
@@ -28,14 +28,14 @@ const catalogOf = (entries: Record<string, { repo: string; hosts: string[] }>): 
  * fixed key, or one chosen from the document's text (the host name the
  * mocked attestation fetch serves). `authorizes` makes it caller-authorized.
  */
-function verifier(hpke: string | ((document: string) => string), authorizes = false, seen: string[] = []): Verifier {
+function verifier(hpke: string | ((document: string) => string), authorizes = false, seen: Pin[] = []): Verifier {
   return {
-    checkRepoVerifiability: (repo: string) => {
+    checkPinVerifiability: ({ repo = "" }: { repo?: string }) => {
       if (repo === "") throw new UsageError("repo required");
     },
     callerAuthorizesConfig: authorizes,
-    verifyV3At: async (doc: Uint8Array, _nonce: Uint8Array, repo: string) => {
-      seen.push(repo);
+    verifyV3At: async (doc: Uint8Array, _nonce: Uint8Array, pin: Pin) => {
+      seen.push(pin);
       const key = typeof hpke === "function" ? hpke(new TextDecoder().decode(doc)) : hpke;
       const material = [
         { id: "tls", format: KEY_SPKI_FP_SHA256_V1_FORMAT, data: "ab".repeat(32) },
@@ -575,9 +575,9 @@ describe("GatewayTransport", () => {
   it("verifies a model's replicas in a fixed order on demand and lists the models the policy serves", async () => {
     const order = await rank(HOSTS, MODEL, undefined);
     const attempts: string[] = [];
-    const repos: string[] = [];
+    const pins: Pin[] = [];
     const t = transport({
-      policy: await GatewayPolicy.create(new Map([[MODEL, { repo: "tinfoilsh/test@v1" }], ["unlisted", { repo: "tinfoilsh/unlisted" }]]), false, verifier((document) => keyOf(document), false, repos)),
+      policy: await GatewayPolicy.create(new Map([[MODEL, { repo: "tinfoilsh/test@v1" }], ["unlisted", { repo: "tinfoilsh/unlisted" }]]), false, verifier((document) => keyOf(document), false, pins)),
       gatewayFetch: gateway().fetch,
       catalog: () => catalogOf({ [MODEL]: { repo: "tinfoilsh/test", hosts: HOSTS }, other: { repo: "tinfoilsh/other", hosts: ["o.example"] } }),
       documentFetch: async (input) => {
@@ -590,9 +590,9 @@ describe("GatewayTransport", () => {
     const v = await t.ensureVerified(MODEL);
     expect(v.hpkePublicKey).toBe(keyOf(order[1]!));
     expect([...new Set(attempts)]).toEqual([order[0], order[1]]);
-    expect(repos).toEqual(["tinfoilsh/test@v1"]);
+    expect(pins).toEqual([{ repo: "tinfoilsh/test@v1", project: "tinfoilsh/test@v1" }]);
     await t.ensureVerified(MODEL);
-    expect(repos).toHaveLength(1);
+    expect(pins).toHaveLength(1);
     expect(t.verifications()[0]).toMatchObject({ host: order[1], reference: "tinfoilsh/test@v1", pinnedModel: MODEL, models: [] });
     await expect(t.ensureVerified("unlisted")).rejects.toBeInstanceOf(ConfigurationError);
     const aborted = new AbortController();

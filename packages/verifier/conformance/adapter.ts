@@ -18,7 +18,7 @@ import { parseReference } from "../src/internal/endorsement/reference.js";
 import { ARTIFACT_FORMAT } from "../src/internal/policy/artifact.js";
 import * as quote from "../src/internal/quote/quote.js";
 import { registerHex, type Expected, type Measurement as V3Measurement, type Register } from "../src/measurement.js";
-import { Verifier } from "../src/index.js";
+import { Verifier, type Pin } from "../src/index.js";
 import { checkTime, newTimePolicy } from "../src/internal/endorsement/time.js";
 import { parseBundleBytes } from "../src/internal/sigstore/bundle.js";
 import { pinnedKeys, verifyKeyedBundle } from "../src/internal/sigstore/keyed.js";
@@ -62,6 +62,7 @@ export interface Input {
   document_b64: string;
   nonce_hex: string;
   repo: string;
+  project: string;
   amd_root_ca_pem?: string;
   ask_pem?: string;
   intel_sgx_root_pem?: string;
@@ -164,7 +165,7 @@ async function runStage(stage: string, raw: unknown): Promise<Result> {
 
   switch (stage) {
     case Stage.Verify:
-      return verifyFull(doc, nonce, in_.repo, roots, appraisal);
+      return verifyFull(doc, nonce, { repo: in_.repo, project: in_.project }, roots, appraisal);
 
     case Stage.CheckEnvelope:
       return layer(stage, "ENVELOPE_REJECTED", async () => {
@@ -281,7 +282,7 @@ async function verifyTimestampStage(in_: Input, roots: DangerousTestOnlyRoots, a
 async function verifyFull(
   doc: Uint8Array,
   nonce: Uint8Array,
-  repo: string,
+  pin: Pin,
   roots: DangerousTestOnlyRoots,
   appraisal: Date,
 ): Promise<Result> {
@@ -292,7 +293,7 @@ async function verifyFull(
     // injected anchors go through the test-only seam of the same verifier.
     const injected = roots.amd !== undefined || roots.intel !== undefined || roots.sigstore !== undefined;
     const verifier = injected ? await dangerousTestOnlyVerifier(roots) : await Verifier.create();
-    verified = await verifier.verifyV3At(doc, nonce, repo, appraisal);
+    verified = await verifier.verifyV3At(doc, nonce, pin, appraisal);
   } catch (err) {
     const mapped = rejectionCode(err);
     if (mapped === undefined) return { output: { stage, accepted: false }, exitCode: ExitCode.Internal };
@@ -399,6 +400,7 @@ const STRING_FIELDS = [
   "document_b64",
   "nonce_hex",
   "repo",
+  "project",
   "amd_root_ca_pem",
   "ask_pem",
   "intel_sgx_root_pem",

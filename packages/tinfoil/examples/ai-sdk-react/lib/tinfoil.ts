@@ -122,13 +122,14 @@ async function initializeTransport(): Promise<TinfoilChatTransport> {
  * Use this when you need more control over the configuration,
  * such as when using a specific enclave rather than the discovered router.
  */
-export async function createTinfoilTransport(options: {
-  proxyUrl: string;
-  enclaveHost: string;
-  repo: string;
-  model?: string;
-}): Promise<TinfoilChatTransport> {
-  const client = await EnclaveHTTPClient.create(options.enclaveHost, options.repo, {
+export async function createTinfoilTransport(
+  options: {
+    proxyUrl: string;
+    enclaveHost: string;
+    model?: string;
+  } & ({ repo: string; project?: string } | { repo?: string; project: string }),
+): Promise<TinfoilChatTransport> {
+  const client = await EnclaveHTTPClient.create(options.enclaveHost, { repo: options.repo, project: options.project }, {
     baseURL: options.proxyUrl,
   });
 
