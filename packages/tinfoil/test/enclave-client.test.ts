@@ -510,7 +510,7 @@ describe("EnclaveHTTPClient over EHBP", () => {
     const docs = documents();
     const client = await createEnclaveHTTPClient(
       "enclave.example",
-      {},
+      { unpinned: true },
       { verifier: verifier(() => ({ tls: "ab".repeat(32), hpke: verified++ === 0 ? stale : ehbp.publicKeyHex })), transportMode: "ehbp", baseURL: `${ehbp.origin}/` },
       { documentFetch: docs.fetch, sleep: async () => {} },
     );
@@ -526,7 +526,7 @@ describe("EnclaveHTTPClient over EHBP", () => {
   it("closes with nothing to release, and a sealed exchange in flight completes", async () => {
     const client = await createEnclaveHTTPClient(
       "enclave.example",
-      {},
+      { unpinned: true },
       { verifier: verifier(() => ({ tls: "ab".repeat(32), hpke: ehbp.publicKeyHex })), transportMode: "ehbp", baseURL: `${ehbp.origin}/` },
       { documentFetch: documents().fetch },
     );
@@ -542,7 +542,7 @@ describe("EnclaveHTTPClient over EHBP", () => {
     const docs = documents();
     const ai = await createEnclaveOpenAIClient(
       "enclave.example",
-      {},
+      { unpinned: true },
       {
         verifier: verifier(() => ({ tls: "ab".repeat(32), hpke: ehbp.publicKeyHex })),
         transportMode: "ehbp",
