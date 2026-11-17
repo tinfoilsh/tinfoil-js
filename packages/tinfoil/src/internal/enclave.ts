@@ -70,7 +70,7 @@ export class Enclave {
   private constructor(config: EnclaveConfig, verifier: Verifier) {
     this.#host = config.host;
     this.#relay = config.relay;
-    this.#pin = Object.freeze({ repo: config.pin.repo ?? "", project: config.pin.project ?? "" });
+    this.#pin = Object.freeze({ repo: config.pin.repo ?? "", project: config.pin.project ?? "", unpinned: config.pin.unpinned ?? false });
     this.#verifier = verifier;
     this.#check = config.verificationCheck;
     this.#fetch = config.fetch ?? ((input, init) => fetch(input, init));
@@ -95,7 +95,7 @@ export class Enclave {
     return this.#host;
   }
 
-  /** The pin the enclave is verified against; an unset part is "". */
+  /** The pin the enclave is verified against; an unset part is "", and `unpinned` is false unless set. */
   pin(): Required<Pin> {
     return this.#pin;
   }

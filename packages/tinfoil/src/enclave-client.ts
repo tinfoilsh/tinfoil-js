@@ -162,7 +162,7 @@ export class EnclaveHTTPClient {
   readonly baseURL: string;
   /** The host of the verified enclave, even when `baseURL` is a proxy. */
   readonly enclave: string;
-  /** The pin the enclave is verified against; an unset part is "". */
+  /** The pin the enclave is verified against; an unset part is "", and `unpinned` is false unless set. */
   readonly pin: Required<Pin>;
   readonly #transport: KeyedTransport;
 
@@ -183,8 +183,9 @@ export class EnclaveHTTPClient {
   }
 
   /**
-   * A client for the enclave at `host`, verified against `pin`. An empty
-   * `pin` accepts configs authorized by the verifier option. Options are
+   * A client for the enclave at `host`, verified against `pin`. A pin of
+   * `{ unpinned: true }` accepts configs authorized by the verifier option;
+   * one that names nothing is a {@link ConfigurationError}. Options are
    * checked before any network I/O; the enclave is verified before the client
    * is returned.
    */

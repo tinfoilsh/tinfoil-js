@@ -150,7 +150,7 @@ describe("createTinfoil's option checks", () => {
       { ...seams([]), globals: worker },
     );
     expect(sealed.httpClient).toBeInstanceOf(EnclaveHTTPClient);
-    expect(sealed.httpClient.pin).toEqual({ repo: "tinfoilsh/repo", project: "tinfoilsh/project" });
+    expect(sealed.httpClient.pin).toEqual({ repo: "tinfoilsh/repo", project: "tinfoilsh/project", unpinned: false });
     const node = { process: { versions: { node: "22.0.0" } } } as RuntimeGlobals;
     await expect(createTinfoilProvider({ apiKey: "k", transportMode: "tls", verifier: verifier({ tls: TEST_PIN }) }, { ...s, globals: node })).resolves.toBeDefined();
   });
@@ -185,7 +185,7 @@ describe("the provider over the discovered router", () => {
     const client = tinfoil.httpClient;
     expect(client).toBeInstanceOf(RouterHTTPClient);
     expect(client.enclave).toBe(tls.host);
-    expect(client.pin).toEqual({ repo: ROUTER_REPO, project: ROUTER_REPO });
+    expect(client.pin).toEqual({ repo: ROUTER_REPO, project: ROUTER_REPO, unpinned: false });
     expect(client.current?.tlsPublicKeyFP).toBe(TEST_PIN);
     expect(Object.getOwnPropertyDescriptor(tinfoil, "httpClient")?.writable).toBe(false);
   });

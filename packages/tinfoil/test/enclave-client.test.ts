@@ -220,7 +220,7 @@ describe("EnclaveHTTPClient over TLS", () => {
     expect(Object.keys(client)).toEqual(["fetch", "baseURL", "enclave", "pin"]);
     expect(() => ((client as { enclave: string }).enclave = "evil.example")).toThrow(TypeError);
     expect(client.enclave).toBe(tls.host);
-    expect(client.pin).toEqual({ repo: "tinfoilsh/repo", project: "" });
+    expect(client.pin).toEqual({ repo: "tinfoilsh/repo", project: "", unpinned: false });
     expect(Object.isFrozen(client.pin)).toBe(true);
     expect(client.baseURL).toBe(`https://${tls.host}/`);
     expect(client.current?.tlsPublicKeyFP).toBe(TEST_PIN);
@@ -418,13 +418,13 @@ describe("EnclaveHTTPClient over EHBP", () => {
     });
     const proxied = await createEnclaveHTTPClient(
       "enclave.example",
-      {},
+      { unpinned: true },
       { verifier: verifier(() => ({ tls: "ab".repeat(32), hpke: ehbp.publicKeyHex })), transportMode: "ehbp", baseURL: `${ehbp.origin}/`, fetch: network.fetch },
       { documentFetch: docs.fetch },
     );
     expect(proxied.baseURL).toBe(`${ehbp.origin}/`);
     expect(proxied.enclave).toBe("enclave.example");
-    expect(proxied.pin).toEqual({ repo: "", project: "" });
+    expect(proxied.pin).toEqual({ repo: "", project: "", unpinned: true });
     const res = await proxied.fetch(`${ehbp.origin}/echo`, { method: "POST", body: "prompt" });
     expect(await res.json()).toEqual({ path: "/echo", sealed: true, enclave: "https://enclave.example", text: "prompt" });
     const bodiless = await (await proxied.fetch(`${ehbp.origin}/echo`)).json();
@@ -484,18 +484,18 @@ describe("EnclaveHTTPClient over EHBP", () => {
 
   it("ends the base URL with a slash, keeps requests on its origin, and gives an OpenAI client the same paths either way", async () => {
     const options = (baseURL: string): EnclaveOptions => ({ verifier: verifier(() => ({ tls: "ab".repeat(32), hpke: ehbp.publicKeyHex })), transportMode: "ehbp", baseURL });
-    const bare = await createEnclaveHTTPClient("enclave.example", {}, options(ehbp.origin), { documentFetch: documents().fetch });
+    const bare = await createEnclaveHTTPClient("enclave.example", { unpinned: true }, options(ehbp.origin), { documentFetch: documents().fetch });
     expect(bare.baseURL).toBe(`${ehbp.origin}/`);
     expect((await (await bare.fetch(new URL("echo", bare.baseURL), { method: "POST", body: "under" })).json()).text).toBe("under");
     await expect(bare.fetch("https://other.example/echo")).rejects.toThrow(/client is bound to enclave/);
-    const slashed = await createEnclaveHTTPClient("enclave.example", {}, options(`${ehbp.origin}/`), { documentFetch: documents().fetch });
+    const slashed = await createEnclaveHTTPClient("enclave.example", { unpinned: true }, options(`${ehbp.origin}/`), { documentFetch: documents().fetch });
     expect(slashed.baseURL).toBe(`${ehbp.origin}/`);
-    const padded = await createEnclaveHTTPClient("enclave.example", {}, options(`  ${ehbp.origin}/v1  `), { documentFetch: documents().fetch });
+    const padded = await createEnclaveHTTPClient("enclave.example", { unpinned: true }, options(`  ${ehbp.origin}/v1  `), { documentFetch: documents().fetch });
     expect(padded.baseURL).toBe(`${ehbp.origin}/v1/`);
 
     const paths: string[] = [];
     for (const base of [`${ehbp.origin}/v1`, `${ehbp.origin}/v1/`]) {
-      const ai = await createEnclaveOpenAIClient("enclave.example", {}, options(base), { apiKey: "k" }, { documentFetch: documents().fetch });
+      const ai = await createEnclaveOpenAIClient("enclave.example", { unpinned: true }, options(base), { apiKey: "k" }, { documentFetch: documents().fetch });
       expect(ai.baseURL).toBe(`${ehbp.origin}/v1/`);
       const completion = await ai.chat.completions.create({ model: "test", messages: [{ role: "user", content: "hi" }] });
       expect(completion.choices[0]!.message.content).toBe("sealed");

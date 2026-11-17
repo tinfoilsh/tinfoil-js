@@ -23,6 +23,8 @@ export interface TinfoilProviderEnclave {
   readonly repo?: string;
   /** A config registry project, `org/project[@revision][@sha256:digest]`. */
   readonly project?: string;
+  /** Accepts any config the verifier's trust authorizes. Excludes `repo` and `project`. */
+  readonly unpinned?: boolean;
 }
 
 /**
@@ -84,7 +86,7 @@ export async function createTinfoilProvider(options: TinfoilProviderOptions, sea
     signal: options.signal,
     fetch: options.fetch,
   };
-  const client = options.enclave === undefined ? await createRouterHTTPClient(clientOptions, seams) : await createEnclaveHTTPClient(options.enclave.host, { repo: options.enclave.repo, project: options.enclave.project }, clientOptions, seams);
+  const client = options.enclave === undefined ? await createRouterHTTPClient(clientOptions, seams) : await createEnclaveHTTPClient(options.enclave.host, { repo: options.enclave.repo, project: options.enclave.project, unpinned: options.enclave.unpinned }, clientOptions, seams);
   const provider = createOpenAICompatible({
     name: "tinfoil",
     baseURL: openAIURLOf(client),

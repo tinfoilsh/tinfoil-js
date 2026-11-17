@@ -93,14 +93,17 @@ export interface EmbeddedReferences {
 /**
  * Names the workload a caller trusts. `repo` and `project` are separate
  * namespaces with unrelated owners, so neither is satisfied by the other's
- * collateral. Setting both accepts either; with neither, any config the
- * verifier's trust authorizes is accepted. An absent part and "" are the same.
+ * collateral. Setting both accepts either. A pin must set `repo`, `project`
+ * or `unpinned`: one that names nothing is a UsageError. An absent part and ""
+ * are the same.
  */
 export interface Pin {
   /** A GitHub repository, `owner/name[@tag][@sha256:digest]`. */
   readonly repo?: string;
   /** A config registry project, `org/project[@revision][@sha256:digest]`. */
   readonly project?: string;
+  /** Accepts any config the verifier's trust authorizes. Excludes `repo` and `project`. */
+  readonly unpinned?: boolean;
 }
 
 export interface VerifierOptions {
@@ -252,7 +255,8 @@ export class Verifier {
 
   /**
    * Throws UsageError, without a document or network I/O, for a pin that
-   * verification rejects whatever the document: a malformed reference, a
+   * verification rejects whatever the document: one that names nothing
+   * without being `unpinned`, a malformed reference, a
    * `repo` set alone when the verifier verifies registry collateral only, or
    * a `project` that its config authorizer or embedded config cannot match.
    */
@@ -626,11 +630,19 @@ interface ConfigPins {
   readonly registryIDs?: readonly string[];
 }
 
-/** The parts of `pin`, "" when unset. A bare string is refused, not read as an empty pin. */
+/**
+ * The parts of `pin`, "" when unset. A bare string is refused, not read as an
+ * empty pin, and so is a pin that names nothing without being unpinned, or
+ * that is unpinned and names something.
+ */
 function pinOf(pin: Pin): { repo: string; project: string } {
-  if (typeof pin !== "object" || pin === null) throw new UsageError("pin must be an object with a repo, a project, or both");
-  const { repo = "", project = "" } = pin;
+  if (typeof pin !== "object" || pin === null) throw new UsageError("pin must be an object with a repo, a project, both, or unpinned");
+  const { repo = "", project = "", unpinned = false } = pin;
   if (typeof repo !== "string" || typeof project !== "string") throw new UsageError("pin repo and project must be strings");
+  if (typeof unpinned !== "boolean") throw new UsageError("pin unpinned must be a boolean");
+  const named = repo !== "" || project !== "";
+  if (unpinned && named) throw new UsageError("an unpinned pin cannot also name a repository or project");
+  if (!unpinned && !named) throw new UsageError("pin names nothing: set repo, project, or unpinned to accept any authorized config");
   return { repo, project };
 }
 
