@@ -617,6 +617,15 @@ describe("policy.parse: decode semantics", () => {
       const data = mutated((t) => (tdxBlock(t)["platform_measurements"] = null));
       expect(() => parse(enc(data))).toThrow(`policy "tdx-h200-prod": platform_measurements are required in v1 and excluded in v2`);
     });
+    it("rejects an all-zero machine identifier", () => {
+      for (const [policy, length] of [
+        ["tdx-h200-prod", 32],
+        ["amd-turin-prod", 128],
+      ] as const) {
+        const data = mutated((t) => (get(t, "machines")["0".repeat(length)] = policy));
+        expect(() => parse(enc(data))).toThrow("machine 0000000000000000...: identifier must not be all zeros");
+      }
+    });
     // A null string reads as "", which names no policy.
     it("rejects a null machine policy name", () => {
       const data = mutated((t) => (get(t, "machines")[inf7PPID] = null));
