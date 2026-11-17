@@ -62,8 +62,7 @@ export interface Input {
   document_b64: string;
   nonce_hex: string;
   repo: string;
-  /** When absent, takes the value of `repo`. */
-  project?: string;
+  project: string;
   amd_root_ca_pem?: string;
   ask_pem?: string;
   intel_sgx_root_pem?: string;
@@ -166,7 +165,7 @@ async function runStage(stage: string, raw: unknown): Promise<Result> {
 
   switch (stage) {
     case Stage.Verify:
-      return verifyFull(doc, nonce, { repo: in_.repo, project: in_.project ?? in_.repo }, roots, appraisal);
+      return verifyFull(doc, nonce, { repo: in_.repo, project: in_.project }, roots, appraisal);
 
     case Stage.CheckEnvelope:
       return layer(stage, "ENVELOPE_REJECTED", async () => {
@@ -401,6 +400,7 @@ const STRING_FIELDS = [
   "document_b64",
   "nonce_hex",
   "repo",
+  "project",
   "amd_root_ca_pem",
   "ask_pem",
   "intel_sgx_root_pem",
@@ -414,8 +414,7 @@ const STRING_FIELDS = [
 /**
  * Validates the parsed stdin value against the Input shape: unknown members
  * are ignored, absent or null members take their type's empty value ("" or
- * 0) except `project`, which stays absent, and a member of the wrong type is
- * malformed. The clock must also lie
+ * 0), and a member of the wrong type is malformed. The clock must also lie
  * within the range that a Date can hold, so that no stage ever appraises
  * against an invalid time.
  */
@@ -432,11 +431,6 @@ function decodeInput(raw: unknown): Input | undefined {
     } else {
       return undefined;
     }
-  }
-  if (typeof obj.project === "string") {
-    out.project = obj.project;
-  } else if (obj.project !== undefined && obj.project !== null) {
-    return undefined;
   }
   const keys = obj.signing_keys_pem;
   if (keys === undefined || keys === null) {

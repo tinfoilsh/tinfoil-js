@@ -25,8 +25,8 @@ export interface LiveRequest {
   readonly host: string;
   /** Empty when only a project is named. */
   readonly repo: string;
-  /** When absent, takes the value of `repo`. */
-  readonly project?: string;
+  /** Empty when only a repository is named. */
+  readonly project: string;
 }
 
 /** Decodes the request; a missing or empty field, or a host that is not a bare authority, is malformed input. */
@@ -35,9 +35,9 @@ export function decodeLiveRequest(raw: unknown): LiveRequest | undefined {
   const o = raw as Record<string, unknown>;
   const repo = o.repo ?? "";
   if (typeof o.host !== "string" || typeof repo !== "string" || !isAuthority(o.host)) return undefined;
-  if (o.project !== undefined && o.project !== null && typeof o.project !== "string") return undefined;
-  if (repo === "" && (o.project ?? "") === "") return undefined;
-  return { host: o.host, repo, ...(typeof o.project === "string" ? { project: o.project } : {}) };
+  const project = o.project ?? "";
+  if (typeof project !== "string" || (repo === "" && project === "")) return undefined;
+  return { host: o.host, repo, project };
 }
 
 /** Runs the lane; a thrown error is an internal failure (exit 1), a rejection is reported in the output. */
@@ -48,7 +48,7 @@ export async function liveVerify(req: LiveRequest, log: (line: string) => void =
 
   let verified: Verification;
   try {
-    verified = await verifier.verifyV3(doc, nonce, { repo: req.repo, project: req.project ?? req.repo });
+    verified = await verifier.verifyV3(doc, nonce, { repo: req.repo, project: req.project });
   } catch (err) {
     log(`live verification: ${err instanceof Error ? err.message : String(err)}`);
     const mapped = rejectionCode(err);

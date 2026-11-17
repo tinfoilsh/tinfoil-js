@@ -100,18 +100,12 @@ describe("the pin of a full-verify input", () => {
   };
   const code = async (collateralFormat: string, pin: { repo: string; project?: string | null }) => (await run(Stage.Verify, await input(collateralFormat, pin))).output.rejection?.code;
 
-  it("uses repo in both namespaces when the input has no project member", async () => {
-    // A name that is a valid repository but not a valid config identity is the
-    // caller's mistake only when it is read as a project.
-    expect(await code(FORMAT_V3, { repo: "Org/My_Repo" })).toBe("MALFORMED_INPUT");
-    expect(await code(FORMAT_V3, { repo: "Org/My_Repo", project: null })).toBe("MALFORMED_INPUT");
-    expect(await code(FORMAT_V2, { repo: "Org/My_Repo" })).toBe("PROVENANCE_REJECTED");
-  });
-
-  it("uses the two values as given when the project member is present, even empty", async () => {
-    expect(await code(FORMAT_V3, { repo: "Org/My_Repo", project: "" })).toBe("PROVENANCE_REJECTED");
+  it("names each namespace only by its own member", async () => {
+    // A repository alone never matches registry collateral, nor a project repository collateral.
+    expect(await code(FORMAT_V3, { repo: "org/project" })).toBe("PROVENANCE_REJECTED");
+    expect(await code(FORMAT_V3, { repo: "org/project", project: null })).toBe("PROVENANCE_REJECTED");
+    expect(await code(FORMAT_V2, { repo: "", project: "org/project" })).toBe("PROVENANCE_REJECTED");
     expect(await code(FORMAT_V3, { repo: "Org/My_Repo", project: "org/project" })).toBe("PROVENANCE_REJECTED");
-    expect(await code(FORMAT_V2, { repo: "org/project", project: "Org/My_Repo" })).toBe("PROVENANCE_REJECTED");
     expect(await code(FORMAT_V2, { repo: "org/project", project: "not a reference" })).toBe("MALFORMED_INPUT");
     const wrongType = await run(Stage.Verify, { ...(await input(FORMAT_V2, { repo: "org/project" })), project: 7 });
     expect(wrongType.exitCode).toBe(ExitCode.Malformed);
@@ -123,8 +117,8 @@ describe("live request decoding", () => {
     for (const host of ["enclave.example.com", "Enclave.Example.COM", "ENCLAVE.EXAMPLE.COM:8443", "example.com:443", "[2001:DB8::1]:8443"]) {
       expect(isAuthority(host), host).toBe(true);
     }
-    expect(decodeLiveRequest({ host: "Enclave.Example.COM", repo: "org/repo" })).toEqual({ host: "Enclave.Example.COM", repo: "org/repo" });
-    expect(decodeLiveRequest({ host: "example.com", repo: "org/repo", project: null })).toEqual({ host: "example.com", repo: "org/repo" });
+    expect(decodeLiveRequest({ host: "Enclave.Example.COM", repo: "org/repo" })).toEqual({ host: "Enclave.Example.COM", repo: "org/repo", project: "" });
+    expect(decodeLiveRequest({ host: "example.com", repo: "org/repo", project: null })).toEqual({ host: "example.com", repo: "org/repo", project: "" });
     expect(decodeLiveRequest({ host: "example.com", repo: "org/repo", project: "" })).toEqual({ host: "example.com", repo: "org/repo", project: "" });
     expect(decodeLiveRequest({ host: "example.com", repo: "org/repo", project: "org/project" })).toEqual({ host: "example.com", repo: "org/repo", project: "org/project" });
     expect(decodeLiveRequest({ host: "example.com", project: "org/project" })).toEqual({ host: "example.com", repo: "", project: "org/project" });
