@@ -91,18 +91,15 @@ export interface EmbeddedReferences {
 }
 
 /**
- * Names the workload a caller trusts and the namespace that vouches for it.
- * The two namespaces are unrelated: the same name can belong to different
- * owners in each, so a pin in one is never satisfied by the other.
- *
- * Setting both accepts a document that satisfies either. A pin with neither
- * accepts any config authorized by the verifier's registry trust, embedded
- * config or config authorizer. An absent part and "" are the same.
+ * Names the workload a caller trusts. `repo` and `project` are separate
+ * namespaces with unrelated owners, so neither is satisfied by the other's
+ * collateral. Setting both accepts either; with neither, any config the
+ * verifier's trust authorizes is accepted. An absent part and "" are the same.
  */
 export interface Pin {
-  /** A GitHub repository, `owner/name[@tag][@sha256:digest]`. Only a document carrying that repository's signed release satisfies it. */
+  /** A GitHub repository, `owner/name[@tag][@sha256:digest]`. */
   readonly repo?: string;
-  /** A config registry project, `org/project[@revision][@sha256:digest]`. Only a document carrying a registry approval of that project, or a matching config the caller embedded, satisfies it. */
+  /** A config registry project, `org/project[@revision][@sha256:digest]`. */
   readonly project?: string;
 }
 
@@ -254,15 +251,10 @@ export class Verifier {
   }
 
   /**
-   * Throws UsageError when `pin` cannot be verified under this verifier's
-   * policy, whatever the document: a malformed `repo` or `project`; a `repo`
-   * set alone when the verifier verifies registry collateral only, through
-   * an embedded reference, explicit signing keys, registry IDs or a config
-   * authorizer; a `project` when a config authorizer is set; or a `project`
-   * that an embedded config's name or digest doesn't match. No document or
-   * network I/O. Verification can still refuse a pin that passes: registry
-   * collateral also requires the project and revision to be valid config
-   * identity components, and that check waits for the document.
+   * Throws UsageError, without a document or network I/O, for a pin that
+   * verification rejects whatever the document: a malformed reference, a
+   * `repo` set alone when the verifier verifies registry collateral only, or
+   * a `project` that its config authorizer or embedded config cannot match.
    */
   checkPinVerifiability(pin: Pin): void {
     const { repo, project } = pinOf(pin);
@@ -277,10 +269,7 @@ export class Verifier {
 
   /**
    * Appraises a nonce-bound v3 document against `pin` at the current time.
-   * The document's collateral decides which part of `pin` applies, and a
-   * document whose collateral `pin` does not cover is rejected. With neither
-   * part set, a document carrying repository collateral is a UsageError: it
-   * needs a repository to verify against.
+   * The document's collateral decides which part of `pin` applies.
    */
   async verifyV3(docBytes: Uint8Array, nonce: Uint8Array, pin: Pin): Promise<Verification> {
     return this.verifyV3At(docBytes, nonce, pin, new Date());
@@ -307,7 +296,7 @@ export class Verifier {
     });
 
     const refs = await at("provenance", async () => {
-      // A malformed pin is the caller's mistake whichever collateral the document carries.
+      // A malformed pin is a usage error for any document.
       if (repo !== "") usage(() => parseReference(repo));
       this.#referencePins(project);
       switch (doc.collateralFormat()) {
@@ -637,11 +626,7 @@ interface ConfigPins {
   readonly registryIDs?: readonly string[];
 }
 
-/**
- * The parts of `pin` as strings, "" for one that is unset. A pin that is not
- * an object of strings is refused, so that a bare reference string from
- * untyped code is not read as an empty pin.
- */
+/** The parts of `pin`, "" when unset. A bare string is refused, not read as an empty pin. */
 function pinOf(pin: Pin): { repo: string; project: string } {
   if (typeof pin !== "object" || pin === null) throw new UsageError("pin must be an object with a repo, a project, or both");
   const { repo = "", project = "" } = pin;

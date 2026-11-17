@@ -35,7 +35,7 @@ export interface EnclaveConfig {
   readonly host: string;
   /** When set, a host that fetches attestation from the enclave on the client's behalf. */
   readonly relay?: string;
-  /** The GitHub repository, the registry project, or both, that the enclave is verified against; neither accepts configs the verifier authorizes. */
+  /** What the enclave is verified against. */
   readonly pin: Pin;
   /** The policy, which several enclaves can share; undefined selects the defaults. */
   readonly verifier?: Verifier;
@@ -95,7 +95,7 @@ export class Enclave {
     return this.#host;
   }
 
-  /** The trusted repository and registry project references, including version and digest pins; an unset part is "". */
+  /** The pin the enclave is verified against; an unset part is "". */
   pin(): Required<Pin> {
     return this.#pin;
   }

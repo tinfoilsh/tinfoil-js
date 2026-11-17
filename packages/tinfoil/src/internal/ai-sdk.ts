@@ -21,7 +21,7 @@ export interface TinfoilProviderEnclave {
   readonly host: string;
   /** A GitHub repository, `owner/name[@tag][@sha256:digest]`. */
   readonly repo?: string;
-  /** A config registry project, `org/project[@revision][@sha256:digest]`. With neither, the verifier option authorizes the config. */
+  /** A config registry project, `org/project[@revision][@sha256:digest]`. */
   readonly project?: string;
 }
 

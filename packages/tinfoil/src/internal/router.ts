@@ -11,7 +11,7 @@ import { Enclave, type EnclaveConfig } from "./enclave.js";
 import { getFollowingRedirects, isAuthority, readBounded } from "./fetch.js";
 import { KeyedTransport, type Mode } from "./transport/transport.js";
 
-// The router is published under one name in both namespaces, each owned by Tinfoil.
+// Tinfoil owns the router's name in both namespaces.
 export const DEFAULT_ROUTER_NAME = "tinfoilsh/confidential-model-router";
 export const DEFAULT_ROUTER_PIN: Pin = Object.freeze({ repo: DEFAULT_ROUTER_NAME, project: DEFAULT_ROUTER_NAME });
 export const DEFAULT_ROUTER_URL = "https://atc.tinfoil.sh/routers";

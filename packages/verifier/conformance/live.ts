@@ -25,7 +25,7 @@ export interface LiveRequest {
   readonly host: string;
   /** Empty when only a project is named. */
   readonly repo: string;
-  /** Absent in requests that predate separate pins, where repo names the workload in either namespace. */
+  /** When absent, takes the value of `repo`. */
   readonly project?: string;
 }
 

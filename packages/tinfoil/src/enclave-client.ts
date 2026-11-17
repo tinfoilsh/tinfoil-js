@@ -162,7 +162,7 @@ export class EnclaveHTTPClient {
   readonly baseURL: string;
   /** The host of the verified enclave, even when `baseURL` is a proxy. */
   readonly enclave: string;
-  /** The repository and registry project the enclave is verified against, each "" when unset; both are unset when the verifier authorizes the config instead. */
+  /** The pin the enclave is verified against; an unset part is "". */
   readonly pin: Required<Pin>;
   readonly #transport: KeyedTransport;
 
@@ -183,14 +183,10 @@ export class EnclaveHTTPClient {
   }
 
   /**
-   * A client for the enclave at `host`, verified against `pin`: a GitHub
-   * repository (`repo`, `owner/name[@tag][@sha256:digest]`), a config
-   * registry project (`project`, `org/project[@revision][@sha256:digest]`),
-   * or both, which accepts either. The two namespaces have unrelated owners,
-   * so a `repo` is never satisfied by a registry approval or a `project` by a
-   * repository's release. An empty `pin` accepts configs authorized by the
-   * verifier option. Options are checked before any network
-   * I/O; the enclave is verified before the client is returned.
+   * A client for the enclave at `host`, verified against `pin`. An empty
+   * `pin` accepts configs authorized by the verifier option. Options are
+   * checked before any network I/O; the enclave is verified before the client
+   * is returned.
    */
   static create(host: string, pin: Pin, options?: EnclaveOptions): Promise<EnclaveHTTPClient> {
     return createEnclaveHTTPClient(host, pin, options ?? {}, {});

@@ -62,7 +62,7 @@ export interface Input {
   document_b64: string;
   nonce_hex: string;
   repo: string;
-  /** Absent in inputs that predate separate pins, where repo names the workload in either namespace. */
+  /** When absent, takes the value of `repo`. */
   project?: string;
   amd_root_ca_pem?: string;
   ask_pem?: string;
