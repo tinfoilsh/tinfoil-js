@@ -71,7 +71,9 @@ async function nodePinnedFetch(key: string, options: TLSOptions): Promise<BoundF
   // key, so every connection it makes is checked against that key, and a
   // connection it pools was. A check given per request would stop the
   // runtime from pooling the connection at all.
-  const agent = new https.Agent({ keepAlive: true, ca, checkServerIdentity });
+  // Stated outright: left to its default, the runtime takes it from the
+  // environment, and when it is off the result of the check is ignored.
+  const agent = new https.Agent({ keepAlive: true, ca, checkServerIdentity, rejectUnauthorized: true });
   // An idle pooled connection must not keep the process alive; a reused one is referenced again.
   agent.on("free", (socket: import("node:net").Socket) => socket.unref());
 
@@ -194,7 +196,7 @@ async function bunPinnedFetch(key: string, options: TLSOptions): Promise<BoundFe
     const redirect = noFollow(init?.redirect ?? (input instanceof Request ? input.redirect : undefined));
     try {
       // `tls` is the runtime's own fetch option for the connection's TLS settings.
-      return await fetch(input, { ...init, redirect, tls: { ca: options.ca, checkServerIdentity } } as RequestInit);
+      return await fetch(input, { ...init, redirect, tls: { ca: options.ca, checkServerIdentity, rejectUnauthorized: true } } as RequestInit);
     } catch (err) {
       if (messageOf(err).includes(CERT_MISMATCH)) throw new PeerLacksKeyError(CERT_MISMATCH, { cause: err });
       throw classify(err);

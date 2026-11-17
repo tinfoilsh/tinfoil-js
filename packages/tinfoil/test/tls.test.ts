@@ -11,7 +11,7 @@ import { createHash, X509Certificate } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { createServer, type Server } from "node:https";
 import type { AddressInfo } from "node:net";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { AttestationError, ConfigurationError, NetworkError } from "../src/errors.js";
 import { Enclave } from "../src/internal/enclave.js";
 import { withReplay } from "../src/internal/transport/replay.js";
@@ -155,6 +155,22 @@ describe("tlsMode", () => {
     const err = await untrusting.fetch(`${origin}/never`).catch((e: unknown) => e);
     expect(err).toBeInstanceOf(PeerLacksKeyError);
     untrusting.close?.();
+  });
+
+  it("keeps both checks when the environment turns certificate checking off", async () => {
+    const before = seen.length;
+    vi.stubEnv("NODE_TLS_REJECT_UNAUTHORIZED", "0");
+    try {
+      const wrongKey = await mode.bind(verification(OTHER));
+      expect(await wrongKey.fetch(`${origin}/never`).catch((e: unknown) => e)).toBeInstanceOf(PeerLacksKeyError);
+      wrongKey.close?.();
+      const untrusting = await tlsMode().bind(verification(PIN));
+      expect(await untrusting.fetch(`${origin}/never`).catch((e: unknown) => e)).toBeInstanceOf(PeerLacksKeyError);
+      untrusting.close?.();
+    } finally {
+      vi.unstubAllEnvs();
+    }
+    expect(seen.length).toBe(before);
   });
 
   it("streams a response chunk by chunk as the server writes it", async () => {
