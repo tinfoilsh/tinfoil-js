@@ -284,6 +284,9 @@ export class Verifier {
       throw new UsageError("verification time must be a valid date");
     }
     const { repo, project } = pinOf(pin);
+    // A malformed pin is a usage error for any document.
+    if (repo !== "") usage(() => parseReference(repo));
+    this.#referencePins(project);
     const now = new Date(verificationTime.getTime());
 
     const doc = await at("envelope", async () => {
@@ -296,9 +299,6 @@ export class Verifier {
     });
 
     const refs = await at("provenance", async () => {
-      // A malformed pin is a usage error for any document.
-      if (repo !== "") usage(() => parseReference(repo));
-      this.#referencePins(project);
       switch (doc.collateralFormat()) {
         case FORMAT_V3:
           if (project === "" && repo !== "") {
