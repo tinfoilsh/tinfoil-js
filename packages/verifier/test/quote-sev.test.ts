@@ -52,6 +52,8 @@ const b64 = (s: string): Uint8Array => new Uint8Array(Buffer.from(s, "base64"));
 const utf8 = (s: string): Uint8Array => new TextEncoder().encode(s);
 const unix = (s: number): Date => new Date(s * 1000);
 const withoutVectors = !conformanceAvailable();
+/** The DEBUG bit of the SEV-SNP guest policy. */
+const SEV_POLICY_DEBUG = 1n << 19n;
 // Read at module scope: a skipped describe still runs its body.
 const sevFixtures = withoutVectors ? [] : loadFixtures("quote-sev");
 
@@ -502,8 +504,10 @@ describe.skipIf(withoutVectors)(vectorsTitle("sev expectations"), () => {
 
   it("requires the guest policy and platform info to match exactly and the ABI version to meet the floor", () => {
     const e = assemble();
-    const debug = withReport({ policy: q.report.policy ^ (1n << 19n) });
-    expect(() => validateSev(e, debug)).toThrow(/guest policy does not match/);
+    const debug = withReport({ policy: q.report.policy | SEV_POLICY_DEBUG });
+    expect(() => validateSev(e, debug)).toThrow(/allows the guest to be debugged/);
+    // A debuggable guest is refused even when the endorsed policy permits debugging.
+    expect(() => validateSev(assemble({ ...policy, guestPolicy: { ...policy.guestPolicy, debug: true } }), debug)).toThrow(/allows the guest to be debugged/);
     expect(() => validateSev(assemble({ ...policy, guestPolicy: { ...policy.guestPolicy, debug: !policy.guestPolicy.debug } }), q)).toThrow(
       /guest policy does not match/,
     );

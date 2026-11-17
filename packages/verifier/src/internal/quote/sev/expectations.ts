@@ -262,6 +262,7 @@ function checkHwid(r: SevReport, hwid: Uint8Array): void {
  * info bits exactly, minimum build/version/SVN/TCBs, VMPL, host data, image
  * and family ids, mitigation vectors, measurement, report data and chip id,
  * the VCEK's hardware id, and that no author key or id block signed the launch.
+ * A report that allows debugging is refused whatever the policy.
  */
 export function validateSev(e: SevExpectations, q: SevQuote): void {
   const r = q.report;
@@ -276,6 +277,8 @@ export function validateSev(e: SevExpectations, q: SevQuote): void {
       `required policy ABI version (${e.minimumAbiMajor}.${e.minimumAbiMinor}) is greater than the report's ABI version (${got.abiMajor}.${got.abiMinor})`,
     );
   }
+  // Refused whatever the endorsed policy says.
+  if (got.debug) throw new Error("SEV report allows the guest to be debugged");
   const g = p.guestPolicy;
   if (
     got.debug !== g.debug ||

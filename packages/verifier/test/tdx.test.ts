@@ -588,6 +588,8 @@ describe.skipIf(withoutVectors)(vectorsTitle("assembleTdx and validateTdx"), () 
     const attrs = withBody({ tdAttributes: hex("0200004000000000") });
     expect(() => validateTdx({ ...expectations(), tdAttributes: attrs.quote.body.tdAttributes }, attrs)).toThrow(/TD attributes .* set bits outside/);
     const debug = withBody({ tdAttributes: hex("0100004000000000") });
-    expect(() => validateTdx({ ...expectations(), tdAttributes: debug.quote.body.tdAttributes }, debug)).not.toThrow();
+    // A debuggable TD is refused even when the endorsed TD attributes match it.
+    expect(() => validateTdx({ ...expectations(), tdAttributes: debug.quote.body.tdAttributes }, debug)).toThrow(/TD quote reports a debuggable TD/);
+    expect(() => validateTdx(expectations(), debug)).toThrow(/TD quote reports a debuggable TD/);
   });
 });
