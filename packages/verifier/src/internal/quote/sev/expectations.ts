@@ -209,12 +209,9 @@ function checkVersion(e: SevExpectations, r: SevReport): void {
       );
     }
   } else {
-    if (r.committedBuild > r.currentBuild) {
-      throw new Error(`committed build number ${r.committedBuild} is greater than the current build number ${r.currentBuild}`);
-    }
-    if (committed > current) {
+    if (firmwareVersion(r.committedMajor, r.committedMinor, r.committedBuild) > firmwareVersion(r.currentMajor, r.currentMinor, r.currentBuild)) {
       throw new Error(
-        `committed API version (${r.committedMajor}.${r.committedMinor}) is greater than the current API version (${r.currentMajor}.${r.currentMinor})`,
+        `committed firmware version ${r.committedMajor}.${r.committedMinor} build ${r.committedBuild} is later than the current version ${r.currentMajor}.${r.currentMinor} build ${r.currentBuild}`,
       );
     }
     // The committed firmware is what the machine can fall back to, so the

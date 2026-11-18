@@ -556,7 +556,11 @@ describe.skipIf(withoutVectors)(vectorsTitle("sev expectations"), () => {
     expect(() => validateSev(e, withReport({ committedBuild: r.currentBuild + 1 }))).toThrow(/committed build number .* does not match/);
     expect(() => validateSev(e, withReport({ committedMinor: r.currentMinor + 1 }))).toThrow(/committed API version .* does not match/);
     const provisional = assemble({ ...policy, permitProvisionalFirmware: true });
-    expect(() => validateSev(provisional, withReport({ committedBuild: r.currentBuild + 1 }))).toThrow(/is greater than the current build number/);
+    expect(() => validateSev(provisional, withReport({ committedBuild: r.currentBuild + 1 }))).toThrow(/committed firmware version .* is later than the current version/);
+    expect(() => validateSev(provisional, withReport({ committedMinor: r.currentMinor + 1, committedBuild: 0 }))).toThrow(/is later than the current version/);
+    // Committed firmware of an earlier API version is earlier whatever its build, for the floor too.
+    const earlierFloor = assemble({ ...policy, permitProvisionalFirmware: true, minimumApiVersion: `${r.currentMajor}.${r.currentMinor - 1}`, minimumBuild: 0 });
+    expect(() => validateSev(earlierFloor, withReport({ committedMinor: r.currentMinor - 1, committedBuild: 255 }))).not.toThrow();
     // Provisional firmware does not lift the floors off the committed firmware.
     const buildFloor = assemble({ ...policy, permitProvisionalFirmware: true, minimumApiVersion: own, minimumBuild: r.currentBuild });
     expect(() => validateSev(buildFloor, withReport({ committedBuild: r.currentBuild - 1 }))).toThrow(/committed firmware version .* is below the endorsed minimum/);
