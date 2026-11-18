@@ -19,8 +19,8 @@ export const TLS_UNAVAILABLE_IN_BROWSERS = 'the "tls" transport mode pins the se
 /** Why the TLS mode is refused on a runtime that emulates Node. */
 export const TLS_UNAVAILABLE_ON_NODE_EMULATION = 'the "tls" transport mode pins the server certificate in Node\'s or Bun\'s TLS handshake, which this runtime only emulates; use "ehbp", which seals request and response bodies to the enclave\'s key instead';
 
-/** The user agent that Cloudflare Workers report. */
-const WORKERS_USER_AGENT = "Cloudflare-Workers";
+/** How Node's own user agent starts; a runtime that emulates Node reports its own name, or none. */
+const NODE_USER_AGENT_PREFIX = "Node.js/";
 
 /**
  * The oldest Bun whose fetch runs a caller's certificate check before it
@@ -51,7 +51,6 @@ export function webSocketsUnavailableOnBun(version: string): string {
 export interface RuntimeGlobals {
   readonly process?: { readonly versions?: { readonly node?: string; readonly bun?: string } };
   readonly Bun?: unknown;
-  readonly Deno?: unknown;
   readonly navigator?: { readonly userAgent?: string };
 }
 
@@ -63,13 +62,15 @@ export function isServerRuntime(globals: RuntimeGlobals = globalThis as RuntimeG
 
 /**
  * Whether `globals` belong to a runtime that runs a caller's certificate
- * check in its own TLS handshake: Node and Bun. Deno and Cloudflare Workers
- * identify themselves as Node, but their emulation of its TLS is not known
+ * check in its own TLS handshake: Bun, or Node by its own user agent. A
+ * runtime that emulates Node (Deno, Cloudflare Workers) sets
+ * `process.versions.node` too, but its emulation of Node's TLS is not known
  * to run the check, and a check that never runs leaves the connection
  * unpinned without an error.
  */
 export function pinsTLS(globals: RuntimeGlobals = globalThis as RuntimeGlobals): boolean {
-  return isServerRuntime(globals) && globals.Deno === undefined && globals.navigator?.userAgent !== WORKERS_USER_AGENT;
+  if (isBun(globals) || globals.Bun !== undefined) return true;
+  return Boolean(globals.process?.versions?.node) && globals.navigator?.userAgent?.startsWith(NODE_USER_AGENT_PREFIX) === true;
 }
 
 /** Whether `globals` belong to Bun, which pins TLS connections through its own fetch and WebSocket rather than Node's. */

@@ -16,7 +16,6 @@ export const TLS_UNAVAILABLE_IN_BROWSERS = 'the "tls" transport mode pins the se
 export interface RuntimeGlobals {
   readonly process?: { readonly versions?: { readonly node?: string; readonly bun?: string } };
   readonly Bun?: unknown;
-  readonly Deno?: unknown;
   readonly navigator?: { readonly userAgent?: string };
 }
 

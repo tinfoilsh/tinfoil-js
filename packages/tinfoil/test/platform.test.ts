@@ -10,7 +10,7 @@ import { bunOlderThan, checkTransportMode, defaultTransportMode, MIN_BUN_FOR_TLS
 import { checkWebSocketCapability } from "../src/internal/websocket.js";
 
 const bun = (version: string): RuntimeGlobals => ({ process: { versions: { bun: version } } });
-const node: RuntimeGlobals = { process: { versions: { node: "22.0.0" } } };
+const node: RuntimeGlobals = { process: { versions: { node: "22.0.0" } }, navigator: { userAgent: "Node.js/22" } };
 
 describe("Bun version floors", () => {
   it("orders versions numerically, ignores a canary tag, counts an unreadable version as old, and knows nothing of other runtimes", () => {
@@ -42,19 +42,22 @@ describe("Bun version floors", () => {
 });
 
 describe("runtimes that emulate Node", () => {
-  const deno: RuntimeGlobals = { process: { versions: { node: "22.0.0" } }, Deno: {} };
-  const workers: RuntimeGlobals = { process: { versions: { node: "22.0.0" } }, navigator: { userAgent: "Cloudflare-Workers" } };
+  const emulating = (userAgent?: string): RuntimeGlobals => ({ process: { versions: { node: "22.0.0" } }, navigator: { userAgent } });
 
   it("pins TLS on Node and Bun only", () => {
     expect(pinsTLS(node)).toBe(true);
-    expect(pinsTLS({ ...node, navigator: { userAgent: "Node.js/22" } })).toBe(true);
     expect(pinsTLS(bun(MIN_BUN_FOR_TLS_MODE))).toBe(true);
+    expect(pinsTLS({ Bun: {} })).toBe(true);
     expect(pinsTLS({})).toBe(false);
+    expect(pinsTLS({ navigator: { userAgent: "Node.js/22" } })).toBe(false);
   });
 
   it.each([
-    ["Deno", deno],
-    ["Cloudflare Workers", workers],
+    ["Deno", emulating("Deno/2.5.0")],
+    ["Cloudflare Workers", emulating("Cloudflare-Workers")],
+    ["a runtime with another name", emulating("Other/1.0")],
+    ["a runtime with no name", emulating()],
+    ["a runtime with no navigator", { process: { versions: { node: "22.0.0" } } }],
   ])("gives %s the EHBP default, refuses the TLS mode and a pinned WebSocket, and still takes an API key", (_name, globals) => {
     expect(pinsTLS(globals)).toBe(false);
     expect(defaultTransportMode(globals)).toBe("ehbp");

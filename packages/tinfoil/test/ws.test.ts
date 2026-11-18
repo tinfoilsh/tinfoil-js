@@ -126,7 +126,7 @@ describe("webSocketURL", () => {
   });
 
   it("is available only on a runtime that identifies itself as a server", () => {
-    expect(() => checkWebSocketCapability({ process: { versions: { node: "22.0.0" } } })).not.toThrow();
+    expect(() => checkWebSocketCapability({ process: { versions: { node: "22.0.0" } }, navigator: { userAgent: "Node.js/22" } })).not.toThrow();
     expect(() => checkWebSocketCapability({ Bun: {} })).not.toThrow();
     expect(() => checkWebSocketCapability({ self: {} } as never)).toThrow(/browsers don't expose/);
   });
