@@ -16,8 +16,8 @@ import { isCertificateError } from "./transport/pin-errors.js";
 import type { TLSOptions } from "./transport/tls.js";
 import type { KeyedTransport } from "./transport/transport.js";
 
-/** Why a verified WebSocket is refused on a runtime that emulates Node. */
-export const WEBSOCKETS_UNAVAILABLE_ON_NODE_EMULATION = "a verified WebSocket pins the server certificate in Node's or Bun's TLS handshake, which this runtime only emulates, so it can't be opened here";
+/** Why a verified WebSocket is refused on a runtime that is not known to be Node or Bun. */
+export const WEBSOCKETS_UNAVAILABLE_ON_NODE_EMULATION = "a verified WebSocket pins the server certificate in Node's or Bun's TLS handshake, and this runtime identifies itself as neither (Node is known by a navigator.userAgent of 'Node.js/…'), so it can't be opened here";
 
 export const WEBSOCKETS_UNAVAILABLE_IN_BROWSERS = "a verified WebSocket pins the server certificate, which browsers don't expose to scripts, so it can't be opened from a browser";
 

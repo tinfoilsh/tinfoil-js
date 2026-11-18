@@ -16,8 +16,8 @@ export const PLATFORM: "node" | "browser" = "node";
 /** Why the TLS mode is refused in a browser. */
 export const TLS_UNAVAILABLE_IN_BROWSERS = 'the "tls" transport mode pins the server certificate, which browsers don\'t expose to scripts; use "ehbp", the browser default, which seals request and response bodies to the enclave\'s key instead';
 
-/** Why the TLS mode is refused on a runtime that emulates Node. */
-export const TLS_UNAVAILABLE_ON_NODE_EMULATION = 'the "tls" transport mode pins the server certificate in Node\'s or Bun\'s TLS handshake, which this runtime only emulates; use "ehbp", which seals request and response bodies to the enclave\'s key instead';
+/** Why the TLS mode is refused on a runtime that is not known to be Node or Bun. */
+export const TLS_UNAVAILABLE_ON_NODE_EMULATION = 'the "tls" transport mode pins the server certificate in Node\'s or Bun\'s TLS handshake, and this runtime identifies itself as neither (Node is known by a navigator.userAgent of "Node.js/…"); use "ehbp", which seals request and response bodies to the enclave\'s key instead';
 
 /** How Node's own user agent starts; a runtime that emulates Node reports its own name, or none. */
 const NODE_USER_AGENT_PREFIX = "Node.js/";

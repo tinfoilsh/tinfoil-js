@@ -63,8 +63,8 @@ describe("runtimes that emulate Node", () => {
     expect(defaultTransportMode(globals)).toBe("ehbp");
     expect(() => checkTransportMode("ehbp", globals)).not.toThrow();
     expect(() => checkTransportMode("tls", globals)).toThrow(ConfigurationError);
-    expect(() => checkTransportMode("tls", globals)).toThrow(/which this runtime only emulates; use "ehbp"/);
-    expect(() => checkWebSocketCapability(globals)).toThrow(/which this runtime only emulates/);
+    expect(() => checkTransportMode("tls", globals)).toThrow(/identifies itself as neither .* use "ehbp"/);
+    expect(() => checkWebSocketCapability(globals)).toThrow(/identifies itself as neither/);
     expect(() => checkAPIKeyRuntime("key", globals)).not.toThrow();
   });
 });
