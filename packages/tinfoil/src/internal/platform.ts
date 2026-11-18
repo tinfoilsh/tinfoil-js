@@ -2,8 +2,7 @@
  * What the platform allows of the transport modes. Node and Bun expose the
  * TLS connection, so both modes are available and TLS pinning is the
  * default; a Bun too old to check a connection before it sends over it
- * gets the browser default, and so does a runtime that only emulates Node
- * (Deno, Cloudflare Workers), whose TLS is not known to run the pin. Anywhere else, a browser page or a worker
+ * gets the browser default. Anywhere else, a browser page or a worker
  * reached by a bundler that ignored the browser build, this module behaves
  * as the browser build does: a runtime is a server only when it says so.
  */
@@ -15,12 +14,6 @@ export const PLATFORM: "node" | "browser" = "node";
 
 /** Why the TLS mode is refused in a browser. */
 export const TLS_UNAVAILABLE_IN_BROWSERS = 'the "tls" transport mode pins the server certificate, which browsers don\'t expose to scripts; use "ehbp", the browser default, which seals request and response bodies to the enclave\'s key instead';
-
-/** Why the TLS mode is refused on a runtime that is not known to be Node or Bun. */
-export const TLS_UNAVAILABLE_ON_NODE_EMULATION = 'the "tls" transport mode pins the server certificate in Node\'s or Bun\'s TLS handshake, and this runtime identifies itself as neither (Node is known by a navigator.userAgent of "Node.js/…"); use "ehbp", which seals request and response bodies to the enclave\'s key instead';
-
-/** How Node's own user agent starts; a runtime that emulates Node reports its own name, or none. */
-const NODE_USER_AGENT_PREFIX = "Node.js/";
 
 /**
  * The oldest Bun whose fetch runs a caller's certificate check before it
@@ -37,6 +30,18 @@ export const MIN_BUN_FOR_TLS_MODE = "1.4.0";
  */
 export const MIN_BUN_FOR_PINNED_WEBSOCKETS = "1.4.4";
 
+/**
+ * The oldest Deno whose `node:https` and `ws` run a caller's certificate
+ * check. An older one never calls it, so a peer without the attested key
+ * would receive the request.
+ */
+export const MIN_DENO_FOR_TLS_MODE = "2.8.0";
+
+/** Why the TLS mode and a pinned WebSocket are refused on a Deno older than {@link MIN_DENO_FOR_TLS_MODE}. */
+export function pinningUnavailableOnDeno(version: string): string {
+  return `pinning the server certificate needs Deno ${MIN_DENO_FOR_TLS_MODE} or later: Deno ${version} connects without running the caller's certificate check; for requests, the "ehbp" transport mode seals request and response bodies to the enclave's key instead`;
+}
+
 /** Why the TLS mode is refused on a Bun older than {@link MIN_BUN_FOR_TLS_MODE}. */
 export function tlsUnavailableOnBun(version: string): string {
   return `the "tls" transport mode pins the server certificate, which Bun ${version} checks only after sending the request; use Bun ${MIN_BUN_FOR_TLS_MODE} or later, or "ehbp", which seals request and response bodies to the enclave's key instead`;
@@ -51,26 +56,13 @@ export function webSocketsUnavailableOnBun(version: string): string {
 export interface RuntimeGlobals {
   readonly process?: { readonly versions?: { readonly node?: string; readonly bun?: string } };
   readonly Bun?: unknown;
-  readonly navigator?: { readonly userAgent?: string };
+  readonly Deno?: { readonly version?: { readonly deno?: string } };
 }
 
-/** Whether `globals` belong to a server: Node, Bun, or a runtime that emulates Node; anything else is treated as a browser. */
+/** Whether `globals` belong to Node or Bun, the runtimes that expose the TLS connection; anything else is treated as a browser. */
 export function isServerRuntime(globals: RuntimeGlobals = globalThis as RuntimeGlobals): boolean {
   const versions = globals.process?.versions;
   return Boolean(versions?.node) || Boolean(versions?.bun) || globals.Bun !== undefined;
-}
-
-/**
- * Whether `globals` belong to a runtime that runs a caller's certificate
- * check in its own TLS handshake: Bun, or Node by its own user agent. A
- * runtime that emulates Node (Deno, Cloudflare Workers) sets
- * `process.versions.node` too, but its emulation of Node's TLS is not known
- * to run the check, and a check that never runs leaves the connection
- * unpinned without an error.
- */
-export function pinsTLS(globals: RuntimeGlobals = globalThis as RuntimeGlobals): boolean {
-  if (isBun(globals) || globals.Bun !== undefined) return true;
-  return Boolean(globals.process?.versions?.node) && globals.navigator?.userAgent?.startsWith(NODE_USER_AGENT_PREFIX) === true;
 }
 
 /** Whether `globals` belong to Bun, which pins TLS connections through its own fetch and WebSocket rather than Node's. */
@@ -86,7 +78,15 @@ export function isBun(globals: RuntimeGlobals = globalThis as RuntimeGlobals): b
  * counts as older.
  */
 export function bunOlderThan(floor: string, globals: RuntimeGlobals = globalThis as RuntimeGlobals): string | undefined {
-  const version = globals.process?.versions?.bun;
+  return olderThan(globals.process?.versions?.bun, floor);
+}
+
+/** {@link bunOlderThan} for the Deno that `globals` describe. */
+export function denoOlderThan(floor: string, globals: RuntimeGlobals = globalThis as RuntimeGlobals): string | undefined {
+  return olderThan(globals.Deno?.version?.deno, floor);
+}
+
+function olderThan(version: string | undefined, floor: string): string | undefined {
   if (version === undefined || version === "") return undefined;
   const have = parseVersion(version);
   if (have === undefined) return version;
@@ -104,16 +104,23 @@ function parseVersion(v: string): readonly [number, number, number] | undefined 
   return match === null ? undefined : [Number(match[1]), Number(match[2]), Number(match[3])];
 }
 
-/** TLS pinning where the runtime checks a connection before it sends over it (Node, or Bun from {@link MIN_BUN_FOR_TLS_MODE}); EHBP anywhere else. */
+/** TLS pinning where the runtime checks a connection before it sends over it (Node, Bun from {@link MIN_BUN_FOR_TLS_MODE}, Deno from {@link MIN_DENO_FOR_TLS_MODE}); EHBP anywhere else. */
 export function defaultTransportMode(globals: RuntimeGlobals = globalThis as RuntimeGlobals): TransportMode {
-  return pinsTLS(globals) && bunOlderThan(MIN_BUN_FOR_TLS_MODE, globals) === undefined ? "tls" : "ehbp";
+  const pins = bunOlderThan(MIN_BUN_FOR_TLS_MODE, globals) === undefined && denoOlderThan(MIN_DENO_FOR_TLS_MODE, globals) === undefined;
+  return isServerRuntime(globals) && pins ? "tls" : "ehbp";
 }
 
 /** Rejects a mode the platform can't provide. */
 export function checkTransportMode(mode: TransportMode, globals: RuntimeGlobals = globalThis as RuntimeGlobals): void {
   if (mode !== "tls") return;
   if (!isServerRuntime(globals)) throw new ConfigurationError(TLS_UNAVAILABLE_IN_BROWSERS);
-  if (!pinsTLS(globals)) throw new ConfigurationError(TLS_UNAVAILABLE_ON_NODE_EMULATION);
   const old = bunOlderThan(MIN_BUN_FOR_TLS_MODE, globals);
   if (old !== undefined) throw new ConfigurationError(tlsUnavailableOnBun(old));
+  checkDenoPins(globals);
+}
+
+/** Rejects a Deno older than {@link MIN_DENO_FOR_TLS_MODE}, which pins no connection. */
+export function checkDenoPins(globals: RuntimeGlobals = globalThis as RuntimeGlobals): void {
+  const old = denoOlderThan(MIN_DENO_FOR_TLS_MODE, globals);
+  if (old !== undefined) throw new ConfigurationError(pinningUnavailableOnDeno(old));
 }

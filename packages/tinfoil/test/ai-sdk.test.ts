@@ -151,7 +151,7 @@ describe("createTinfoil's option checks", () => {
     );
     expect(sealed.httpClient).toBeInstanceOf(EnclaveHTTPClient);
     expect(sealed.httpClient.pin).toEqual({ repo: "tinfoilsh/repo", project: "tinfoilsh/project" });
-    const node = { process: { versions: { node: "22.0.0" } }, navigator: { userAgent: "Node.js/22" } } as RuntimeGlobals;
+    const node = { process: { versions: { node: "22.0.0" } } } as RuntimeGlobals;
     await expect(createTinfoilProvider({ apiKey: "k", transportMode: "tls", verifier: verifier({ tls: TEST_PIN }) }, { ...s, globals: node })).resolves.toBeDefined();
   });
 

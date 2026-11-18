@@ -152,7 +152,7 @@ describe("EnclaveHTTPClient.create", () => {
     const network = recordingFetch(runtimeFetch);
     const refused = /fetch option .* requires transportMode "ehbp"/;
     expect(() => checkEnclaveOptions("enclave.example", { fetch: network.fetch, transportMode: "tls" })).toThrow(refused);
-    expect(() => checkEnclaveOptions("enclave.example", { fetch: network.fetch }, { process: { versions: { node: "22.0.0" } }, navigator: { userAgent: "Node.js/22" } })).toThrow(refused);
+    expect(() => checkEnclaveOptions("enclave.example", { fetch: network.fetch }, { process: { versions: { node: "22.0.0" } } })).toThrow(refused);
     expect(checkEnclaveOptions("enclave.example", { fetch: network.fetch, transportMode: "ehbp" })).toEqual({ mode: "ehbp", baseURL: "" });
     // A browser resolves no mode to EHBP, so the option needs no mode there; the TLS mode is refused for the browser's own reason.
     const worker = { self: {} } as unknown as Parameters<typeof checkEnclaveOptions>[2];

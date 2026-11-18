@@ -5,12 +5,11 @@
  */
 import { describe, expect, it } from "vitest";
 import { ConfigurationError } from "../src/errors.js";
-import { checkAPIKeyRuntime } from "../src/internal/credential.js";
-import { bunOlderThan, checkTransportMode, defaultTransportMode, MIN_BUN_FOR_TLS_MODE, pinsTLS, type RuntimeGlobals } from "../src/internal/platform.js";
+import { bunOlderThan, checkTransportMode, defaultTransportMode, MIN_BUN_FOR_TLS_MODE, MIN_DENO_FOR_TLS_MODE, type RuntimeGlobals } from "../src/internal/platform.js";
 import { checkWebSocketCapability } from "../src/internal/websocket.js";
 
 const bun = (version: string): RuntimeGlobals => ({ process: { versions: { bun: version } } });
-const node: RuntimeGlobals = { process: { versions: { node: "22.0.0" } }, navigator: { userAgent: "Node.js/22" } };
+const node: RuntimeGlobals = { process: { versions: { node: "22.0.0" } } };
 
 describe("Bun version floors", () => {
   it("orders versions numerically, ignores a canary tag, counts an unreadable version as old, and knows nothing of other runtimes", () => {
@@ -41,30 +40,21 @@ describe("Bun version floors", () => {
   });
 });
 
-describe("runtimes that emulate Node", () => {
-  const emulating = (userAgent?: string): RuntimeGlobals => ({ process: { versions: { node: "22.0.0" } }, navigator: { userAgent } });
+describe("Deno version floor", () => {
+  const deno = (version: string): RuntimeGlobals => ({ process: { versions: { node: "22.0.0" } }, Deno: { version: { deno: version } } });
 
-  it("pins TLS on Node and Bun only", () => {
-    expect(pinsTLS(node)).toBe(true);
-    expect(pinsTLS(bun(MIN_BUN_FOR_TLS_MODE))).toBe(true);
-    expect(pinsTLS({ Bun: {} })).toBe(true);
-    expect(pinsTLS({})).toBe(false);
-    expect(pinsTLS({ navigator: { userAgent: "Node.js/22" } })).toBe(false);
-  });
-
-  it.each([
-    ["Deno", emulating("Deno/2.5.0")],
-    ["Cloudflare Workers", emulating("Cloudflare-Workers")],
-    ["a runtime with another name", emulating("Other/1.0")],
-    ["a runtime with no name", emulating()],
-    ["a runtime with no navigator", { process: { versions: { node: "22.0.0" } } }],
-  ])("gives %s the EHBP default, refuses the TLS mode and a pinned WebSocket, and still takes an API key", (_name, globals) => {
-    expect(pinsTLS(globals)).toBe(false);
-    expect(defaultTransportMode(globals)).toBe("ehbp");
-    expect(() => checkTransportMode("ehbp", globals)).not.toThrow();
-    expect(() => checkTransportMode("tls", globals)).toThrow(ConfigurationError);
-    expect(() => checkTransportMode("tls", globals)).toThrow(/identifies itself as neither .* use "ehbp"/);
-    expect(() => checkWebSocketCapability(globals)).toThrow(/identifies itself as neither/);
-    expect(() => checkAPIKeyRuntime("key", globals)).not.toThrow();
+  it("gives a Deno that never runs the certificate check the browser default, and refuses the TLS mode and a pinned WebSocket on it by name", () => {
+    for (const old of ["2.7.14", "2.5.0"]) {
+      expect(defaultTransportMode(deno(old))).toBe("ehbp");
+      expect(() => checkTransportMode("ehbp", deno(old))).not.toThrow();
+      expect(() => checkTransportMode("tls", deno(old))).toThrow(ConfigurationError);
+      expect(() => checkTransportMode("tls", deno(old))).toThrow(`needs Deno 2.8.0 or later: Deno ${old} connects without`);
+      expect(() => checkWebSocketCapability(deno(old))).toThrow(`needs Deno 2.8.0 or later: Deno ${old} connects without`);
+    }
+    for (const current of [MIN_DENO_FOR_TLS_MODE, "2.9.8"]) {
+      expect(defaultTransportMode(deno(current))).toBe("tls");
+      expect(() => checkTransportMode("tls", deno(current))).not.toThrow();
+      expect(() => checkWebSocketCapability(deno(current))).not.toThrow();
+    }
   });
 });
