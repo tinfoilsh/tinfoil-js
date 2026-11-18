@@ -184,17 +184,20 @@ function checkTcb(e: SevExpectations, q: SevQuote): void {
   atMost(e.minimumTcb, "policy minimum TCB", reported, "report's REPORTED_TCB");
 }
 
+/** SEV firmware in AMD's order: API major, then minor, then the build within that API version. Each part is one byte. */
+function firmwareVersion(major: number, minor: number, build: number): number {
+  return (major << 16) | (minor << 8) | build;
+}
+
 function checkVersion(e: SevExpectations, r: SevReport): void {
   const minimumBuild = e.policy.minimumBuild ?? 0;
-  if (minimumBuild > r.currentBuild) {
-    throw new Error(`firmware build number ${r.currentBuild} is less than the required minimum ${minimumBuild}`);
+  const minimum = (e.minimumVersion << 8) | minimumBuild;
+  const below = (what: string, major: number, minor: number, build: number): Error =>
+    new Error(`${what} ${major}.${minor} build ${build} is below the endorsed minimum ${e.minimumVersion >> 8}.${e.minimumVersion & 0xff} build ${minimumBuild}`);
+  if (firmwareVersion(r.currentMajor, r.currentMinor, r.currentBuild) < minimum) {
+    throw below("firmware version", r.currentMajor, r.currentMinor, r.currentBuild);
   }
   const current = (r.currentMajor << 8) | r.currentMinor;
-  if (e.minimumVersion > current) {
-    throw new Error(
-      `firmware API version (${r.currentMajor}.${r.currentMinor}) is less than the required minimum (${e.minimumVersion >> 8}.${e.minimumVersion & 0xff})`,
-    );
-  }
   const committed = (r.committedMajor << 8) | r.committedMinor;
   if (!e.policy.permitProvisionalFirmware) {
     if (r.committedBuild !== r.currentBuild) {
@@ -206,23 +209,15 @@ function checkVersion(e: SevExpectations, r: SevReport): void {
       );
     }
   } else {
-    if (r.committedBuild > r.currentBuild) {
-      throw new Error(`committed build number ${r.committedBuild} is greater than the current build number ${r.currentBuild}`);
-    }
-    if (committed > current) {
+    if (firmwareVersion(r.committedMajor, r.committedMinor, r.committedBuild) > firmwareVersion(r.currentMajor, r.currentMinor, r.currentBuild)) {
       throw new Error(
-        `committed API version (${r.committedMajor}.${r.committedMinor}) is greater than the current API version (${r.currentMajor}.${r.currentMinor})`,
+        `committed firmware version ${r.committedMajor}.${r.committedMinor} build ${r.committedBuild} is later than the current version ${r.currentMajor}.${r.currentMinor} build ${r.currentBuild}`,
       );
     }
     // The committed firmware is what the machine can fall back to, so the
-    // floors apply to it as well as to the running firmware.
-    if (minimumBuild > r.committedBuild) {
-      throw new Error(`committed build number ${r.committedBuild} is less than the required minimum ${minimumBuild}`);
-    }
-    if (e.minimumVersion > committed) {
-      throw new Error(
-        `committed API version (${r.committedMajor}.${r.committedMinor}) is less than the required minimum (${e.minimumVersion >> 8}.${e.minimumVersion & 0xff})`,
-      );
+    // floor applies to it as well as to the running firmware.
+    if (firmwareVersion(r.committedMajor, r.committedMinor, r.committedBuild) < minimum) {
+      throw below("committed firmware version", r.committedMajor, r.committedMinor, r.committedBuild);
     }
   }
 }
