@@ -32,9 +32,9 @@ export const MIN_BUN_FOR_PINNED_WEBSOCKETS = "1.4.4";
 
 /**
  * The oldest Deno whose `node:https` and `ws` both run a caller's
- * certificate check. Before 2.7 neither calls it, so a peer without the
- * attested key would receive the request; late 2.7 releases run it for
- * `node:https` and crash on a rejected `ws` connection.
+ * certificate check. Through 2.7.0 `node:https` never calls it, so a peer
+ * without the attested key would receive the request; 2.7.14 runs it for
+ * `node:https` and crashes on a rejected `ws` connection.
  */
 export const MIN_DENO_FOR_TLS_MODE = "2.8.0";
 
