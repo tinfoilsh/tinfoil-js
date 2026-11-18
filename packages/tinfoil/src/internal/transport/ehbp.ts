@@ -6,9 +6,10 @@
  * nothing after the handshake would be sealed. A request body is sealed as
  * framed chunks and sent in full before the response begins, so a streaming
  * request body is accepted but its response cannot interleave with it. A
- * redirect is never followed: it is handed back to the caller, or, in a
- * browser, which hides where it leads, failed as a network error. This mode
- * works wherever fetch does, browsers included.
+ * redirect is never followed. One that answers a sealed request is failed as
+ * a network error; one that answers a request without a body is handed back
+ * to the caller, or, in a browser, which hides where it leads, failed too.
+ * This mode works wherever fetch does, browsers included.
  */
 import type { Verification } from "@tinfoilsh/verifier";
 import { Identity, PROTOCOL, type RequestContext } from "ehbp";
@@ -27,6 +28,8 @@ const TUNNEL =
 
 /** Headers the protocol owns; a caller setting one would be overwritten or break framing. */
 const RESERVED_HEADERS = ["content-length", "transfer-encoding", "host", PROTOCOL.ENCAPSULATED_KEY_HEADER.toLowerCase(), PROTOCOL.RESPONSE_NONCE_HEADER.toLowerCase()];
+
+const REDIRECTED = "the server redirected the request, which a sealed request does not follow";
 
 const MAX_PROBLEM_BYTES = 64 * 1024;
 
@@ -112,6 +115,12 @@ async function sealedFetch(identity: Identity, send: Fetch, input: string | URL 
     // The response headers mean the upload finished; what the sealing spooled is done.
     await sealed.cleanup?.().catch(() => {});
   }
+  // A redirect is refused with or without a nonce: nothing authenticates
+  // where it points, and what follows one need not be sealed.
+  if (response.status >= 300 && response.status < 400) {
+    await response.body?.cancel().catch(() => {});
+    throw new NetworkError(REDIRECTED);
+  }
   await rejectKeyMismatch(response);
   if (response.headers.has(PROTOCOL.RESPONSE_NONCE_HEADER)) {
     try {
@@ -124,7 +133,7 @@ async function sealedFetch(identity: Identity, send: Fetch, input: string | URL 
     }
   }
   // An error status may come from a proxy or from the peer before it could seal.
-  if (!response.ok) return response;
+  if (response.status >= 400) return response;
   await response.body?.cancel().catch(() => {});
   throw new NetworkError(`sealed exchange answered without the ${PROTOCOL.RESPONSE_NONCE_HEADER} header`);
 }
@@ -147,7 +156,7 @@ async function deliver(send: Fetch, sealed: Request, request: Request): Promise<
   // A runtime that hides redirects (a browser) answers with an opaque response that tells nothing of where the request would have gone.
   if (response.type === "opaqueredirect") {
     await response.body?.cancel().catch(() => {});
-    throw new NetworkError("the server redirected the request, which a sealed request does not follow");
+    throw new NetworkError(REDIRECTED);
   }
   return response;
 }
