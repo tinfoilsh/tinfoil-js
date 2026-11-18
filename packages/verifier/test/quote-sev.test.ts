@@ -547,17 +547,21 @@ describe.skipIf(withoutVectors)(vectorsTitle("sev expectations"), () => {
   it("enforces the firmware build and version floors and committed firmware", () => {
     const e = assemble();
     const r = q.report;
-    expect(() => validateSev(assemble({ ...policy, minimumBuild: r.currentBuild + 1 }), q)).toThrow(/build number .* is less than the required minimum/);
-    expect(() => validateSev(assemble({ ...policy, minimumApiVersion: "255.0" }), q)).toThrow(/API version .* is less than the required minimum \(255\.0\)/);
+    const own = `${r.currentMajor}.${r.currentMinor}`;
+    expect(() => validateSev(assemble({ ...policy, minimumApiVersion: own, minimumBuild: r.currentBuild + 1 }), q)).toThrow(/firmware version .* is below the endorsed minimum/);
+    expect(() => validateSev(assemble({ ...policy, minimumApiVersion: "255.0" }), q)).toThrow(/is below the endorsed minimum 255\.0 build/);
+    // The API version orders before the build: an earlier version with a later build is still earlier.
+    expect(() => validateSev(assemble({ ...policy, minimumApiVersion: `${r.currentMajor}.${r.currentMinor - 1}`, minimumBuild: 255 }), q)).not.toThrow();
+    expect(() => validateSev(assemble({ ...policy, minimumApiVersion: `${r.currentMajor}.${r.currentMinor + 1}`, minimumBuild: 0 }), q)).toThrow(/is below the endorsed minimum/);
     expect(() => validateSev(e, withReport({ committedBuild: r.currentBuild + 1 }))).toThrow(/committed build number .* does not match/);
     expect(() => validateSev(e, withReport({ committedMinor: r.currentMinor + 1 }))).toThrow(/committed API version .* does not match/);
     const provisional = assemble({ ...policy, permitProvisionalFirmware: true });
     expect(() => validateSev(provisional, withReport({ committedBuild: r.currentBuild + 1 }))).toThrow(/is greater than the current build number/);
     // Provisional firmware does not lift the floors off the committed firmware.
-    const buildFloor = assemble({ ...policy, permitProvisionalFirmware: true, minimumBuild: r.currentBuild });
-    expect(() => validateSev(buildFloor, withReport({ committedBuild: r.currentBuild - 1 }))).toThrow(/committed build number .* is less than the required minimum/);
-    const versionFloor = assemble({ ...policy, permitProvisionalFirmware: true, minimumApiVersion: `${r.currentMajor}.${r.currentMinor}` });
-    expect(() => validateSev(versionFloor, withReport({ committedMinor: r.currentMinor - 1 }))).toThrow(/committed API version .* is less than the required minimum/);
+    const buildFloor = assemble({ ...policy, permitProvisionalFirmware: true, minimumApiVersion: own, minimumBuild: r.currentBuild });
+    expect(() => validateSev(buildFloor, withReport({ committedBuild: r.currentBuild - 1 }))).toThrow(/committed firmware version .* is below the endorsed minimum/);
+    const versionFloor = assemble({ ...policy, permitProvisionalFirmware: true, minimumApiVersion: own });
+    expect(() => validateSev(versionFloor, withReport({ committedMinor: r.currentMinor - 1 }))).toThrow(/committed firmware version .* is below the endorsed minimum/);
     expect(() => validateSev(assemble({ ...policy, minimumGuestSvn: r.guestSvn + 1 }), q)).toThrow(/GUEST_SVN .* is less than the required minimum/);
     expect(() => validateSev(assemble({ ...policy, vmpl: 3n }), withReport({ vmpl: 2 }))).toThrow(/report VMPL 2 is not 3/);
   });
