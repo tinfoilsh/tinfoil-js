@@ -495,6 +495,7 @@ const TIMESTAMP_REJECTIONS: Readonly<Record<string, RegExp>> = {
   "after-window": /authority 0: not valid at/,
   "before-window": /authority 0: not valid at/,
   "eku-not-critical": /extended key usage must be critical/,
+  "embedded-lookalike-signer": /authority 0: the timestamp signature does not verify/,
   "granted-with-mods": /not granted \(status 1\)/,
   "imprint-mismatch": /does not match the input/,
   "no-eku": /has no extended key usage/,
