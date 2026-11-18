@@ -5,7 +5,9 @@
  */
 import { describe, expect, it } from "vitest";
 import { ConfigurationError } from "../src/errors.js";
-import { bunOlderThan, checkTransportMode, defaultTransportMode, MIN_BUN_FOR_TLS_MODE, type RuntimeGlobals } from "../src/internal/platform.js";
+import { checkAPIKeyRuntime } from "../src/internal/credential.js";
+import { bunOlderThan, checkTransportMode, defaultTransportMode, MIN_BUN_FOR_TLS_MODE, pinsTLS, type RuntimeGlobals } from "../src/internal/platform.js";
+import { checkWebSocketCapability } from "../src/internal/websocket.js";
 
 const bun = (version: string): RuntimeGlobals => ({ process: { versions: { bun: version } } });
 const node: RuntimeGlobals = { process: { versions: { node: "22.0.0" } } };
@@ -36,5 +38,30 @@ describe("Bun version floors", () => {
     expect(() => checkTransportMode("ehbp", bun("1.3.14"))).not.toThrow();
     expect(() => checkTransportMode("tls", bun(MIN_BUN_FOR_TLS_MODE))).not.toThrow();
     expect(() => checkTransportMode("tls", node)).not.toThrow();
+  });
+});
+
+describe("runtimes that emulate Node", () => {
+  const deno: RuntimeGlobals = { process: { versions: { node: "22.0.0" } }, Deno: {} };
+  const workers: RuntimeGlobals = { process: { versions: { node: "22.0.0" } }, navigator: { userAgent: "Cloudflare-Workers" } };
+
+  it("pins TLS on Node and Bun only", () => {
+    expect(pinsTLS(node)).toBe(true);
+    expect(pinsTLS({ ...node, navigator: { userAgent: "Node.js/22" } })).toBe(true);
+    expect(pinsTLS(bun(MIN_BUN_FOR_TLS_MODE))).toBe(true);
+    expect(pinsTLS({})).toBe(false);
+  });
+
+  it.each([
+    ["Deno", deno],
+    ["Cloudflare Workers", workers],
+  ])("gives %s the EHBP default, refuses the TLS mode and a pinned WebSocket, and still takes an API key", (_name, globals) => {
+    expect(pinsTLS(globals)).toBe(false);
+    expect(defaultTransportMode(globals)).toBe("ehbp");
+    expect(() => checkTransportMode("ehbp", globals)).not.toThrow();
+    expect(() => checkTransportMode("tls", globals)).toThrow(ConfigurationError);
+    expect(() => checkTransportMode("tls", globals)).toThrow(/which this runtime only emulates; use "ehbp"/);
+    expect(() => checkWebSocketCapability(globals)).toThrow(/which this runtime only emulates/);
+    expect(() => checkAPIKeyRuntime("key", globals)).not.toThrow();
   });
 });

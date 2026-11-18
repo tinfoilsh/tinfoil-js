@@ -16,10 +16,17 @@ export const TLS_UNAVAILABLE_IN_BROWSERS = 'the "tls" transport mode pins the se
 export interface RuntimeGlobals {
   readonly process?: { readonly versions?: { readonly node?: string; readonly bun?: string } };
   readonly Bun?: unknown;
+  readonly Deno?: unknown;
+  readonly navigator?: { readonly userAgent?: string };
 }
 
 /** Never a server in the browser build: the secret stays in memory and the transport default is EHBP. */
 export function isServerRuntime(_globals: RuntimeGlobals = globalThis as RuntimeGlobals): boolean {
+  return false;
+}
+
+/** Never pins TLS in the browser build. */
+export function pinsTLS(_globals: RuntimeGlobals = globalThis as RuntimeGlobals): boolean {
   return false;
 }
 

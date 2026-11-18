@@ -10,11 +10,14 @@
 import type * as WS from "ws";
 import { AttestationError, ConfigurationError } from "../errors.js";
 import type { PinnedWebSocket, WebSocketOptions } from "../options.js";
-import { isServerRuntime, type RuntimeGlobals } from "./platform.js";
+import { isServerRuntime, pinsTLS, type RuntimeGlobals } from "./platform.js";
 import { normalizedOrigin } from "./transport/origin.js";
 import { isCertificateError } from "./transport/pin-errors.js";
 import type { TLSOptions } from "./transport/tls.js";
 import type { KeyedTransport } from "./transport/transport.js";
+
+/** Why a verified WebSocket is refused on a runtime that emulates Node. */
+export const WEBSOCKETS_UNAVAILABLE_ON_NODE_EMULATION = "a verified WebSocket pins the server certificate in Node's or Bun's TLS handshake, which this runtime only emulates, so it can't be opened here";
 
 export const WEBSOCKETS_UNAVAILABLE_IN_BROWSERS = "a verified WebSocket pins the server certificate, which browsers don't expose to scripts, so it can't be opened from a browser";
 
@@ -41,6 +44,7 @@ export function webSocketAccessOf(client: object): WebSocketAccess {
 /** Rejects a runtime that can't pin a connection. */
 export function checkWebSocketCapability(globals: RuntimeGlobals = globalThis as RuntimeGlobals): void {
   if (!isServerRuntime(globals)) throw new ConfigurationError(WEBSOCKETS_UNAVAILABLE_IN_BROWSERS);
+  if (!pinsTLS(globals)) throw new ConfigurationError(WEBSOCKETS_UNAVAILABLE_ON_NODE_EMULATION);
 }
 
 /**

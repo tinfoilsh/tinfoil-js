@@ -2,7 +2,8 @@
  * What the platform allows of the transport modes. Node and Bun expose the
  * TLS connection, so both modes are available and TLS pinning is the
  * default; a Bun too old to check a connection before it sends over it
- * gets the browser default. Anywhere else, a browser page or a worker
+ * gets the browser default, and so does a runtime that only emulates Node
+ * (Deno, Cloudflare Workers), whose TLS is not known to run the pin. Anywhere else, a browser page or a worker
  * reached by a bundler that ignored the browser build, this module behaves
  * as the browser build does: a runtime is a server only when it says so.
  */
@@ -14,6 +15,12 @@ export const PLATFORM: "node" | "browser" = "node";
 
 /** Why the TLS mode is refused in a browser. */
 export const TLS_UNAVAILABLE_IN_BROWSERS = 'the "tls" transport mode pins the server certificate, which browsers don\'t expose to scripts; use "ehbp", the browser default, which seals request and response bodies to the enclave\'s key instead';
+
+/** Why the TLS mode is refused on a runtime that emulates Node. */
+export const TLS_UNAVAILABLE_ON_NODE_EMULATION = 'the "tls" transport mode pins the server certificate in Node\'s or Bun\'s TLS handshake, which this runtime only emulates; use "ehbp", which seals request and response bodies to the enclave\'s key instead';
+
+/** The user agent that Cloudflare Workers report. */
+const WORKERS_USER_AGENT = "Cloudflare-Workers";
 
 /**
  * The oldest Bun whose fetch runs a caller's certificate check before it
@@ -44,12 +51,25 @@ export function webSocketsUnavailableOnBun(version: string): string {
 export interface RuntimeGlobals {
   readonly process?: { readonly versions?: { readonly node?: string; readonly bun?: string } };
   readonly Bun?: unknown;
+  readonly Deno?: unknown;
+  readonly navigator?: { readonly userAgent?: string };
 }
 
-/** Whether `globals` belong to Node or Bun, the runtimes that expose the TLS connection; anything else is treated as a browser. */
+/** Whether `globals` belong to a server: Node, Bun, or a runtime that emulates Node; anything else is treated as a browser. */
 export function isServerRuntime(globals: RuntimeGlobals = globalThis as RuntimeGlobals): boolean {
   const versions = globals.process?.versions;
   return Boolean(versions?.node) || Boolean(versions?.bun) || globals.Bun !== undefined;
+}
+
+/**
+ * Whether `globals` belong to a runtime that runs a caller's certificate
+ * check in its own TLS handshake: Node and Bun. Deno and Cloudflare Workers
+ * identify themselves as Node, but their emulation of its TLS is not known
+ * to run the check, and a check that never runs leaves the connection
+ * unpinned without an error.
+ */
+export function pinsTLS(globals: RuntimeGlobals = globalThis as RuntimeGlobals): boolean {
+  return isServerRuntime(globals) && globals.Deno === undefined && globals.navigator?.userAgent !== WORKERS_USER_AGENT;
 }
 
 /** Whether `globals` belong to Bun, which pins TLS connections through its own fetch and WebSocket rather than Node's. */
@@ -85,13 +105,14 @@ function parseVersion(v: string): readonly [number, number, number] | undefined 
 
 /** TLS pinning where the runtime checks a connection before it sends over it (Node, or Bun from {@link MIN_BUN_FOR_TLS_MODE}); EHBP anywhere else. */
 export function defaultTransportMode(globals: RuntimeGlobals = globalThis as RuntimeGlobals): TransportMode {
-  return isServerRuntime(globals) && bunOlderThan(MIN_BUN_FOR_TLS_MODE, globals) === undefined ? "tls" : "ehbp";
+  return pinsTLS(globals) && bunOlderThan(MIN_BUN_FOR_TLS_MODE, globals) === undefined ? "tls" : "ehbp";
 }
 
 /** Rejects a mode the platform can't provide. */
 export function checkTransportMode(mode: TransportMode, globals: RuntimeGlobals = globalThis as RuntimeGlobals): void {
   if (mode !== "tls") return;
   if (!isServerRuntime(globals)) throw new ConfigurationError(TLS_UNAVAILABLE_IN_BROWSERS);
+  if (!pinsTLS(globals)) throw new ConfigurationError(TLS_UNAVAILABLE_ON_NODE_EMULATION);
   const old = bunOlderThan(MIN_BUN_FOR_TLS_MODE, globals);
   if (old !== undefined) throw new ConfigurationError(tlsUnavailableOnBun(old));
 }
