@@ -60,6 +60,8 @@ const XFAM_FIXED1 = 0x00000003n;
 const XFAM_FIXED0 = 0x0006dbe7n;
 /** TD attribute bits that may be set: TUD.DEBUG, SEPT_VE_DISABLE, PKS and PERFMON. */
 const TD_ATTRIBUTES_FIXED0 = 0x1n | (1n << 28n) | (1n << 30n) | (1n << 63n);
+/** The DEBUG bit of TDATTRIBUTES. */
+const TD_ATTRIBUTES_DEBUG = 1n << 0n;
 
 export interface TdxOptions {
   /** PEM root CA replacing the embedded Intel SGX root. Test-only. */
@@ -363,10 +365,12 @@ export function assembleTdx(policy: TdxPolicy, _q: TdxQuote, m: TdxMeasurement, 
  * MROWNERCONFIG and REPORT_DATA byte for byte; every TEE TCB SVN component
  * at least the minimum; XFAM and TD attributes within the fixed bit masks
  * every accepted TD must satisfy; and the TCB evaluation data number at
- * least the policy's floor.
+ * least the policy's floor. A debuggable TD is refused whatever the policy.
  */
 export function validateTdx(e: TdxExpectations, q: TdxQuote): void {
   const { header, body } = q.quote;
+  // Refused whatever the endorsed policy says.
+  if ((littleEndian64(body.tdAttributes) & TD_ATTRIBUTES_DEBUG) !== 0n) throw new Error("TD quote reports a debuggable TD");
   const exact = (name: string, got: Uint8Array, want: Uint8Array): void => {
     if (!bytesEqual(got, want)) throw new Error(`quote field ${name} is ${toHex(got)}, expected ${toHex(want)}`);
   };

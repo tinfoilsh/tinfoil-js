@@ -20,6 +20,7 @@ export type Platform = typeof PLATFORM_SEV_SNP | typeof PLATFORM_TDX;
 const SEV_IDENTIFIER_HEX_LEN = 128;
 const TDX_IDENTIFIER_HEX_LEN = 32;
 const LOWER_HEX_RE = /^[0-9a-f]+$/;
+const ALL_ZEROS_RE = /^0+$/;
 
 /** TDX platform registers for one VM shape. */
 export interface PlatformMeasurement {
@@ -147,6 +148,7 @@ function validate(a: Artifact): void {
     const id = truncId(identifier);
     if (p === undefined) throw new Error(`machine ${id}...: unknown policy ${JSON.stringify(policyName)}`);
     if (!LOWER_HEX_RE.test(identifier)) throw new Error(`machine ${id}...: identifier is not lowercase hex`);
+    if (ALL_ZEROS_RE.test(identifier)) throw new Error(`machine ${id}...: identifier must not be all zeros`);
     switch (p.platform) {
       case PLATFORM_SEV_SNP:
         if (identifier.length !== SEV_IDENTIFIER_HEX_LEN) {

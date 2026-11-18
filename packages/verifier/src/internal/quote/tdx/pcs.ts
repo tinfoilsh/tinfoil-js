@@ -266,6 +266,9 @@ export function rootCrl(c: PcsCollateral, uris: readonly string[]): Uint8Array {
   throw new Error(`intel-pcs collateral has no captured response for the root CA CRL (${uris.join(", ")})`);
 }
 
+/** A statement response has the signed member and its signature, and nothing else. */
+const STATEMENT_RESPONSE_MEMBERS = 2;
+
 function decodeStatement(body: Uint8Array, member: string): { value: JsonObject; signed: Uint8Array; signature: Uint8Array } {
   if (body.length === 0) throw new Error(`${member} response is empty`);
   let top: JsonValue;
@@ -279,6 +282,7 @@ function decodeStatement(body: Uint8Array, member: string): { value: JsonObject;
   if (value === undefined) throw new Error(`${member} response has no ${JSON.stringify(member)} member`);
   const signature = hexBytes(o, "signature");
   if (signature.length !== 64) throw new Error(`${member} signature is ${signature.length} bytes, expected 64`);
+  if (o.size !== STATEMENT_RESPONSE_MEMBERS) throw new Error(`${member} response must contain exactly the ${JSON.stringify(member)} and "signature" members`);
   return { value: object(value, member), signed: memberValueBytes(body, member), signature };
 }
 

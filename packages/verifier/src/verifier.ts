@@ -94,7 +94,8 @@ export interface EmbeddedReferences {
  * Names the workload a caller trusts. `repo` and `project` are separate
  * namespaces with unrelated owners, so neither is satisfied by the other's
  * collateral. Setting both accepts either; with neither, any config the
- * verifier's trust authorizes is accepted. An absent part and "" are the same.
+ * verifier's trust authorizes is accepted, which is a UsageError under default
+ * config trust. An absent part and "" are the same.
  */
 export interface Pin {
   /** A GitHub repository, `owner/name[@tag][@sha256:digest]`. */
@@ -252,12 +253,14 @@ export class Verifier {
 
   /**
    * Throws UsageError, without a document or network I/O, for a pin that
-   * verification rejects whatever the document: a malformed reference, a
+   * verification rejects whatever the document: one that names nothing under
+   * default config trust, a malformed reference, a
    * `repo` set alone when the verifier verifies registry collateral only, or
    * a `project` that its config authorizer or embedded config cannot match.
    */
   checkPinVerifiability(pin: Pin): void {
     const { repo, project } = pinOf(pin);
+    this.#requirePin(repo, project);
     if (repo !== "") {
       usage(() => parseReference(repo));
       if (project === "" && this.#requiresConfigCollateral()) {
@@ -285,6 +288,7 @@ export class Verifier {
     }
     const { repo, project } = pinOf(pin);
     // A malformed pin is a usage error for any document.
+    this.#requirePin(repo, project);
     if (repo !== "") usage(() => parseReference(repo));
     this.#referencePins(project);
     const now = new Date(verificationTime.getTime());
@@ -338,6 +342,13 @@ export class Verifier {
   }
 
   // ---------------------------------------------------------------- code releases (collateral v2)
+
+  /** Refuses a pin that names nothing under default config trust, which would accept any config in the public registry. */
+  #requirePin(repo: string, project: string): void {
+    const p = this.#policy;
+    if (repo !== "" || project !== "" || p.embedded.configReference !== undefined || p.configAuthorizer !== undefined || p.configKeysPinned || p.configRegistryIDs !== undefined) return;
+    throw new UsageError("pin names nothing: set repo or project, or configure the verifier's config trust");
+  }
 
   #requiresConfigCollateral(): boolean {
     const e = this.#policy.embedded;

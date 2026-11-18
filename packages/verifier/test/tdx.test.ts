@@ -325,6 +325,15 @@ describe.skipIf(withoutVectors)(vectorsTitle("PCS statements and chains"), () =>
     expect(() => tcbInfo(edited((t) => t.replace(/"signature":"[0-9a-f]+"/, '"signature":"0011"')), SYNTH_FMSPC)).toThrow(/signature is 2 bytes/);
     expect(() => tcbInfo(edited((t) => t.replace('"mrsigner":"0000', '"mrsigner":"zz00')), SYNTH_FMSPC)).toThrow(/mrsigner is not hex/);
   });
+
+  it("rejects a statement response with a member beside the statement and its signature", () => {
+    const withExtra = (path: string): ReturnType<typeof indexCollateral> =>
+      indexCollateral(
+        happyResponses.map((r) => (r.url.includes(path) ? { ...r, body: utf8(new TextDecoder().decode(r.body).replace(/\}\s*$/, ',"extra":1}')) } : r)),
+      );
+    expect(() => tcbInfo(withExtra("/tcb?"), SYNTH_FMSPC)).toThrow(/tcbInfo response must contain exactly the "tcbInfo" and "signature" members/);
+    expect(() => qeIdentity(withExtra("/qe/identity"))).toThrow(/enclaveIdentity response must contain exactly the "enclaveIdentity" and "signature" members/);
+  });
 });
 
 // ---------------------------------------------------------------- TCB evaluation
@@ -579,6 +588,8 @@ describe.skipIf(withoutVectors)(vectorsTitle("assembleTdx and validateTdx"), () 
     const attrs = withBody({ tdAttributes: hex("0200004000000000") });
     expect(() => validateTdx({ ...expectations(), tdAttributes: attrs.quote.body.tdAttributes }, attrs)).toThrow(/TD attributes .* set bits outside/);
     const debug = withBody({ tdAttributes: hex("0100004000000000") });
-    expect(() => validateTdx({ ...expectations(), tdAttributes: debug.quote.body.tdAttributes }, debug)).not.toThrow();
+    // A debuggable TD is refused even when the endorsed TD attributes match it.
+    expect(() => validateTdx({ ...expectations(), tdAttributes: debug.quote.body.tdAttributes }, debug)).toThrow(/TD quote reports a debuggable TD/);
+    expect(() => validateTdx(expectations(), debug)).toThrow(/TD quote reports a debuggable TD/);
   });
 });

@@ -414,7 +414,6 @@ describe("the document's collateral selects the part of the pin that applies", (
     ["repository collateral, both", FORMAT_V2, both, SIGSTORE_CODE_V1_FORMAT],
     ["registry collateral, project", FORMAT_V3, project, CONFIG_ID],
     ["registry collateral, repository", FORMAT_V3, repo, repositoryOnly],
-    ["registry collateral, no pin", FORMAT_V3, {}, CONFIG_ID],
     ["registry collateral, both", FORMAT_V3, both, CONFIG_ID],
   ])("%s", async (_name, format, pin, want) => {
     const v = await Verifier.create();
@@ -428,7 +427,7 @@ describe("the document's collateral selects the part of the pin that applies", (
     const v = await Verifier.create();
     for (const format of [FORMAT_V2, FORMAT_V3]) {
       const doc = await document(format);
-      for (const pin of [{ repo: "not a reference" }, { project: "not a reference" }, { repo: "org/project", project: "not a reference" }, { repo: "not a reference", project: "org/project" }]) {
+      for (const pin of [{}, { repo: "not a reference" }, { project: "not a reference" }, { repo: "org/project", project: "not a reference" }, { repo: "not a reference", project: "org/project" }]) {
         await expect(v.verifyV3(doc, nonce, pin)).rejects.toThrow(UsageError);
       }
     }
@@ -461,8 +460,9 @@ describe("checkPinVerifiability", () => {
     ["defaults with a project", {}, { project: "org/repo@v1" }, true],
     ["defaults with a repository", {}, { repo: "Org/My_Repo" }, true],
     ["defaults with both", {}, { repo: "Org/My_Repo", project: "org/project" }, true],
-    ["defaults without a pin", {}, {}, true],
-    ["defaults with empty parts", {}, { repo: "", project: "" }, true],
+    ["defaults without a pin", {}, {}, false],
+    ["defaults with empty parts", {}, { repo: "", project: "" }, false],
+    ["registry IDs without a pin", { configRegistryIDs: [PUBLIC_REGISTRY_ID] }, {}, true],
     ["defaults with a malformed project", {}, { project: "not a reference" }, false],
     ["defaults with a malformed repository", {}, { repo: "not a reference" }, false],
     ["embedded config without a pin", embedded, {}, true],
