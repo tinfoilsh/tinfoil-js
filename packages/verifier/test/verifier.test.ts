@@ -427,7 +427,7 @@ describe("the document's collateral selects the part of the pin that applies", (
     const v = await Verifier.create();
     for (const format of [FORMAT_V2, FORMAT_V3]) {
       const doc = await document(format);
-      for (const pin of [{ repo: "not a reference" }, { project: "not a reference" }, { repo: "org/project", project: "not a reference" }, { repo: "not a reference", project: "org/project" }]) {
+      for (const pin of [{}, { repo: "not a reference" }, { project: "not a reference" }, { repo: "org/project", project: "not a reference" }, { repo: "not a reference", project: "org/project" }]) {
         await expect(v.verifyV3(doc, nonce, pin)).rejects.toThrow(UsageError);
       }
     }

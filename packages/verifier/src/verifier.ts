@@ -253,7 +253,8 @@ export class Verifier {
 
   /**
    * Throws UsageError, without a document or network I/O, for a pin that
-   * verification rejects whatever the document: a malformed reference, a
+   * verification rejects whatever the document: one that names nothing under
+   * default config trust, a malformed reference, a
    * `repo` set alone when the verifier verifies registry collateral only, or
    * a `project` that its config authorizer or embedded config cannot match.
    */
