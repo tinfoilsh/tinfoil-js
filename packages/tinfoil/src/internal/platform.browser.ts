@@ -16,12 +16,16 @@ export const TLS_UNAVAILABLE_IN_BROWSERS = 'the "tls" transport mode pins the se
 export interface RuntimeGlobals {
   readonly process?: { readonly versions?: { readonly node?: string; readonly bun?: string } };
   readonly Bun?: unknown;
+  readonly Deno?: { readonly version?: { readonly deno?: string } };
 }
 
 /** Never a server in the browser build: the secret stays in memory and the transport default is EHBP. */
 export function isServerRuntime(_globals: RuntimeGlobals = globalThis as RuntimeGlobals): boolean {
   return false;
 }
+
+/** Never Deno in the browser build. */
+export function checkDenoPins(_globals: RuntimeGlobals = globalThis as RuntimeGlobals): void {}
 
 /** Never Bun in the browser build; the transports that tell Bun from Node are mapped to stubs here. */
 export function isBun(_globals: RuntimeGlobals = globalThis as RuntimeGlobals): boolean {

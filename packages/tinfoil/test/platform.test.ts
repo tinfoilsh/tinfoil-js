@@ -5,7 +5,8 @@
  */
 import { describe, expect, it } from "vitest";
 import { ConfigurationError } from "../src/errors.js";
-import { bunOlderThan, checkTransportMode, defaultTransportMode, MIN_BUN_FOR_TLS_MODE, type RuntimeGlobals } from "../src/internal/platform.js";
+import { bunOlderThan, checkTransportMode, defaultTransportMode, MIN_BUN_FOR_TLS_MODE, MIN_DENO_FOR_TLS_MODE, type RuntimeGlobals } from "../src/internal/platform.js";
+import { checkWebSocketCapability } from "../src/internal/websocket.js";
 
 const bun = (version: string): RuntimeGlobals => ({ process: { versions: { bun: version } } });
 const node: RuntimeGlobals = { process: { versions: { node: "22.0.0" } } };
@@ -36,5 +37,24 @@ describe("Bun version floors", () => {
     expect(() => checkTransportMode("ehbp", bun("1.3.14"))).not.toThrow();
     expect(() => checkTransportMode("tls", bun(MIN_BUN_FOR_TLS_MODE))).not.toThrow();
     expect(() => checkTransportMode("tls", node)).not.toThrow();
+  });
+});
+
+describe("Deno version floor", () => {
+  const deno = (version: string): RuntimeGlobals => ({ process: { versions: { node: "22.0.0" } }, Deno: { version: { deno: version } } });
+
+  it("gives a Deno that never runs the certificate check the browser default, and refuses the TLS mode and a pinned WebSocket on it by name", () => {
+    for (const old of ["2.7.14", "2.5.0"]) {
+      expect(defaultTransportMode(deno(old))).toBe("ehbp");
+      expect(() => checkTransportMode("ehbp", deno(old))).not.toThrow();
+      expect(() => checkTransportMode("tls", deno(old))).toThrow(ConfigurationError);
+      expect(() => checkTransportMode("tls", deno(old))).toThrow(`needs Deno 2.8.0 or later: Deno ${old} connects without`);
+      expect(() => checkWebSocketCapability(deno(old))).toThrow(`needs Deno 2.8.0 or later: Deno ${old} connects without`);
+    }
+    for (const current of [MIN_DENO_FOR_TLS_MODE, "2.9.8"]) {
+      expect(defaultTransportMode(deno(current))).toBe("tls");
+      expect(() => checkTransportMode("tls", deno(current))).not.toThrow();
+      expect(() => checkWebSocketCapability(deno(current))).not.toThrow();
+    }
   });
 });

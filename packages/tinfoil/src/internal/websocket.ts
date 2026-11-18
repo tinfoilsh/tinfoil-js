@@ -10,7 +10,7 @@
 import type * as WS from "ws";
 import { AttestationError, ConfigurationError } from "../errors.js";
 import type { PinnedWebSocket, WebSocketOptions } from "../options.js";
-import { isServerRuntime, type RuntimeGlobals } from "./platform.js";
+import { checkDenoPins, isServerRuntime, type RuntimeGlobals } from "./platform.js";
 import { normalizedOrigin } from "./transport/origin.js";
 import { isCertificateError } from "./transport/pin-errors.js";
 import type { TLSOptions } from "./transport/tls.js";
@@ -41,6 +41,7 @@ export function webSocketAccessOf(client: object): WebSocketAccess {
 /** Rejects a runtime that can't pin a connection. */
 export function checkWebSocketCapability(globals: RuntimeGlobals = globalThis as RuntimeGlobals): void {
   if (!isServerRuntime(globals)) throw new ConfigurationError(WEBSOCKETS_UNAVAILABLE_IN_BROWSERS);
+  checkDenoPins(globals);
 }
 
 /**

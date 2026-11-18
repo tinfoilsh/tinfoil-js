@@ -51,6 +51,8 @@ Browsers use the EHBP transport, the default and the only one available there. T
 
 Bun pins the TLS connection from Bun 1.4.0, the first release whose `fetch` checks the server certificate before it sends the request; on an older Bun the default transport mode is `"ehbp"` and `transportMode: "tls"` is refused with a `ConfigurationError`. `createWebSocket` needs Bun 1.4.4 or later, the first release whose WebSocket runs the certificate check at all, and is refused on an older Bun before anything is sent. `pinnedWebSocketOptions` and `createRealtimeWebSocket` hand settings to the `ws` library, which Bun replaces with its own WebSocket, so they are available on Node only.
 
+Deno pins the TLS connection from Deno 2.8.0, the first release whose Node compatibility layer runs the certificate check for both requests and WebSockets; on an older Deno the default transport mode is `"ehbp"`, and `transportMode: "tls"` and `createWebSocket` are refused with a `ConfigurationError`.
+
 **WebSockets from the `openai` package aren't pinned.** The `openai` package's WebSocket classes (`ResponsesWS`, `LiveWS` and its sideband and forks, `OpenAIRealtimeWS`, `OpenAIRealtimeWebSocket` and `OpenAIRealtimeTranslationWS`) take an OpenAI client and open their own WebSocket. Given a Tinfoil client, they connect to its base URL with its API key or bearer token, but without the TLS pin, so the connection isn't bound to the verified enclave. With an enclave or router client:
 
 - For a realtime session, use `createRealtimeWebSocket` instead of `OpenAIRealtimeWS`. It always connects to the verified enclave, even when the client sends its requests through a proxy `baseURL`.
