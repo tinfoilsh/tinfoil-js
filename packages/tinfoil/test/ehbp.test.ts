@@ -3,8 +3,8 @@
  * a bodyless request passes through unsealed, a streamed response is
  * opened chunk by chunk as it arrives, a peer that no longer holds the key
  * is reported as such and the request is replayed after re-verification,
- * tunnels and reserved headers are refused, a redirect is handed back
- * rather than followed, a failing fetch is a network error, the proxy
+ * tunnels and reserved headers are refused, a redirect is never
+ * followed, a failing fetch is a network error, the proxy
  * header travels in plaintext, and the base URL rules.
  */
 import { Identity } from "ehbp";
@@ -213,13 +213,12 @@ describe("ehbpMode", () => {
     expect((await (await direct(`${server.origin}/echo`, { method: "POST", body: "d" })).json()).enclave).toBeNull();
   });
 
-  it("hands a redirect back rather than following it, and keeps a request's own refusal of one", async () => {
+  it("fails a redirect that answers a sealed request, hands one back for a bodyless request, and follows neither", async () => {
     const bound = await mode.bind(verification(server.publicKeyHex));
     const before = server.seen.length;
-    const sealedExchange = await bound.fetch(`${server.origin}/redirect`, { method: "POST", body: "x", redirect: "follow" });
-    expect(sealedExchange.status).toBe(307);
-    expect(sealedExchange.headers.get("location")).toBe(`${server.origin}/plain`);
-    await sealedExchange.text();
+    const sealedExchange = await bound.fetch(`${server.origin}/redirect`, { method: "POST", body: "x", redirect: "follow" }).catch((e: unknown) => e);
+    expect(sealedExchange).toBeInstanceOf(NetworkError);
+    expect((sealedExchange as Error).message).toMatch(/redirected the request, which a sealed request does not follow/);
     const plainExchange = await bound.fetch(`${server.origin}/redirect`);
     expect(plainExchange.status).toBe(307);
     await plainExchange.text();
