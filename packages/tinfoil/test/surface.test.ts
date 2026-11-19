@@ -18,6 +18,8 @@ import { createRouterHTTPClient } from "../src/router-client.js";
 import type { Fetch } from "../src/options.js";
 import { refusal, FORBIDDEN_TRANSPORT_OPTIONS } from "./helpers/transport-options.js";
 
+const PINS = new Map([["m", { repo: "tinfoilsh/m" }]]);
+
 /** Every runtime export, sorted. Type-only exports are checked by compiling this file. */
 const EXPORTS = [
   // clients
@@ -296,7 +298,7 @@ describe("public surface", () => {
       // @ts-expect-error `workloadIdentity` authenticates through OpenAI's own token exchange.
       void surface.EnclaveOpenAIClient.create("h", "o/r", {}, { workloadIdentity: {} as never });
       // @ts-expect-error `credential` would use OpenAI's own certificate transport.
-      void surface.GatewayOpenAIClient.create({}, { credential: {} as never });
+      void surface.GatewayOpenAIClient.create({ modelPins: PINS }, { credential: {} as never });
       // @ts-expect-error `x509Transport` would use OpenAI's own certificate transport.
       tinfoil.withOptions({ x509Transport: {} as never });
       // A type that omits them is still a valid argument.
@@ -345,8 +347,8 @@ describe("public surface", () => {
   it("checks gateway client options before any network I/O", async () => {
     const fetches = countingFetch();
     const seams = { catalogFetch: fetches.fetch, documentFetch: fetches.fetch };
-    await expect(createGatewayHTTPClient({ url: "http://gateway.example/v1/" }, seams)).rejects.toBeInstanceOf(surface.ConfigurationError);
-    await expect(createGatewayOpenAIClient({ pinnedModelsOnly: true }, {}, seams)).rejects.toBeInstanceOf(surface.ConfigurationError);
+    await expect(createGatewayHTTPClient({ modelPins: PINS, url: "http://gateway.example/v1/" }, seams)).rejects.toBeInstanceOf(surface.ConfigurationError);
+    await expect(createGatewayOpenAIClient({}, {}, seams)).rejects.toBeInstanceOf(surface.ConfigurationError);
     expect(fetches.calls).toBe(0);
   });
 
@@ -364,7 +366,7 @@ describe("public surface", () => {
       createClient: (options) => createTinfoilClient(options, router),
       RouterOpenAIClient: (options) => createRouterOpenAIClient({}, options, router),
       EnclaveOpenAIClient: (options) => createEnclaveOpenAIClient("enclave.example", { repo: "tinfoilsh/repo" }, {}, options, { documentFetch: fetches.fetch }),
-      GatewayOpenAIClient: (options) => createGatewayOpenAIClient({}, options, { catalogFetch: fetches.fetch, documentFetch: fetches.fetch }),
+      GatewayOpenAIClient: (options) => createGatewayOpenAIClient({ modelPins: PINS }, options, { catalogFetch: fetches.fetch, documentFetch: fetches.fetch }),
     };
     for (const [name, factory] of Object.entries(factories)) {
       for (const [key, value] of Object.entries(FORBIDDEN_TRANSPORT_OPTIONS)) {

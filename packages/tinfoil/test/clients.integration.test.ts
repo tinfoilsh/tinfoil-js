@@ -11,7 +11,7 @@ import { describe, expect, it } from "vitest";
 import { EnclaveHTTPClient } from "../src/enclave-client.js";
 import { fetchCatalog, GatewayHTTPClient } from "../src/gateway-client.js";
 import { createClient, EnclaveOpenAIClient, GatewayOpenAIClient, RouterOpenAIClient } from "../src/openai-client.js";
-import type { TransportMode } from "../src/options.js";
+import type { Catalog, ModelPin, TransportMode } from "../src/options.js";
 import { completeChat, LIVE_HOST as HOST, LIVE_PIN as PIN, SHA256_HEX, streamChat } from "./helpers/live.js";
 
 const RUN_INTEGRATION = process.env.RUN_TINFOIL_INTEGRATION === "true";
@@ -61,13 +61,17 @@ describe("createClient on the live router", () => {
   );
 });
 
+/** Pins every model the catalog lists to the repository it names. */
+const pinsOf = (catalog: Catalog): Map<string, ModelPin> => new Map([...catalog].map(([model, entry]) => [model, { repo: entry.repo }]));
+
 describe("GatewayHTTPClient on the live gateway", () => {
   it.skipIf(!RUN_INTEGRATION)(
     "reads the catalog and verifies a replica of a listed model through the gateway",
     async () => {
       const catalog = await fetchCatalog(GATEWAY_HOST);
       expect(catalog.size).toBeGreaterThan(0);
-      await using http = await GatewayHTTPClient.create();
+      // The client reads the snapshot its pins were built from, so the two cannot drift apart.
+      await using http = await GatewayHTTPClient.create({ modelPins: pinsOf(catalog), catalog: () => catalog });
       const models = await http.models();
       expect(models).toEqual([...catalog.keys()].sort());
       const verification = await http.ensureVerified(models[0]!);
@@ -80,7 +84,8 @@ describe("GatewayHTTPClient on the live gateway", () => {
   it.skipIf(!RUN_INTEGRATION || apiKey === "")(
     "completes a chat through the gateway",
     async () => {
-      await using ai = await GatewayOpenAIClient.create({}, { apiKey });
+      const catalog = await fetchCatalog(GATEWAY_HOST);
+      await using ai = await GatewayOpenAIClient.create({ modelPins: pinsOf(catalog), catalog: () => catalog }, { apiKey });
       await completeChat(ai, (await ai.httpClient.models())[0]!);
       expect(ai.httpClient.current.length).toBeGreaterThan(0);
     },

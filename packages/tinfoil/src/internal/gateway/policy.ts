@@ -1,7 +1,7 @@
 /**
  * Which repository a model's replicas are verified against, and under which
- * policy: a pin the caller set, or the untrusted catalog's repository under
- * the default policy. Pinned-only mode serves nothing else.
+ * policy: the pin the caller set for the model. Only pinned models are
+ * served; the untrusted catalog supplies replica hosts.
  *
  * @experimental The gateway route is new; this API may change without a major version.
  */
@@ -11,7 +11,7 @@ import type { Catalog, ModelPin } from "../../options.js";
 import { TRUSTED_REPO_OWNER, trusted } from "./catalog.js";
 
 /**
- * A replica to verify: its host, the reference it is verified against, and the model whose pin set the reference, if any.
+ * A replica to verify: its host, the reference it is verified against, and the model whose pin set the reference.
  *
  * @experimental The gateway route is new; this API may change without a major version.
  */
@@ -38,19 +38,15 @@ interface ResolvedPin {
 /** @experimental The gateway route is new; this API may change without a major version. */
 export class GatewayPolicy {
   readonly #pins: ReadonlyMap<string, ResolvedPin>;
-  readonly #pinnedOnly: boolean;
-  readonly #verifier: Verifier;
 
-  private constructor(pins: ReadonlyMap<string, ResolvedPin>, pinnedOnly: boolean, verifier: Verifier) {
+  private constructor(pins: ReadonlyMap<string, ResolvedPin>) {
     this.#pins = pins;
-    this.#pinnedOnly = pinnedOnly;
-    this.#verifier = verifier;
   }
 
   /** Checks the pins and the policies; every failure is a {@link ConfigurationError}. */
-  static async create(modelPins: ReadonlyMap<string, ModelPin> | undefined, pinnedOnly: boolean, verifier: Verifier | undefined): Promise<GatewayPolicy> {
+  static async create(modelPins: ReadonlyMap<string, ModelPin> | undefined, verifier: Verifier | undefined): Promise<GatewayPolicy> {
     const pins = modelPins ?? new Map<string, ModelPin>();
-    if (pinnedOnly && pins.size === 0) throw new ConfigurationError("pinned-only mode requires at least one model pin");
+    if (pins.size === 0) throw new ConfigurationError("a gateway client requires at least one model pin");
     if (verifier === undefined) {
       try {
         verifier = await Verifier.create();
@@ -72,7 +68,7 @@ export class GatewayPolicy {
       }
       resolved.set(model, { repo: pin.repo, verifier: pin.verifier ?? verifier });
     }
-    return new GatewayPolicy(resolved, pinnedOnly, verifier);
+    return new GatewayPolicy(resolved);
   }
 
   /**
@@ -83,19 +79,16 @@ export class GatewayPolicy {
    */
   resolve(model: string, catalog: Catalog): { hosts: readonly string[]; replica: Omit<Replica, "host"> } {
     const pin = this.#pins.get(model);
-    if (this.#pinnedOnly && pin === undefined) throw new ConfigurationError(`model ${JSON.stringify(model)} is not pinned`);
+    if (pin === undefined) throw new ConfigurationError(`model ${JSON.stringify(model)} is not pinned`);
     const entry = catalog.get(model);
     if (!trusted(entry)) {
       throw new ConfigurationError(`model ${JSON.stringify(model)} has no valid bare ${TRUSTED_REPO_OWNER} repository with replicas in the gateway catalog`);
     }
-    if (pin !== undefined) {
-      const repo = pin.repo.split("@", 1)[0]!;
-      if (entry.repo !== repo) {
-        throw new AttestationError(`model ${JSON.stringify(model)}: expected repository ${JSON.stringify(repo)}, gateway offered ${JSON.stringify(entry.repo)}`);
-      }
-      return { hosts: entry.hosts, replica: { ref: pin.repo, model } };
+    const repo = pin.repo.split("@", 1)[0]!;
+    if (entry.repo !== repo) {
+      throw new AttestationError(`model ${JSON.stringify(model)}: expected repository ${JSON.stringify(repo)}, gateway offered ${JSON.stringify(entry.repo)}`);
     }
-    return { hosts: entry.hosts, replica: { ref: entry.repo, model: "" } };
+    return { hosts: entry.hosts, replica: { ref: pin.repo, model } };
   }
 
   /** Whether the policy serves `model` from `catalog`. */
@@ -108,9 +101,11 @@ export class GatewayPolicy {
     }
   }
 
-  /** The policy a replica of `r` is verified under. */
+  /** The policy a replica of `r` is verified under; a replica of a model without a pin is a {@link ConfigurationError}. */
   verifierFor(r: Omit<Replica, "host">): Verifier {
-    return this.#pins.get(r.model)?.verifier ?? this.#verifier;
+    const pin = this.#pins.get(r.model);
+    if (pin === undefined) throw new ConfigurationError(`model ${JSON.stringify(r.model)} is not pinned`);
+    return pin.verifier;
   }
 }
 

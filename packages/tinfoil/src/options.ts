@@ -283,12 +283,11 @@ export interface ReplicaVerification {
  * @experimental The gateway route is new; this API may change without a major version.
  */
 export interface GatewayOptions {
-  /** Pins models to repositories. With `pinnedModelsOnly`, only pinned models are served, which requires at least one pin. */
+  /** Pins models to repositories. Only pinned models are served, so at least one pin is required. */
   readonly modelPins?: ReadonlyMap<string, ModelPin>;
-  readonly pinnedModelsOnly?: boolean;
-  /** The policy for unpinned models; undefined selects the defaults. */
+  /** The policy for pins that set none; undefined selects the defaults. */
   readonly verifier?: Verifier;
-  /** Called with each replica's verification, for pinned and unpinned models. A rejected replica is skipped for the next replica of the model. */
+  /** Called with each replica's verification. A rejected replica is skipped for the next replica of the model. */
   readonly verificationCheck?: VerificationCheck;
   /** As for {@link RouterOptions.userCacheSecret}. */
   readonly userCacheSecret?: string;

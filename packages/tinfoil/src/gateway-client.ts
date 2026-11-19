@@ -52,7 +52,7 @@ export async function createGatewayHTTPClient(options: GatewayOptions, seams: Ga
   // The rules every base URL follows, such as no query string or fragment; HTTPS is already required above.
   validateBaseURL(given);
   const baseURL = normalizeBaseURL(given);
-  const policy = await GatewayPolicy.create(options.modelPins, options.pinnedModelsOnly ?? false, options.verifier);
+  const policy = await GatewayPolicy.create(options.modelPins, options.verifier);
   const secret = await (seams.resolveSecret ?? resolveUserCacheSecret)(options.userCacheSecret);
   const transport = new GatewayTransport({
     baseURL,
