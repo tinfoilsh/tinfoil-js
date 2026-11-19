@@ -9,6 +9,8 @@ import * as surface from "../src/index.js";
 import * as builtHTTP from "tinfoil/http";
 import * as builtRoot from "tinfoil";
 
+const PINS = new Map([["m", { repo: "tinfoilsh/m" }]]);
+
 describe("v3 client surface under Bun", () => {
   it("exposes the clients, the errors and the version", () => {
     for (const name of ["createClient", "EnclaveHTTPClient", "RouterHTTPClient", "GatewayHTTPClient", "TinfoilError", "SDK_VERSION"]) {
@@ -38,6 +40,6 @@ describe("v3 client surface under Bun", () => {
 
   it("checks client options before any network I/O", async () => {
     await expect(surface.EnclaveHTTPClient.create("", { repo: "tinfoilsh/repo" })).rejects.toBeInstanceOf(surface.ConfigurationError);
-    await expect(surface.GatewayHTTPClient.create({ url: "http://gateway.example/v1/" })).rejects.toBeInstanceOf(surface.ConfigurationError);
+    await expect(surface.GatewayHTTPClient.create({ modelPins: PINS, url: "http://gateway.example/v1/" })).rejects.toBeInstanceOf(surface.ConfigurationError);
   });
 });

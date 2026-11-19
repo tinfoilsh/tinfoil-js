@@ -26,6 +26,8 @@ import { createWebSocket, pinnedWebSocketOptions } from "../src/websocket.js";
 import { createEhbpPeer, fetchOf, paced, type EhbpPeer } from "./helpers/ehbp-peer.js";
 import { recordingFetch } from "./helpers/network.js";
 
+const PINS = new Map([["test-model", { repo: "tinfoilsh/test" }]]);
+
 const ENCLAVE = "enclave.example";
 let peer: EhbpPeer;
 let sseEnded = false;
@@ -245,7 +247,7 @@ describe("OpenAI clients in a browser", () => {
       browserEntry.RouterOpenAIClient.create({}, { apiKey: "k", dangerouslyAllowBrowser: true }),
       createEnclaveOpenAIClient(ENCLAVE, { repo: "tinfoilsh/repo" }, options, { apiKey: "k" }, { ...seams(), documentFetch: counting }),
       createEnclaveOpenAIClient(ENCLAVE, { repo: "tinfoilsh/repo" }, options, { apiKey: "k", dangerouslyAllowBrowser: true }, { ...seams(), documentFetch: counting }),
-      createGatewayOpenAIClient({ url: "https://gateway.example/v1/" }, { apiKey: "k" }, { ...seams(), catalogFetch: counting, documentFetch: counting }),
+      createGatewayOpenAIClient({ modelPins: PINS, url: "https://gateway.example/v1/" }, { apiKey: "k" }, { ...seams(), catalogFetch: counting, documentFetch: counting }),
     ];
     for (const failure of refused) {
       await expect(failure).rejects.toBeInstanceOf(ConfigurationError);
@@ -291,10 +293,10 @@ describe("the gateway in a browser", () => {
   it("fetches the catalog, verifies a replica through the gateway, and seals a completion to it", async () => {
     const peerFetch = fetchOf(peer);
     const gatewaySeams = { ...seams(), catalogFetch: peerFetch, documentFetch: peerFetch };
-    const http = await createGatewayHTTPClient({ verifier: verifier(peer.publicKeyHex), url: "https://gateway.example/v1/" }, gatewaySeams);
+    const http = await createGatewayHTTPClient({ modelPins: PINS, verifier: verifier(peer.publicKeyHex), url: "https://gateway.example/v1/" }, gatewaySeams);
     expect(http).toBeInstanceOf(GatewayHTTPClient);
     expect(await http.models()).toEqual(["test-model"]);
-    const ai = await createGatewayOpenAIClient({ verifier: verifier(peer.publicKeyHex), url: "https://gateway.example/v1/" }, { bearerToken: "jwt" }, gatewaySeams);
+    const ai = await createGatewayOpenAIClient({ modelPins: PINS, verifier: verifier(peer.publicKeyHex), url: "https://gateway.example/v1/" }, { bearerToken: "jwt" }, gatewaySeams);
     const reply = await ai.chat.completions.create({ model: "test-model", messages: [{ role: "user", content: "hi" }] });
     expect(reply.choices[0]!.message.content).toBe("sealed");
     const last = peer.seen[peer.seen.length - 1]!;
