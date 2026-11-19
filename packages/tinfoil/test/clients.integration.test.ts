@@ -70,7 +70,8 @@ describe("GatewayHTTPClient on the live gateway", () => {
     async () => {
       const catalog = await fetchCatalog(GATEWAY_HOST);
       expect(catalog.size).toBeGreaterThan(0);
-      await using http = await GatewayHTTPClient.create({ modelPins: pinsOf(catalog) });
+      // The client reads the snapshot its pins were built from, so the two cannot drift apart.
+      await using http = await GatewayHTTPClient.create({ modelPins: pinsOf(catalog), catalog: () => catalog });
       const models = await http.models();
       expect(models).toEqual([...catalog.keys()].sort());
       const verification = await http.ensureVerified(models[0]!);
@@ -83,7 +84,8 @@ describe("GatewayHTTPClient on the live gateway", () => {
   it.skipIf(!RUN_INTEGRATION || apiKey === "")(
     "completes a chat through the gateway",
     async () => {
-      await using ai = await GatewayOpenAIClient.create({ modelPins: pinsOf(await fetchCatalog(GATEWAY_HOST)) }, { apiKey });
+      const catalog = await fetchCatalog(GATEWAY_HOST);
+      await using ai = await GatewayOpenAIClient.create({ modelPins: pinsOf(catalog), catalog: () => catalog }, { apiKey });
       await completeChat(ai, (await ai.httpClient.models())[0]!);
       expect(ai.httpClient.current.length).toBeGreaterThan(0);
     },

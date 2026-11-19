@@ -1,7 +1,7 @@
 /**
  * Which repository a model's replicas are verified against, and under which
- * policy: a pin the caller set, or the untrusted catalog's repository under
- * the default policy. Pinned-only mode serves nothing else.
+ * policy: the pin the caller set for the model. Only pinned models are
+ * served; the untrusted catalog supplies replica hosts.
  *
  * @experimental The gateway route is new; this API may change without a major version.
  */
@@ -11,7 +11,7 @@ import type { Catalog, ModelPin } from "../../options.js";
 import { TRUSTED_REPO_OWNER, trusted } from "./catalog.js";
 
 /**
- * A replica to verify: its host, the reference it is verified against, and the model whose pin set the reference, if any.
+ * A replica to verify: its host, the reference it is verified against, and the model whose pin set the reference.
  *
  * @experimental The gateway route is new; this API may change without a major version.
  */
@@ -101,7 +101,7 @@ export class GatewayPolicy {
     }
   }
 
-  /** The policy a replica of `r` is verified under. */
+  /** The policy a replica of `r` is verified under; a replica of a model without a pin is a {@link ConfigurationError}. */
   verifierFor(r: Omit<Replica, "host">): Verifier {
     const pin = this.#pins.get(r.model);
     if (pin === undefined) throw new ConfigurationError(`model ${JSON.stringify(r.model)} is not pinned`);
