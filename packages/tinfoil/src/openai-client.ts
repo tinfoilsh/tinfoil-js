@@ -229,7 +229,8 @@ function inherit(client: OpenAI, options: Partial<OpenAIClientOptions>): OpenAIC
  * client's error as its `cause`. An enclave that fails to verify again on a
  * request thus surfaces as an `APIConnectionError` caused by an
  * `AttestationError`, after three verification attempts; `maxRetries: 0` on
- * the client or the request shows the first failure.
+ * the client or the request shows the first failure. `findTinfoilError` from
+ * `tinfoil` returns the SDK error behind an OpenAI error, or undefined.
  */
 export class OpenAIClient<H extends AttestedHTTPClient = AttestedHTTPClient> extends OpenAI {
   /**

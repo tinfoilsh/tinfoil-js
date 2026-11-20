@@ -30,6 +30,44 @@ export abstract class TinfoilError extends Error {
   }
 }
 
+/** How many links of a `cause` chain {@link findTinfoilError} follows before it gives up. */
+const MAX_CAUSE_DEPTH = 32;
+
+/**
+ * The SDK error behind `err`: `err` itself when it is a {@link TinfoilError},
+ * otherwise the first one in its `cause` chain, or undefined when there is
+ * none. Use it on an error from an OpenAI client from `tinfoil/openai`: a
+ * request whose attested transport fails, for example because the enclave
+ * fails to verify again, rejects with the OpenAI library's
+ * `APIConnectionError` (or `APIConnectionTimeoutError`), whose `cause` is the
+ * SDK error.
+ *
+ * ```ts
+ * try {
+ *   await client.chat.completions.create(request);
+ * } catch (err) {
+ *   const sdk = findTinfoilError(err);
+ *   if (sdk?.category === "attestation") stopUsing(client);
+ *   else throw err;
+ * }
+ * ```
+ *
+ * The chain is followed at most 32 links, and a cycle in it ends the search.
+ * An error from the API itself, such as `RateLimitError`, has no SDK error
+ * behind it.
+ */
+export function findTinfoilError(err: unknown): TinfoilError | undefined {
+  const seen = new Set<unknown>();
+  let current = err;
+  for (let depth = 0; depth <= MAX_CAUSE_DEPTH; depth++) {
+    if (current instanceof TinfoilError) return current;
+    if (typeof current !== "object" || current === null || seen.has(current)) return undefined;
+    seen.add(current);
+    current = (current as { cause?: unknown }).cause;
+  }
+  return undefined;
+}
+
 /** Invalid caller arguments or client configuration. Retrying won't help. */
 export class ConfigurationError extends TinfoilError {
   constructor(message: string, options?: { cause?: unknown }) {

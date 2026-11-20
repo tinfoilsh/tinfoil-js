@@ -9,7 +9,7 @@
 export { EnclaveHTTPClient } from "./enclave-client.js";
 export { RouterHTTPClient } from "./router-client.js";
 export { GatewayHTTPClient, fetchCatalog } from "./gateway-client.js";
-export { TinfoilError, ConfigurationError, NetworkError, AttestationError, type ErrorCategory } from "./errors.js";
+export { TinfoilError, ConfigurationError, NetworkError, AttestationError, findTinfoilError, type ErrorCategory } from "./errors.js";
 export {
   sessionRecoveryToken,
   serializeSessionRecoveryToken,
