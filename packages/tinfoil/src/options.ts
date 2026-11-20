@@ -20,10 +20,11 @@ export type Fetch = (...args: Parameters<typeof globalThis.fetch>) => ReturnType
 /**
  * How a client protects its traffic to an enclave: {@link TLS} or
  * {@link EHBP}, told apart by `kind`. Undefined selects the platform's
- * default: `{ kind: "tls" }` where the runtime checks a connection before it
- * sends over it (Node, Bun 1.4.0 or later, and Deno 2.8.0 or later), and
- * `{ kind: "ehbp" }` in browsers and on an older Bun or Deno, which refuse
- * TLS. An unknown `kind` is a {@link ConfigurationError}.
+ * default: `{ kind: "tls" }` on Node, Bun 1.4.0 or later and Deno 2.8.0 or
+ * later, which check a connection before they send over it, and
+ * `{ kind: "ehbp" }` in browsers and on an older Bun or Deno. `{ kind: "tls" }`
+ * is a {@link ConfigurationError} where the platform can't pin a connection,
+ * and so is an unknown `kind`.
  */
 export type Transport = TLS | EHBP;
 
@@ -193,7 +194,15 @@ export interface PinnedWebSocket {
  * request body.
  */
 export interface EnclaveOptions {
-  /** How requests to the enclave are protected; undefined selects the platform's default, as {@link Transport} describes. */
+  /**
+   * How requests to the enclave are protected: {@link TLS} or {@link EHBP}.
+   * Undefined selects the platform's default: `{ kind: "tls" }` on Node,
+   * Bun 1.4.0 or later and Deno 2.8.0 or later, which check a connection
+   * before they send over it, and `{ kind: "ehbp" }` in browsers and on an
+   * older Bun or Deno. `{ kind: "tls" }` is a {@link ConfigurationError}
+   * where the platform can't pin a connection: in a browser, and on a Bun
+   * older than 1.4.0 or a Deno older than 2.8.0.
+   */
   readonly transport?: Transport;
   /**
    * The verification policy, as plain data; undefined selects the defaults.
@@ -209,9 +218,14 @@ export interface EnclaveOptions {
 /** Configures a {@link RouterHTTPClient}. */
 export interface RouterOptions {
   /**
-   * How requests to the router are protected; undefined selects the
-   * platform's default, as {@link Transport} describes. An EHBP proxy
-   * forwards requests to the router that discovery chooses.
+   * How requests to the router are protected: {@link TLS} or {@link EHBP}.
+   * An EHBP proxy forwards requests to the router that discovery chooses.
+   * Undefined selects the platform's default: `{ kind: "tls" }` on Node,
+   * Bun 1.4.0 or later and Deno 2.8.0 or later, which check a connection
+   * before they send over it, and `{ kind: "ehbp" }` in browsers and on an
+   * older Bun or Deno. `{ kind: "tls" }` is a {@link ConfigurationError}
+   * where the platform can't pin a connection: in a browser, and on a Bun
+   * older than 1.4.0 or a Deno older than 2.8.0.
    */
   readonly transport?: Transport;
   /**
