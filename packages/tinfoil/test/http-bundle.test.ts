@@ -71,14 +71,17 @@ function assertLoadsWithout(entry: string, banned: string, factory: string) {
   `], { cwd: packageRoot, stdio: "pipe" });
 }
 
-describe("the published HTTP entry", () => {
+// `openai`, the AI SDK and its OpenAI-compatible provider are optional peers
+// that only `tinfoil/openai` and `tinfoil/ai-sdk` need, so the root entry must
+// load and bundle without any of them, eagerly or lazily.
+describe("the published root entry", () => {
   it("loads in Node without resolving an API adapter", () => {
-    assertLoadsWithout("tinfoil/http", "^(?:openai|ai)(?:/|$)|^@ai-sdk/", ".RouterHTTPClient.create");
+    assertLoadsWithout("tinfoil", "^(?:openai|ai)(?:/|$)|^@ai-sdk/", ".RouterHTTPClient.create");
   });
   it.each([false, true])("keeps API adapters out of a consumer (lazy: %s)", async (lazy) => {
     const { modules, entryModules, dynamicImports } = await bundleConsumer(lazy
-      ? 'export const loadHTTP = () => import("tinfoil/http");\n'
-      : 'export { RouterHTTPClient, EnclaveHTTPClient, GatewayHTTPClient } from "tinfoil/http";\n');
+      ? 'export const loadTinfoil = () => import("tinfoil");\n'
+      : 'export { RouterHTTPClient, EnclaveHTTPClient, GatewayHTTPClient, createWebSocket } from "tinfoil";\n');
     expect(modules.some((id) => id.endsWith("/tinfoil/dist/router-client.js"))).toBe(true);
     expect(modules.some((id) => id.endsWith("/internal/platform.browser.js"))).toBe(true);
     expect(modules.some((id) => id.endsWith("/internal/transport/ehbp.js"))).toBe(true);
@@ -89,20 +92,6 @@ describe("the published HTTP entry", () => {
       expect(dynamicImports).toHaveLength(1);
       expect(entryModules.filter((id) => /\/(?:packages\/tinfoil\/dist|node_modules)\//.test(id))).toEqual([]);
     }
-  });
-});
-
-// `openai`, the AI SDK and its OpenAI-compatible provider are optional peers
-// that only `tinfoil/openai` and `tinfoil/ai-sdk` need, so the root entry must
-// load and bundle without any of them.
-describe("the published root entry", () => {
-  it("loads in Node without resolving an API adapter", () => {
-    assertLoadsWithout("tinfoil", "^(?:openai|ai)(?:/|$)|^@ai-sdk/", ".RouterHTTPClient.create");
-  });
-  it("keeps the API adapters out of a consumer", async () => {
-    const { modules } = await bundleConsumer('export { RouterHTTPClient, createWebSocket } from "tinfoil";\n');
-    expect(modules.filter((id) => /\/node_modules\/(?:openai|ai|@ai-sdk)\//.test(id))).toEqual([]);
-    expect(modules.filter((id) => /\/(?:openai-client|ai-sdk|realtime)\.js$/.test(id))).toEqual([]);
   });
 });
 

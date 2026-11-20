@@ -1,10 +1,42 @@
 /**
  * The package root's public surface, shared by its Node and browser entries:
- * the attested HTTP clients, which the `tinfoil/http` entry exposes through
- * `./http.js`, and the pinned WebSockets. The OpenAI-compatible client lives
- * in the `tinfoil/openai` entry, so that the root imports no API library;
- * platform-specific behaviour lives behind the same client names.
+ * the attested HTTP clients, their options, errors and helpers, and the
+ * pinned WebSockets. The OpenAI-compatible client lives in the
+ * `tinfoil/openai` entry and the AI SDK provider in `tinfoil/ai-sdk`, so
+ * that the root imports no API library; platform-specific behaviour lives
+ * behind the same client names.
  */
-export * from "./http.js";
+export { EnclaveHTTPClient } from "./enclave-client.js";
+export { RouterHTTPClient } from "./router-client.js";
+export { GatewayHTTPClient, fetchCatalog } from "./gateway-client.js";
+export { TinfoilError, ConfigurationError, NetworkError, AttestationError, type ErrorCategory } from "./errors.js";
+export {
+  sessionRecoveryToken,
+  serializeSessionRecoveryToken,
+  deserializeSessionRecoveryToken,
+  decryptResponseWithToken,
+  type SessionRecoveryToken,
+} from "./session-recovery.js";
+export type {
+  Fetch,
+  Transport,
+  TLS,
+  EHBP,
+  VerificationCheck,
+  CallOptions,
+  EnclaveOptions,
+  RouterOptions,
+  GatewayOptions,
+  ModelPin,
+  Policy,
+  ArtifactTrust,
+  EndorsedArtifacts,
+  EmbeddedArtifacts,
+  Catalog,
+  CatalogEntry,
+  ReplicaVerification,
+} from "./options.js";
+export type { Trust, RepoPin, ProjectPin, SignedBy, AuthorizedBy, EmbeddedConfig, EitherPin } from "./trust.js";
+export { SDK_VERSION } from "./version.js";
 export { createWebSocket, pinnedWebSocketOptions } from "./websocket.js";
 export type { WebSocketOptions, PinnedWebSocket } from "./options.js";

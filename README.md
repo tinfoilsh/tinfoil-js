@@ -18,7 +18,7 @@ What to install depends on the entry point that you import:
 
 | Entry point | Install |
 |---|---|
-| `tinfoil` (the attested HTTP clients and pinned WebSockets), `tinfoil/http` and `tinfoil/unsafe` | `npm install tinfoil@next` |
+| `tinfoil` (the attested HTTP clients and pinned WebSockets) and `tinfoil/unsafe` | `npm install tinfoil@next` |
 | `tinfoil/openai` (the OpenAI client) | `npm install tinfoil@next openai` |
 | `tinfoil/ai-sdk` (the Vercel AI SDK provider) | `npm install tinfoil@next ai @ai-sdk/openai-compatible` |
 
@@ -67,7 +67,14 @@ const router = await RouterHTTPClient.create({ policy: { freshnessMaxAgeMs: 24 *
 | `{ kind: "embeddedConfig", bytes, name? }` | v3 collateral for exactly these config bytes |
 | `{ kind: "eitherPin", repo, project }` | either of `repoPin` and `projectPin`, for the migration from v2 to v3 collateral |
 
-The router's trust is fixed to its repository, and the gateway client takes `modelPins` instead. Every HTTP client takes `policy`, the verifier's policy as plain data: `pinnedRegisters`, `freshnessMaxAgeMs` and `artifacts` (`{ kind: "endorsedArtifacts", freshnessKeys? }` or `{ kind: "embeddedArtifacts", runtime?, platform?, freshnessKeys? }`). The enclave and router clients take `transport`: `{ kind: "tls" }`, which pins each connection to the attested key, or `{ kind: "ehbp", proxyURL?, fetch? }`, which seals request and response bodies to the attested key so that they stay private through a proxy. Unset, it is TLS on Node and Bun and EHBP in browsers. The trust, the policy and the options are checked before any network I/O: an invalid value, or an unknown `kind`, is a `ConfigurationError`.
+The router's trust is fixed to its repository, and the gateway client takes `modelPins` instead. Every HTTP client takes `policy`, the verifier's policy as plain data: `pinnedRegisters`, `freshnessMaxAgeMs` and `artifacts` (`{ kind: "endorsedArtifacts", freshnessKeys? }` or `{ kind: "embeddedArtifacts", runtime?, platform?, freshnessKeys? }`). The enclave and router clients take `transport`: `{ kind: "tls" }`, which pins each connection to the attested key, or `{ kind: "ehbp", proxyURL?, fetch? }`, which seals request and response bodies to the attested key so that they stay private through a proxy. The default depends on the platform:
+
+| Platform | Default `transport` | `{ kind: "tls" }` |
+|---|---|---|
+| Node; Bun 1.4.0 or later; Deno 2.8.0 or later | TLS | accepted |
+| Browsers; Bun before 1.4.0; Deno before 2.8.0 | EHBP | a `ConfigurationError`, since the platform can't pin the connection |
+
+The trust, the policy and the options are checked before any network I/O: an invalid value, or an unknown `kind`, is a `ConfigurationError`.
 
 Never put `apiKey` in browser code: the OpenAI clients and the AI SDK provider refuse it outside Node and Bun, `dangerouslyAllowBrowser` or not. Route browser requests through a [proxy server](https://docs.tinfoil.sh/guides/proxy-server) that adds the key, and authenticate the browser with a token of your own:
 
@@ -95,12 +102,12 @@ Deno pins the TLS connection from Deno 2.8.0, the first release whose Node compa
 
 The request body is still encrypted to the verified enclave's key; the proxy only forwards it, to the enclave named in the `X-Tinfoil-Enclave-Url` header. A `proxyURL`'s path is where the proxy is mounted, not the API path: an `OpenAIClient` joins its `apiPath` (`/v1/` by default) under it, so `https://proxy.example.com/relay` and `https://proxy.example.com/relay/` both give `https://proxy.example.com/relay/v1/`. Multi-user services must scope prompt caches to each end user with the router client's `userCacheSecret` or a per-request `user_cache_secret`; an enclave client never adds one. See [Prompt caching](https://docs.tinfoil.sh/sdk/prompt-caching).
 
-### HTTP-only and lazy imports
+### HTTP clients and lazy imports
 
-If you supply your own API client and need only the verified HTTP transport, import from `tinfoil/http`. It exports the same `RouterHTTPClient`, `EnclaveHTTPClient` and `GatewayHTTPClient` classes, their options, Tinfoil errors, catalog and session-recovery helpers, without importing the OpenAI client or AI SDK adapters. The package's browser mappings still select the browser transport; verification and encryption are unchanged.
+If you supply your own API client and need only the verified HTTP transport, import from `tinfoil`. Its root entry exports the `RouterHTTPClient`, `EnclaveHTTPClient` and `GatewayHTTPClient` classes, their options, Tinfoil errors, catalog and session-recovery helpers, and the pinned WebSockets, and imports neither the OpenAI client nor the AI SDK. The package's browser mappings select the browser transport.
 
 ```typescript
-import { RouterHTTPClient, type RouterOptions } from "tinfoil/http";
+import { RouterHTTPClient, type RouterOptions } from "tinfoil";
 
 const options: RouterOptions = { transport: { kind: "ehbp" } };
 const client = await RouterHTTPClient.create(options);
@@ -110,7 +117,7 @@ const client = await RouterHTTPClient.create(options);
 To defer downloading and evaluating the transport until a user needs it, dynamically import the same entry inside that action:
 
 ```typescript
-const { RouterHTTPClient } = await import("tinfoil/http");
+const { RouterHTTPClient } = await import("tinfoil");
 const client = await RouterHTTPClient.create({ transport: { kind: "ehbp" } });
 ```
 
@@ -121,7 +128,7 @@ A bundler can put this dynamic import in a separate chunk, provided the transpor
 The EHBP transport of `RouterHTTPClient.create` and `EnclaveHTTPClient.create` takes a `fetch`: a fetch-compatible network implementation that carries their sealed requests, for a native HTTP bridge (such as Tauri's) or a trusted relay. `GatewayHTTPClient.create`, which always uses EHBP, takes it as its `fetch` option, and the AI SDK provider's `createTinfoil` takes it in its `transport`. `createClient` takes only the OpenAI options, so it doesn't take it; build an `OpenAIClient` over an HTTP client instead.
 
 ```typescript
-import { RouterHTTPClient } from "tinfoil/http";
+import { RouterHTTPClient } from "tinfoil";
 
 // nativeFetch: a fetch-compatible function that sends the sealed requests.
 const client = await RouterHTTPClient.create({ transport: { kind: "ehbp", fetch: nativeFetch } });
