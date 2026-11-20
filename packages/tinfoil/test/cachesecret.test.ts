@@ -206,6 +206,27 @@ describe("resolveUserCacheSecret", () => {
     expect(warn).not.toHaveBeenCalled();
   });
 
+  it("throws the random source's error unchanged, records nothing, and generates again on the next call", () => {
+    const failure = new Error("no secure randomness");
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    vi.spyOn(crypto, "getRandomValues").mockImplementationOnce(() => {
+      throw failure;
+    });
+    let thrown: unknown;
+    try {
+      resolveUserCacheSecret(undefined);
+    } catch (e) {
+      thrown = e;
+    }
+    expect(thrown).toBe(failure);
+    // An explicit option needs no generation, so it still resolves.
+    expect(resolveUserCacheSecret("from-option")).toBe("from-option");
+    const generated = resolveUserCacheSecret(undefined);
+    expect(generated).toMatch(/^[0-9a-f]{64}$/);
+    expect(resolveUserCacheSecret(undefined)).toBe(generated);
+    expect(warn).not.toHaveBeenCalled();
+  });
+
   it("creates nothing under the home directory", () => {
     resolveUserCacheSecret(undefined);
     expect(existsSync(join(home, ".tinfoil"))).toBe(false);

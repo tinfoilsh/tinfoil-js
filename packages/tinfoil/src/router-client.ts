@@ -35,6 +35,8 @@ export async function createRouterHTTPClient(options: RouterOptions, seams: Rout
   const resolved = resolveTransport(options.transport, seams.globals);
   checkFetcher("fetchAttestation", options.fetchAttestation);
   checkFetcher("fetchRouterList", options.fetchRouterList);
+  // Resolved before discovery, so a failure to generate it leaves nothing open.
+  const secret = (seams.resolveSecret ?? resolveUserCacheSecret)(options.userCacheSecret);
   const verifier = await buildVerifier(undefined, options.policy, seams);
   const transport = await discoverRouter({
     verifier,
@@ -50,7 +52,6 @@ export async function createRouterHTTPClient(options: RouterOptions, seams: Rout
     nonce: seams.nonce,
     sleep: seams.sleep,
   });
-  const secret = (seams.resolveSecret ?? resolveUserCacheSecret)(options.userCacheSecret);
   const host = transport.enclave().host();
   const proxyURL = resolved.proxyURL;
   const client = construct(
@@ -110,7 +111,9 @@ export class RouterHTTPClient {
    * network I/O; the router is verified before the client is returned. When
    * the user cache secret option is empty, the client uses the secret that is
    * generated once for the current runtime: the process, or the page in a
-   * browser.
+   * browser. When that secret can't be generated, because
+   * `crypto.getRandomValues` throws, the promise rejects with that error
+   * unchanged, before any network I/O.
    */
   static create(options?: RouterOptions): Promise<RouterHTTPClient> {
     return createRouterHTTPClient(options ?? {}, {});
