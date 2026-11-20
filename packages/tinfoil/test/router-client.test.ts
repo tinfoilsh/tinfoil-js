@@ -28,12 +28,11 @@ const BODY = '{"model":"test","messages":[{"role":"user","content":"hi"}],"seed"
 let tls: TlsServer;
 let ehbp: EhbpServer;
 
-function verifier(keys: { tls?: string; hpke?: string }, authorizes = false, expiresAt: () => Date = () => new Date(Date.now() + 60_000)): Verifier {
+function verifier(keys: { tls?: string; hpke?: string }, expiresAt: () => Date = () => new Date(Date.now() + 60_000)): Verifier {
   return {
     checkPinVerifiability: ({ repo = "" }: { repo?: string }) => {
       if (repo === "") throw new UsageError("repo required");
     },
-    callerAuthorizesConfig: authorizes,
     verifyV3At: async () => {
       const material = [
         ...(keys.tls === undefined ? [] : [{ id: "tls", format: KEY_SPKI_FP_SHA256_V1_FORMAT, data: keys.tls }]),
@@ -97,7 +96,6 @@ describe("RouterHTTPClient.create", () => {
       { verifier: verifier({ tls: TEST_PIN }), transportMode: "ehbp", baseURL: "http://proxy.example/" },
       { verifier: verifier({ tls: TEST_PIN }), transportMode: "ehbp", baseURL: "https://proxy.example/v1/?key=1" },
       { verifier: verifier({ tls: TEST_PIN }), transportMode: "ehbp", baseURL: "https://proxy.example/v1/#frag" },
-      { verifier: verifier({ tls: TEST_PIN }, true) },
     ];
     for (const options of cases) {
       await expect(createRouterHTTPClient(options, s), JSON.stringify(options.baseURL)).rejects.toBeInstanceOf(ConfigurationError);
@@ -441,7 +439,7 @@ describe("errors through the OpenAI API surface", () => {
       { apiKey: "k" },
       { ...seams([tls.host]), clock: () => new Date(now) },
       {
-        verifier: verifier({ tls: TEST_PIN }, false, () => new Date(now + 60_000)),
+        verifier: verifier({ tls: TEST_PIN }, () => new Date(now + 60_000)),
         transportMode: "tls",
         verificationCheck: () => {
           if (checks++ > 0) throw new Error("rejected on refresh");

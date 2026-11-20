@@ -19,7 +19,6 @@ function verifier(pins: Pin[] = []): Verifier {
     checkPinVerifiability: ({ repo = "" }: { repo?: string }) => {
       if (repo === "") throw new UsageError("repo required");
     },
-    callerAuthorizesConfig: false,
     verifyV3At: async (_doc: Uint8Array, _nonce: Uint8Array, pin: Pin) => {
       pins.push(pin);
       const material = [{ id: "tls", format: KEY_SPKI_FP_SHA256_V1_FORMAT, data: PIN }];

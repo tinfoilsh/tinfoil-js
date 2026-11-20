@@ -26,14 +26,13 @@ const catalogOf = (entries: Record<string, { repo: string; hosts: string[] }>): 
 /**
  * A verifier accepting every document, whose verifications carry `hpke`: a
  * fixed key, or one chosen from the document's text (the host name the
- * mocked attestation fetch serves). `authorizes` makes it caller-authorized.
+ * mocked attestation fetch serves).
  */
-function verifier(hpke: string | ((document: string) => string), authorizes = false, seen: Pin[] = []): Verifier {
+function verifier(hpke: string | ((document: string) => string), seen: Pin[] = []): Verifier {
   return {
     checkPinVerifiability: ({ repo = "" }: { repo?: string }) => {
       if (repo === "") throw new UsageError("repo required");
     },
-    callerAuthorizesConfig: authorizes,
     verifyV3At: async (doc: Uint8Array, _nonce: Uint8Array, pin: Pin) => {
       seen.push(pin);
       const key = typeof hpke === "function" ? hpke(new TextDecoder().decode(doc)) : hpke;
@@ -180,8 +179,6 @@ describe("GatewayPolicy", () => {
 
   it("checks the pins before any network I/O", async () => {
     await expect(GatewayPolicy.create(undefined, true, v)).rejects.toThrow(/at least one model pin/);
-    await expect(GatewayPolicy.create(undefined, false, verifier("", true))).rejects.toThrow(/caller-authorized config/);
-    await expect(GatewayPolicy.create(new Map([["m", { repo: "tinfoilsh/m", verifier: verifier("", true) }]]), false, v)).rejects.toThrow(/model "m": caller-authorized/);
     await expect(GatewayPolicy.create(new Map([["m", { repo: "evil/m" }]]), false, v)).rejects.toThrow(/must belong to tinfoilsh\//);
     await expect(GatewayPolicy.create(new Map([[" ", { repo: "tinfoilsh/m" }]]), false, v)).rejects.toThrow(/must belong to/);
     await expect(GatewayPolicy.create(new Map([["m", { repo: "tinfoilsh/m@@" }]]), false, v)).rejects.toBeInstanceOf(ConfigurationError);
@@ -577,7 +574,7 @@ describe("GatewayTransport", () => {
     const attempts: string[] = [];
     const pins: Pin[] = [];
     const t = transport({
-      policy: await GatewayPolicy.create(new Map([[MODEL, { repo: "tinfoilsh/test@v1" }], ["unlisted", { repo: "tinfoilsh/unlisted" }]]), false, verifier((document) => keyOf(document), false, pins)),
+      policy: await GatewayPolicy.create(new Map([[MODEL, { repo: "tinfoilsh/test@v1" }], ["unlisted", { repo: "tinfoilsh/unlisted" }]]), false, verifier((document) => keyOf(document), pins)),
       gatewayFetch: gateway().fetch,
       catalog: () => catalogOf({ [MODEL]: { repo: "tinfoilsh/test", hosts: HOSTS }, other: { repo: "tinfoilsh/other", hosts: ["o.example"] } }),
       documentFetch: async (input) => {

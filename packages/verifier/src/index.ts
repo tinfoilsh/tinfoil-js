@@ -19,7 +19,20 @@ import {
   type Register,
 } from "./measurement.js";
 
-export { Verifier, type EmbeddedConfigBytes, type EmbeddedConfigReference, type EmbeddedReferences, type Pin, type VerifierOptions } from "./verifier.js";
+export {
+  Verifier,
+  type ArtifactTrust,
+  type ConfigAuthorizer,
+  type ConfigSigningKeys,
+  type ConfigTrust,
+  type EmbeddedArtifacts,
+  type EmbeddedConfig,
+  type EmbeddedConfigReference,
+  type EndorsedArtifacts,
+  type Pin,
+  type Policy,
+  type Registries,
+} from "./verifier.js";
 export {
   cryptoMaterialData,
   Verification,
@@ -71,9 +84,9 @@ export type { Reference };
 export { fromHex, toHex } from "./internal/bytes.js";
 
 /**
- * The public registry's ID, the one accepted by default. `configRegistryIDs`
- * names the exact accepted set, so a policy that accepts the public registry
- * alongside others lists it: `[PUBLIC_REGISTRY_ID, ...mine]`.
+ * The public registry's ID, the one accepted by default. A `registries`
+ * config trust names the exact accepted set, so one that accepts the public
+ * registry alongside others lists it: `[PUBLIC_REGISTRY_ID, ...mine]`.
  */
 export const PUBLIC_REGISTRY_ID: string = PUBLIC_REGISTRY_ID_INTERNAL;
 

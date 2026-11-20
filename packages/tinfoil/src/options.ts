@@ -203,11 +203,7 @@ export interface RouterOptions {
    * proxy that expects the enclave's own paths needs `/v1/` on the end.
    */
   readonly baseURL?: string;
-  /**
-   * The verification policy; undefined selects the defaults. A verifier that
-   * authorizes the config itself is a {@link ConfigurationError}, since it
-   * needs an explicit enclave.
-   */
+  /** The verification policy; undefined selects the defaults. */
   readonly verifier?: Verifier;
   /**
    * Called for each router tried during discovery and whenever the client

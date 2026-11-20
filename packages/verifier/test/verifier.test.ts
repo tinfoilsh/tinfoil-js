@@ -18,7 +18,7 @@ import { ARTIFACT_FORMAT, ARTIFACT_FORMAT_V2 } from "../src/internal/policy/arti
 import { endorsementReference, timestampInput } from "../src/internal/sigstore/timestamp.js";
 import type { Expected } from "../src/measurement.js";
 import { PUBLIC_REGISTRY_ID as PUBLIC_REGISTRY_ID_EXPORTED } from "../src/index.js";
-import { Verifier, type EmbeddedConfigReference, type Pin, type VerifierOptions } from "../src/verifier.js";
+import { Verifier, type ArtifactTrust, type ConfigTrust, type EmbeddedConfigReference, type Pin, type Policy } from "../src/verifier.js";
 import { VERIFIER_NAME, VERIFIER_VERSION } from "../src/version.js";
 import { buildDocument } from "./helpers/builder.js";
 import { conformanceAvailable, inputBytes, loadFixture, loadFixtures, repoOf, vectorsTitle, type ConformanceFixture } from "./helpers/conformance.js";
@@ -119,7 +119,7 @@ describe.skipIf(withoutVectors)(vectorsTitle("hardware expiration"), () => {
   ])("caps cached verification at the hardware deadline for %s", async (path, deadline) => {
     const fixture = loadFixture(path);
     const c = await caseOf(fixture);
-    const verifier = await dangerousTestOnlyVerifier(rootsOf(fixture), { freshnessMaxAgeMs: extendedApprovalAgeMs });
+    const verifier = await dangerousTestOnlyVerifier(rootsOf(fixture), undefined, { freshnessMaxAgeMs: extendedApprovalAgeMs });
     const verified = await verifier.verifyV3At(c.doc, c.nonce, { repo: c.repo }, c.at);
     expect(verified.freshnessExpiresAt).toEqual(new Date(deadline));
     const afterExpiry = new Date(new Date(deadline).getTime() + 1);
@@ -201,7 +201,7 @@ describe.skipIf(withoutVectors)(vectorsTitle("verifyV3At caller mistakes"), () =
   });
 
   it("requires config collateral once the policy pins config trust", async () => {
-    const verifier = await dangerousTestOnlyVerifier(rootsOf(c.fixture), { configAuthorizer: () => undefined });
+    const verifier = await dangerousTestOnlyVerifier(rootsOf(c.fixture), { kind: "configAuthorizer", authorize: () => undefined });
     const err = await verifier.verifyV3At(c.doc, c.nonce, { repo: c.repo }, c.at).catch((e: unknown) => e);
     expect(err).toBeInstanceOf(VerificationError);
     expect((err as VerificationError).layer).toBe("provenance");
@@ -212,7 +212,7 @@ describe.skipIf(withoutVectors)(vectorsTitle("verifyV3At caller mistakes"), () =
     const v = await c.verifier.verifyV3At(c.doc, c.nonce, { repo: c.repo }, c.at);
     const launch = v.enclaveMeasurement;
     if (launch.platform !== "sev-snp") throw new Error("golden-happy is an SEV-SNP document");
-    const matching = await dangerousTestOnlyVerifier(rootsOf(c.fixture), { pinnedRegisters: { platform: "sev-snp", launch: launch.launch } });
+    const matching = await dangerousTestOnlyVerifier(rootsOf(c.fixture), undefined, { pinnedRegisters: { platform: "sev-snp", launch: launch.launch } });
     await expect(matching.verifyV3At(c.doc, c.nonce, { repo: c.repo }, c.at)).resolves.toBeDefined();
     expect(matching.pinnedRegisters).toEqual({ platform: "sev-snp", launch: launch.launch });
     // The pins are one frozen copy: every read is the same object, and the policy keeps its own.
@@ -221,13 +221,13 @@ describe.skipIf(withoutVectors)(vectorsTitle("verifyV3At caller mistakes"), () =
     (matching.pinnedRegisters as { launch: Uint8Array }).launch[0] ^= 0xff;
     await expect(matching.verifyV3At(c.doc, c.nonce, { repo: c.repo }, c.at)).resolves.toBeDefined();
 
-    const conflicting = await dangerousTestOnlyVerifier(rootsOf(c.fixture), { pinnedRegisters: { platform: "sev-snp", launch: new Uint8Array(48).fill(9) } });
+    const conflicting = await dangerousTestOnlyVerifier(rootsOf(c.fixture), undefined, { pinnedRegisters: { platform: "sev-snp", launch: new Uint8Array(48).fill(9) } });
     const err = await conflicting.verifyV3At(c.doc, c.nonce, { repo: c.repo }, c.at).catch((e: unknown) => e);
     expect(err).toBeInstanceOf(VerificationError);
     expect((err as VerificationError).layer).toBe("policy");
     expect((err as Error).message).toMatch(/pinned launch measurement does not match/);
 
-    const foreign = await dangerousTestOnlyVerifier(rootsOf(c.fixture), { pinnedRegisters: { platform: "tdx", rtmr3: new Uint8Array(48) } });
+    const foreign = await dangerousTestOnlyVerifier(rootsOf(c.fixture), undefined, { pinnedRegisters: { platform: "tdx", rtmr3: new Uint8Array(48) } });
     const err2 = await foreign.verifyV3At(c.doc, c.nonce, { repo: c.repo }, c.at).catch((e: unknown) => e);
     expect((err2 as VerificationError).layer).toBe("policy");
     expect((err2 as Error).message).toMatch(/pinned registers are for tdx, but the enclave is sev-snp/);
@@ -236,7 +236,7 @@ describe.skipIf(withoutVectors)(vectorsTitle("verifyV3At caller mistakes"), () =
   it("enforces the freshness window it was built with", async () => {
     // The witnesses were logged at the vector's clock; one second later a
     // one-millisecond window no longer covers them.
-    const tight = await dangerousTestOnlyVerifier(rootsOf(c.fixture), { freshnessMaxAgeMs: 1 });
+    const tight = await dangerousTestOnlyVerifier(rootsOf(c.fixture), undefined, { freshnessMaxAgeMs: 1 });
     expect(tight.freshnessMaxAgeMs).toBe(1);
     const later = new Date(c.at.getTime() + 1000);
     await expect(c.verifier.verifyV3At(c.doc, c.nonce, { repo: c.repo }, later)).resolves.toBeDefined();
@@ -247,44 +247,73 @@ describe.skipIf(withoutVectors)(vectorsTitle("verifyV3At caller mistakes"), () =
   });
 });
 
-describe("Verifier.create options", () => {
+describe("Verifier.create config trust and policy", () => {
   const artifact = (format: string): Uint8Array => utf8(JSON.stringify({ format, measurements: {}, machines: {}, policies: {} }));
 
   it("defaults to a seven-day freshness window, no pins and endorsement-authorized configs", async () => {
     const v = await Verifier.create();
     expect(v.freshnessMaxAgeMs).toBe(7 * 24 * 60 * 60 * 1000);
     expect(v.pinnedRegisters).toBeUndefined();
-    expect(v.callerAuthorizesConfig).toBe(false);
     // The policy can't be reported differently from how it is enforced.
-    expect(() => ((v as { callerAuthorizesConfig: boolean }).callerAuthorizesConfig = true)).toThrow(TypeError);
+    expect(() => ((v as { freshnessMaxAgeMs: number }).freshnessMaxAgeMs = 1)).toThrow(TypeError);
     expect(() => v.checkPinVerifiability({ repo: "tinfoilsh/repo@v1.0.0" })).not.toThrow();
     expect(() => v.checkPinVerifiability({ repo: "no slash" })).toThrow(UsageError);
+    // A pin naming nothing is refused under the public registry alone.
+    expect(() => v.checkPinVerifiability({})).toThrow(/pin names nothing/);
+    const empty = await Verifier.create(undefined, {});
+    expect(empty.freshnessMaxAgeMs).toBe(7 * 24 * 60 * 60 * 1000);
   });
 
-  it("rejects invalid options as usage errors", async () => {
-    await expect(Verifier.create({ freshnessMaxAgeMs: -1 })).rejects.toThrow(UsageError);
-    await expect(Verifier.create({ freshnessMaxAgeMs: Number.NaN })).rejects.toThrow(UsageError);
-    await expect(Verifier.create({ configSigningKeys: [] })).rejects.toThrow(UsageError);
-    await expect(Verifier.create({ configSigningKeys: ["not a pem"] })).rejects.toThrow(UsageError);
-    await expect(Verifier.create({ freshnessSigningKeys: ["not a pem"] })).rejects.toThrow(UsageError);
-    await expect(Verifier.create({ pinnedRegisters: { platform: "sev-snp", launch: new Uint8Array(3) } })).rejects.toThrow(UsageError);
-    await expect(Verifier.create({ pinnedRegisters: { platform: "other" } as unknown as Expected })).rejects.toThrow(UsageError);
-    await expect(Verifier.create({ configAuthorizer: "yes" as unknown as () => void })).rejects.toThrow(UsageError);
-    await expect(Verifier.create({ embeddedReferences: {} })).rejects.toThrow(/at least one component/);
-    await expect(Verifier.create({ embeddedReferences: { platform: artifact(ARTIFACT_FORMAT) } })).rejects.toThrow(/platform-endorsements\/v2/);
-    await expect(Verifier.create({ embeddedReferences: { runtime: utf8("{}") } })).rejects.toThrow(UsageError);
-    await expect(Verifier.create({ embeddedReferences: { config: { bytes: utf8("name: app\n") } } })).rejects.toThrow(UsageError);
+  it("rejects an invalid field as a usage error", async () => {
+    await expect(Verifier.create(undefined, { freshnessMaxAgeMs: -1 })).rejects.toThrow(UsageError);
+    await expect(Verifier.create(undefined, { freshnessMaxAgeMs: Number.NaN })).rejects.toThrow(UsageError);
+    await expect(Verifier.create({ kind: "configSigningKeys", keys: [] })).rejects.toThrow(/must not be empty/);
+    await expect(Verifier.create({ kind: "configSigningKeys", keys: ["not a pem"] })).rejects.toThrow(UsageError);
+    await expect(Verifier.create({ kind: "configSigningKeys", keys: "not a list" as unknown as string[] })).rejects.toThrow(/list of PEM strings/);
+    await expect(Verifier.create(undefined, { artifacts: { kind: "endorsedArtifacts", freshnessKeys: ["not a pem"] } })).rejects.toThrow(UsageError);
+    await expect(Verifier.create(undefined, { artifacts: { kind: "endorsedArtifacts", freshnessKeys: [] } })).rejects.toThrow(/must not be empty/);
+    await expect(Verifier.create(undefined, { pinnedRegisters: { platform: "sev-snp", launch: new Uint8Array(3) } })).rejects.toThrow(UsageError);
+    await expect(Verifier.create(undefined, { pinnedRegisters: { platform: "other" } as unknown as Expected })).rejects.toThrow(UsageError);
+    await expect(Verifier.create({ kind: "configAuthorizer", authorize: "yes" as unknown as () => void })).rejects.toThrow(UsageError);
+    await expect(Verifier.create(undefined, { artifacts: { kind: "embeddedArtifacts" } })).rejects.toThrow(/runtime or a platform/);
+    await expect(Verifier.create(undefined, { artifacts: { kind: "embeddedArtifacts", platform: artifact(ARTIFACT_FORMAT) } })).rejects.toThrow(/platform-endorsements\/v2/);
+    await expect(Verifier.create(undefined, { artifacts: { kind: "embeddedArtifacts", runtime: utf8("{}") } })).rejects.toThrow(UsageError);
+    await expect(Verifier.create(undefined, { artifacts: { kind: "embeddedArtifacts", runtime: "{}" as unknown as Uint8Array } })).rejects.toThrow(/must be a Uint8Array/);
+    await expect(Verifier.create({ kind: "embeddedConfig", bytes: utf8("name: app\n") })).rejects.toThrow(UsageError);
+  });
+
+  it("rejects an unknown kind, a value without one, or a missing member from untyped code as a usage error", async () => {
+    for (const bad of [{ kind: "public" }, { ids: [PUBLIC_REGISTRY_ID] }, "registries", null, { kind: "registries" }, { kind: "configSigningKeys" }, { kind: "configAuthorizer" }, { kind: "embeddedConfig" }, { kind: "embeddedConfigReference" }]) {
+      await expect(Verifier.create(bad as unknown as ConfigTrust)).rejects.toThrow(UsageError);
+    }
+    await expect(Verifier.create({ kind: "public" } as unknown as ConfigTrust)).rejects.toThrow(/config trust must have kind/);
+    for (const bad of [{ kind: "embedded" }, {}, "endorsedArtifacts", null]) {
+      await expect(Verifier.create(undefined, { artifacts: bad as unknown as ArtifactTrust })).rejects.toThrow(UsageError);
+    }
+    await expect(Verifier.create(undefined, { artifacts: { kind: "embedded" } as unknown as ArtifactTrust })).rejects.toThrow(/artifact trust must have kind/);
+    await expect(Verifier.create(undefined, "policy" as unknown as Policy)).rejects.toThrow(/policy must be an object/);
+  });
+
+  it("refuses freshness keys when both artifacts are embedded, since nothing is left for them to verify", async () => {
+    const pem = (await newSigner()).pem;
+    const register = "cd".repeat(48);
+    const manifest = utf8(JSON.stringify({ version: "v1.2.3", igvm: { format_version: 1, snp_launch: { measurement: register } } }));
+    await expect(
+      Verifier.create(undefined, { artifacts: { kind: "embeddedArtifacts", runtime: manifest, platform: artifact(ARTIFACT_FORMAT_V2), freshnessKeys: [pem] } }),
+    ).rejects.toThrow(/no endorsed artifact to verify/);
+    await expect(Verifier.create(undefined, { artifacts: { kind: "embeddedArtifacts", platform: artifact(ARTIFACT_FORMAT_V2), freshnessKeys: [pem] } })).resolves.toBeDefined();
   });
 
   it("accepts an embedded v2 platform artifact and derives the config reference from embedded config bytes", async () => {
-    const platform = await Verifier.create({ embeddedReferences: { platform: artifact(ARTIFACT_FORMAT_V2) } });
-    expect(platform.callerAuthorizesConfig).toBe(false);
+    const platform = await Verifier.create(undefined, { artifacts: { kind: "embeddedArtifacts", platform: artifact(ARTIFACT_FORMAT_V2) } });
+    expect(() => platform.checkPinVerifiability({ project: "org/project@r1" })).not.toThrow();
     const config = utf8(`name: app\ncvm-version: v1.2.3@sha256:${"a".repeat(64)}\n`);
-    const embedded = await Verifier.create({ embeddedReferences: { config: { name: "/org/project/r1", bytes: config } } });
-    expect(embedded.callerAuthorizesConfig).toBe(true);
+    const embedded = await Verifier.create({ kind: "embeddedConfig", name: "/org/project/r1", bytes: config });
+    expect(() => embedded.checkPinVerifiability({})).not.toThrow();
     expect(() => embedded.checkPinVerifiability({ project: "org/project@r1" })).not.toThrow();
     expect(() => embedded.checkPinVerifiability({ project: "org/other@r1" })).toThrow(/embedded config does not match/);
-    await expect(Verifier.create({ embeddedReferences: { config: { name: "bad name", bytes: config } } })).rejects.toThrow(UsageError);
+    await expect(Verifier.create({ kind: "embeddedConfig", name: "bad name", bytes: config })).rejects.toThrow(UsageError);
+    await expect(Verifier.create({ kind: "embeddedConfig", name: 7 as unknown as string, bytes: config })).rejects.toThrow(/name must be a string/);
   });
 
   it("accepts an embedded config reference in place of the config bytes", async () => {
@@ -297,31 +326,20 @@ describe("Verifier.create options", () => {
     );
     const runtime: RuntimeReference = { repo: "tinfoilsh/cvmimage", tag: "v1.2.3", digest: toHex(await sha256(manifest)) };
     const digest = "a".repeat(64);
-    const reference: EmbeddedConfigReference = { name: "/org/project/r1", digest, runtime };
-    const v = await Verifier.create({ embeddedReferences: { config: reference, runtime: manifest } });
-    expect(v.callerAuthorizesConfig).toBe(true);
+    const reference: EmbeddedConfigReference = { kind: "embeddedConfigReference", name: "/org/project/r1", digest, runtime };
+    const embeddedRuntime: Policy = { artifacts: { kind: "embeddedArtifacts", runtime: manifest } };
+    const v = await Verifier.create(reference, embeddedRuntime);
     expect(() => v.checkPinVerifiability({})).not.toThrow();
     expect(() => v.checkPinVerifiability({ project: `org/project@r1@sha256:${digest}` })).not.toThrow();
     expect(() => v.checkPinVerifiability({ project: "org/project@r2" })).toThrow(/embedded config does not match/);
     expect(() => v.checkPinVerifiability({ project: `org/project@sha256:${"b".repeat(64)}` })).toThrow(/embedded config does not match/);
     // Without a name the reference has no identity, so any repository reference, which always
     // pins an identity, mismatches even when its digest agrees; only the empty reference fits.
-    const unnamed = await Verifier.create({ embeddedReferences: { config: { digest, runtime } } });
+    const unnamed = await Verifier.create({ kind: "embeddedConfigReference", digest, runtime });
     expect(() => unnamed.checkPinVerifiability({ project: `org/project@sha256:${digest}` })).toThrow(/embedded config does not match/);
     expect(() => unnamed.checkPinVerifiability({})).not.toThrow();
-    // An embedded config is its bytes or its reference, never both: each form excludes the
-    // other's fields, so the combined object fails to compile under the test typecheck.
     const bytes = utf8(`cvm-version: v1.2.3@sha256:${runtime.digest}\n`);
-    // @ts-expect-error The bytes form excludes digest and runtime, and the reference form excludes bytes.
-    const combined: VerifierOptions = { embeddedReferences: { config: { bytes, ...reference } } };
-    void combined;
-    // Untyped code giving both, neither or something other than an object is refused before anything else is checked.
-    for (const bad of [{ bytes, ...reference }, { name: "/org/project/r1" }, {}, "config", null]) {
-      await expect(Verifier.create({ embeddedReferences: { config: bad as unknown as EmbeddedConfigReference } })).rejects.toThrow(UsageError);
-    }
-    const both = { bytes, ...reference } as unknown as EmbeddedConfigReference;
-    await expect(Verifier.create({ embeddedReferences: { config: both } })).rejects.toThrow(/not both or neither/);
-    await expect(Verifier.create({ embeddedReferences: { config: { bytes: "config" as unknown as Uint8Array } } })).rejects.toThrow(/must be a Uint8Array/);
+    await expect(Verifier.create({ kind: "embeddedConfig", bytes: "config" as unknown as Uint8Array })).rejects.toThrow(/must be a Uint8Array/);
     // The reference is validated like one derived from config bytes, and the embedded manifest must be the one it pins.
     for (const bad of [
       { ...reference, digest: "" },
@@ -333,62 +351,53 @@ describe("Verifier.create options", () => {
       { ...reference, runtime: "v1.2.3" as unknown as RuntimeReference },
       { ...reference, digest: 7 as unknown as string },
     ]) {
-      await expect(Verifier.create({ embeddedReferences: { config: bad, runtime: manifest } })).rejects.toThrow(UsageError);
+      await expect(Verifier.create(bad, embeddedRuntime)).rejects.toThrow(UsageError);
     }
     // A later change to the caller's object does not reach the verifier.
-    const mutable = { name: "/org/project/r1", digest, runtime: { ...runtime } };
-    const copied = await Verifier.create({ embeddedReferences: { config: mutable } });
+    const mutable = { kind: "embeddedConfigReference" as const, name: "/org/project/r1", digest, runtime: { ...runtime } };
+    const copied = await Verifier.create(mutable);
     mutable.digest = "b".repeat(64);
     mutable.runtime.digest = "cd".repeat(32);
     expect(() => copied.checkPinVerifiability({ project: `org/project@r1@sha256:${digest}` })).not.toThrow();
     // Nor does a later change to embedded config bytes: the reference was settled from a copy.
-    const fromBytes = await Verifier.create({ embeddedReferences: { config: { name: "/org/project/r1", bytes } } });
+    const fromBytes = await Verifier.create({ kind: "embeddedConfig", name: "/org/project/r1", bytes });
     const bytesDigest = toHex(await sha256(bytes));
     bytes.fill(0);
     expect(() => fromBytes.checkPinVerifiability({ project: `org/project@r1@sha256:${bytesDigest}` })).not.toThrow();
     // Like every configured trust source, it needs config collateral.
     if (withoutVectors) return;
     const fixture = loadFixture("golden/golden-happy.json");
-    const embedded = await dangerousTestOnlyVerifier(rootsOf(fixture), { embeddedReferences: { config: reference } });
+    const embedded = await dangerousTestOnlyVerifier(rootsOf(fixture), reference);
     const err = await embedded.verifyV3At(inputBytes(fixture, "document_b64"), hex(fixture.input.nonce_hex ?? ""), {}, clockOf(fixture)).catch((e: unknown) => e);
     expect(err).toBeInstanceOf(VerificationError);
     expect((err as VerificationError).layer).toBe("provenance");
     expect((err as Error).message).toMatch(/configured trust requires/);
   });
 
-  it("accepts registry ID pins only alongside registry trust", async () => {
+  it("validates and copies registry IDs", async () => {
     const privateRegistryID = "https://registry.tinfoil.sh/scopes/9c4a7f21e0b836d56a13c8fe42d907ab";
-    const pinned = await Verifier.create({ configRegistryIDs: [privateRegistryID, "https://registry.tinfoil.sh/scopes/public"] });
-    expect(pinned.callerAuthorizesConfig).toBe(false);
+    const ids = [privateRegistryID, "https://registry.tinfoil.sh/scopes/public"];
+    const pinned = await Verifier.create({ kind: "registries", ids });
+    ids.length = 0;
     expect(() => pinned.checkPinVerifiability({ project: "org/project@r1" })).not.toThrow();
-    await expect(Verifier.create({ configRegistryIDs: [] })).rejects.toThrow(/must not be empty/);
-    await expect(Verifier.create({ configRegistryIDs: [privateRegistryID, privateRegistryID] })).rejects.toThrow(/duplicate/);
-    await expect(Verifier.create({ configRegistryIDs: ["https://example.invalid/scope"] })).rejects.toThrow(/canonical registry URI/);
-    await expect(Verifier.create({ configRegistryIDs: "public" as unknown as string[] })).rejects.toThrow(UsageError);
-    const { pem } = await newSigner();
-    await expect(Verifier.create({ configRegistryIDs: [privateRegistryID], configSigningKeys: [pem] })).rejects.toThrow(/registry root verification/);
-    await expect(Verifier.create({ configRegistryIDs: [privateRegistryID], configAuthorizer: () => undefined })).rejects.toThrow(/require endorsement verification/);
-    const config = { bytes: utf8(`cvm-version: v1.2.3@sha256:${"a".repeat(64)}\n`) };
-    await expect(Verifier.create({ configRegistryIDs: [privateRegistryID], embeddedReferences: { config } })).rejects.toThrow(/require endorsement verification/);
+    await expect(Verifier.create({ kind: "registries", ids: [] })).rejects.toThrow(/must not be empty/);
+    await expect(Verifier.create({ kind: "registries", ids: [privateRegistryID, privateRegistryID] })).rejects.toThrow(/duplicate/);
+    await expect(Verifier.create({ kind: "registries", ids: ["https://example.invalid/scope"] })).rejects.toThrow(/canonical registry URI/);
+    await expect(Verifier.create({ kind: "registries", ids: "public" as unknown as string[] })).rejects.toThrow(UsageError);
   });
 
   it("requires config collateral once registry IDs are pinned", async () => {
     if (withoutVectors) return;
     const fixture = loadFixture("golden/golden-happy.json");
-    const pinned = await dangerousTestOnlyVerifier(rootsOf(fixture), { configRegistryIDs: ["https://registry.tinfoil.sh/scopes/public"] });
+    const pinned = await dangerousTestOnlyVerifier(rootsOf(fixture), { kind: "registries", ids: ["https://registry.tinfoil.sh/scopes/public"] });
     const err = await pinned.verifyV3At(inputBytes(fixture, "document_b64"), hex(fixture.input.nonce_hex ?? ""), { repo: repoOf(fixture) }, clockOf(fixture)).catch((e: unknown) => e);
     expect(err).toBeInstanceOf(VerificationError);
     expect((err as VerificationError).layer).toBe("provenance");
     expect((err as Error).message).toMatch(/configured trust requires/);
   });
 
-  it("rejects conflicting trust sources", async () => {
-    const config = { bytes: utf8(`cvm-version: v1.2.3@sha256:${"a".repeat(64)}\n`) };
-    const pem = "-----BEGIN PUBLIC KEY-----\nMFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAE" + "A".repeat(84) + "\n-----END PUBLIC KEY-----\n";
-    await expect(Verifier.create({ configAuthorizer: () => undefined, embeddedReferences: { config } })).rejects.toThrow(/conflicts/);
-    await expect(Verifier.create({ configAuthorizer: () => undefined, configSigningKeys: [pem] })).rejects.toThrow(UsageError);
-    const authorizer = await Verifier.create({ configAuthorizer: () => undefined });
-    expect(authorizer.callerAuthorizesConfig).toBe(true);
+  it("refuses a project pin under a config authorizer, which authenticates no name", async () => {
+    const authorizer = await Verifier.create({ kind: "configAuthorizer", authorize: () => undefined });
     expect(() => authorizer.checkPinVerifiability({ project: "org/project" })).toThrow(/enforce them in caller policy/);
     expect(() => authorizer.checkPinVerifiability({})).not.toThrow();
   });
@@ -434,7 +443,7 @@ describe("the document's collateral selects the part of the pin that applies", (
   });
 
   it("keeps the configured-trust rejection for repository collateral under registry-only trust", async () => {
-    const v = await Verifier.create({ configRegistryIDs: [PUBLIC_REGISTRY_ID] });
+    const v = await Verifier.create({ kind: "registries", ids: [PUBLIC_REGISTRY_ID] });
     for (const pin of [{}, project, both]) {
       const err = await v.verifyV3(await document(FORMAT_V2), nonce, pin).catch((e: unknown) => e);
       expect(err).toBeInstanceOf(VerificationError);
@@ -453,30 +462,31 @@ describe("the document's collateral selects the part of the pin that applies", (
 
 describe("checkPinVerifiability", () => {
   const config = utf8(`name: app\ncvm-version: v1.2.3@sha256:${"a".repeat(64)}\n`);
-  const embedded: VerifierOptions = { embeddedReferences: { config: { name: "/org/project/v1", bytes: config } } };
-  const authorizer: VerifierOptions = { configAuthorizer: () => undefined };
+  const embedded: ConfigTrust = { kind: "embeddedConfig", name: "/org/project/v1", bytes: config };
+  const authorizer: ConfigTrust = { kind: "configAuthorizer", authorize: () => undefined };
+  const registries: ConfigTrust = { kind: "registries", ids: [PUBLIC_REGISTRY_ID] };
 
-  it.each<[string, VerifierOptions, Pin, boolean]>([
-    ["defaults with a project", {}, { project: "org/repo@v1" }, true],
-    ["defaults with a repository", {}, { repo: "Org/My_Repo" }, true],
-    ["defaults with both", {}, { repo: "Org/My_Repo", project: "org/project" }, true],
-    ["defaults without a pin", {}, {}, false],
-    ["defaults with empty parts", {}, { repo: "", project: "" }, false],
-    ["registry IDs without a pin", { configRegistryIDs: [PUBLIC_REGISTRY_ID] }, {}, true],
-    ["defaults with a malformed project", {}, { project: "not a reference" }, false],
-    ["defaults with a malformed repository", {}, { repo: "not a reference" }, false],
+  it.each<[string, ConfigTrust | undefined, Pin, boolean]>([
+    ["defaults with a project", undefined, { project: "org/repo@v1" }, true],
+    ["defaults with a repository", undefined, { repo: "Org/My_Repo" }, true],
+    ["defaults with both", undefined, { repo: "Org/My_Repo", project: "org/project" }, true],
+    ["defaults without a pin", undefined, {}, false],
+    ["defaults with empty parts", undefined, { repo: "", project: "" }, false],
+    ["registry IDs without a pin", registries, {}, true],
+    ["defaults with a malformed project", undefined, { project: "not a reference" }, false],
+    ["defaults with a malformed repository", undefined, { repo: "not a reference" }, false],
     ["embedded config without a pin", embedded, {}, true],
     ["embedded config with its own project", embedded, { project: "org/project@v1" }, true],
     ["embedded config with another project", embedded, { project: "org/repo" }, false],
     ["embedded config with a repository alone", embedded, { repo: "org/project" }, false],
     ["embedded config with its own project and a repository", embedded, { repo: "org/project", project: "org/project@v1" }, true],
-    ["registry IDs with a repository alone", { configRegistryIDs: [PUBLIC_REGISTRY_ID] }, { repo: "org/project" }, false],
-    ["registry IDs with a repository and a project", { configRegistryIDs: [PUBLIC_REGISTRY_ID] }, { repo: "org/project", project: "org/project" }, true],
+    ["registry IDs with a repository alone", registries, { repo: "org/project" }, false],
+    ["registry IDs with a repository and a project", registries, { repo: "org/project", project: "org/project" }, true],
     ["config authorizer without a pin", authorizer, {}, true],
     ["config authorizer with a project", authorizer, { project: "org/repo" }, false],
     ["config authorizer with a repository", authorizer, { repo: "org/repo" }, false],
-  ])("%s", async (_name, options, pin, valid) => {
-    const v = await Verifier.create(options);
+  ])("%s", async (_name, config, pin, valid) => {
+    const v = await Verifier.create(config);
     if (valid) expect(() => v.checkPinVerifiability(pin)).not.toThrow();
     else expect(() => v.checkPinVerifiability(pin)).toThrow(UsageError);
   });
@@ -496,26 +506,15 @@ describe("config registry IDs beyond the public registry", () => {
 
   it("accepts the public registry alongside the given registry IDs as one validated list", async () => {
     expect(PUBLIC_REGISTRY_ID).toBe(PUBLIC_REGISTRY_ID_EXPORTED);
-    const v = await Verifier.create({ configRegistryIDs: [PUBLIC_REGISTRY_ID, PRIVATE_REGISTRY_ID] });
-    expect(v.callerAuthorizesConfig).toBe(false);
+    const v = await Verifier.create({ kind: "registries", ids: [PUBLIC_REGISTRY_ID, PRIVATE_REGISTRY_ID] });
     expect(() => v.checkPinVerifiability({ project: "org/project@r1" })).not.toThrow();
-    await expect(Verifier.create({ configRegistryIDs: [PUBLIC_REGISTRY_ID, PUBLIC_REGISTRY_ID] })).rejects.toThrow(/duplicate config registry ID/);
-    await expect(Verifier.create({ configRegistryIDs: [PUBLIC_REGISTRY_ID, PRIVATE_REGISTRY_ID, PRIVATE_REGISTRY_ID] })).rejects.toThrow(/duplicate config registry ID/);
-    await expect(Verifier.create({ configRegistryIDs: [PUBLIC_REGISTRY_ID, "https://example.invalid/scope"] })).rejects.toThrow(/canonical registry URI/);
-    // The same trust conflicts as any registry ID list.
-    const { pem } = await newSigner();
-    await expect(Verifier.create({ configRegistryIDs: [PUBLIC_REGISTRY_ID, PRIVATE_REGISTRY_ID], configSigningKeys: [pem] })).rejects.toThrow(/registry root verification/);
-    await expect(Verifier.create({ configRegistryIDs: [PUBLIC_REGISTRY_ID, PRIVATE_REGISTRY_ID], configAuthorizer: () => undefined })).rejects.toThrow(
-      /require endorsement verification/,
-    );
-    const config = { bytes: utf8(`cvm-version: v1.2.3@sha256:${"a".repeat(64)}\n`) };
-    await expect(Verifier.create({ configRegistryIDs: [PUBLIC_REGISTRY_ID, PRIVATE_REGISTRY_ID], embeddedReferences: { config } })).rejects.toThrow(
-      /require endorsement verification/,
-    );
+    await expect(Verifier.create({ kind: "registries", ids: [PUBLIC_REGISTRY_ID, PUBLIC_REGISTRY_ID] })).rejects.toThrow(/duplicate config registry ID/);
+    await expect(Verifier.create({ kind: "registries", ids: [PUBLIC_REGISTRY_ID, PRIVATE_REGISTRY_ID, PRIVATE_REGISTRY_ID] })).rejects.toThrow(/duplicate config registry ID/);
+    await expect(Verifier.create({ kind: "registries", ids: [PUBLIC_REGISTRY_ID, "https://example.invalid/scope"] })).rejects.toThrow(/canonical registry URI/);
     // Once pinned, config collateral is required like any configured trust.
     if (withoutVectors) return;
     const fixture = loadFixture("golden/golden-happy.json");
-    const pinned = await dangerousTestOnlyVerifier(rootsOf(fixture), { configRegistryIDs: [PUBLIC_REGISTRY_ID, PRIVATE_REGISTRY_ID] });
+    const pinned = await dangerousTestOnlyVerifier(rootsOf(fixture), { kind: "registries", ids: [PUBLIC_REGISTRY_ID, PRIVATE_REGISTRY_ID] });
     const err = await pinned.verifyV3At(inputBytes(fixture, "document_b64"), hex(fixture.input.nonce_hex ?? ""), { repo: repoOf(fixture) }, clockOf(fixture)).catch((e: unknown) => e);
     expect(err).toBeInstanceOf(VerificationError);
     expect((err as VerificationError).layer).toBe("provenance");
@@ -557,18 +556,18 @@ describe("config registry IDs beyond the public registry", () => {
     );
     const roots = { sigstore: utf8(JSON.stringify(rootJson([log], [authorityJson(tsa)]))), registryRoots: [registry.root.pem] };
     const at = new Date(GEN_TIME.getTime() + 60 * 60 * 1000);
-    const verify = async (options: VerifierOptions): Promise<VerificationError> => {
-      const v = await dangerousTestOnlyVerifier(roots, { embeddedReferences: { runtime: manifest, platform }, ...options });
+    const verify = async (config: ConfigTrust | undefined): Promise<VerificationError> => {
+      const v = await dangerousTestOnlyVerifier(roots, config, { artifacts: { kind: "embeddedArtifacts", runtime: manifest, platform } });
       const err = await v.verifyV3At(bytes, nonce, { project: "org/project@r1" }, at).catch((e: unknown) => e);
       expect(err).toBeInstanceOf(VerificationError);
       return err as VerificationError;
     };
     // The config approval passes and the bogus quote fails next, at the quote layer.
-    expect((await verify({ configRegistryIDs: [PUBLIC_REGISTRY_ID, PRIVATE_REGISTRY_ID] })).layer).toBe("quote");
-    expect((await verify({ configRegistryIDs: [PRIVATE_REGISTRY_ID] })).layer).toBe("quote");
+    expect((await verify({ kind: "registries", ids: [PUBLIC_REGISTRY_ID, PRIVATE_REGISTRY_ID] })).layer).toBe("quote");
+    expect((await verify({ kind: "registries", ids: [PRIVATE_REGISTRY_ID] })).layer).toBe("quote");
     // A list without the private registry, or the public-only default, rejects it at the provenance layer.
-    for (const options of [{}, { configRegistryIDs: [PUBLIC_REGISTRY_ID] }, { configRegistryIDs: [PUBLIC_REGISTRY_ID, REGISTRY_ID_PREFIX + "0".repeat(32)] }]) {
-      const err = await verify(options);
+    for (const config of [undefined, { kind: "registries", ids: [PUBLIC_REGISTRY_ID] }, { kind: "registries", ids: [PUBLIC_REGISTRY_ID, REGISTRY_ID_PREFIX + "0".repeat(32)] }] as const) {
+      const err = await verify(config);
       expect(err.layer).toBe("provenance");
       expect(err.message).toMatch(/registry ID is not accepted by the caller/);
     }
@@ -596,12 +595,15 @@ describe("config authorizer", () => {
       () => ({ format: SEV_SNP_REPORT_V1_FORMAT, report: new Uint8Array(1184).fill(1) }),
     );
     let seen: ConfigEndorsement | undefined;
-    const v = await Verifier.create({
-      embeddedReferences: { runtime: manifest, platform },
-      configAuthorizer: (endorsement) => {
-        seen = endorsement;
+    const v = await Verifier.create(
+      {
+        kind: "configAuthorizer",
+        authorize: (endorsement) => {
+          seen = endorsement;
+        },
       },
-    });
+      { artifacts: { kind: "embeddedArtifacts", runtime: manifest, platform } },
+    );
     const err = await v.verifyV3At(bytes, nonce, {}, new Date()).catch((e: unknown) => e);
     expect(seen?.bundle).toBe(bundleText);
     const member = utf8(seen!.bundle!);

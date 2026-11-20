@@ -23,7 +23,6 @@ function verifier(hpke: string): Verifier {
     checkPinVerifiability: ({ repo = "" }: { repo?: string }) => {
       if (repo === "") throw new UsageError("repo required");
     },
-    callerAuthorizesConfig: false,
     verifyV3At: async () =>
       ({
         cryptoMaterial: [

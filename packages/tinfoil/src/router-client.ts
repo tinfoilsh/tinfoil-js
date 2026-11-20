@@ -40,9 +40,6 @@ export async function createRouterHTTPClient(options: RouterOptions, seams: Rout
     }
     baseURL = normalizeBaseURL(baseURL);
   }
-  if (options.verifier?.callerAuthorizesConfig) {
-    throw new ConfigurationError("caller-authorized config requires an explicit enclave");
-  }
   const transport = await discoverRouter({
     verifier: options.verifier,
     verificationCheck: options.verificationCheck,

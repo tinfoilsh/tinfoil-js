@@ -58,10 +58,8 @@ export class GatewayPolicy {
         throw new ConfigurationError(`gateway verification options: ${messageOf(err)}`, { cause: err });
       }
     }
-    if (verifier.callerAuthorizesConfig) throw new ConfigurationError(CALLER_AUTHORIZED);
     const resolved = new Map<string, ResolvedPin>();
     for (const [model, pin] of pins) {
-      if (pin.verifier?.callerAuthorizesConfig) throw new ConfigurationError(`model ${JSON.stringify(model)}: ${CALLER_AUTHORIZED}`);
       if (model.trim() === "" || !pin.repo.startsWith(TRUSTED_REPO_OWNER)) {
         throw new ConfigurationError(`model pin ${JSON.stringify(model)} repository ${JSON.stringify(pin.repo)} must belong to ${TRUSTED_REPO_OWNER}`);
       }
@@ -113,6 +111,3 @@ export class GatewayPolicy {
     return this.#pins.get(r.model)?.verifier ?? this.#verifier;
   }
 }
-
-/** Gateway replicas are verified against repository pins, so a config the caller supplies or authorizes has no place. */
-const CALLER_AUTHORIZED = "caller-authorized config requires a direct enclave client";

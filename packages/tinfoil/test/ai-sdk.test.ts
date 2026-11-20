@@ -34,7 +34,6 @@ function verifier(keys: { tls?: string; hpke?: string }): Verifier {
     checkPinVerifiability: ({ repo = "" }: { repo?: string }) => {
       if (repo === "") throw new UsageError("repo required");
     },
-    callerAuthorizesConfig: false,
     verifyV3At: async () => {
       const material = [
         ...(keys.tls === undefined ? [] : [{ id: "tls", format: KEY_SPKI_FP_SHA256_V1_FORMAT, data: keys.tls }]),

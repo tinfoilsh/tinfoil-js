@@ -18,12 +18,11 @@ const GATEWAY_URL = "https://gateway.example/v1/";
 const CATALOG = { "test-model": { repo: "tinfoilsh/test", hosts: ["replica-a.example", "replica-b.example"] }, other: { repo: "tinfoilsh/other", hosts: ["o.example"] } };
 let gateway: EhbpServer;
 
-function verifier(hpke: string, authorizes = false): Verifier {
+function verifier(hpke: string): Verifier {
   return {
     checkPinVerifiability: ({ repo = "" }: { repo?: string }) => {
       if (repo === "") throw new UsageError("repo required");
     },
-    callerAuthorizesConfig: authorizes,
     verifyV3At: async () => {
       const material = [
         { id: "tls", format: KEY_SPKI_FP_SHA256_V1_FORMAT, data: "ab".repeat(32) },
@@ -89,7 +88,6 @@ describe("GatewayHTTPClient.create", () => {
       { verifier: v, url: "https://gateway.example/v1/?key=1" },
       { verifier: v, url: "https://gateway.example/v1/#frag" },
       { verifier: v, pinnedModelsOnly: true },
-      { verifier: verifier(gateway.publicKeyHex, true) },
       { verifier: v, modelPins: new Map([["m", { repo: "other/m" }]]) },
     ];
     for (const options of cases) {
