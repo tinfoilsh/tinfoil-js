@@ -19,6 +19,8 @@ export {
 } from "./session-recovery.js";
 export type {
   Fetch,
+  AttestationFetcher,
+  RouterListFetcher,
   Transport,
   TLS,
   EHBP,
@@ -38,5 +40,6 @@ export type {
 } from "./options.js";
 export type { Trust, RepoPin, ProjectPin, SignedBy, AuthorizedBy, EmbeddedConfig, EitherPin } from "./trust.js";
 export { SDK_VERSION } from "./version.js";
+export { attestationRelay, routerListRelay, type RelayOptions } from "./fetchers.js";
 export { createWebSocket, pinnedWebSocketOptions } from "./websocket.js";
 export type { WebSocketOptions, PinnedWebSocket } from "./options.js";

@@ -86,6 +86,35 @@ const router = await RouterHTTPClient.create({ transport: { kind: "ehbp", proxyU
 const client = new OpenAIClient(router, {}, { bearerToken: "<SESSION_TOKEN>" });
 ```
 
+### A page that contacts only your own origin
+
+By default a client also fetches each enclave's attestation document directly from the enclave, and the router client fetches its list of candidate routers from `https://atc.tinfoil.sh/routers`. A page under a strict content security policy, or one that shouldn't reveal its users' IP addresses to enclaves, can send all three kinds of request to your own origin instead:
+
+```typescript
+import { attestationRelay, RouterHTTPClient, routerListRelay } from "tinfoil";
+import { OpenAIClient } from "tinfoil/openai";
+
+const router = await RouterHTTPClient.create({
+  // Requests, with bodies sealed to the verified router's key.
+  transport: { kind: "ehbp", proxyURL: "https://app.example/tinfoil/proxy" },
+  // GET /tinfoil/.well-known/tinfoil-attestation?nonce=…&enclave=…
+  fetchAttestation: attestationRelay("https://app.example/tinfoil"),
+  // GET /tinfoil/routers
+  fetchRouterList: routerListRelay("https://app.example/tinfoil"),
+});
+const client = new OpenAIClient(router, {}, { bearerToken: "<SESSION_TOKEN>" });
+```
+
+Your server implements three endpoints:
+
+| Endpoint | Forwards to |
+|---|---|
+| The proxy (`proxyURL`) | The router named in the `X-Tinfoil-Enclave-Url` header, adding your API key. Request and response bodies stay sealed |
+| `{relay}/.well-known/tinfoil-attestation?nonce={hex}&enclave={host}` | `https://{host}/.well-known/tinfoil-attestation?nonce={hex}`, returning the body unchanged. Forward only to the enclave hosts that you expect, so that the relay isn't an open proxy |
+| `{relay}/routers` | `https://atc.tinfoil.sh/routers`, returning the body unchanged |
+
+None of them is trusted. The client verifies every document that the relay returns, as it verifies one that it fetched itself: the document must answer the client's fresh nonce and pass the router's trust and policy. The router list only proposes candidates: discovery still verifies each one, and falls back to `inference.tinfoil.sh` when none passes. One residual trust remains: a document doesn't name the host that served it, so the list's source is trusted not to name a host that relays another router's attestation, which would then receive the request headers, including the bearer token, although not the sealed bodies. Relay URLs follow the proxy URL's rules: HTTPS, or HTTP only to localhost or a loopback address, with no user information, query or fragment; `attestationRelay` and `routerListRelay` throw a `ConfigurationError` for a bad one when they are called. `fetchAttestation` and `fetchRouterList` also take a function of your own: `(host, nonce, { signal }) => Promise<Uint8Array>` and `({ signal }) => Promise<string[]>`. An `EnclaveHTTPClient` takes `fetchAttestation` too.
+
 Browsers use the EHBP transport, the default and the only one available there. The package's type declarations are shared with the Node build, so a browser project type-checks a few names that throw a `ConfigurationError` when called: `createWebSocket` and `pinnedWebSocketOptions` (a verified WebSocket pins the server certificate, which browsers don't expose to scripts), `createRealtimeWebSocket` (a realtime session runs over such a WebSocket), and `transport: { kind: "tls" }` (the TLS transport pins the server certificate too; EHBP seals request and response bodies to the enclave's key instead).
 
 Bun pins the TLS connection from Bun 1.4.0, the first release whose `fetch` checks the server certificate before it sends the request; on an older Bun the default transport is EHBP and `transport: { kind: "tls" }` is refused with a `ConfigurationError`. `createWebSocket` needs Bun 1.4.4 or later, the first release whose WebSocket runs the certificate check at all, and is refused on an older Bun before anything is sent. `pinnedWebSocketOptions` and `createRealtimeWebSocket` hand settings to the `ws` library, which Bun replaces with its own WebSocket, so they are available on Node only.
@@ -134,7 +163,7 @@ import { RouterHTTPClient } from "tinfoil";
 const client = await RouterHTTPClient.create({ transport: { kind: "ehbp", fetch: nativeFetch } });
 ```
 
-The client verifies the enclave and seals each request body before calling it, and opens the response that it returns; attestation documents, the router list and the gateway catalog are still fetched with the runtime's fetch. The function must return a standard `Response` and honour the request's signal, and a relay must pass the sealed body and the protocol headers through unchanged. The method, URL and headers aren't sealed, so a relay sees the API key: use only a relay that you trust, over HTTPS. A request without a body passes through it unsealed, as EHBP leaves it. The TLS transport has no `fetch`, since it pins the connection itself.
+The client verifies the enclave and seals each request body before calling it, and opens the response that it returns; attestation documents, the router list and the gateway catalog are still fetched with the runtime's fetch, unless `fetchAttestation` or `fetchRouterList` says otherwise. The function must return a standard `Response` and honour the request's signal, and a relay must pass the sealed body and the protocol headers through unchanged. The method, URL and headers aren't sealed, so a relay sees the API key: use only a relay that you trust, over HTTPS. A request without a body passes through it unsealed, as EHBP leaves it. The TLS transport has no `fetch`, since it pins the connection itself.
 
 ## Errors
 

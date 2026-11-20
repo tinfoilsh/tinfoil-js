@@ -100,11 +100,17 @@ export function attestedFetch(transport: KeyedTransport, host: string, proxyURL:
   return withOriginRestriction(chain, host, proxyURL);
 }
 
+/** @internal Refuses a fetcher option that untyped code set to something other than a function. */
+export function checkFetcher(name: string, fetcher: unknown): void {
+  if (fetcher !== undefined && typeof fetcher !== "function") throw new ConfigurationError(`the ${name} option must be a function, such as one that ${name === "fetchRouterList" ? "routerListRelay" : "attestationRelay"} returns`);
+}
+
 /** @internal The option checks that need no network I/O, so a misconfigured client fails before anything is fetched. */
 export function checkEnclaveOptions(host: string, options: EnclaveOptions, globals?: RuntimeGlobals): ResolvedTransport {
   if (typeof host !== "string" || host === "") throw new ConfigurationError("enclave host is required");
   const transport = resolveTransport(options.transport, globals);
   refuseEnclaveOriginProxy(transport.proxyURL, host);
+  checkFetcher("fetchAttestation", options.fetchAttestation);
   return transport;
 }
 
@@ -140,6 +146,7 @@ export async function createEnclaveHTTPClient(host: string, trust: Trust, option
     pin,
     verifier,
     verificationCheck: options.verificationCheck,
+    fetchAttestation: options.fetchAttestation,
     fetch: seams.documentFetch,
     clock: seams.clock,
     nonce: seams.nonce,

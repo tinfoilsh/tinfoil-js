@@ -73,6 +73,44 @@ export interface EHBP {
 }
 
 /**
+ * Obtains the attestation document of an enclave for a challenge nonce, in
+ * place of the client's direct fetch from the enclave; {@link attestationRelay}
+ * returns one that fetches through a relay. `host` is the enclave's host,
+ * with an optional port, and `nonce` is the fresh 32-byte challenge that the
+ * document must answer. The client verifies whatever it returns as it
+ * verifies a document that it fetched itself, so a fetcher isn't trusted: it
+ * can make verification fail, but it can't make an enclave pass that
+ * wouldn't pass otherwise.
+ *
+ * A client calls it for every verification: when it is created, whenever it
+ * verifies again after an expiry or a key rotation, and, on the router
+ * route, for each router that discovery tries and for the fallback.
+ * `signal` ends after 30 seconds, or when the caller that waits for the
+ * verification stops waiting; the client stops waiting then too. A thrown
+ * error is reported as a {@link NetworkError} that wraps it, unless it
+ * already is an SDK error. It may be called concurrently.
+ */
+export type AttestationFetcher = (host: string, nonce: Uint8Array, options: { readonly signal: AbortSignal }) => Promise<Uint8Array>;
+
+/**
+ * Obtains the candidate routers for router discovery, in place of the
+ * client's fetch from `https://atc.tinfoil.sh/routers`; {@link routerListRelay}
+ * returns one that fetches through a relay. The list isn't trusted: it only
+ * proposes hosts, and discovery verifies each one before it uses it, tries
+ * them for at most 30 seconds in all, and falls back to inference.tinfoil.sh
+ * when none passes. A thrown error, or a result that isn't an array of
+ * strings, counts as an empty list.
+ *
+ * An attestation document doesn't name the host that serves it, so the list
+ * source is trusted not to name a host that would relay another router's
+ * attestation: with EHBP, such a host would receive the request headers,
+ * including the API key, although not the sealed bodies.
+ *
+ * `signal` ends when the caller's signal does, or after 30 seconds.
+ */
+export type RouterListFetcher = (options: { readonly signal: AbortSignal }) => Promise<readonly string[]>;
+
+/**
  * Called with each verification that passes the verifier, before the client
  * uses the enclave's keys: when the client is created and whenever it
  * verifies again. Throw to reject the enclave; verification then fails with
@@ -211,6 +249,12 @@ export interface EnclaveOptions {
    */
   readonly policy?: Policy;
   readonly verificationCheck?: VerificationCheck;
+  /**
+   * How the client obtains each attestation document; undefined fetches it
+   * directly from the enclave. Use {@link attestationRelay} to fetch through
+   * a relay, or a function of your own; see {@link AttestationFetcher}.
+   */
+  readonly fetchAttestation?: AttestationFetcher;
   /** Aborts the verification the factory performs before it returns. */
   readonly signal?: AbortSignal;
 }
@@ -239,6 +283,19 @@ export interface RouterOptions {
    * otherwise it fails verification as for an enclave client.
    */
   readonly verificationCheck?: VerificationCheck;
+  /**
+   * How the client obtains each attestation document, for every router that
+   * discovery tries, the fallback and every later verification; undefined
+   * fetches it directly from the router. See {@link AttestationFetcher}.
+   */
+  readonly fetchAttestation?: AttestationFetcher;
+  /**
+   * How the client obtains its list of candidate routers; undefined fetches
+   * Tinfoil's list. Use {@link routerListRelay} to fetch through a relay, or
+   * a function of your own; see {@link RouterListFetcher}. Discovery runs
+   * whatever the list's source.
+   */
+  readonly fetchRouterList?: RouterListFetcher;
   /**
    * The default prompt-cache scope. A non-empty `user_cache_secret` string
    * in a request's JSON body overrides it. Undefined or empty selects a

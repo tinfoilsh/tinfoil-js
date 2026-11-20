@@ -59,7 +59,8 @@ function routerList(body: unknown, status = 200): { fetch: Fetch; calls: string[
 }
 
 function config(overrides: Partial<DiscoveryConfig>): DiscoveryConfig {
-  return { verifier: verifier(), mode: tlsMode(), sleep: async () => {}, ...overrides };
+  // The list's order is kept, so that a test can say which router is tried first.
+  return { verifier: verifier(), mode: tlsMode(), sleep: async () => {}, shuffle: (items) => [...items], ...overrides };
 }
 
 describe("discoverRouter", () => {

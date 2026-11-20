@@ -6,15 +6,18 @@
  * unreachable routers can't hold up a client before it falls back.
  */
 import type { Pin, Verifier } from "@tinfoilsh/verifier";
-import type { Fetch, VerificationCheck } from "../options.js";
+import { wrapNetwork } from "../errors.js";
+import type { AttestationFetcher, Fetch, RouterListFetcher, VerificationCheck } from "../options.js";
 import { Enclave, type EnclaveConfig } from "./enclave.js";
-import { getFollowingRedirects, isAuthority, readBounded } from "./fetch.js";
+import { getFollowingRedirects, isAuthority, readBounded, untilAborted } from "./fetch.js";
 import { KeyedTransport, type Mode } from "./transport/transport.js";
 
 // Tinfoil owns the router's name in both namespaces.
 export const DEFAULT_ROUTER_NAME = "tinfoilsh/confidential-model-router";
 export const DEFAULT_ROUTER_PIN: Pin = Object.freeze({ repo: DEFAULT_ROUTER_NAME, project: DEFAULT_ROUTER_NAME });
 export const DEFAULT_ROUTER_URL = "https://atc.tinfoil.sh/routers";
+/** The path of the router list, under Tinfoil's origin or a relay's URL. */
+export const ROUTER_LIST_PATH = "/routers";
 export const FALLBACK_ROUTER_HOST = "inference.tinfoil.sh";
 export const ROUTER_FETCH_TIMEOUT_MS = 30_000;
 export const DISCOVERY_TIMEOUT_MS = 30_000;
@@ -25,8 +28,13 @@ export interface DiscoveryConfig {
   readonly verificationCheck?: VerificationCheck;
   readonly mode: Mode;
   readonly signal?: AbortSignal;
-  /** Seams for tests: the fetch for the router list, and the enclave's seams. */
+  /** How each router's attestation document is obtained; undefined fetches it directly. */
+  readonly fetchAttestation?: AttestationFetcher;
+  /** How the router list is obtained; undefined fetches Tinfoil's list. */
+  readonly fetchRouterList?: RouterListFetcher;
+  /** Seams for tests: the fetch for Tinfoil's router list, the shuffle, and the enclave's seams. */
   readonly routersFetch?: Fetch;
+  readonly shuffle?: <T>(items: readonly T[]) => T[];
   readonly documentFetch?: Fetch;
   readonly clock?: () => Date;
   readonly nonce?: () => Uint8Array;
@@ -48,6 +56,7 @@ export async function discoverRouter(config: DiscoveryConfig): Promise<KeyedTran
       pin: DEFAULT_ROUTER_PIN,
       verifier: config.verifier,
       verificationCheck: config.verificationCheck,
+      fetchAttestation: config.fetchAttestation,
       fetch: config.documentFetch,
       clock: config.clock,
       nonce: config.nonce,
@@ -58,16 +67,18 @@ export async function discoverRouter(config: DiscoveryConfig): Promise<KeyedTran
   const budget = AbortSignal.timeout(DISCOVERY_TIMEOUT_MS);
   const probing = config.signal === undefined ? budget : AbortSignal.any([config.signal, budget]);
 
-  let routers: string[] = [];
+  let listed: readonly unknown[] = [];
   try {
-    routers = await fetchRouters(config.routersFetch ?? ((input, init) => fetch(input, init)), probing);
+    listed = config.fetchRouterList === undefined ? await fetchRouters(config.routersFetch ?? ((input, init) => fetch(input, init)), probing) : await listFrom(config.fetchRouterList, probing);
   } catch {
-    // An unreachable or malformed list leaves the fallback.
+    // An unreachable or malformed list, or a fetcher's error, leaves the fallback.
   }
+  // A copy, so that a caller's array is never reordered.
+  const routers = (config.shuffle ?? shuffled)(listed);
   for (const router of routers) {
     // The deadline can pass before the budget's timer fires.
     if (probing.aborted || clock().getTime() >= deadline) break;
-    if (!isAuthority(router)) continue;
+    if (typeof router !== "string" || !isAuthority(router)) continue;
     let candidate: KeyedTransport | undefined;
     try {
       candidate = new KeyedTransport(await enclaveFor(router), config.mode, config.clock);
@@ -90,17 +101,52 @@ export async function discoverRouter(config: DiscoveryConfig): Promise<KeyedTran
   return new KeyedTransport(fallback, config.mode, config.clock);
 }
 
-/** The router list: a JSON array of hosts, fetched within its own timeout and size cap over HTTPS only. */
-export async function fetchRouters(fetchImpl: Fetch, signal?: AbortSignal): Promise<string[]> {
-  const response = await getFollowingRedirects(DEFAULT_ROUTER_URL, fetchImpl, signal, ROUTER_FETCH_TIMEOUT_MS);
-  if (response.status > 299) {
-    await response.body?.cancel();
-    throw new Error(`fetching routers from ${DEFAULT_ROUTER_URL}: ${response.status} ${response.statusText}`);
+/**
+ * The list that a caller's fetcher returns, within the discovery budget: a
+ * result that isn't an array of strings, like an error, counts as an empty
+ * list, so discovery falls back.
+ */
+async function listFrom(fetcher: RouterListFetcher, signal: AbortSignal): Promise<readonly unknown[]> {
+  const listed: unknown = await untilAborted(Promise.resolve().then(() => fetcher({ signal })), signal);
+  if (!Array.isArray(listed) || !listed.every((r) => typeof r === "string")) return [];
+  return listed;
+}
+
+/** Tinfoil's router list: a JSON array of hosts, fetched within its own timeout and size cap over HTTPS only. */
+export function fetchRouters(fetchImpl: Fetch, signal?: AbortSignal): Promise<string[]> {
+  return fetchRouterListFrom(DEFAULT_ROUTER_URL, fetchImpl, signal);
+}
+
+/**
+ * The router list at `url`, Tinfoil's or a relay's: a JSON array of hosts,
+ * fetched within its own timeout and size cap with no redirect to a URL that
+ * isn't HTTPS. Any failure is a {@link NetworkError}, which discovery takes
+ * as an empty list.
+ */
+export async function fetchRouterListFrom(url: string, fetchImpl: Fetch, signal?: AbortSignal): Promise<string[]> {
+  try {
+    const response = await getFollowingRedirects(url, fetchImpl, signal, ROUTER_FETCH_TIMEOUT_MS);
+    if (response.status > 299) {
+      await response.body?.cancel();
+      throw new Error(`fetching routers from ${url}: ${response.status} ${response.statusText}`);
+    }
+    const body = await readBounded(response, MAX_ROUTER_BYTES, `router list from ${url}`);
+    const routers: unknown = JSON.parse(new TextDecoder().decode(body));
+    if (!Array.isArray(routers) || !routers.every((r) => typeof r === "string")) {
+      throw new Error(`router list from ${url} is not an array of hosts`);
+    }
+    return routers;
+  } catch (err) {
+    throw wrapNetwork(err);
   }
-  const body = await readBounded(response, MAX_ROUTER_BYTES, `router list from ${DEFAULT_ROUTER_URL}`);
-  const routers: unknown = JSON.parse(new TextDecoder().decode(body));
-  if (!Array.isArray(routers) || !routers.every((r) => typeof r === "string")) {
-    throw new Error(`router list from ${DEFAULT_ROUTER_URL} is not an array of hosts`);
+}
+
+/** A uniformly shuffled copy of `items`, so that clients spread across routers. */
+export function shuffled<T>(items: readonly T[]): T[] {
+  const out = [...items];
+  for (let i = out.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [out[i], out[j]] = [out[j]!, out[i]!];
   }
-  return routers;
+  return out;
 }

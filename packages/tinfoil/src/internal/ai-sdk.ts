@@ -14,7 +14,7 @@ import { apiBaseURL, validateAPIPath } from "./api-path.js";
 import { ConfigurationError } from "../errors.js";
 import { checkAPIKeyRuntime } from "./credential.js";
 import type { RuntimeGlobals } from "./platform.js";
-import type { EnclaveOptions, RouterOptions } from "../options.js";
+import type { EnclaveOptions, RouterListFetcher, RouterOptions } from "../options.js";
 import { createRouterHTTPClient, RouterHTTPClient, type RouterClientSeams } from "../router-client.js";
 import type { Trust } from "../trust.js";
 
@@ -26,7 +26,7 @@ export interface TinfoilProviderEnclave {
 }
 
 /** The options of {@link createTinfoil} that both routes take. */
-export interface TinfoilProviderBaseOptions extends Pick<RouterOptions & EnclaveOptions, "transport" | "policy" | "verificationCheck" | "signal"> {
+export interface TinfoilProviderBaseOptions extends Pick<RouterOptions & EnclaveOptions, "transport" | "policy" | "verificationCheck" | "fetchAttestation" | "signal"> {
   /** A long-lived API key, sent as the bearer credential. It belongs on a server, never in a page. */
   readonly apiKey?: string;
   /** A credential a browser page may hold, such as a short-lived token from the application's own sign-in. */
@@ -55,11 +55,14 @@ export type TinfoilProviderOptions = TinfoilProviderBaseOptions &
         readonly enclave?: undefined;
         /** As for the router client's `userCacheSecret`. */
         readonly userCacheSecret?: string;
+        /** As for the router client's `fetchRouterList`. */
+        readonly fetchRouterList?: RouterListFetcher;
       }
     | {
         /** Binds the provider to this enclave rather than the discovered router. */
         readonly enclave: TinfoilProviderEnclave;
         readonly userCacheSecret?: never;
+        readonly fetchRouterList?: never;
       }
   );
 
@@ -99,15 +102,19 @@ export async function createTinfoilProvider(options: TinfoilProviderOptions, sea
     transport: options.transport,
     policy: options.policy,
     verificationCheck: options.verificationCheck,
+    fetchAttestation: options.fetchAttestation,
     signal: options.signal,
   };
   let client: EnclaveHTTPClient | RouterHTTPClient;
   if (options.enclave === undefined) {
-    client = await createRouterHTTPClient({ ...clientOptions, userCacheSecret: options.userCacheSecret }, seams);
+    client = await createRouterHTTPClient({ ...clientOptions, userCacheSecret: options.userCacheSecret, fetchRouterList: options.fetchRouterList }, seams);
   } else {
     if (typeof options.enclave !== "object" || options.enclave === null) throw new ConfigurationError("enclave must be an object with a host and a trust");
     // Untyped code can give both; an enclave client has no cache secret to apply it to.
     const secret = (options as { readonly userCacheSecret?: unknown }).userCacheSecret;
+    if ((options as { readonly fetchRouterList?: unknown }).fetchRouterList !== undefined) {
+      throw new ConfigurationError("fetchRouterList is the router's option; an enclave client discovers no router");
+    }
     if (secret !== undefined && secret !== "") {
       throw new ConfigurationError("userCacheSecret is the router's option; an enclave client never adds a user_cache_secret, so set it in each request body instead");
     }

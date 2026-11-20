@@ -5,7 +5,7 @@
 import { NONCE_SIZE, toHex } from "@tinfoilsh/verifier";
 import { SDK_NAME, SDK_VERSION } from "../version.js";
 import { ConfigurationError, messageOf, NetworkError, TinfoilError } from "../errors.js";
-import type { Fetch } from "../options.js";
+import type { AttestationFetcher, Fetch } from "../options.js";
 
 export const ATTESTATION_ENDPOINT = "/.well-known/tinfoil-attestation";
 export const SDK_NAME_HEADER = "Tinfoil-SDK";
@@ -52,6 +52,71 @@ export async function fetchDocument(host: string, relay: string | undefined, non
     if (err instanceof TinfoilError) throw err;
     throw new NetworkError(messageOf(err), { cause: err });
   }
+}
+
+/**
+ * GET the attestation document of `host` for `nonce` through the relay at
+ * `relayURL`, a validated base URL ending with `/`, under the bounds of a
+ * direct fetch. A bad host or nonce is a {@link ConfigurationError};
+ * everything else that fails is a {@link NetworkError}.
+ */
+export async function fetchRelayedDocument(relayURL: string, host: string, nonce: Uint8Array, fetchImpl: Fetch, signal?: AbortSignal): Promise<Uint8Array> {
+  attestationURL(host, undefined, nonce);
+  const target = `${relayURL.replace(/\/$/, "")}${ATTESTATION_ENDPOINT}?nonce=${toHex(nonce)}&enclave=${encodeURIComponent(host)}`;
+  try {
+    const response = await getFollowingRedirects(target, fetchImpl, signal);
+    if (response.status > 299) {
+      await response.body?.cancel();
+      throw new Error(`HTTP GET ${target}: ${response.status} ${response.statusText}`);
+    }
+    return await readBounded(response, MAX_ATTESTATION_BYTES, "attestation document");
+  } catch (err) {
+    if (err instanceof TinfoilError) throw err;
+    throw new NetworkError(messageOf(err), { cause: err });
+  }
+}
+
+/**
+ * The document that a caller's fetcher returns for `host` and `nonce`. The
+ * fetcher gets its own copy of the nonce and a signal that ends when
+ * `signal` does or after the fetch timeout, and its wait ends then too, even
+ * if the fetcher ignores the signal. A fetcher's error is a
+ * {@link NetworkError} that wraps it unless it already is an SDK error; a
+ * result that isn't a `Uint8Array` is a {@link ConfigurationError}, and one
+ * over the size limit a {@link NetworkError}.
+ */
+export async function fetchDocumentWith(fetcher: AttestationFetcher, host: string, nonce: Uint8Array, signal?: AbortSignal): Promise<Uint8Array> {
+  const timeout = AbortSignal.timeout(ATTESTATION_FETCH_TIMEOUT_MS);
+  const combined = signal === undefined ? timeout : AbortSignal.any([signal, timeout]);
+  let doc: unknown;
+  try {
+    doc = await untilAborted(Promise.resolve().then(() => fetcher(host, nonce.slice(), { signal: combined })), combined);
+  } catch (err) {
+    if (err instanceof TinfoilError) throw err;
+    throw new NetworkError(`fetching the attestation document of ${host}: ${messageOf(err)}`, { cause: err });
+  }
+  if (!(doc instanceof Uint8Array)) throw new ConfigurationError("fetchAttestation must resolve to a Uint8Array");
+  if (doc.length > MAX_ATTESTATION_BYTES) throw new NetworkError(`attestation document exceeds ${MAX_ATTESTATION_BYTES} bytes`);
+  return doc;
+}
+
+/** `promise`, or a rejection with `signal`'s reason as soon as it aborts. */
+export function untilAborted<T>(promise: Promise<T>, signal: AbortSignal): Promise<T> {
+  if (signal.aborted) return Promise.reject(signal.reason);
+  return new Promise<T>((resolve, reject) => {
+    const onAbort = (): void => reject(signal.reason);
+    signal.addEventListener("abort", onAbort, { once: true });
+    promise.then(
+      (value) => {
+        signal.removeEventListener("abort", onAbort);
+        resolve(value);
+      },
+      (err: unknown) => {
+        signal.removeEventListener("abort", onAbort);
+        reject(err);
+      },
+    );
+  });
 }
 
 /** GET `url` with the SDK headers, following at most ten HTTPS redirects, within `timeoutMs` or until `signal` aborts. */

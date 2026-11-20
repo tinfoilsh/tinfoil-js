@@ -5,7 +5,7 @@
  * created and tries routers for at most 30 seconds before falling back.
  */
 import type { Verification } from "@tinfoilsh/verifier";
-import { attestedFetch, buildVerifier, modeFor, resolveTransport, type EnclaveClientSeams } from "./enclave-client.js";
+import { attestedFetch, buildVerifier, checkFetcher, modeFor, resolveTransport, type EnclaveClientSeams } from "./enclave-client.js";
 import { ConfigurationError } from "./errors.js";
 import { resolveUserCacheSecret } from "./internal/cachesecret.js";
 import { registerRoute } from "./internal/api-path.js";
@@ -18,6 +18,8 @@ import type { CallOptions, Fetch, RouterOptions } from "./options.js";
 /** @internal Seams for tests: the enclave client's, and the fetch that retrieves the router list. */
 export interface RouterClientSeams extends EnclaveClientSeams {
   readonly routersFetch?: Fetch;
+  /** Reorders the router list; undefined shuffles it uniformly. */
+  readonly shuffle?: <T>(items: readonly T[]) => T[];
   /** Resolves the cache secret when the option is empty. */
   readonly resolveSecret?: (explicit: string | undefined) => string;
 }
@@ -31,13 +33,18 @@ let construct: (transport: KeyedTransport, baseURL: string, fetchImpl: Fetch) =>
 /** @internal The factory with its test seams; {@link RouterHTTPClient.create} is this without them. */
 export async function createRouterHTTPClient(options: RouterOptions, seams: RouterClientSeams): Promise<RouterHTTPClient> {
   const resolved = resolveTransport(options.transport, seams.globals);
+  checkFetcher("fetchAttestation", options.fetchAttestation);
+  checkFetcher("fetchRouterList", options.fetchRouterList);
   const verifier = await buildVerifier(undefined, options.policy, seams);
   const transport = await discoverRouter({
     verifier,
     verificationCheck: options.verificationCheck,
     mode: modeFor(resolved, seams),
     signal: options.signal,
+    fetchAttestation: options.fetchAttestation,
+    fetchRouterList: options.fetchRouterList,
     routersFetch: seams.routersFetch,
+    shuffle: seams.shuffle,
     documentFetch: seams.documentFetch,
     clock: seams.clock,
     nonce: seams.nonce,

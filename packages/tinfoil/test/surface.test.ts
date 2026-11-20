@@ -29,6 +29,9 @@ const EXPORTS = [
   // websockets
   "createWebSocket",
   "pinnedWebSocketOptions",
+  // fetchers
+  "attestationRelay",
+  "routerListRelay",
   // errors
   "TinfoilError",
   "ConfigurationError",
@@ -93,6 +96,9 @@ const OPENAI_CLIENT_MEMBERS = { httpClient: "property", withOptions: "method" } 
 /** The type-only exports, pinned under the test typecheck: a removed or renamed type fails compilation here. */
 type TypeExports = [
   surface.Fetch,
+  surface.AttestationFetcher,
+  surface.RouterListFetcher,
+  surface.RelayOptions,
   surface.Transport,
   surface.TLS,
   surface.EHBP,

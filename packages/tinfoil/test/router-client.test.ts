@@ -60,7 +60,7 @@ function seams(routers: string[], extra: Partial<RouterClientSeams> = {}): Route
     state.documentHosts.push(new URL(String(input)).host);
     return new Response(new Uint8Array([1]));
   };
-  return Object.assign(state, { routersFetch, documentFetch, sleep: async () => {}, tls: { ca: TEST_CERT }, resolveSecret: (s: string | undefined) => s || "resolved-secret", ...extra });
+  return Object.assign(state, { routersFetch, documentFetch, sleep: async () => {}, shuffle: <T>(items: readonly T[]) => [...items], tls: { ca: TEST_CERT }, resolveSecret: (s: string | undefined) => s || "resolved-secret", ...extra });
 }
 
 function completion(content: string): unknown {
