@@ -110,7 +110,8 @@ afterAll(async () => {
 
 describe("createTinfoil's option checks", () => {
   it("requires exactly one credential and checks the client's options before fetching anything", async () => {
-    const s = { ...seams([tls.host]), verifier: verifier({ tls: TEST_PIN }) };
+    // Assigned rather than spread, so that the fetch counter stays the one the seams increment.
+    const s = Object.assign(seams([tls.host]), { verifier: verifier({ tls: TEST_PIN }) });
     const network = recordingFetch((input, init) => fetch(input, init));
     const cases: [TinfoilProviderOptions, RegExp][] = [
       [{}, /credential is required/],
@@ -120,6 +121,7 @@ describe("createTinfoil's option checks", () => {
       [{ transport: { kind: "ehbp", proxyURL: "http://proxy.example/" }, apiKey: "k" }, /HTTP is allowed only for localhost/],
       [{ transport: { kind: "quic" } as unknown as Transport, apiKey: "k" }, /transport must have kind/],
       [{ apiKey: "k", apiPath: "v1/" }, /invalid API path/],
+      [{ apiKey: "k", enclave: null } as unknown as TinfoilProviderOptions, /enclave must be an object/],
       [{ apiKey: "k", enclave: { host: "enclave.example", trust: { kind: "repoPin", repo: ROUTER_REPO } }, userCacheSecret: "s" } as unknown as TinfoilProviderOptions, /userCacheSecret is the router's option/],
       [{ apiKey: "k", enclave: { host: "enclave.example", trust: { kind: "projectPin", project: "org/project", registryIDs: [] } } }, /registryIDs must not be empty/],
       [{ apiKey: "k", enclave: { host: "enclave.example", repo: ROUTER_REPO } as never }, /trust is required/],

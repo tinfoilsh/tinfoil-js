@@ -5,7 +5,7 @@
  * origin other than the one it is bound to.
  */
 import { Verifier, type ConfigTrust, type Policy, type Verification } from "@tinfoilsh/verifier";
-import { ConfigurationError } from "./errors.js";
+import { ConfigurationError, describeKind } from "./errors.js";
 import { withCacheSecret } from "./internal/cachesecret.js";
 import { registerRoute } from "./internal/api-path.js";
 import { asyncDispose } from "./internal/dispose.js";
@@ -60,15 +60,14 @@ export function resolveTransport(transport: Transport | undefined, globals?: Run
       checkTransportMode("tls", globals);
       return { mode: "tls", proxyURL: "" };
     case "ehbp": {
-      const proxyURL = transport.proxyURL ?? "";
+      const proxyURL = transport.proxyURL === undefined ? "" : transport.proxyURL;
       if (typeof proxyURL !== "string") throw new ConfigurationError("invalid proxy URL: it must be a string");
       if (proxyURL !== "") validateBaseURL(proxyURL, "proxy URL");
       if (transport.fetch !== undefined && typeof transport.fetch !== "function") throw new ConfigurationError("the EHBP fetch must be a function");
       return { mode: "ehbp", proxyURL: proxyURL === "" ? "" : normalizeBaseURL(proxyURL), ...(transport.fetch === undefined ? {} : { fetch: transport.fetch }) };
     }
     default: {
-      const kind = (transport as { kind?: unknown }).kind;
-      throw new ConfigurationError(`transport must have kind "tls" or "ehbp", not ${kind === undefined ? "a value without one" : JSON.stringify(kind)}`);
+      throw new ConfigurationError(`transport must have kind "tls" or "ehbp", not ${describeKind((transport as { kind?: unknown }).kind)}`);
     }
   }
 }

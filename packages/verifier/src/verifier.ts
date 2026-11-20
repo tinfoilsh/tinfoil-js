@@ -764,7 +764,10 @@ function kindOf(value: unknown, what: string): unknown {
 /** How an unknown `kind` is named in an error. */
 function describeKind(value: unknown): string {
   const kind = (value as { kind?: unknown }).kind;
-  return kind === undefined ? "a value without one" : JSON.stringify(kind) ?? String(kind);
+  if (kind === undefined) return "a value without one";
+  if (typeof kind === "string") return JSON.stringify(kind);
+  if (typeof kind === "number" || typeof kind === "boolean" || typeof kind === "bigint" || kind === null) return String(kind);
+  return `a ${typeof kind}`;
 }
 
 /** A copy of caller-supplied bytes, or undefined when they are absent; anything but a Uint8Array is a UsageError. */

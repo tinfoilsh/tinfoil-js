@@ -152,10 +152,10 @@ function openAIClientOptions(options: OpenAIClientOptions): Omit<ClientOptions, 
   return { ...rest, apiKey: bearerToken, dangerouslyAllowBrowser: true };
 }
 
-/** The OpenAI options each client was created with, which its clones inherit. */
+/** The OpenAI options that each client was created with, which its clones inherit. */
 const givenOptions = new WeakMap<OpenAI, OpenAIClientOptions>();
 
-/** The options each client was created with, which its clones keep. */
+/** The options that each client was created with, which its clones keep. */
 const givenAPIOptions = new WeakMap<OpenAI, OpenAIOptions>();
 
 /**

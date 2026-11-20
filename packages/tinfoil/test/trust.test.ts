@@ -59,10 +59,17 @@ describe("verifierInputs", () => {
       { kind: "projectPin", project: 7 },
       { kind: "eitherPin", repo: "org/repo" },
       { kind: "eitherPin", project: "org/project" },
+      { kind: 1n },
+      { kind: Symbol("repoPin") },
+      { kind: {} },
     ]) {
-      expect(() => verifierInputs(bad as unknown as Trust), JSON.stringify(bad)).toThrow(ConfigurationError);
+      expect(() => verifierInputs(bad as unknown as Trust), typeof bad).toThrow(ConfigurationError);
     }
     expect(() => verifierInputs({ kind: "pin" } as unknown as Trust)).toThrow(/trust must have kind/);
+  });
+
+  it("passes a signedBy project that isn't a string to the pin check rather than dropping it", () => {
+    expect(verifierInputs({ kind: "signedBy", keys: ["pem"], project: null as unknown as string }).pin).toEqual({ project: null });
   });
 
   it("fails closed on an empty registry list rather than widening trust to the public registry", () => {
@@ -95,6 +102,7 @@ describe("the policy and the trust are checked before any network I/O", () => {
       () => createEnclaveHTTPClient("enclave.example", { kind: "signedBy", keys: [] }, {}, { documentFetch: documents.fetch }),
       () => createEnclaveHTTPClient("enclave.example", { kind: "authorizedBy", authorize: "yes" as never }, {}, { documentFetch: documents.fetch }),
       () => createEnclaveHTTPClient("enclave.example", { kind: "embeddedConfig", bytes: new Uint8Array() }, {}, { documentFetch: documents.fetch }),
+      () => createEnclaveHTTPClient("enclave.example", { kind: "signedBy", keys: ["not a pem"], project: null as unknown as string }, {}, { documentFetch: documents.fetch }),
       () => createRouterHTTPClient({ policy: { freshnessMaxAgeMs: -1 } }, { routersFetch: documents.fetch, documentFetch: documents.fetch }),
       () => createGatewayHTTPClient({ policy: { freshnessMaxAgeMs: -1 } }, { catalogFetch: documents.fetch, documentFetch: documents.fetch }),
       () => createGatewayHTTPClient({ modelPins: new Map([["m", { repo: "tinfoilsh/m", policy: { freshnessMaxAgeMs: -1 } }]]) }, { catalogFetch: documents.fetch, documentFetch: documents.fetch }),

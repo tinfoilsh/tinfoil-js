@@ -7,7 +7,7 @@
  * verification is made against.
  */
 import type { ConfigEndorsement, ConfigTrust, Pin } from "@tinfoilsh/verifier";
-import { ConfigurationError } from "./errors.js";
+import { ConfigurationError, describeKind } from "./errors.js";
 
 /**
  * Who vouches for the config that an enclave runs: one of {@link RepoPin},
@@ -115,7 +115,7 @@ export function verifierInputs(trust: Trust): { config: ConfigTrust | undefined;
       return { config: { kind: "registries", ids: trust.registryIDs }, pin };
     }
     case "signedBy":
-      return { config: { kind: "configSigningKeys", keys: trust.keys }, pin: { project: trust.project ?? "" } };
+      return { config: { kind: "configSigningKeys", keys: trust.keys }, pin: { project: trust.project === undefined ? "" : trust.project } };
     case "authorizedBy":
       return { config: { kind: "configAuthorizer", authorize: trust.authorize }, pin: {} };
     case "embeddedConfig":
@@ -125,9 +125,8 @@ export function verifierInputs(trust: Trust): { config: ConfigTrust | undefined;
       required(trust, "eitherPin", "project");
       return { config: undefined, pin: { repo: trust.repo, project: trust.project } };
     default: {
-      const kind = (trust as { kind?: unknown }).kind;
       throw new ConfigurationError(
-        `trust must have kind "repoPin", "projectPin", "signedBy", "authorizedBy", "embeddedConfig" or "eitherPin", not ${kind === undefined ? "a value without one" : JSON.stringify(kind)}`,
+        `trust must have kind "repoPin", "projectPin", "signedBy", "authorizedBy", "embeddedConfig" or "eitherPin", not ${describeKind((trust as { kind?: unknown }).kind)}`,
       );
     }
   }

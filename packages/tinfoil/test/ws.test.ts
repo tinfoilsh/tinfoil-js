@@ -107,7 +107,7 @@ afterAll(async () => {
 
 /** An enclave OpenAI client in TLS mode, verified against `pin`, with documents from `docs`. */
 async function openAIClient(openaiOptions: OpenAIClientOptions, pin: () => string = () => TEST_PIN, docs = documents()): Promise<OpenAIClient<EnclaveHTTPClient>> {
-  return openAIOver(createEnclaveHTTPClient(host, { kind: "repoPin", repo: "tinfoilsh/repo" }, { transport: { kind: "tls" } }, { verifier: verifier(pin), documentFetch: docs.fetch, tls: { ca: TEST_CERT } }), openaiOptions);
+  return openAIOver(client(pin, docs), openaiOptions);
 }
 
 describe("webSocketURL", () => {

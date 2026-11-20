@@ -105,6 +105,7 @@ export async function createTinfoilProvider(options: TinfoilProviderOptions, sea
   if (options.enclave === undefined) {
     client = await createRouterHTTPClient({ ...clientOptions, userCacheSecret: options.userCacheSecret }, seams);
   } else {
+    if (typeof options.enclave !== "object" || options.enclave === null) throw new ConfigurationError("enclave must be an object with a host and a trust");
     // Untyped code can give both; an enclave client has no cache secret to apply it to.
     const secret = (options as { readonly userCacheSecret?: unknown }).userCacheSecret;
     if (secret !== undefined && secret !== "") {
