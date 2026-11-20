@@ -12,7 +12,7 @@ const dist = fileURLToPath(new URL("../dist/", import.meta.url));
 
 describePublishedDeclarations({
   dist,
-  entries: ["index.d.ts", "index.browser.d.ts", "http.d.ts", "ai-sdk.d.ts", "unsafe.d.ts"].map((e) => `${dist}${e}`),
+  entries: ["index.d.ts", "index.browser.d.ts", "openai.d.ts", "ai-sdk.d.ts", "unsafe.d.ts"].map((e) => `${dist}${e}`),
   forbidden: [
     /@internal/,
     /KeyedTransport/,
@@ -24,16 +24,12 @@ describePublishedDeclarations({
     /createTinfoilClient/,
     /create(Enclave|Router|Gateway)OpenAIClient/,
     /createTinfoilProvider/,
-    /openAIURLOf|setOpenAIURL|attestedFetch|checkEnclaveOptions|checkNetworkFetch|checkUnverifiedOptions|ehbpOptionsFor|modeFor|resolveTransportMode/,
+    /registerRoute|routeOf|apiPathOf|attestedFetch|checkEnclaveOptions|checkUnverifiedOptions|ehbpOptionsFor|modeFor|resolveTransport\b|ResolvedTransport|buildVerifier|verifierInputs|cloneTrust/,
   ],
   privatelyConstructed: {
     EnclaveHTTPClient: "enclave-client.d.ts",
     RouterHTTPClient: "router-client.d.ts",
     GatewayHTTPClient: "gateway-client.d.ts",
-    TinfoilClient: "openai-client.d.ts",
-    EnclaveOpenAIClient: "openai-client.d.ts",
-    RouterOpenAIClient: "openai-client.d.ts",
-    GatewayOpenAIClient: "openai-client.d.ts",
     UnverifiedClient: "internal/unsafe-client.d.ts",
   },
 });

@@ -13,14 +13,15 @@ import { APIConnectionError } from "openai";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { AttestationError, ConfigurationError, NetworkError, TinfoilError } from "../src/errors.js";
 import type { RuntimeGlobals } from "../src/internal/platform.js";
-import { createRouterOpenAIClient, createTinfoilClient, RouterOpenAIClient, TinfoilClient } from "../src/openai-client.js";
-import type { Fetch, RouterOptions } from "../src/options.js";
+import { createTinfoilClient, OpenAIClient } from "../src/openai-client.js";
+import type { Fetch, RouterOptions, Transport } from "../src/options.js";
 import { createRouterHTTPClient, RouterHTTPClient, type RouterClientSeams } from "../src/router-client.js";
 import { KEY_SPKI_FP_SHA256_V1_FORMAT, KEY_X25519_HPKE_V1_FORMAT, UsageError, type Verification, type Verifier } from "../../verifier/src/index.js";
 import { startEhbpServer, type EhbpServer } from "./helpers/ehbp-server.js";
 import { recordingFetch } from "./helpers/network.js";
 import { startTlsServer, TEST_CERT, TEST_PIN, type TlsServer } from "./helpers/tls-server.js";
 import { expectWithOptionsRefusesTransportOptions } from "./helpers/transport-options.js";
+import { openAIOver } from "./helpers/openai.js";
 
 const ROUTER_REPO = "tinfoilsh/confidential-model-router";
 const BODY = '{"model":"test","messages":[{"role":"user","content":"hi"}],"seed":9223372036854775807,"metadata":{"a":{"b":[1,2.50]}}}';
@@ -28,12 +29,11 @@ const BODY = '{"model":"test","messages":[{"role":"user","content":"hi"}],"seed"
 let tls: TlsServer;
 let ehbp: EhbpServer;
 
-function verifier(keys: { tls?: string; hpke?: string }, authorizes = false, expiresAt: () => Date = () => new Date(Date.now() + 60_000)): Verifier {
+function verifier(keys: { tls?: string; hpke?: string }, expiresAt: () => Date = () => new Date(Date.now() + 60_000)): Verifier {
   return {
     checkPinVerifiability: ({ repo = "" }: { repo?: string }) => {
       if (repo === "") throw new UsageError("repo required");
     },
-    callerAuthorizesConfig: authorizes,
     verifyV3At: async () => {
       const material = [
         ...(keys.tls === undefined ? [] : [{ id: "tls", format: KEY_SPKI_FP_SHA256_V1_FORMAT, data: keys.tls }]),
@@ -60,7 +60,7 @@ function seams(routers: string[], extra: Partial<RouterClientSeams> = {}): Route
     state.documentHosts.push(new URL(String(input)).host);
     return new Response(new Uint8Array([1]));
   };
-  return Object.assign(state, { routersFetch, documentFetch, sleep: async () => {}, tls: { ca: TEST_CERT }, resolveSecret: async (s: string | undefined) => s || "resolved-secret", ...extra });
+  return Object.assign(state, { routersFetch, documentFetch, sleep: async () => {}, shuffle: <T>(items: readonly T[]) => [...items], tls: { ca: TEST_CERT }, resolveSecret: (s: string | undefined) => s || "resolved-secret", ...extra });
 }
 
 function completion(content: string): unknown {
@@ -86,23 +86,19 @@ afterAll(async () => {
 
 describe("RouterHTTPClient.create", () => {
   it("checks its options before fetching anything", async () => {
-    const s = seams(["r1.example"]);
+    const s = seams(["r1.example"], { verifier: verifier({ tls: TEST_PIN }) });
     const network = recordingFetch((input, init) => fetch(input, init));
     const cases: RouterOptions[] = [
-      { verifier: verifier({ tls: TEST_PIN }), transportMode: "quic" as never },
-      { verifier: verifier({ tls: TEST_PIN }), transportMode: "tls", fetch: network.fetch },
-      { verifier: verifier({ tls: TEST_PIN }), fetch: network.fetch },
-      { verifier: verifier({ tls: TEST_PIN }), baseURL: "https://proxy.example/" },
-      { verifier: verifier({ tls: TEST_PIN }), transportMode: "tls", baseURL: "https://proxy.example/" },
-      { verifier: verifier({ tls: TEST_PIN }), transportMode: "ehbp", baseURL: "http://proxy.example/" },
-      { verifier: verifier({ tls: TEST_PIN }), transportMode: "ehbp", baseURL: "https://proxy.example/v1/?key=1" },
-      { verifier: verifier({ tls: TEST_PIN }), transportMode: "ehbp", baseURL: "https://proxy.example/v1/#frag" },
-      { verifier: verifier({ tls: TEST_PIN }, true) },
+      { transport: { kind: "quic" } as unknown as Transport },
+      { transport: { kind: "ehbp", fetch: "fetch" as never } },
+      { transport: { kind: "ehbp", proxyURL: "http://proxy.example/" } },
+      { transport: { kind: "ehbp", proxyURL: "https://user@proxy.example/" } },
+      { transport: { kind: "ehbp", proxyURL: "https://proxy.example/v1/?key=1" } },
+      { transport: { kind: "ehbp", proxyURL: "https://proxy.example/v1/#frag" } },
     ];
     for (const options of cases) {
-      await expect(createRouterHTTPClient(options, s), JSON.stringify(options.baseURL)).rejects.toBeInstanceOf(ConfigurationError);
+      await expect(createRouterHTTPClient(options, s), JSON.stringify(options.transport)).rejects.toBeInstanceOf(ConfigurationError);
     }
-    await expect(createRouterHTTPClient({ verifier: verifier({ tls: TEST_PIN }), transportMode: "tls", fetch: network.fetch }, s)).rejects.toThrow(/fetch option .* requires transportMode "ehbp"/);
     expect(s.listCalls).toBe(0);
     expect(s.documentHosts).toEqual([]);
     expect(network.seen).toHaveLength(0);
@@ -112,16 +108,11 @@ describe("RouterHTTPClient.create", () => {
     const checked: string[] = [];
     const s = seams(["first.example", tls.host]);
     const client = await createRouterHTTPClient(
-      {
-        verifier: verifier({ tls: TEST_PIN }),
-        transportMode: "tls",
-        verificationCheck: (v) => {
+      { transport: { kind: "tls" }, verificationCheck: (v) => {
           checked.push(v.tlsPublicKeyFP!);
           if (checked.length === 1) throw new Error("not this router");
-        },
-      },
-      s,
-    );
+        } },
+      { ...s, verifier: verifier({ tls: TEST_PIN }) });
     expect(client.enclave).toBe(tls.host);
     expect(s.documentHosts).toEqual(["first.example", tls.host]);
     expect(checked).toHaveLength(2);
@@ -142,7 +133,7 @@ describe("RouterHTTPClient.create", () => {
         },
       });
       const controller = new AbortController();
-      const pending = createRouterHTTPClient({ verifier: verifier({ tls: TEST_PIN }), transportMode: "tls", signal: controller.signal }, s);
+      const pending = createRouterHTTPClient({ transport: { kind: "tls" }, signal: controller.signal }, { ...s, verifier: verifier({ tls: TEST_PIN }) });
       await started;
       const reason = new Error("gave up");
       controller.abort(reason);
@@ -162,11 +153,11 @@ describe("RouterHTTPClient.create", () => {
         throw new TypeError("fetch failed");
       },
     });
-    const network = createRouterHTTPClient({ verifier: verifier({ tls: TEST_PIN }) }, unreachable);
+    const network = createRouterHTTPClient({}, { ...unreachable, verifier: verifier({ tls: TEST_PIN }) });
     await expect(network).rejects.toBeInstanceOf(NetworkError);
 
     const keyless = seams([]);
-    const attestation = createRouterHTTPClient({ verifier: verifier({}) }, keyless);
+    const attestation = createRouterHTTPClient({}, { ...keyless, verifier: verifier({}) });
     await expect(attestation).rejects.toBeInstanceOf(AttestationError);
     expect(keyless.documentHosts.every((h) => h === "inference.tinfoil.sh")).toBe(true);
     await expect(attestation).rejects.toBeInstanceOf(TinfoilError);
@@ -187,14 +178,13 @@ describe("RouterHTTPClient over TLS", () => {
       },
     });
     s.documentHosts = hosts;
-    client = await createRouterHTTPClient({ verifier: verifier({ tls: TEST_PIN }), transportMode: "tls" }, s);
+    client = await createRouterHTTPClient({ transport: { kind: "tls" } }, { ...s, verifier: verifier({ tls: TEST_PIN }) });
   });
 
   it("binds to the first router that verifies without verifying it again", () => {
-    expect(Object.keys(client)).toEqual(["fetch", "baseURL", "enclave", "pin"]);
+    expect(Object.keys(client)).toEqual(["fetch", "baseURL", "enclave"]);
     expect(() => ((client as { enclave: string }).enclave = "evil.example")).toThrow(TypeError);
     expect(client.enclave).toBe(tls.host);
-    expect(client.pin).toEqual({ repo: ROUTER_REPO, project: ROUTER_REPO });
     expect(client.baseURL).toBe(`https://${tls.host}/`);
     expect(client.current?.tlsPublicKeyFP).toBe(TEST_PIN);
     expect(s.documentHosts.filter((h) => h === tls.host)).toHaveLength(1);
@@ -225,11 +215,7 @@ describe("RouterHTTPClient over TLS", () => {
   });
 
   it("backs an OpenAI client on the router's /v1/ API with the option's secret", async () => {
-    const ai = await createRouterOpenAIClient(
-      { verifier: verifier({ tls: TEST_PIN }), transportMode: "tls", userCacheSecret: "option-secret" },
-      { apiKey: "k" },
-      seams([tls.host], { resolveSecret: undefined }),
-    );
+    const ai = await openAIOver(createRouterHTTPClient({ transport: { kind: "tls" }, userCacheSecret: "option-secret" }, { ...seams([tls.host], { resolveSecret: undefined }), verifier: verifier({ tls: TEST_PIN }) }), { apiKey: "k" });
     expect(ai.baseURL).toBe(`https://${tls.host}/v1/`);
     expect(ai.httpClient).toBeInstanceOf(RouterHTTPClient);
     const reply = await ai.chat.completions.create({ model: "test", messages: [{ role: "user", content: "hi" }] });
@@ -237,7 +223,7 @@ describe("RouterHTTPClient over TLS", () => {
     const last = tls.seen[tls.seen.length - 1]!;
     expect(JSON.parse(new TextDecoder().decode(last.body)).user_cache_secret).toBe("option-secret");
     expect(last.headers.authorization).toBe("Bearer k");
-    expect(() => new (RouterOpenAIClient as any)(Symbol("x"), ai.httpClient, {})).toThrow(ConfigurationError);
+    expect(() => new OpenAIClient(Symbol("x") as never)).toThrow(ConfigurationError);
     expect(() => new (RouterHTTPClient as any)(Symbol("x"))).toThrow(ConfigurationError);
     expectWithOptionsRefusesTransportOptions(ai);
   });
@@ -272,9 +258,9 @@ describe("the router clients' default cache secret", () => {
   }
 
   it("is one in-memory secret that every client in the process shares, ignoring the environment and the home directory", async () => {
-    const options = { verifier: verifier({ tls: TEST_PIN }), transportMode: "tls" } as const;
-    const first = await createRouterHTTPClient(options, seams([tls.host], { resolveSecret: undefined }));
-    const second = await createRouterHTTPClient(options, seams([tls.host], { resolveSecret: undefined }));
+    const options = { transport: { kind: "tls" } } as const;
+    const first = await createRouterHTTPClient(options, seams([tls.host], { resolveSecret: undefined, verifier: verifier({ tls: TEST_PIN }) }));
+    const second = await createRouterHTTPClient(options, seams([tls.host], { resolveSecret: undefined, verifier: verifier({ tls: TEST_PIN }) }));
     const a = JSON.parse(await sent(first, BODY)).user_cache_secret as string;
     expect(a).toMatch(/^[0-9a-f]{64}$/);
     expect(JSON.parse(await sent(second, BODY)).user_cache_secret).toBe(a);
@@ -282,7 +268,7 @@ describe("the router clients' default cache secret", () => {
     // A body's own secret still wins, and the option still overrides the generated one.
     const own = '{"user_cache_secret":"per-user"}';
     expect(await sent(first, own)).toBe(own);
-    const pinned = await createRouterHTTPClient({ ...options, userCacheSecret: "option-secret" }, seams([tls.host], { resolveSecret: undefined }));
+    const pinned = await createRouterHTTPClient({ ...options, userCacheSecret: "option-secret" }, seams([tls.host], { resolveSecret: undefined, verifier: verifier({ tls: TEST_PIN }) }));
     expect(JSON.parse(await sent(pinned, BODY)).user_cache_secret).toBe("option-secret");
     expect(readFileSync(join(home, ".tinfoil", "user_cache_secret"), "utf8")).toBe("from-file");
     expect(readdirSync(join(home, ".tinfoil"))).toEqual(["user_cache_secret"]);
@@ -293,7 +279,7 @@ describe("the router clients' default cache secret", () => {
 describe("RouterHTTPClient.close", () => {
   it("refuses further use, keeps the last verification, and closes again without effect", async () => {
     const s = seams([tls.host]);
-    const client = await createRouterHTTPClient({ verifier: verifier({ tls: TEST_PIN }), transportMode: "tls" }, s);
+    const client = await createRouterHTTPClient({ transport: { kind: "tls" } }, { ...s, verifier: verifier({ tls: TEST_PIN }) });
     const verified = s.documentHosts.length;
     await client.close();
     await client.close();
@@ -309,9 +295,8 @@ describe("RouterHTTPClient over EHBP", () => {
   it("reaches the discovered router through a proxy, sealing the body with the secret spliced in", async () => {
     const s = seams(["router.example"]);
     const client = await createRouterHTTPClient(
-      { verifier: verifier({ tls: "ab".repeat(32), hpke: ehbp.publicKeyHex }), transportMode: "ehbp", baseURL: `${ehbp.origin}/` },
-      s,
-    );
+      { transport: { kind: "ehbp", proxyURL: `${ehbp.origin}/` } },
+      { ...s, verifier: verifier({ tls: "ab".repeat(32), hpke: ehbp.publicKeyHex }) });
     expect(client.enclave).toBe("router.example");
     expect(client.baseURL).toBe(`${ehbp.origin}/`);
     const res = await client.fetch(`${ehbp.origin}/v1/chat/completions`, { method: "POST", body: BODY, headers: { "x-raw": "1" } });
@@ -323,40 +308,33 @@ describe("RouterHTTPClient over EHBP", () => {
 
   it("ends the proxy base URL with a slash, resolves a relative path under it, and keeps requests on its origin", async () => {
     const client = await createRouterHTTPClient(
-      { verifier: verifier({ tls: "ab".repeat(32), hpke: ehbp.publicKeyHex }), transportMode: "ehbp", baseURL: ehbp.origin },
-      seams(["router.example"]),
-    );
+      { transport: { kind: "ehbp", proxyURL: ehbp.origin } },
+      { ...seams(["router.example"]), verifier: verifier({ tls: "ab".repeat(32), hpke: ehbp.publicKeyHex }) });
     expect(client.baseURL).toBe(`${ehbp.origin}/`);
     const res = await client.fetch(new URL("v1/echo", client.baseURL), { method: "POST", body: "under", headers: { "x-raw": "1" } });
     expect(await res.text()).toBe("under");
     expect(ehbp.seen[ehbp.seen.length - 1]!.path).toBe("/v1/echo");
     await expect(client.fetch("https://other.example/v1/echo")).rejects.toThrow(/client is bound to enclave/);
     const padded = await createRouterHTTPClient(
-      { verifier: verifier({ tls: "ab".repeat(32), hpke: ehbp.publicKeyHex }), transportMode: "ehbp", baseURL: `  ${ehbp.origin}/v1  ` },
-      seams(["router.example"]),
-    );
+      { transport: { kind: "ehbp", proxyURL: `  ${ehbp.origin}/v1  ` } },
+      { ...seams(["router.example"]), verifier: verifier({ tls: "ab".repeat(32), hpke: ehbp.publicKeyHex }) });
     expect(padded.baseURL).toBe(`${ehbp.origin}/v1/`);
   });
 
   it("backs an OpenAI client on the proxy base URL", async () => {
-    const ai = await createRouterOpenAIClient(
-      { verifier: verifier({ tls: "ab".repeat(32), hpke: ehbp.publicKeyHex }), transportMode: "ehbp", baseURL: `${ehbp.origin}/` },
-      { apiKey: "k" },
-      seams(["router.example"]),
-    );
-    expect(ai.baseURL).toBe(`${ehbp.origin}/`);
+    const ai = await openAIOver(createRouterHTTPClient({ transport: { kind: "ehbp", proxyURL: `${ehbp.origin}/` } }, { ...seams(["router.example"]), verifier: verifier({ tls: "ab".repeat(32), hpke: ehbp.publicKeyHex }) }), { apiKey: "k" });
+    expect(ai.baseURL).toBe(`${ehbp.origin}/v1/`);
     const reply = await ai.chat.completions.create({ model: "test", messages: [{ role: "user", content: "hi" }] });
     expect(reply.choices[0]!.message.content).toBe("sealed");
-    expect(ehbp.seen[ehbp.seen.length - 1]!.path).toBe("/chat/completions");
+    expect(ehbp.seen[ehbp.seen.length - 1]!.path).toBe("/v1/chat/completions");
   });
 
   it("sends sealed requests through the fetch option, with the secret spliced in before sealing, while discovery keeps its own fetches", async () => {
     const network = recordingFetch((input, init) => fetch(input, init));
     const s = seams(["router.example"]);
     const client = await createRouterHTTPClient(
-      { verifier: verifier({ tls: "ab".repeat(32), hpke: ehbp.publicKeyHex }), transportMode: "ehbp", baseURL: `${ehbp.origin}/`, fetch: network.fetch },
-      s,
-    );
+      { transport: { kind: "ehbp", proxyURL: `${ehbp.origin}/`, fetch: network.fetch } },
+      { ...s, verifier: verifier({ tls: "ab".repeat(32), hpke: ehbp.publicKeyHex }) });
     expect(s.listCalls).toBe(1);
     expect(s.documentHosts).toEqual(["router.example"]);
     expect(network.seen).toHaveLength(0);
@@ -377,15 +355,11 @@ describe("RouterHTTPClient over EHBP", () => {
     expect(network.seen).toHaveLength(2);
     expect(network.seen[1]!.headers.has(PROTOCOL.ENCAPSULATED_KEY_HEADER)).toBe(false);
 
-    const ai = await createRouterOpenAIClient(
-      { verifier: verifier({ tls: "ab".repeat(32), hpke: ehbp.publicKeyHex }), transportMode: "ehbp", baseURL: `${ehbp.origin}/`, fetch: network.fetch },
-      { apiKey: "k" },
-      seams(["router.example"]),
-    );
+    const ai = await openAIOver(createRouterHTTPClient({ transport: { kind: "ehbp", proxyURL: `${ehbp.origin}/`, fetch: network.fetch } }, { ...seams(["router.example"]), verifier: verifier({ tls: "ab".repeat(32), hpke: ehbp.publicKeyHex }) }), { apiKey: "k" });
     const reply = await ai.chat.completions.create({ model: "test", messages: [{ role: "user", content: "hi" }] });
     expect(reply.choices[0]!.message.content).toBe("sealed");
     expect(network.seen).toHaveLength(3);
-    expect(network.seen[2]!.url).toBe(`${ehbp.origin}/chat/completions`);
+    expect(network.seen[2]!.url).toBe(`${ehbp.origin}/v1/chat/completions`);
     expect(network.seen[2]!.headers.get("authorization")).toBe("Bearer k");
     expect(network.seen[2]!.body).not.toContain("hi");
   });
@@ -394,27 +368,26 @@ describe("RouterHTTPClient over EHBP", () => {
 describe("createClient", () => {
   it("creates the recommended client over the discovered router", async () => {
     const s = seams([tls.host]);
-    const ai = await createTinfoilClient({ apiKey: "k" }, s, { verifier: verifier({ tls: TEST_PIN }) });
-    expect(ai).toBeInstanceOf(TinfoilClient);
+    const ai = await createTinfoilClient({ apiKey: "k" }, { ...s, verifier: verifier({ tls: TEST_PIN }) }, {});
+    expect(ai).toBeInstanceOf(OpenAIClient);
     expect(ai.baseURL).toBe(`https://${tls.host}/v1/`);
     expect(ai.httpClient).toBeInstanceOf(RouterHTTPClient);
-    expect(ai.httpClient.pin).toEqual({ repo: ROUTER_REPO, project: ROUTER_REPO });
     const reply = await ai.chat.completions.create({ model: "test", messages: [{ role: "user", content: "hi" }] });
     expect(reply.choices[0]!.message.content).toBe("pinned");
     expect(JSON.parse(new TextDecoder().decode(tls.seen[tls.seen.length - 1]!.body)).user_cache_secret).toBe("resolved-secret");
-    expect(() => new (TinfoilClient as any)(Symbol("x"), ai.httpClient, {})).toThrow(ConfigurationError);
+    expect(() => new (OpenAIClient as any)(Symbol("x"), ai.httpClient, {})).toThrow(ConfigurationError);
     expectWithOptionsRefusesTransportOptions(ai);
   });
 
   it("accepts an API key on a server and refuses one anywhere else before fetching anything", async () => {
-    const server = await createTinfoilClient({ apiKey: "k", dangerouslyAllowBrowser: true }, seams([tls.host]), { verifier: verifier({ tls: TEST_PIN }) });
+    const server = await createTinfoilClient({ apiKey: "k", dangerouslyAllowBrowser: true }, { ...seams([tls.host]), verifier: verifier({ tls: TEST_PIN }) }, {});
     expect(server.apiKey).toBe("k");
     expect(server.withOptions({ apiKey: "k2" }).apiKey).toBe("k2");
     const worker = { self: {} } as unknown as RuntimeGlobals;
     const s = seams([tls.host]);
     for (const factory of [
-      () => createTinfoilClient({ apiKey: "k" }, { ...s, globals: worker }, { verifier: verifier({ tls: TEST_PIN }) }),
-      () => createRouterOpenAIClient({ verifier: verifier({ tls: TEST_PIN }) }, { apiKey: "k", dangerouslyAllowBrowser: true }, { ...s, globals: worker }),
+      () => createTinfoilClient({ apiKey: "k" }, { verifier: verifier({ tls: TEST_PIN }), ...s, globals: worker }, {}),
+      () => createTinfoilClient({ apiKey: "k", dangerouslyAllowBrowser: true }, { verifier: verifier({ tls: TEST_PIN }), ...s, globals: worker }, {}),
     ]) {
       const failure = factory();
       await expect(failure).rejects.toBeInstanceOf(ConfigurationError);
@@ -425,29 +398,23 @@ describe("createClient", () => {
     // A bearer token is the credential a worker holds; it is accepted there over sealed bodies.
     const tokened = await createTinfoilClient(
       { bearerToken: "t" },
-      { ...seams(["router.example"]), globals: worker },
-      { verifier: verifier({ tls: "ab".repeat(32), hpke: ehbp.publicKeyHex }), baseURL: `${ehbp.origin}/` },
-    );
+      { verifier: verifier({ tls: "ab".repeat(32), hpke: ehbp.publicKeyHex }), ...seams(["router.example"]), globals: worker },
+      { transport: { kind: "ehbp", proxyURL: `${ehbp.origin}/` } });
     expect(tokened.apiKey).toBe("t");
   });
 });
 
 describe("errors through the OpenAI API surface", () => {
   /** A client whose verification has expired and is rejected whenever it verifies again, so every request's fetch throws an AttestationError. */
-  async function expiredClient(): Promise<{ ai: TinfoilClient; checks: () => number }> {
+  async function expiredClient(): Promise<{ ai: OpenAIClient; checks: () => number }> {
     let now = Date.now();
     let checks = 0;
     const ai = await createTinfoilClient(
       { apiKey: "k" },
-      { ...seams([tls.host]), clock: () => new Date(now) },
-      {
-        verifier: verifier({ tls: TEST_PIN }, false, () => new Date(now + 60_000)),
-        transportMode: "tls",
-        verificationCheck: () => {
+      { verifier: verifier({ tls: TEST_PIN }, () => new Date(now + 60_000)), ...seams([tls.host]), clock: () => new Date(now) },
+      { transport: { kind: "tls" }, verificationCheck: () => {
           if (checks++ > 0) throw new Error("rejected on refresh");
-        },
-      },
-    );
+        } });
     expect(checks).toBe(1);
     now += 120_000;
     return { ai, checks: () => checks - 1 };

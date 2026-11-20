@@ -4,9 +4,9 @@
  * cached prompt prefixes and requests carrying different secrets cannot
  * observe each other's cache timing.
  *
- * Clients for Tinfoil's inference routes resolve it in this order; a client
- * for an explicit enclave uses only the first two, since other enclaves
- * don't read the field:
+ * The router and gateway clients resolve it in this order; a client for an
+ * explicit enclave adds nothing and forwards request bodies as they are,
+ * since only Tinfoil's router reads the field:
  *
  *  1. a non-empty `user_cache_secret` string in the request body,
  *  2. the client's `userCacheSecret` option,
@@ -47,7 +47,7 @@ export function pathEligible(request: RequestShape): boolean {
  * the process's generated secret, on every runtime. Never throws; "" means
  * that no secret could be generated.
  */
-export async function resolveUserCacheSecret(explicit: string | undefined): Promise<string> {
+export function resolveUserCacheSecret(explicit: string | undefined): string {
   if (explicit !== undefined && explicit !== "") return explicit;
   return processUserCacheSecret();
 }

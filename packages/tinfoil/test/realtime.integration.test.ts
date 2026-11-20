@@ -6,15 +6,17 @@
  */
 import { describe, expect, it } from "vitest";
 import { EnclaveHTTPClient } from "../src/enclave-client.js";
-import { EnclaveOpenAIClient } from "../src/openai-client.js";
+
 import type { PinnedWebSocket } from "../src/options.js";
 import { createRealtimeWebSocket } from "../src/realtime.js";
 import { createWebSocket } from "../src/websocket.js";
+import type { Trust } from "../src/trust.js";
+import { openAIOver } from "./helpers/openai.js";
 
 const RUN_INTEGRATION = process.env.RUN_TINFOIL_INTEGRATION === "true";
 const HOST = "inference.tinfoil.sh";
 const ROUTER = "tinfoilsh/confidential-model-router";
-const PIN = { repo: ROUTER, project: ROUTER };
+const PIN: Trust = { kind: "eitherPin", repo: ROUTER, project: ROUTER };
 const MODEL = "voxtral-mini-4b-realtime";
 const apiKey = process.env.TINFOIL_API_KEY ?? "";
 
@@ -47,7 +49,7 @@ describe("realtime against the live enclave", () => {
   it.skipIf(!RUN_INTEGRATION || apiKey === "")(
     "starts a realtime session through the OpenAI client and receives a server event",
     async () => {
-      const ai = await EnclaveOpenAIClient.create(HOST, PIN, {}, { apiKey });
+      const ai = await openAIOver(EnclaveHTTPClient.create(HOST, PIN, {}), { apiKey });
       const rt = await createRealtimeWebSocket(ai, { model: MODEL });
       const first = await new Promise<{ type?: string }>((resolve, reject) => {
         const timer = setTimeout(() => reject(new Error("timed out waiting for a server event")), 30_000);

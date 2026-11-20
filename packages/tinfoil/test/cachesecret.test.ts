@@ -183,20 +183,20 @@ describe("resolveUserCacheSecret", () => {
     vi.restoreAllMocks();
   });
 
-  it("prefers a non-empty option, then one generated secret for the process", async () => {
-    expect(await resolveUserCacheSecret("from-option")).toBe("from-option");
-    const generated = await resolveUserCacheSecret("");
+  it("prefers a non-empty option, then one generated secret for the process, synchronously", () => {
+    expect(resolveUserCacheSecret("from-option")).toBe("from-option");
+    const generated = resolveUserCacheSecret("");
     expect(generated).toMatch(/^[0-9a-f]{64}$/);
-    expect(await resolveUserCacheSecret(undefined)).toBe(generated);
-    expect(await resolveUserCacheSecret("from-option")).toBe("from-option");
+    expect(resolveUserCacheSecret(undefined)).toBe(generated);
+    expect(resolveUserCacheSecret("from-option")).toBe("from-option");
   });
 
-  it("reads neither the environment variable nor a secret file under the home directory, and warns about neither", async () => {
+  it("reads neither the environment variable nor a secret file under the home directory, and warns about neither", () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     process.env.TINFOIL_USER_CACHE_SECRET = "from-env";
     mkdirSync(join(home, ".tinfoil"), { mode: 0o700 });
     writeFileSync(join(home, ".tinfoil", "user_cache_secret"), "from-file", { mode: 0o600 });
-    const secret = await resolveUserCacheSecret(undefined);
+    const secret = resolveUserCacheSecret(undefined);
     expect(secret).toMatch(/^[0-9a-f]{64}$/);
     expect(secret).not.toBe("from-env");
     expect(secret).not.toBe("from-file");
@@ -206,8 +206,8 @@ describe("resolveUserCacheSecret", () => {
     expect(warn).not.toHaveBeenCalled();
   });
 
-  it("creates nothing under the home directory", async () => {
-    await resolveUserCacheSecret(undefined);
+  it("creates nothing under the home directory", () => {
+    resolveUserCacheSecret(undefined);
     expect(existsSync(join(home, ".tinfoil"))).toBe(false);
     expect(readdirSync(home)).toEqual([]);
   });

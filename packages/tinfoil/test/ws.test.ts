@@ -22,12 +22,13 @@ import { PeerLacksKeyError } from "../src/internal/transport/transport.js";
 import { isCertificateError } from "../src/internal/transport/pin-errors.js";
 import { allowedWsOptions } from "../src/internal/transport/ws.js";
 import { checkWebSocketCapability, webSocketURL } from "../src/internal/websocket.js";
-import { createEnclaveOpenAIClient, type EnclaveOpenAIClient, type OpenAIOptions, type TinfoilClient } from "../src/openai-client.js";
+import type { OpenAIClient, OpenAIClientOptions } from "../src/openai-client.js";
 import type { Fetch, PinnedWebSocket } from "../src/options.js";
 import { createRealtimeWebSocket } from "../src/realtime.js";
 import { createWebSocket, pinnedWebSocketOptions } from "../src/websocket.js";
 import { KEY_SPKI_FP_SHA256_V1_FORMAT, KEY_X25519_HPKE_V1_FORMAT, UsageError, type Verification, type Verifier } from "../../verifier/src/index.js";
 import { TEST_CERT, TEST_KEY, TEST_PIN } from "./helpers/tls-server.js";
+import { openAIOver } from "./helpers/openai.js";
 
 const OTHER_PIN = "ab".repeat(32);
 
@@ -70,7 +71,7 @@ function documents(): { fetch: Fetch; calls: number } {
 }
 
 async function client(pin: () => string, docs = documents()): Promise<EnclaveHTTPClient> {
-  return createEnclaveHTTPClient(host, { repo: "tinfoilsh/repo" }, { verifier: verifier(pin), transportMode: "tls" }, { documentFetch: docs.fetch, tls: { ca: TEST_CERT } });
+  return createEnclaveHTTPClient(host, { kind: "repoPin", repo: "tinfoilsh/repo" }, { transport: { kind: "tls" } }, { verifier: verifier(pin), documentFetch: docs.fetch, tls: { ca: TEST_CERT } });
 }
 
 /** Resolves on the socket's open event, or rejects with its error. */
@@ -105,8 +106,8 @@ afterAll(async () => {
 });
 
 /** An enclave OpenAI client in TLS mode, verified against `pin`, with documents from `docs`. */
-async function openAIClient(openaiOptions: OpenAIOptions, pin: () => string = () => TEST_PIN, docs = documents()): Promise<EnclaveOpenAIClient> {
-  return createEnclaveOpenAIClient(host, { repo: "tinfoilsh/repo" }, { verifier: verifier(pin), transportMode: "tls" }, openaiOptions, { documentFetch: docs.fetch, tls: { ca: TEST_CERT } });
+async function openAIClient(openaiOptions: OpenAIClientOptions, pin: () => string = () => TEST_PIN, docs = documents()): Promise<OpenAIClient<EnclaveHTTPClient>> {
+  return openAIOver(client(pin, docs), openaiOptions);
 }
 
 describe("webSocketURL", () => {
@@ -212,7 +213,7 @@ describe("createWebSocket", () => {
 
   it("fails closed when the normal certificate check fails, and verifies again afterwards", async () => {
     const docs = documents();
-    const c = await createEnclaveHTTPClient(host, { repo: "tinfoilsh/repo" }, { verifier: verifier(() => TEST_PIN), transportMode: "tls" }, { documentFetch: docs.fetch });
+    const c = await createEnclaveHTTPClient(host, { kind: "repoPin", repo: "tinfoilsh/repo" }, { transport: { kind: "tls" } }, { verifier: verifier(() => TEST_PIN), documentFetch: docs.fetch });
     const before = connections.length;
     const socket = await createWebSocket(c, "/x");
     const err = (await opened(socket).catch((e: unknown) => e)) as { code?: string };
@@ -249,7 +250,7 @@ describe("createWebSocket", () => {
           freshnessExpiresAt: new Date(Date.now() + 60_000),
         }) as unknown as Verification,
     } as unknown as Verifier;
-    const c = await createEnclaveHTTPClient(host, { repo: "tinfoilsh/repo" }, { verifier: sealing, transportMode: "ehbp" }, { documentFetch: documents().fetch, tls: { ca: TEST_CERT } });
+    const c = await createEnclaveHTTPClient(host, { kind: "repoPin", repo: "tinfoilsh/repo" }, { transport: { kind: "ehbp" } }, { verifier: sealing, documentFetch: documents().fetch, tls: { ca: TEST_CERT } });
     const socket = await createWebSocket(c, "/x");
     await opened(socket);
     socket.close();
@@ -299,8 +300,8 @@ describe("pinnedWebSocketOptions", () => {
 
     /** The OpenAI WebSocket clients that build their own `ws` WebSocket to the client's base URL with the client's key. */
     const libraries = [
-      { name: "ResponsesWS", path: "/v1/responses", open: (ai: EnclaveOpenAIClient, options: WsClientOptions): Session => new ResponsesWS(ai, options) },
-      { name: "LiveWS", path: "/v1/live/sessions", open: (ai: EnclaveOpenAIClient, options: WsClientOptions): Session => new LiveWS(ai, options) },
+      { name: "ResponsesWS", path: "/v1/responses", open: (ai: OpenAIClient<EnclaveHTTPClient>, options: WsClientOptions): Session => new ResponsesWS(ai, options) },
+      { name: "LiveWS", path: "/v1/live/sessions", open: (ai: OpenAIClient<EnclaveHTTPClient>, options: WsClientOptions): Session => new LiveWS(ai, options) },
     ];
 
     /** Resolves with the next connection that the server accepts after `before`, or rejects with the session's error. */
@@ -395,7 +396,7 @@ describe("createRealtimeWebSocket", () => {
   it("refuses a client no factory made, before any connection", async () => {
     const before = connections.length;
     const foreign = new OpenAI({ apiKey: "k" });
-    await expect(createRealtimeWebSocket(foreign as TinfoilClient, { model: "m" })).rejects.toThrow(/not created by its factory/);
+    await expect(createRealtimeWebSocket(foreign as OpenAIClient<EnclaveHTTPClient>, { model: "m" })).rejects.toThrow(/not created by its factory/);
     expect(connections.length).toBe(before);
   });
 });

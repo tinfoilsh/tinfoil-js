@@ -10,23 +10,25 @@
 import { describe, expect, it } from "vitest";
 import { EnclaveHTTPClient } from "../src/enclave-client.js";
 import { fetchCatalog, GatewayHTTPClient } from "../src/gateway-client.js";
-import { createClient, EnclaveOpenAIClient, GatewayOpenAIClient, RouterOpenAIClient } from "../src/openai-client.js";
-import type { TransportMode } from "../src/options.js";
+import { createClient } from "../src/openai-client.js";
+import { RouterHTTPClient } from "../src/router-client.js";
+import type { Transport } from "../src/options.js";
 import { completeChat, LIVE_HOST as HOST, LIVE_PIN as PIN, SHA256_HEX, streamChat } from "./helpers/live.js";
+import { openAIOver } from "./helpers/openai.js";
 
 const RUN_INTEGRATION = process.env.RUN_TINFOIL_INTEGRATION === "true";
 const GATEWAY_HOST = "inference-gateway.tinfoil.sh";
 const apiKey = process.env.TINFOIL_API_KEY ?? "";
 
-describe.each<TransportMode>(["tls", "ehbp"])("EnclaveHTTPClient against %s on a live enclave", (transportMode) => {
+describe.each<Transport["kind"]>(["tls", "ehbp"])("EnclaveHTTPClient against %s on a live enclave", (transportMode) => {
   it.skipIf(!RUN_INTEGRATION || apiKey === "")(
     "verifies, completes a chat, and streams a completion chunk by chunk",
     async () => {
-      await using http = await EnclaveHTTPClient.create(HOST, PIN, { transportMode });
+      await using http = await EnclaveHTTPClient.create(HOST, PIN, { transport: { kind: transportMode } });
       expect(http.enclave).toBe(HOST);
       expect(http.current?.tlsPublicKeyFP).toMatch(SHA256_HEX);
 
-      await using ai = await EnclaveOpenAIClient.create(HOST, PIN, { transportMode }, { apiKey });
+      await using ai = await openAIOver(EnclaveHTTPClient.create(HOST, PIN, { transport: { kind: transportMode } }), { apiKey });
       expect(ai.baseURL).toBe(`https://${HOST}/v1/`);
       await completeChat(ai);
       await streamChat(ai);
@@ -35,13 +37,12 @@ describe.each<TransportMode>(["tls", "ehbp"])("EnclaveHTTPClient against %s on a
   );
 });
 
-describe.each<TransportMode>(["tls", "ehbp"])("RouterOpenAIClient against %s on the live router", (transportMode) => {
+describe.each<Transport["kind"]>(["tls", "ehbp"])("OpenAIClient<RouterHTTPClient> against %s on the live router", (transportMode) => {
   it.skipIf(!RUN_INTEGRATION || apiKey === "")(
     "discovers and verifies a router and completes a chat through it",
     async () => {
-      await using ai = await RouterOpenAIClient.create({ transportMode }, { apiKey });
+      await using ai = await openAIOver(RouterHTTPClient.create({ transport: { kind: transportMode } }), { apiKey });
       const router = ai.httpClient;
-      expect(router.pin).toEqual(PIN);
       expect(router.current?.tlsPublicKeyFP).toMatch(SHA256_HEX);
       expect(ai.baseURL).toBe(`https://${router.enclave}/v1/`);
       await completeChat(ai);
@@ -80,7 +81,7 @@ describe("GatewayHTTPClient on the live gateway", () => {
   it.skipIf(!RUN_INTEGRATION || apiKey === "")(
     "completes a chat through the gateway",
     async () => {
-      await using ai = await GatewayOpenAIClient.create({}, { apiKey });
+      await using ai = await openAIOver(GatewayHTTPClient.create({}), { apiKey });
       await completeChat(ai, (await ai.httpClient.models())[0]!);
       expect(ai.httpClient.current.length).toBeGreaterThan(0);
     },

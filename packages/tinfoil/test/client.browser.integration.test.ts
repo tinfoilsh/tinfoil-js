@@ -7,8 +7,9 @@
  * the lane's config.
  */
 import { describe, expect, it } from "vitest";
-import { createClient, RouterHTTPClient, TinfoilClient } from "../src/index.browser.js";
-import { completeChat, LIVE_PIN, SHA256_HEX, streamChat } from "./helpers/live.js";
+import { RouterHTTPClient } from "../src/index.browser.js";
+import { createClient, OpenAIClient } from "../src/openai.js";
+import { completeChat, SHA256_HEX, streamChat } from "./helpers/live.js";
 
 const RUN_INTEGRATION = process.env.RUN_TINFOIL_INTEGRATION === "true";
 const bearerToken = process.env.TINFOIL_API_KEY ?? "";
@@ -16,10 +17,9 @@ const bearerToken = process.env.TINFOIL_API_KEY ?? "";
 describe("the browser build on the live router", () => {
   it.skipIf(!RUN_INTEGRATION || bearerToken === "")("verifies the router over EHBP with a bearer token, completes a chat and streams a completion", async () => {
     const ai = await createClient({ bearerToken });
-    expect(ai).toBeInstanceOf(TinfoilClient);
+    expect(ai).toBeInstanceOf(OpenAIClient);
     const router = ai.httpClient;
     expect(router).toBeInstanceOf(RouterHTTPClient);
-    expect(router.pin).toEqual(LIVE_PIN);
     expect(router.current?.hpkePublicKey).toMatch(SHA256_HEX);
     expect(ai.baseURL).toBe(`https://${router.enclave}/v1/`);
 

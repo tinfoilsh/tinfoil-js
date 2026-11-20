@@ -6,9 +6,10 @@
  * too. Run with: RUN_TINFOIL_INTEGRATION=true bun test test/integration.bun.ts
  */
 import { describe, expect, it } from "bun:test";
-import { RouterHTTPClient, RouterOpenAIClient } from "../src/index.js";
-import type { TransportMode } from "../src/options.js";
-import { completeChat, LIVE_PIN, SHA256_HEX } from "./helpers/live.js";
+import { RouterHTTPClient } from "../src/index.js";
+import type { Transport } from "../src/options.js";
+import { completeChat, SHA256_HEX } from "./helpers/live.js";
+import { openAIOver } from "./helpers/openai.js";
 
 const RUN_INTEGRATION = process.env.RUN_TINFOIL_INTEGRATION === "true";
 const apiKey = process.env.TINFOIL_API_KEY ?? "";
@@ -18,7 +19,6 @@ describe("RouterHTTPClient under Bun on the live router", () => {
     "discovers and verifies a router",
     async () => {
       const http = await RouterHTTPClient.create();
-      expect(http.pin).toEqual(LIVE_PIN);
       expect(http.current?.tlsPublicKeyFP).toMatch(SHA256_HEX);
       expect(http.current?.hpkePublicKey).toMatch(SHA256_HEX);
     },
@@ -26,14 +26,13 @@ describe("RouterHTTPClient under Bun on the live router", () => {
   );
 });
 
-for (const transportMode of ["tls", "ehbp"] as const satisfies readonly TransportMode[]) {
-  describe(`RouterOpenAIClient under Bun over ${transportMode} on the live router`, () => {
+for (const transportMode of ["tls", "ehbp"] as const satisfies readonly Transport["kind"][]) {
+  describe(`OpenAIClient<RouterHTTPClient> under Bun over ${transportMode} on the live router`, () => {
     it.skipIf(!RUN_INTEGRATION || apiKey === "")(
       "verifies a router and completes a chat through it",
       async () => {
-        const ai = await RouterOpenAIClient.create({ transportMode }, { apiKey });
+        const ai = await openAIOver(RouterHTTPClient.create({ transport: { kind: transportMode } }), { apiKey });
         const router = ai.httpClient;
-        expect(router.pin).toEqual(LIVE_PIN);
         expect(ai.baseURL).toBe(`https://${router.enclave}/v1/`);
         const completed = await completeChat(ai);
         expect(completed.finishReason).toBeTruthy();

@@ -18,7 +18,7 @@
 
 import { createOpenAICompatible } from "@ai-sdk/openai-compatible";
 import { convertToModelMessages, streamText, type ChatTransport, type UIMessage, type UIMessageChunk } from "ai";
-import { EnclaveHTTPClient, RouterHTTPClient } from "tinfoil";
+import { EnclaveHTTPClient, RouterHTTPClient, type Trust } from "tinfoil";
 
 // Model to use - must match your Tinfoil model catalog
 // See: https://docs.tinfoil.sh/models/catalog
@@ -110,7 +110,7 @@ async function initializeTransport(): Promise<TinfoilChatTransport> {
   // browser, request bodies are encrypted end-to-end to the enclave, and the
   // proxy forwards them to the host named by the X-Tinfoil-Enclave-Url header.
   const client = await RouterHTTPClient.create({
-    baseURL: proxyUrl,
+    transport: { kind: "ehbp", proxyURL: proxyUrl },
   });
 
   return new TinfoilChatTransport(client);
@@ -122,15 +122,15 @@ async function initializeTransport(): Promise<TinfoilChatTransport> {
  * Use this when you need more control over the configuration,
  * such as when using a specific enclave rather than the discovered router.
  */
-export async function createTinfoilTransport(
-  options: {
-    proxyUrl: string;
-    enclaveHost: string;
-    model?: string;
-  } & ({ repo: string; project?: string } | { repo?: string; project: string }),
-): Promise<TinfoilChatTransport> {
-  const client = await EnclaveHTTPClient.create(options.enclaveHost, { repo: options.repo, project: options.project }, {
-    baseURL: options.proxyUrl,
+export async function createTinfoilTransport(options: {
+  proxyUrl: string;
+  enclaveHost: string;
+  /** Who vouches for the enclave's config, such as { kind: "repoPin", repo: "owner/name" }. */
+  trust: Trust;
+  model?: string;
+}): Promise<TinfoilChatTransport> {
+  const client = await EnclaveHTTPClient.create(options.enclaveHost, options.trust, {
+    transport: { kind: "ehbp", proxyURL: options.proxyUrl },
   });
 
   return new TinfoilChatTransport(client, options.model);

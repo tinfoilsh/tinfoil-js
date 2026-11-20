@@ -7,13 +7,13 @@
  * as the browser build does: a runtime is a server only when it says so.
  */
 import { ConfigurationError } from "../errors.js";
-import type { TransportMode } from "../options.js";
+import type { TransportMode } from "./transport/transport.js";
 
 /** Which build this module belongs to; the browser build's bundling is checked against it. */
 export const PLATFORM: "node" | "browser" = "node";
 
 /** Why the TLS mode is refused in a browser. */
-export const TLS_UNAVAILABLE_IN_BROWSERS = 'the "tls" transport mode pins the server certificate, which browsers don\'t expose to scripts; use "ehbp", the browser default, which seals request and response bodies to the enclave\'s key instead';
+export const TLS_UNAVAILABLE_IN_BROWSERS = 'the TLS transport ({ kind: "tls" }) pins the server certificate, which browsers don\'t expose to scripts; use the EHBP transport ({ kind: "ehbp" }), the browser default, which seals request and response bodies to the enclave\'s key instead';
 
 /**
  * The oldest Bun whose fetch runs a caller's certificate check before it
@@ -40,12 +40,12 @@ export const MIN_DENO_FOR_TLS_MODE = "2.8.0";
 
 /** Why the TLS mode and a pinned WebSocket are refused on a Deno older than {@link MIN_DENO_FOR_TLS_MODE}. */
 export function pinningUnavailableOnDeno(version: string): string {
-  return `pinning the server certificate needs Deno ${MIN_DENO_FOR_TLS_MODE} or later: Deno ${version} connects without running the caller's certificate check; for requests, the "ehbp" transport mode seals request and response bodies to the enclave's key instead`;
+  return `pinning the server certificate needs Deno ${MIN_DENO_FOR_TLS_MODE} or later: Deno ${version} connects without running the caller's certificate check; for requests, the EHBP transport ({ kind: "ehbp" }) seals request and response bodies to the enclave's key instead`;
 }
 
 /** Why the TLS mode is refused on a Bun older than {@link MIN_BUN_FOR_TLS_MODE}. */
 export function tlsUnavailableOnBun(version: string): string {
-  return `the "tls" transport mode pins the server certificate, which Bun ${version} checks only after sending the request; use Bun ${MIN_BUN_FOR_TLS_MODE} or later, or "ehbp", which seals request and response bodies to the enclave's key instead`;
+  return `the TLS transport ({ kind: "tls" }) pins the server certificate, which Bun ${version} checks only after sending the request; use Bun ${MIN_BUN_FOR_TLS_MODE} or later, or the EHBP transport ({ kind: "ehbp" }), which seals request and response bodies to the enclave's key instead`;
 }
 
 /** Why a pinned WebSocket is refused on a Bun older than {@link MIN_BUN_FOR_PINNED_WEBSOCKETS}. */

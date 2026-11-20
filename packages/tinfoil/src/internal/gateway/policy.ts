@@ -5,7 +5,7 @@
  *
  * @experimental The gateway route is new; this API may change without a major version.
  */
-import { parseReference, Verifier } from "@tinfoilsh/verifier";
+import { parseReference, Verifier, type Policy } from "@tinfoilsh/verifier";
 import { AttestationError, ConfigurationError, messageOf } from "../../errors.js";
 import type { Catalog, ModelPin } from "../../options.js";
 import { TRUSTED_REPO_OWNER, trusted } from "./catalog.js";
@@ -47,21 +47,23 @@ export class GatewayPolicy {
     this.#verifier = verifier;
   }
 
-  /** Checks the pins and the policies; every failure is a {@link ConfigurationError}. */
-  static async create(modelPins: ReadonlyMap<string, ModelPin> | undefined, pinnedOnly: boolean, verifier: Verifier | undefined): Promise<GatewayPolicy> {
+  /**
+   * Checks the pins and builds a verifier for each policy, the gateway's
+   * and each pin's own, so that later changes by the caller have no effect;
+   * every failure is a {@link ConfigurationError}. `build` builds a
+   * verifier from a policy; tests replace it.
+   */
+  static async create(
+    modelPins: ReadonlyMap<string, ModelPin> | undefined,
+    pinnedOnly: boolean,
+    policy: Policy | undefined,
+    build: (policy: Policy | undefined) => Promise<Verifier> = defaultVerifier,
+  ): Promise<GatewayPolicy> {
     const pins = modelPins ?? new Map<string, ModelPin>();
     if (pinnedOnly && pins.size === 0) throw new ConfigurationError("pinned-only mode requires at least one model pin");
-    if (verifier === undefined) {
-      try {
-        verifier = await Verifier.create();
-      } catch (err) {
-        throw new ConfigurationError(`gateway verification options: ${messageOf(err)}`, { cause: err });
-      }
-    }
-    if (verifier.callerAuthorizesConfig) throw new ConfigurationError(CALLER_AUTHORIZED);
+    const verifier = await built(build, policy, "gateway policy");
     const resolved = new Map<string, ResolvedPin>();
     for (const [model, pin] of pins) {
-      if (pin.verifier?.callerAuthorizesConfig) throw new ConfigurationError(`model ${JSON.stringify(model)}: ${CALLER_AUTHORIZED}`);
       if (model.trim() === "" || !pin.repo.startsWith(TRUSTED_REPO_OWNER)) {
         throw new ConfigurationError(`model pin ${JSON.stringify(model)} repository ${JSON.stringify(pin.repo)} must belong to ${TRUSTED_REPO_OWNER}`);
       }
@@ -70,7 +72,8 @@ export class GatewayPolicy {
       } catch (err) {
         throw new ConfigurationError(`model ${JSON.stringify(model)}: ${messageOf(err)}`, { cause: err });
       }
-      resolved.set(model, { repo: pin.repo, verifier: pin.verifier ?? verifier });
+      const pinVerifier = pin.policy === undefined ? verifier : await built(build, pin.policy, `model ${JSON.stringify(model)} policy`);
+      resolved.set(model, { repo: pin.repo, verifier: pinVerifier });
     }
     return new GatewayPolicy(resolved, pinnedOnly, verifier);
   }
@@ -114,5 +117,17 @@ export class GatewayPolicy {
   }
 }
 
-/** Gateway replicas are verified against repository pins, so a config the caller supplies or authorizes has no place. */
-const CALLER_AUTHORIZED = "caller-authorized config requires a direct enclave client";
+/** A verifier for `policy` under the public registry, whose config trust a gateway can't change. */
+function defaultVerifier(policy: Policy | undefined): Promise<Verifier> {
+  return Verifier.create(undefined, policy);
+}
+
+/** `build(policy)`, with a failure as a {@link ConfigurationError} that names `what`. */
+async function built(build: (policy: Policy | undefined) => Promise<Verifier>, policy: Policy | undefined, what: string): Promise<Verifier> {
+  try {
+    return await build(policy);
+  } catch (err) {
+    if (err instanceof ConfigurationError) throw err;
+    throw new ConfigurationError(`${what}: ${messageOf(err)}`, { cause: err });
+  }
+}

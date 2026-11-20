@@ -8,8 +8,8 @@ import { describe, expect, it, vi } from "vitest";
 import { ConfigurationError } from "../src/errors.js";
 import { DEFAULT_ROUTER_URL, discoverRouter, FALLBACK_ROUTER_HOST, fetchRouters, MAX_ROUTER_BYTES, type DiscoveryConfig } from "../src/internal/router.js";
 import { tlsMode } from "../src/internal/transport/tls.js";
-import type { Fetch, Pin } from "../src/options.js";
-import { KEY_SPKI_FP_SHA256_V1_FORMAT, UsageError, type Verification, type Verifier } from "../../verifier/src/index.js";
+import type { Fetch } from "../src/options.js";
+import { KEY_SPKI_FP_SHA256_V1_FORMAT, UsageError, type Pin, type Verification, type Verifier } from "../../verifier/src/index.js";
 
 const PIN = "ab".repeat(32);
 
@@ -19,7 +19,6 @@ function verifier(pins: Pin[] = []): Verifier {
     checkPinVerifiability: ({ repo = "" }: { repo?: string }) => {
       if (repo === "") throw new UsageError("repo required");
     },
-    callerAuthorizesConfig: false,
     verifyV3At: async (_doc: Uint8Array, _nonce: Uint8Array, pin: Pin) => {
       pins.push(pin);
       const material = [{ id: "tls", format: KEY_SPKI_FP_SHA256_V1_FORMAT, data: PIN }];
@@ -60,7 +59,8 @@ function routerList(body: unknown, status = 200): { fetch: Fetch; calls: string[
 }
 
 function config(overrides: Partial<DiscoveryConfig>): DiscoveryConfig {
-  return { verifier: verifier(), mode: tlsMode(), sleep: async () => {}, ...overrides };
+  // The list's order is kept, so that a test can say which router is tried first.
+  return { verifier: verifier(), mode: tlsMode(), sleep: async () => {}, shuffle: (items) => [...items], ...overrides };
 }
 
 describe("discoverRouter", () => {

@@ -3,9 +3,9 @@
  * Every client checks its options before any network I/O, so a misconfigured
  * client fails at creation rather than on its first request.
  */
-import type { Verification, Verifier } from "@tinfoilsh/verifier";
+import type { Policy, Verification } from "@tinfoilsh/verifier";
 
-export type { Pin } from "@tinfoilsh/verifier";
+export type { ArtifactTrust, EmbeddedArtifacts, EndorsedArtifacts, Policy } from "@tinfoilsh/verifier";
 import type { ClientOptions as WsClientOptions } from "ws";
 
 /**
@@ -18,19 +18,100 @@ import type { ClientOptions as WsClientOptions } from "ws";
 export type Fetch = (...args: Parameters<typeof globalThis.fetch>) => ReturnType<typeof globalThis.fetch>;
 
 /**
- * How a client protects its traffic to an enclave.
- *
- * - `"tls"` pins each connection to the attested TLS key. It protects the
- *   whole request and response and needs a direct connection, so it is the
- *   default where the runtime checks the connection before it sends over
- *   it (Node, and Bun 1.4.0 or later; an older Bun refuses it).
- * - `"ehbp"` seals request and response bodies to the attested HPKE key, so
- *   they stay private through a proxy. The method, URL and headers aren't
- *   sealed, and neither is a request without a body or its response. It
- *   refuses protocol upgrades and CONNECT tunnels. It is the only mode in
- *   browsers, and the default there.
+ * How a client protects its traffic to an enclave: {@link TLS} or
+ * {@link EHBP}, told apart by `kind`. Undefined selects the platform's
+ * default: `{ kind: "tls" }` on Node, Bun 1.4.0 or later and Deno 2.8.0 or
+ * later, which check a connection before they send over it, and
+ * `{ kind: "ehbp" }` in browsers and on an older Bun or Deno. `{ kind: "tls" }`
+ * is a {@link ConfigurationError} where the platform can't pin a connection,
+ * and so is an unknown `kind`.
  */
-export type TransportMode = "tls" | "ehbp";
+export type Transport = TLS | EHBP;
+
+/**
+ * Pins each connection to the attested TLS key. It protects the whole
+ * request and response, and needs a direct connection to the enclave, so it
+ * takes no URL: requests go to the enclave's own HTTPS origin.
+ */
+export interface TLS {
+  readonly kind: "tls";
+}
+
+/**
+ * Seals request and response bodies to the attested HPKE key, so that they
+ * stay private through a proxy. The method, URL and headers aren't sealed,
+ * and neither is a request without a body or its response. It refuses
+ * protocol upgrades and CONNECT tunnels, because nothing after the handshake
+ * would be sealed.
+ */
+export interface EHBP {
+  readonly kind: "ehbp";
+  /**
+   * A proxy that forwards requests to the enclave, and that requests are
+   * sent to; undefined or "" sends them directly to the enclave. Its path, if
+   * any, is where the proxy is mounted, not the API path: an OpenAI client
+   * joins its API path under it. Requests to the proxy carry
+   * `X-Tinfoil-Enclave-Url` so that it can forward them. The proxy must use
+   * HTTPS, since EHBP doesn't seal headers such as the API key; `http://` is
+   * accepted only when its host is localhost or a loopback IP address. A URL
+   * with a username or password, a query or a fragment, even an empty one,
+   * is a {@link ConfigurationError}, and so is an enclave client's proxy on
+   * the enclave's own origin, which is no proxy: leave it unset to connect
+   * directly.
+   */
+  readonly proxyURL?: string;
+  /**
+   * The network implementation that sends the sealed requests, for a native
+   * HTTP bridge or a trusted relay. It receives each request after its body
+   * is sealed, and the response that it returns is opened by the client; a
+   * request without a body passes through it unsealed, as EHBP leaves it.
+   * The method, URL and headers aren't sealed, so a relay sees them, the API
+   * key included. Attestation documents and the router list are still
+   * fetched with the runtime's fetch. Undefined selects the runtime's fetch.
+   */
+  readonly fetch?: Fetch;
+}
+
+/**
+ * Obtains the attestation document of an enclave for a challenge nonce, in
+ * place of the client's direct fetch from the enclave; {@link attestationRelay}
+ * returns one that fetches through a relay. `host` is the enclave's host,
+ * with an optional port, and `nonce` is the fresh 32-byte challenge that the
+ * document must answer. The client verifies whatever it returns as it
+ * verifies a document that it fetched itself, so a fetcher isn't trusted: it
+ * can make verification fail, but it can't make an enclave pass that
+ * wouldn't pass otherwise.
+ *
+ * A client calls it for every verification: when it is created, whenever it
+ * verifies again after an expiry or a key rotation, and, on the router
+ * route, for each router that discovery tries and for the fallback.
+ * `signal` ends after 30 seconds. A verification can serve many requests,
+ * so it isn't any one caller's: a caller's cancellation ends only that
+ * caller's wait, and the fetch goes on until it settles or the 30 seconds
+ * pass. The client stops waiting when `signal` ends, even if the fetcher
+ * ignores it. A thrown
+ * error is reported as a {@link NetworkError} that wraps it, unless it
+ * already is an SDK error. It may be called concurrently.
+ */
+export type AttestationFetcher = (host: string, nonce: Uint8Array, options: { readonly signal: AbortSignal }) => Promise<Uint8Array>;
+
+/**
+ * Obtains the candidate routers for router discovery, in place of the
+ * client's fetch from `https://atc.tinfoil.sh/routers`; {@link routerListRelay}
+ * returns one that fetches through a relay. The list isn't trusted: it only
+ * proposes hosts, and discovery verifies each one before it uses it, tries
+ * them for at most 30 seconds in all, and falls back to inference.tinfoil.sh
+ * when none passes. A thrown error, or a result that isn't an array of
+ * strings, counts as an empty list.
+ *
+ * An attestation document doesn't name the host that serves it, so the list
+ * source is trusted not to name a host that would relay another router's
+ * attestation: with EHBP, such a host would receive the request headers,
+ * including the API key, although not the sealed bodies.
+ *
+ * `signal` ends when the caller's signal does, or after 30 seconds.
+ */
+export type RouterListFetcher = (options: { readonly signal: AbortSignal }) => Promise<readonly string[]>;
 
 /**
  * Called with each verification that passes the verifier, before the client
@@ -146,75 +227,78 @@ export interface PinnedWebSocket {
   removeEventListener(type: "close", listener: (event: { readonly code: number; readonly reason: string }) => void): void;
 }
 
-/** Configures an {@link EnclaveHTTPClient}. */
+/**
+ * Configures an {@link EnclaveHTTPClient}. It has no prompt-cache option:
+ * an enclave client sends request bodies as they are, and never adds or
+ * changes a `user_cache_secret` member. A caller that points one at
+ * Tinfoil's router and wants a scoped prompt cache sets that member in each
+ * request body.
+ */
 export interface EnclaveOptions {
-  /** Defaults to `"tls"` on Node and Bun 1.4.0 or later, `"ehbp"` in browsers and on an older Bun, which refuses `"tls"`. */
-  readonly transportMode?: TransportMode;
   /**
-   * A path on the enclave's own HTTPS origin, or a proxy on another origin,
-   * which requires `"ehbp"`. Requests to a proxy carry `X-Tinfoil-Enclave-Url`
-   * so it can forward them. A proxy must use HTTPS, since EHBP doesn't seal
-   * headers such as the API key; `http://` is accepted only for localhost or
-   * a loopback IP address. It is made to end with `/`; a query string or
-   * fragment is a {@link ConfigurationError}. For the OpenAI clients this is
-   * the API root, used as the OpenAI SDK uses its `baseURL`: nothing is
-   * appended, so a proxy that expects the enclave's own paths needs `/v1/`
-   * on the end.
+   * How requests to the enclave are protected: {@link TLS} or {@link EHBP}.
+   * Undefined selects the platform's default: `{ kind: "tls" }` on Node,
+   * Bun 1.4.0 or later and Deno 2.8.0 or later, which check a connection
+   * before they send over it, and `{ kind: "ehbp" }` in browsers and on an
+   * older Bun or Deno. `{ kind: "tls" }` is a {@link ConfigurationError}
+   * where the platform can't pin a connection: in a browser, and on a Bun
+   * older than 1.4.0 or a Deno older than 2.8.0.
    */
-  readonly baseURL?: string;
-  /** The verification policy; undefined selects the defaults. */
-  readonly verifier?: Verifier;
+  readonly transport?: Transport;
+  /**
+   * The verification policy, as plain data; undefined selects the defaults.
+   * The client builds its verifier from the trust argument and this policy,
+   * so an invalid field is a {@link ConfigurationError}.
+   */
+  readonly policy?: Policy;
   readonly verificationCheck?: VerificationCheck;
   /**
-   * The default prompt-cache scope for the client's requests. Only Tinfoil's
-   * router reads it, so set it when the enclave is a router. A non-empty
-   * `user_cache_secret` string in a request's JSON body overrides it. Use an
-   * opaque random value, not a raw user ID or API key.
+   * How the client obtains each attestation document; undefined fetches it
+   * directly from the enclave. Use {@link attestationRelay} to fetch through
+   * a relay, or a function of your own; see {@link AttestationFetcher}.
    */
-  readonly userCacheSecret?: string;
-  /**
-   * The network implementation that sends the client's requests in the
-   * `"ehbp"` transport mode, for a native HTTP bridge or a trusted relay. It
-   * receives each request after its body is sealed, and the response that it
-   * returns is opened by the client; a request without a body passes through
-   * it unsealed, as the mode leaves it. The method, URL and headers aren't
-   * sealed, so a relay sees them, the API key included. Attestation documents
-   * are still fetched with the runtime's fetch. Undefined selects the
-   * runtime's fetch. Refused with `transportMode: "tls"`, which pins the
-   * connection itself and sends nothing through a caller's fetch.
-   */
-  readonly fetch?: Fetch;
+  readonly fetchAttestation?: AttestationFetcher;
   /** Aborts the verification the factory performs before it returns. */
   readonly signal?: AbortSignal;
 }
 
 /** Configures a {@link RouterHTTPClient}. */
 export interface RouterOptions {
-  /** Defaults to `"tls"` on Node and Bun 1.4.0 or later, `"ehbp"` in browsers and on an older Bun, which refuses `"tls"`. */
-  readonly transportMode?: TransportMode;
   /**
-   * A proxy that forwards requests to the router discovery chooses, which
-   * requires `"ehbp"`: the router isn't known before discovery, so a base URL
-   * can't name its origin. Requests carry `X-Tinfoil-Enclave-Url`. The proxy
-   * must use HTTPS; `http://` is accepted only for localhost or a loopback IP
-   * address. It is made to end with `/`; a query string or fragment is a
-   * {@link ConfigurationError}. For the OpenAI clients this is the API root,
-   * used as the OpenAI SDK uses its `baseURL`: nothing is appended, so a
-   * proxy that expects the enclave's own paths needs `/v1/` on the end.
+   * How requests to the router are protected: {@link TLS} or {@link EHBP}.
+   * An EHBP proxy forwards requests to the router that discovery chooses.
+   * Undefined selects the platform's default: `{ kind: "tls" }` on Node,
+   * Bun 1.4.0 or later and Deno 2.8.0 or later, which check a connection
+   * before they send over it, and `{ kind: "ehbp" }` in browsers and on an
+   * older Bun or Deno. `{ kind: "tls" }` is a {@link ConfigurationError}
+   * where the platform can't pin a connection: in a browser, and on a Bun
+   * older than 1.4.0 or a Deno older than 2.8.0.
    */
-  readonly baseURL?: string;
+  readonly transport?: Transport;
   /**
-   * The verification policy; undefined selects the defaults. A verifier that
-   * authorizes the config itself is a {@link ConfigurationError}, since it
-   * needs an explicit enclave.
+   * The verification policy, as plain data; undefined selects the defaults.
+   * The router's config trust is fixed to its repository.
    */
-  readonly verifier?: Verifier;
+  readonly policy?: Policy;
   /**
    * Called for each router tried during discovery and whenever the client
    * verifies again. A rejection during discovery moves on to the next router;
    * otherwise it fails verification as for an enclave client.
    */
   readonly verificationCheck?: VerificationCheck;
+  /**
+   * How the client obtains each attestation document, for every router that
+   * discovery tries, the fallback and every later verification; undefined
+   * fetches it directly from the router. See {@link AttestationFetcher}.
+   */
+  readonly fetchAttestation?: AttestationFetcher;
+  /**
+   * How the client obtains its list of candidate routers; undefined fetches
+   * Tinfoil's list. Use {@link routerListRelay} to fetch through a relay, or
+   * a function of your own; see {@link RouterListFetcher}. Discovery runs
+   * whatever the list's source.
+   */
+  readonly fetchRouterList?: RouterListFetcher;
   /**
    * The default prompt-cache scope. A non-empty `user_cache_secret` string
    * in a request's JSON body overrides it. Undefined or empty selects a
@@ -225,13 +309,6 @@ export interface RouterOptions {
    * for it. Use an opaque random value, not a raw user ID or API key.
    */
   readonly userCacheSecret?: string;
-  /**
-   * As {@link EnclaveOptions.fetch}: the network implementation that sends
-   * the client's sealed requests in the `"ehbp"` transport mode. The router
-   * list and attestation documents are still fetched with the runtime's
-   * fetch. Refused with `transportMode: "tls"`.
-   */
-  readonly fetch?: Fetch;
   /** Aborts discovery and the verification the factory performs before it returns. */
   readonly signal?: AbortSignal;
 }
@@ -243,8 +320,12 @@ export interface RouterOptions {
  */
 export interface ModelPin {
   readonly repo: string;
-  /** The pin's policy: undefined inherits {@link GatewayOptions.verifier}. */
-  readonly verifier?: Verifier;
+  /**
+   * The pin's policy: undefined inherits {@link GatewayOptions.policy}, and a
+   * policy replaces it entirely, so an unset field takes the SDK's default
+   * rather than the gateway's.
+   */
+  readonly policy?: Policy;
 }
 
 /**
@@ -286,8 +367,8 @@ export interface GatewayOptions {
   /** Pins models to repositories. With `pinnedModelsOnly`, only pinned models are served, which requires at least one pin. */
   readonly modelPins?: ReadonlyMap<string, ModelPin>;
   readonly pinnedModelsOnly?: boolean;
-  /** The policy for unpinned models; undefined selects the defaults. */
-  readonly verifier?: Verifier;
+  /** The policy for unpinned models, and for pinned models whose pin has none; undefined selects the defaults. */
+  readonly policy?: Policy;
   /** Called with each replica's verification, for pinned and unpinned models. A rejected replica is skipped for the next replica of the model. */
   readonly verificationCheck?: VerificationCheck;
   /** As for {@link RouterOptions.userCacheSecret}. */
@@ -302,9 +383,10 @@ export interface GatewayOptions {
    */
   readonly catalog?: () => Catalog;
   /**
-   * As {@link EnclaveOptions.fetch}: the network implementation that sends
-   * the client's sealed requests to the gateway. The catalog and attestation
-   * documents are still fetched with the runtime's fetch.
+   * As {@link EHBP.fetch}: the network implementation that sends the
+   * client's sealed requests to the gateway, which always uses EHBP. The
+   * catalog and attestation documents are still fetched with the runtime's
+   * fetch.
    */
   readonly fetch?: Fetch;
   /** Aborts the catalog fetch the factory performs before it returns. */

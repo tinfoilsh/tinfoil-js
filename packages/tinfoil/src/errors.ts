@@ -65,6 +65,18 @@ export class AttestationError extends TinfoilError {
   }
 }
 
+/**
+ * How an unknown `kind` that untyped code passed is named in an error: a
+ * string quoted, another primitive as written, and anything else by its
+ * type, so that naming it can't throw.
+ */
+export function describeKind(kind: unknown): string {
+  if (kind === undefined) return "a value without one";
+  if (typeof kind === "string") return JSON.stringify(kind);
+  if (typeof kind === "number" || typeof kind === "boolean" || typeof kind === "bigint" || kind === null) return String(kind);
+  return `a ${typeof kind}`;
+}
+
 /** The message of an unknown thrown value. */
 export function messageOf(err: unknown): string {
   return err instanceof Error ? err.message : String(err);

@@ -50,7 +50,7 @@ const EXPORTS = [
 
 const VERIFIER_METHODS = ["verifyV3", "verifyV3At", "checkPinVerifiability"].sort();
 /** The policy a verifier carries as own properties, in declaration order. */
-const VERIFIER_PROPERTIES = ["freshnessMaxAgeMs", "pinnedRegisters", "callerAuthorizesConfig"];
+const VERIFIER_PROPERTIES = ["freshnessMaxAgeMs", "pinnedRegisters"];
 /** The facts a verification carries as own properties, in declaration order. */
 const VERIFICATION_PROPERTIES = [
   "codeDigest",
@@ -70,10 +70,17 @@ const VERIFICATION_METHODS = ["cryptoMaterialData", "toJSON"].sort();
 
 /** The type-only exports, pinned under the test typecheck: a removed or renamed type fails compilation here. */
 type TypeExports = [
-  surface.VerifierOptions,
-  surface.EmbeddedReferences,
-  surface.EmbeddedConfigBytes,
+  surface.ConfigTrust,
+  surface.Registries,
+  surface.ConfigSigningKeys,
+  surface.ConfigAuthorizer,
+  surface.EmbeddedConfig,
   surface.EmbeddedConfigReference,
+  surface.Policy,
+  surface.ArtifactTrust,
+  surface.EndorsedArtifacts,
+  surface.EmbeddedArtifacts,
+  surface.Pin,
   surface.RuntimeReference,
   surface.ConfigVerification,
   surface.ArtifactVerification,

@@ -4,13 +4,13 @@
  * otherwise inference.tinfoil.sh. Discovery runs again each time a client is
  * created and tries routers for at most 30 seconds before falling back.
  */
-import type { Pin, Verification } from "@tinfoilsh/verifier";
-import { attestedFetch, checkNetworkFetch, modeFor, resolveTransportMode, setOpenAIURL, type EnclaveClientSeams } from "./enclave-client.js";
+import type { Verification } from "@tinfoilsh/verifier";
+import { attestedFetch, buildVerifier, checkFetcher, modeFor, resolveTransport, type EnclaveClientSeams } from "./enclave-client.js";
 import { ConfigurationError } from "./errors.js";
 import { resolveUserCacheSecret } from "./internal/cachesecret.js";
+import { registerRoute } from "./internal/api-path.js";
 import { asyncDispose } from "./internal/dispose.js";
 import { discoverRouter } from "./internal/router.js";
-import { normalizeBaseURL, validateBaseURL } from "./internal/transport/base-url.js";
 import type { KeyedTransport } from "./internal/transport/transport.js";
 import { registerWebSocketAccess } from "./internal/websocket.js";
 import type { CallOptions, Fetch, RouterOptions } from "./options.js";
@@ -18,49 +18,45 @@ import type { CallOptions, Fetch, RouterOptions } from "./options.js";
 /** @internal Seams for tests: the enclave client's, and the fetch that retrieves the router list. */
 export interface RouterClientSeams extends EnclaveClientSeams {
   readonly routersFetch?: Fetch;
+  /** Reorders the router list; undefined shuffles it uniformly. */
+  readonly shuffle?: <T>(items: readonly T[]) => T[];
   /** Resolves the cache secret when the option is empty. */
-  readonly resolveSecret?: (explicit: string | undefined) => Promise<string>;
+  readonly resolveSecret?: (explicit: string | undefined) => string;
 }
 
 /** Only this module holds the token the constructor requires, so untyped code that calls it is refused. */
 const TOKEN: unique symbol = Symbol("RouterHTTPClient");
 
 /** Calls the private constructor; the class assigns it, as the only place the constructor can be called. */
-let construct: (transport: KeyedTransport, baseURL: string, openAIURL: string, fetchImpl: Fetch) => RouterHTTPClient;
+let construct: (transport: KeyedTransport, baseURL: string, fetchImpl: Fetch) => RouterHTTPClient;
 
 /** @internal The factory with its test seams; {@link RouterHTTPClient.create} is this without them. */
 export async function createRouterHTTPClient(options: RouterOptions, seams: RouterClientSeams): Promise<RouterHTTPClient> {
-  const mode = resolveTransportMode(options.transportMode, seams.globals);
-  checkNetworkFetch(mode, options.fetch);
-  let baseURL = options.baseURL ?? "";
-  if (baseURL !== "") {
-    validateBaseURL(baseURL);
-    if (mode === "tls") {
-      throw new ConfigurationError('a base URL is a proxy when discovering the router, which requires transportMode "ehbp"');
-    }
-    baseURL = normalizeBaseURL(baseURL);
-  }
-  if (options.verifier?.callerAuthorizesConfig) {
-    throw new ConfigurationError("caller-authorized config requires an explicit enclave");
-  }
+  const resolved = resolveTransport(options.transport, seams.globals);
+  checkFetcher("fetchAttestation", options.fetchAttestation);
+  checkFetcher("fetchRouterList", options.fetchRouterList);
+  const verifier = await buildVerifier(undefined, options.policy, seams);
   const transport = await discoverRouter({
-    verifier: options.verifier,
+    verifier,
     verificationCheck: options.verificationCheck,
-    mode: modeFor(mode, options.fetch, seams),
+    mode: modeFor(resolved, seams),
     signal: options.signal,
+    fetchAttestation: options.fetchAttestation,
+    fetchRouterList: options.fetchRouterList,
     routersFetch: seams.routersFetch,
+    shuffle: seams.shuffle,
     documentFetch: seams.documentFetch,
     clock: seams.clock,
     nonce: seams.nonce,
     sleep: seams.sleep,
   });
-  const secret = await (seams.resolveSecret ?? resolveUserCacheSecret)(options.userCacheSecret);
+  const secret = (seams.resolveSecret ?? resolveUserCacheSecret)(options.userCacheSecret);
   const host = transport.enclave().host();
+  const proxyURL = resolved.proxyURL;
   const client = construct(
     transport,
-    baseURL !== "" ? baseURL : `https://${host}/`,
-    baseURL !== "" ? baseURL : `https://${host}/v1/`,
-    attestedFetch(transport, host, baseURL, secret),
+    proxyURL !== "" ? proxyURL : `https://${host}/`,
+    attestedFetch(transport, host, proxyURL, secret),
   );
   registerWebSocketAccess(client, transport, seams.tls ?? {});
   // Discovery leaves its fallback unverified. A verification that the
@@ -82,28 +78,25 @@ export async function createRouterHTTPClient(options: RouterOptions, seams: Rout
  * header. The constructor is private: type-checked code cannot call it, and
  * a call from untyped code is refused at runtime. Clients come from
  * {@link RouterHTTPClient.create}, and from the factories built over it:
- * `createClient` and {@link TinfoilClient.create},
- * {@link RouterOpenAIClient.create}, and the AI SDK provider.
+ * `createClient` from `tinfoil/openai` and the AI SDK provider. An
+ * `OpenAIClient` from `tinfoil/openai` can be built over one.
  */
 export class RouterHTTPClient {
   /** As {@link EnclaveHTTPClient.fetch}. */
   readonly fetch: Fetch;
-  /** Where requests go: the `baseURL` option, or the router's own origin. Always ends with `/`, so a relative path resolves against it with `new URL(path, client.baseURL)`. */
+  /** Where requests go: the EHBP proxy, or the router's own origin. Always ends with `/`, so a relative path resolves against it with `new URL(path, client.baseURL)`. */
   readonly baseURL: string;
   /** The host of the verified router, even when `baseURL` is a proxy. */
   readonly enclave: string;
-  /** The repository and registry project the router is verified against. */
-  readonly pin: Required<Pin>;
   readonly #transport: KeyedTransport;
 
-  private constructor(token: typeof TOKEN, transport: KeyedTransport, baseURL: string, openAIURL: string, fetchImpl: Fetch) {
+  private constructor(token: typeof TOKEN, transport: KeyedTransport, baseURL: string, fetchImpl: Fetch) {
     if (token !== TOKEN) throw new ConfigurationError("RouterHTTPClient is created with RouterHTTPClient.create");
     this.#transport = transport;
     this.fetch = fetchImpl;
     this.baseURL = baseURL;
     this.enclave = transport.enclave().host();
-    this.pin = transport.enclave().pin();
-    setOpenAIURL(this, openAIURL);
+    registerRoute(this, "router");
     // The client's state lives in the transport; the client itself never changes once created.
     Object.freeze(this);
   }

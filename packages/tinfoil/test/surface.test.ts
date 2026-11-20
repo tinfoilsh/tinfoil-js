@@ -10,30 +10,28 @@ import { describe, expect, it } from "vitest";
 import * as aiSdk from "../src/ai-sdk.js";
 import * as browser from "../src/index.browser.js";
 import * as surface from "../src/index.js";
+import * as openaiEntry from "../src/openai.js";
 import * as unsafeEntry from "../src/unsafe.js";
 import { createEnclaveHTTPClient } from "../src/enclave-client.js";
 import { createGatewayHTTPClient } from "../src/gateway-client.js";
-import { createEnclaveOpenAIClient, createGatewayOpenAIClient, createRouterOpenAIClient, createTinfoilClient } from "../src/openai-client.js";
+import { createTinfoilClient } from "../src/openai-client.js";
 import { createRouterHTTPClient } from "../src/router-client.js";
 import type { Fetch } from "../src/options.js";
 import { refusal, FORBIDDEN_TRANSPORT_OPTIONS } from "./helpers/transport-options.js";
 
-/** Every runtime export, sorted. Type-only exports are checked by compiling this file. */
+/** Every runtime export of the root entry, sorted. Type-only exports are checked by compiling this file. */
 const EXPORTS = [
   // clients
-  "createClient",
-  "TinfoilClient",
   "EnclaveHTTPClient",
-  "EnclaveOpenAIClient",
   "RouterHTTPClient",
-  "RouterOpenAIClient",
   "GatewayHTTPClient",
-  "GatewayOpenAIClient",
   "fetchCatalog",
   // websockets
   "createWebSocket",
   "pinnedWebSocketOptions",
-  "createRealtimeWebSocket",
+  // fetchers
+  "attestationRelay",
+  "routerListRelay",
   // errors
   "TinfoilError",
   "ConfigurationError",
@@ -46,6 +44,13 @@ const EXPORTS = [
   "decryptResponseWithToken",
   // version
   "SDK_VERSION",
+].sort();
+
+/** Every runtime export of the `tinfoil/openai` entry, sorted. */
+const OPENAI_EXPORTS = [
+  "OpenAIClient",
+  "createClient",
+  "createRealtimeWebSocket",
   // OpenAI helpers and errors
   "toFile",
   "APIPromise",
@@ -73,25 +78,30 @@ const EXPORTS = [
  * tests, where one is built.
  */
 type Members<T> = Record<Extract<keyof T, string>, "property" | "getter" | "method">;
-const ATTESTED_CLIENT_MEMBERS: Members<surface.EnclaveHTTPClient> & Members<surface.RouterHTTPClient> = {
+const ROUTER_CLIENT_MEMBERS: Members<surface.RouterHTTPClient> = {
   fetch: "property",
   baseURL: "property",
   enclave: "property",
-  pin: "property",
   current: "getter",
   ensureVerified: "method",
   reverify: "method",
   close: "method",
 };
+const ENCLAVE_CLIENT_MEMBERS: Members<surface.EnclaveHTTPClient> = { ...ROUTER_CLIENT_MEMBERS, trust: "getter" };
 const GATEWAY_CLIENT_MEMBERS: Members<surface.GatewayHTTPClient> = { fetch: "property", baseURL: "property", current: "getter", models: "method", ensureVerified: "method", close: "method" };
 const UNVERIFIED_CLIENT_MEMBERS: Members<unsafeEntry.UnverifiedClient> = { fetch: "property", baseURL: "property", keyOrigin: "property" };
-/** What the OpenAI subclasses add to the OpenAI client. */
-const OPENAI_CLIENT_MEMBERS = { httpClient: "property", withOptions: "method" } as const satisfies Pick<Members<surface.TinfoilClient>, "httpClient" | "withOptions">;
+/** What the OpenAI subclass adds to the OpenAI client. */
+const OPENAI_CLIENT_MEMBERS = { httpClient: "property", withOptions: "method" } as const satisfies Pick<Members<openaiEntry.OpenAIClient>, "httpClient" | "withOptions">;
 
 /** The type-only exports, pinned under the test typecheck: a removed or renamed type fails compilation here. */
 type TypeExports = [
   surface.Fetch,
-  surface.TransportMode,
+  surface.AttestationFetcher,
+  surface.RouterListFetcher,
+  surface.RelayOptions,
+  surface.Transport,
+  surface.TLS,
+  surface.EHBP,
   surface.VerificationCheck,
   surface.CallOptions,
   surface.EnclaveOptions,
@@ -103,11 +113,24 @@ type TypeExports = [
   surface.ReplicaVerification,
   surface.WebSocketOptions,
   surface.PinnedWebSocket,
-  surface.RealtimeOptions,
-  surface.OpenAIOptions,
   surface.ErrorCategory,
   surface.SessionRecoveryToken,
-  surface.Uploadable,
+  surface.Policy,
+  surface.ArtifactTrust,
+  surface.EndorsedArtifacts,
+  surface.EmbeddedArtifacts,
+  surface.Trust,
+  surface.RepoPin,
+  surface.ProjectPin,
+  surface.SignedBy,
+  surface.AuthorizedBy,
+  surface.EmbeddedConfig,
+  surface.EitherPin,
+  openaiEntry.RealtimeOptions,
+  openaiEntry.OpenAIOptions,
+  openaiEntry.OpenAIClientOptions,
+  openaiEntry.AttestedHTTPClient,
+  openaiEntry.Uploadable,
 ];
 const typeExports: TypeExports | undefined = undefined;
 void typeExports;
@@ -125,14 +148,6 @@ function privateConstructors(): void {
   new surface.RouterHTTPClient({} as never);
   // @ts-expect-error The constructor is private; a client comes from GatewayHTTPClient.create.
   new surface.GatewayHTTPClient({} as never);
-  // @ts-expect-error The constructor is private; a client comes from createClient.
-  new surface.TinfoilClient({} as never);
-  // @ts-expect-error The constructor is private; a client comes from EnclaveOpenAIClient.create.
-  new surface.EnclaveOpenAIClient({} as never);
-  // @ts-expect-error The constructor is private; a client comes from RouterOpenAIClient.create.
-  new surface.RouterOpenAIClient({} as never);
-  // @ts-expect-error The constructor is private; a client comes from GatewayOpenAIClient.create.
-  new surface.GatewayOpenAIClient({} as never);
   // @ts-expect-error The constructor is private; a client comes from UnverifiedClient.create.
   new unsafeEntry.UnverifiedClient({} as never);
 }
@@ -182,7 +197,6 @@ function countingFetch(): { fetch: Fetch; calls: number } {
 /** The exports whose API may change without a major version; each must say so in its doc comment. */
 const EXPERIMENTAL_EXPORTS: Record<string, string[]> = {
   "src/gateway-client.ts": ["GatewayHTTPClient", "fetchCatalog"],
-  "src/openai-client.ts": ["GatewayOpenAIClient"],
   "src/options.ts": ["GatewayOptions", "ModelPin", "CatalogEntry", "Catalog", "ReplicaVerification"],
 };
 
@@ -195,7 +209,7 @@ function docCommentOf(source: string, name: string): string | undefined {
 
 /** The `tinfoil/ai-sdk` entry: the AI SDK provider alone, so the AI SDK stays out of bundles that don't use it. */
 const AI_SDK_EXPORTS = ["createTinfoil"];
-type AiSdkTypeExports = [aiSdk.TinfoilProvider, aiSdk.TinfoilProviderOptions, aiSdk.TinfoilProviderEnclave];
+type AiSdkTypeExports = [aiSdk.TinfoilProvider, aiSdk.TinfoilProviderOptions, aiSdk.TinfoilProviderBaseOptions, aiSdk.TinfoilProviderEnclave];
 const aiSdkTypeExports: AiSdkTypeExports | undefined = undefined;
 void aiSdkTypeExports;
 
@@ -221,12 +235,26 @@ describe("public surface", () => {
         expect(docCommentOf(source, name), `${name} in ${file}`).toMatch(/@experimental/);
       }
     }
-    expect(Object.values(EXPERIMENTAL_EXPORTS).flat().filter((n) => n in surface).sort()).toEqual(["GatewayHTTPClient", "GatewayOpenAIClient", "fetchCatalog"]);
+    expect(Object.values(EXPERIMENTAL_EXPORTS).flat().filter((n) => n in surface).sort()).toEqual(["GatewayHTTPClient", "fetchCatalog"]);
   });
 
   it("exports exactly the specified names from both entries", () => {
     expect(Object.keys(surface).sort()).toEqual(EXPORTS);
     expect(Object.keys(browser).sort()).toEqual(EXPORTS);
+    expect(Object.keys(openaiEntry).sort()).toEqual(OPENAI_EXPORTS);
+  });
+
+  it("publishes the OpenAI client as its own subpath, with openai an optional peer dependency", () => {
+    const pkg = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8")) as {
+      exports: Record<string, Record<string, string>>;
+      dependencies: Record<string, string>;
+      peerDependencies: Record<string, string>;
+      peerDependenciesMeta: Record<string, { optional?: boolean }>;
+    };
+    expect(pkg.exports["./openai"]).toEqual({ types: "./dist/openai.d.ts", import: "./dist/openai.js", default: "./dist/openai.js" });
+    expect(pkg.dependencies).not.toHaveProperty("openai");
+    expect(pkg.peerDependencies).toHaveProperty("openai");
+    expect(pkg.peerDependenciesMeta["openai"]).toEqual({ optional: true });
   });
 
   it("keeps the unsafe entry to the unverified client, its warning and its options type", () => {
@@ -239,37 +267,39 @@ describe("public surface", () => {
   });
 
   it("shapes the HTTP clients as specified: a `create` factory, state as properties, and the verification methods", () => {
-    for (const cls of [surface.EnclaveHTTPClient, surface.RouterHTTPClient]) {
-      expect(staticsOf(cls)).toEqual(["create"]);
-      expectShape(cls, ATTESTED_CLIENT_MEMBERS);
-    }
+    for (const cls of [surface.EnclaveHTTPClient, surface.RouterHTTPClient]) expect(staticsOf(cls)).toEqual(["create"]);
+    expectShape(surface.EnclaveHTTPClient, ENCLAVE_CLIENT_MEMBERS);
+    expectShape(surface.RouterHTTPClient, ROUTER_CLIENT_MEMBERS);
     expect(staticsOf(surface.GatewayHTTPClient)).toEqual(["create"]);
     expectShape(surface.GatewayHTTPClient, GATEWAY_CLIENT_MEMBERS);
   });
 
   it("disposes the HTTP clients and the OpenAI clients over them with `await using`", () => {
-    for (const cls of [surface.EnclaveHTTPClient, surface.RouterHTTPClient, surface.GatewayHTTPClient, surface.TinfoilClient, surface.EnclaveOpenAIClient, surface.RouterOpenAIClient, surface.GatewayOpenAIClient]) {
+    for (const cls of [surface.EnclaveHTTPClient, surface.RouterHTTPClient, surface.GatewayHTTPClient, openaiEntry.OpenAIClient]) {
       expect(typeof (cls.prototype as AsyncDisposable)[Symbol.asyncDispose], cls.name).toBe("function");
     }
     expect(Symbol.asyncDispose in OpenAI.prototype).toBe(false);
     expect(Symbol.asyncDispose in unsafeEntry.UnverifiedClient.prototype).toBe(false);
   });
 
-  it("shapes the OpenAI clients as OpenAI subclasses with a `create` factory and an `httpClient` property", () => {
-    for (const cls of [surface.TinfoilClient, surface.EnclaveOpenAIClient, surface.RouterOpenAIClient, surface.GatewayOpenAIClient]) {
-      expect(Object.getPrototypeOf(cls)).toBe(OpenAI);
-      expect(staticsOf(cls)).toEqual(["create"]);
-      expectShape(cls, OPENAI_CLIENT_MEMBERS);
-    }
+  it("shapes the OpenAI client as an OpenAI subclass with a public constructor and an `httpClient` property", () => {
+    expect(Object.getPrototypeOf(openaiEntry.OpenAIClient)).toBe(OpenAI);
+    expect(staticsOf(openaiEntry.OpenAIClient)).toEqual([]);
+    expectShape(openaiEntry.OpenAIClient, OPENAI_CLIENT_MEMBERS);
     // The OpenAI client has no member of that name to collide with.
     expect("httpClient" in OpenAI.prototype).toBe(false);
-    expect(typeof surface.createClient).toBe("function");
+    expect(typeof openaiEntry.createClient).toBe("function");
     expect(typeof surface.fetchCatalog).toBe("function");
   });
 
   it("refuses the transport options in withOptions at compile time", () => {
     // Checked by the test typecheck: each call below is a type error, so the clone can't name a transport.
-    const attempts = (tinfoil: surface.TinfoilClient, enclave: surface.EnclaveOpenAIClient, router: surface.RouterOpenAIClient, gateway: surface.GatewayOpenAIClient): void => {
+    const attempts = (
+      tinfoil: openaiEntry.OpenAIClient,
+      enclave: openaiEntry.OpenAIClient<surface.EnclaveHTTPClient>,
+      router: openaiEntry.OpenAIClient<surface.RouterHTTPClient>,
+      gateway: openaiEntry.OpenAIClient<surface.GatewayHTTPClient>,
+    ): void => {
       // @ts-expect-error `baseURL` belongs to the attested transport.
       tinfoil.withOptions({ baseURL: "https://evil.example/" });
       // @ts-expect-error `fetch` belongs to the attested transport.
@@ -288,26 +318,30 @@ describe("public surface", () => {
 
   it("refuses the OpenAI options that would choose another transport at compile time", () => {
     // Checked by the test typecheck: each option below is a type error, in the factories and in withOptions.
-    const attempts = (tinfoil: surface.TinfoilClient): void => {
+    const attempts = (tinfoil: openaiEntry.OpenAIClient, http: surface.RouterHTTPClient): void => {
       // @ts-expect-error `dataResidency` would pick a regional base URL over the client's.
-      void surface.createClient({ apiKey: "k", dataResidency: "eu" });
+      void openaiEntry.createClient({ apiKey: "k", dataResidency: "eu" });
       // @ts-expect-error `provider` would pick a third-party base URL over the client's.
-      void surface.RouterOpenAIClient.create({}, { apiKey: "k", provider: {} as never });
+      void new openaiEntry.OpenAIClient(http, {}, { apiKey: "k", provider: {} as never });
       // @ts-expect-error `workloadIdentity` authenticates through OpenAI's own token exchange.
-      void surface.EnclaveOpenAIClient.create("h", "o/r", {}, { workloadIdentity: {} as never });
+      void new openaiEntry.OpenAIClient(http, {}, { workloadIdentity: {} as never });
       // @ts-expect-error `credential` would use OpenAI's own certificate transport.
-      void surface.GatewayOpenAIClient.create({}, { credential: {} as never });
+      void new openaiEntry.OpenAIClient(http, {}, { credential: {} as never });
+      // @ts-expect-error `baseURL` is set by the client; `apiPath` chooses the API path.
+      void new openaiEntry.OpenAIClient(http, {}, { baseURL: "https://evil.example/" });
       // @ts-expect-error `x509Transport` would use OpenAI's own certificate transport.
       tinfoil.withOptions({ x509Transport: {} as never });
+      // @ts-expect-error The HTTP client must be one of the SDK's.
+      void new openaiEntry.OpenAIClient({ fetch: globalThis.fetch, baseURL: "https://evil.example/" });
       // A type that omits them is still a valid argument.
-      const options: surface.OpenAIOptions = { apiKey: "k", organization: "o", defaultQuery: { q: "1" }, fetchOptions: {} };
-      void surface.createClient(options);
+      const options: openaiEntry.OpenAIClientOptions = { apiKey: "k", organization: "o", defaultQuery: { q: "1" }, fetchOptions: {} };
+      void openaiEntry.createClient(options);
     };
-    expect(attempts.length).toBe(1);
+    expect(attempts.length).toBe(2);
   });
 
   it("opens WebSockets through functions that take a client, not through client methods", () => {
-    for (const fn of [surface.createWebSocket, surface.pinnedWebSocketOptions, surface.createRealtimeWebSocket]) expect(typeof fn).toBe("function");
+    for (const fn of [surface.createWebSocket, surface.pinnedWebSocketOptions, openaiEntry.createRealtimeWebSocket]) expect(typeof fn).toBe("function");
     expect(methodsOf(surface.EnclaveHTTPClient)).not.toContain("createWebSocket");
   });
 
@@ -331,12 +365,12 @@ describe("public surface", () => {
 
   it("checks enclave client options before any network I/O", async () => {
     const fetches = countingFetch();
-    await expect(createEnclaveHTTPClient("", { repo: "tinfoilsh/repo" }, {}, { documentFetch: fetches.fetch })).rejects.toBeInstanceOf(surface.ConfigurationError);
-    await expect(createEnclaveOpenAIClient("enclave.example", { repo: "tinfoilsh/repo" }, { baseURL: "http://proxy.example/" }, {}, { documentFetch: fetches.fetch })).rejects.toBeInstanceOf(
+    await expect(createEnclaveHTTPClient("", { kind: "repoPin", repo: "tinfoilsh/repo" }, {}, { documentFetch: fetches.fetch })).rejects.toBeInstanceOf(surface.ConfigurationError);
+    await expect(createEnclaveHTTPClient("enclave.example", { kind: "repoPin", repo: "tinfoilsh/repo" }, { transport: { kind: "ehbp", proxyURL: "http://proxy.example/" } }, { documentFetch: fetches.fetch })).rejects.toBeInstanceOf(
       surface.ConfigurationError,
     );
-    // The fetch option carries sealed requests, so it is refused with the TLS mode before either fetch is called.
-    await expect(createEnclaveHTTPClient("enclave.example", { repo: "tinfoilsh/repo" }, { transportMode: "tls", fetch: fetches.fetch }, { documentFetch: fetches.fetch })).rejects.toBeInstanceOf(
+    // A proxy on the enclave's own origin is refused before either fetch is called.
+    await expect(createEnclaveHTTPClient("enclave.example", { kind: "repoPin", repo: "tinfoilsh/repo" }, { transport: { kind: "ehbp", proxyURL: "https://enclave.example/relay", fetch: fetches.fetch } }, { documentFetch: fetches.fetch })).rejects.toBeInstanceOf(
       surface.ConfigurationError,
     );
     expect(fetches.calls).toBe(0);
@@ -346,42 +380,39 @@ describe("public surface", () => {
     const fetches = countingFetch();
     const seams = { catalogFetch: fetches.fetch, documentFetch: fetches.fetch };
     await expect(createGatewayHTTPClient({ url: "http://gateway.example/v1/" }, seams)).rejects.toBeInstanceOf(surface.ConfigurationError);
-    await expect(createGatewayOpenAIClient({ pinnedModelsOnly: true }, {}, seams)).rejects.toBeInstanceOf(surface.ConfigurationError);
+    await expect(createGatewayHTTPClient({ pinnedModelsOnly: true }, seams)).rejects.toBeInstanceOf(surface.ConfigurationError);
     expect(fetches.calls).toBe(0);
   });
 
   it("checks router client options before any network I/O", async () => {
-    await expect(surface.RouterHTTPClient.create({ transportMode: "tls", baseURL: "https://proxy.example/" })).rejects.toBeInstanceOf(
-      surface.ConfigurationError,
-    );
-    await expect(surface.RouterOpenAIClient.create({ baseURL: "http://proxy.example/" })).rejects.toBeInstanceOf(surface.ConfigurationError);
+    await expect(surface.RouterHTTPClient.create({ transport: { kind: "ehbp", proxyURL: "https://proxy.example/?" } })).rejects.toBeInstanceOf(surface.ConfigurationError);
+    await expect(surface.RouterHTTPClient.create({ transport: { kind: "ehbp", proxyURL: "http://proxy.example/" } })).rejects.toBeInstanceOf(surface.ConfigurationError);
   });
 
   it("refuses the OpenAI options that would choose another transport before any network I/O", async () => {
     const fetches = countingFetch();
     const router = { routersFetch: fetches.fetch, documentFetch: fetches.fetch };
-    const factories: Record<string, (options: surface.OpenAIOptions) => Promise<unknown>> = {
-      createClient: (options) => createTinfoilClient(options, router),
-      RouterOpenAIClient: (options) => createRouterOpenAIClient({}, options, router),
-      EnclaveOpenAIClient: (options) => createEnclaveOpenAIClient("enclave.example", { repo: "tinfoilsh/repo" }, {}, options, { documentFetch: fetches.fetch }),
-      GatewayOpenAIClient: (options) => createGatewayOpenAIClient({}, options, { catalogFetch: fetches.fetch, documentFetch: fetches.fetch }),
-    };
-    for (const [name, factory] of Object.entries(factories)) {
-      for (const [key, value] of Object.entries(FORBIDDEN_TRANSPORT_OPTIONS)) {
-        const failure = factory({ apiKey: "k", [key]: value } as surface.OpenAIOptions);
-        await expect(failure, `${name} ${key}`).rejects.toBeInstanceOf(surface.ConfigurationError);
-        await expect(failure, `${name} ${key}`).rejects.toThrow(refusal(key));
-      }
+    for (const [key, value] of Object.entries(FORBIDDEN_TRANSPORT_OPTIONS)) {
+      const failure = createTinfoilClient({ apiKey: "k", [key]: value } as openaiEntry.OpenAIClientOptions, router);
+      await expect(failure, key).rejects.toBeInstanceOf(surface.ConfigurationError);
+      await expect(failure, key).rejects.toThrow(refusal(key));
     }
     expect(fetches.calls).toBe(0);
+  });
+
+  it("refuses anything but one of the SDK's HTTP clients in the OpenAI client, without any network I/O", () => {
+    for (const bad of [null, undefined, {}, { fetch: globalThis.fetch, baseURL: "https://evil.example/" }, Object.create(surface.RouterHTTPClient.prototype) as object]) {
+      expect(() => new openaiEntry.OpenAIClient(bad as never), String(bad)).toThrow(surface.ConfigurationError);
+    }
+    expect(() => new openaiEntry.OpenAIClient({} as never)).toThrow(/must be an EnclaveHTTPClient, RouterHTTPClient or GatewayHTTPClient/);
   });
 
   it("fetches nothing before rejecting router client options", async () => {
     const fetches = countingFetch();
     const seams = { routersFetch: fetches.fetch, documentFetch: fetches.fetch };
-    await expect(createRouterHTTPClient({ transportMode: "tls", baseURL: "https://proxy.example/" }, seams)).rejects.toBeInstanceOf(surface.ConfigurationError);
-    await expect(createRouterOpenAIClient({ baseURL: "http://proxy.example/" }, {}, seams)).rejects.toBeInstanceOf(surface.ConfigurationError);
-    await expect(createRouterOpenAIClient({ transportMode: "tls", fetch: fetches.fetch }, {}, seams)).rejects.toBeInstanceOf(surface.ConfigurationError);
+    await expect(createRouterHTTPClient({ transport: { kind: "ehbp", proxyURL: "https://proxy.example/#" } }, seams)).rejects.toBeInstanceOf(surface.ConfigurationError);
+    await expect(createRouterHTTPClient({ transport: { kind: "ehbp", proxyURL: "http://proxy.example/" } }, seams)).rejects.toBeInstanceOf(surface.ConfigurationError);
+    await expect(createRouterHTTPClient({ transport: { kind: "quic" } as never }, seams)).rejects.toBeInstanceOf(surface.ConfigurationError);
     expect(fetches.calls).toBe(0);
   });
 });

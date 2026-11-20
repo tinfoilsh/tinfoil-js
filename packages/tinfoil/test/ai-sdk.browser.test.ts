@@ -11,6 +11,7 @@ import { createTinfoilProvider, type TinfoilProvider } from "../src/internal/ai-
 import { ConfigurationError } from "../src/errors.js";
 import type { Fetch } from "../src/options.js";
 import * as browserEntry from "../src/index.browser.js";
+import * as openaiEntry from "../src/openai.js";
 import { createEhbpPeer, fetchOf, paced, type EhbpPeer } from "./helpers/ehbp-peer.js";
 
 const ENCLAVE = "enclave.example";
@@ -23,7 +24,6 @@ function verifier(hpke: string): Verifier {
     checkPinVerifiability: ({ repo = "" }: { repo?: string }) => {
       if (repo === "") throw new UsageError("repo required");
     },
-    callerAuthorizesConfig: false,
     verifyV3At: async () =>
       ({
         cryptoMaterial: [
@@ -61,15 +61,14 @@ describe("createTinfoil in a browser", () => {
   beforeAll(async () => {
     const documentFetch: Fetch = async () => new Response(new Uint8Array([1]));
     tinfoil = await createTinfoilProvider(
-      { bearerToken: "short-lived", enclave: { host: ENCLAVE, repo: "tinfoilsh/repo" }, verifier: verifier(peer.publicKeyHex) },
-      { documentFetch, sleep: async () => {}, ehbp: { fetch: fetchOf(peer) } },
-    );
+      { bearerToken: "short-lived", enclave: { host: ENCLAVE, trust: { kind: "repoPin", repo: "tinfoilsh/repo" } } },
+      { verifier: verifier(peer.publicKeyHex), documentFetch, sleep: async () => {}, ehbp: { fetch: fetchOf(peer) } });
   });
 
   it("lives on its own entry, not the main one, and refuses the TLS transport", async () => {
     expect(typeof createTinfoil).toBe("function");
     expect("createTinfoil" in browserEntry).toBe(false);
-    await expect(createTinfoil({ bearerToken: "t", transportMode: "tls" })).rejects.toBeInstanceOf(ConfigurationError);
+    await expect(createTinfoil({ transport: { kind: "tls" }, bearerToken: "t" })).rejects.toBeInstanceOf(ConfigurationError);
   });
 
   it("refuses a long-lived API key in a page and names the bearer token as the credential, as the OpenAI client does", async () => {
@@ -78,7 +77,7 @@ describe("createTinfoil in a browser", () => {
     await expect(failure).rejects.toThrow(/bearerToken/);
     const rejection = (p: Promise<unknown>): Promise<Error> => p.then(() => Promise.reject(new Error("resolved")), (e: unknown) => e as Error);
     const provider = await rejection(failure);
-    const client = await rejection(browserEntry.createClient({ apiKey: "long-lived" }));
+    const client = await rejection(openaiEntry.createClient({ apiKey: "long-lived" }));
     expect(client).toBeInstanceOf(ConfigurationError);
     expect(client.message).toBe(provider.message);
   });

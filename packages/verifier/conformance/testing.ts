@@ -6,14 +6,14 @@
  * package entry.
  */
 import { decode, Document } from "../src/document/document.js";
-import { buildVerifier, type InjectedRoots, type Verifier, type VerifierOptions } from "../src/verifier.js";
+import { buildVerifier, type ConfigTrust, type InjectedRoots, type Policy, type Verifier } from "../src/verifier.js";
 
 /** Trust roots that replace the embedded production anchors; an absent root keeps the embedded one. */
 export type DangerousTestOnlyRoots = InjectedRoots;
 
 /** Builds a verifier that trusts the injected roots instead of the embedded ones; otherwise as `Verifier.create`. */
-export function dangerousTestOnlyVerifier(roots: DangerousTestOnlyRoots, options: VerifierOptions = {}): Promise<Verifier> {
-  return buildVerifier(options, roots);
+export function dangerousTestOnlyVerifier(roots: DangerousTestOnlyRoots, config?: ConfigTrust, policy?: Policy): Promise<Verifier> {
+  return buildVerifier(config, policy, roots);
 }
 
 /** Decodes a document without binding it to a nonce, so one layer can be driven on its own. */

@@ -4,13 +4,13 @@
  * selecting TLS is a configuration error.
  */
 import { ConfigurationError } from "../errors.js";
-import type { TransportMode } from "../options.js";
+import type { TransportMode } from "./transport/transport.js";
 
 /** Which build this module belongs to; the browser build's bundling is checked against it. */
 export const PLATFORM: "node" | "browser" = "browser";
 
 /** Why the TLS mode is refused in a browser. */
-export const TLS_UNAVAILABLE_IN_BROWSERS = 'the "tls" transport mode pins the server certificate, which browsers don\'t expose to scripts; use "ehbp", the browser default, which seals request and response bodies to the enclave\'s key instead';
+export const TLS_UNAVAILABLE_IN_BROWSERS = 'the TLS transport ({ kind: "tls" }) pins the server certificate, which browsers don\'t expose to scripts; use the EHBP transport ({ kind: "ehbp" }), the browser default, which seals request and response bodies to the enclave\'s key instead';
 
 /** The globals a runtime identifies itself by; unused in the browser build, where nothing is a server. */
 export interface RuntimeGlobals {
@@ -19,7 +19,7 @@ export interface RuntimeGlobals {
   readonly Deno?: { readonly version?: { readonly deno?: string } };
 }
 
-/** Never a server in the browser build: the secret stays in memory and the transport default is EHBP. */
+/** Never a server in the browser build: the transport default is EHBP, and an API key and a pinned WebSocket are refused. */
 export function isServerRuntime(_globals: RuntimeGlobals = globalThis as RuntimeGlobals): boolean {
   return false;
 }

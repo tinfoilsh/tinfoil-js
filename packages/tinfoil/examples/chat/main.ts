@@ -10,7 +10,7 @@
  *
  * Run from packages/tinfoil: npx ts-node examples/chat/main.ts
  */
-import { createClient } from "tinfoil";
+import { createClient } from "tinfoil/openai";
 
 async function main() {
   try {

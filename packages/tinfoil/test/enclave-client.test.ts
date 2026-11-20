@@ -7,23 +7,28 @@
 import { Agent } from "node:https";
 import { Identity, PROTOCOL } from "ehbp";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
-import { checkEnclaveOptions, createEnclaveHTTPClient, EnclaveHTTPClient, resolveTransportMode, type EnclaveClientSeams } from "../src/enclave-client.js";
+import { checkEnclaveOptions, createEnclaveHTTPClient, EnclaveHTTPClient, resolveTransport, type EnclaveClientSeams } from "../src/enclave-client.js";
 import { checkTransportMode, defaultTransportMode, isBun, isServerRuntime } from "../src/internal/platform.js";
 import { AttestationError, ConfigurationError } from "../src/errors.js";
-import { createEnclaveOpenAIClient, EnclaveOpenAIClient } from "../src/openai-client.js";
-import type { EnclaveOptions, Fetch, Pin } from "../src/options.js";
+import { OpenAIClient, type OpenAIClientOptions } from "../src/openai-client.js";
+import type { EnclaveOptions, Fetch, Transport } from "../src/options.js";
+import type { Trust } from "../src/trust.js";
 import { KEY_SPKI_FP_SHA256_V1_FORMAT, KEY_X25519_HPKE_V1_FORMAT, UsageError, type Verification, type Verifier } from "../../verifier/src/index.js";
 import { createWebSocket, pinnedWebSocketOptions } from "../src/websocket.js";
 import { startEhbpServer, type EhbpServer } from "./helpers/ehbp-server.js";
 import { recordingFetch } from "./helpers/network.js";
 import { paced, startTlsServer, TEST_CERT, TEST_PIN, type TlsServer } from "./helpers/tls-server.js";
 import { expectWithOptionsRefusesTransportOptions } from "./helpers/transport-options.js";
+import { openAIOver } from "./helpers/openai.js";
 
 let tls: TlsServer;
 let ehbp: EhbpServer;
 let sseEnded = false;
 /** The runtime's fetch as it was before any test replaces the global, for a network fetch to forward over. */
 const runtimeFetch: Fetch = globalThis.fetch.bind(globalThis);
+
+/** A trust that the test verifiers ignore, as a caller-authorized config needs no pin. */
+const AUTHORIZED: Trust = { kind: "authorizedBy", authorize: () => undefined };
 
 /** A verifier whose verifications carry the given keys; `keys` is read per verification so a test can rotate them. */
 function verifier(keys: () => { tls?: string; hpke?: string }): Verifier {
@@ -72,7 +77,7 @@ beforeAll(async () => {
     return { headers: { "content-type": "application/json" }, body: JSON.stringify({ path: seen.path, enclave: seen.headers["x-tinfoil-enclave-url"] ?? null }) };
   });
   ehbp = await startEhbpServer((seen) => {
-    if (seen.path === "/chat/completions" || seen.path === "/v1/chat/completions") {
+    if (seen.path.endsWith("/chat/completions")) {
       return { headers: { "content-type": "application/json" }, body: JSON.stringify(completion(new TextDecoder().decode(seen.body).length > 0 ? "sealed" : "plain")) };
     }
     return {
@@ -98,9 +103,9 @@ function completion(content: string): unknown {
 
 describe("EnclaveHTTPClient.create", () => {
   it("defaults the transport mode by platform and rejects an unknown one", () => {
-    expect(resolveTransportMode(undefined)).toBe("tls");
-    expect(resolveTransportMode("ehbp")).toBe("ehbp");
-    expect(() => resolveTransportMode("quic" as never)).toThrow(/unknown transport mode "quic"/);
+    expect(resolveTransport(undefined).mode).toBe("tls");
+    expect(resolveTransport({ kind: "ehbp" }).mode).toBe("ehbp");
+    expect(() => resolveTransport({ kind: "quic" } as unknown as Transport)).toThrow(/transport must have kind/);
   });
 
   it("treats only a runtime that identifies itself as Node or Bun as a server, and anything else as a browser", () => {
@@ -127,43 +132,72 @@ describe("EnclaveHTTPClient.create", () => {
   it("checks its options before fetching anything", async () => {
     const docs = documents();
     const network = recordingFetch(runtimeFetch);
-    const seams: EnclaveClientSeams = { documentFetch: docs.fetch };
-    const v = verifier(() => ({ tls: TEST_PIN }));
-    const cases: [string, Pin, EnclaveOptions][] = [
-      ["", { repo: "tinfoilsh/repo" }, { verifier: v }],
-      ["enclave.example", { repo: "tinfoilsh/repo" }, { verifier: v, transportMode: "quic" as never }],
-      ["enclave.example", { repo: "tinfoilsh/repo" }, { verifier: v, baseURL: "http://proxy.example/" }],
-      ["enclave.example", { repo: "tinfoilsh/repo" }, { verifier: v, baseURL: "https://proxy.example/" }],
-      ["enclave.example", { repo: "tinfoilsh/repo" }, { verifier: v, transportMode: "tls", baseURL: "https://proxy.example/" }],
-      ["enclave.example", { repo: "tinfoilsh/repo" }, { verifier: v, transportMode: "ehbp", baseURL: "https://proxy.example/v1/?key=1" }],
-      ["enclave.example", { repo: "tinfoilsh/repo" }, { verifier: v, transportMode: "ehbp", baseURL: "https://proxy.example/v1/#frag" }],
-      ["enclave.example", { repo: "tinfoilsh/repo" }, { verifier: v, transportMode: "tls", fetch: network.fetch }],
-      ["enclave.example", { repo: "tinfoilsh/repo" }, { verifier: v, fetch: network.fetch }],
-      ["enclave.example", { repo: "bad repo" }, { verifier: v }],
+    const seams: EnclaveClientSeams = { documentFetch: docs.fetch, verifier: verifier(() => ({ tls: TEST_PIN })) };
+    const repo: Trust = { kind: "repoPin", repo: "tinfoilsh/repo" };
+    const cases: [string, Trust, EnclaveOptions][] = [
+      ["", repo, {}],
+      ["enclave.example", repo, { transport: { kind: "quic" as never } as Transport }],
+      ["enclave.example", repo, { transport: { kind: "ehbp", proxyURL: "http://proxy.example/" } }],
+      ["enclave.example", repo, { transport: { kind: "ehbp", proxyURL: "https://proxy.example/v1/?key=1" } }],
+      ["enclave.example", repo, { transport: { kind: "ehbp", proxyURL: "https://proxy.example/v1/?" } }],
+      ["enclave.example", repo, { transport: { kind: "ehbp", proxyURL: "https://proxy.example/v1/#frag" } }],
+      ["enclave.example", repo, { transport: { kind: "ehbp", proxyURL: "https://proxy.example/v1/#" } }],
+      ["enclave.example", repo, { transport: { kind: "ehbp", proxyURL: "https://user:pw@proxy.example/" } }],
+      ["enclave.example", repo, { transport: { kind: "ehbp", proxyURL: "/v1" } }],
+      ["enclave.example", repo, { transport: { kind: "ehbp", proxyURL: "ftp://proxy.example/" } }],
+      // A proxy on the enclave's own origin is no proxy, with or without the default port.
+      ["enclave.example", repo, { transport: { kind: "ehbp", proxyURL: "https://enclave.example/relay" } }],
+      ["enclave.example", repo, { transport: { kind: "ehbp", proxyURL: "https://enclave.example:443" } }],
+      ["enclave.example", repo, { transport: { kind: "ehbp", fetch: "fetch" as never } }],
+      ["enclave.example", repo, { transport: "ehbp" as never }],
+      ["enclave.example", repo, { transport: { kind: "ehbp", proxyURL: null } as never }],
+      ["enclave.example", repo, { transport: { kind: 1n } as never }],
+      ["enclave.example", repo, { transport: { kind: Symbol("tls") } as never }],
+      ["enclave.example", repo, { transport: { proxyURL: "https://proxy.example/" } as never }],
+      ["enclave.example", { kind: "repoPin", repo: "" }, {}],
+      ["enclave.example", { kind: "projectPin", project: "org/project", registryIDs: [] }, {}],
+      ["enclave.example", { kind: "eitherPin", repo: "tinfoilsh/repo" } as unknown as Trust, {}],
+      ["enclave.example", { kind: "pin", repo: "tinfoilsh/repo" } as unknown as Trust, {}],
+      ["enclave.example", { repo: "tinfoilsh/repo" } as unknown as Trust, {}],
+      ["enclave.example", undefined as unknown as Trust, {}],
     ];
-    for (const [host, pin, options] of cases) {
-      await expect(createEnclaveHTTPClient(host, pin, options, seams), `${host} ${pin.repo}`).rejects.toBeInstanceOf(ConfigurationError);
+    for (const [host, trust, options] of cases) {
+      await expect(createEnclaveHTTPClient(host, trust, options, seams), `${host} ${JSON.stringify(trust)}`).rejects.toBeInstanceOf(ConfigurationError);
     }
+    // A policy, a malformed reference and an empty registry list are checked by the verifier built from them, before any fetch.
+    await expect(createEnclaveHTTPClient("enclave.example", repo, { policy: { freshnessMaxAgeMs: -1 } }, { documentFetch: docs.fetch })).rejects.toBeInstanceOf(ConfigurationError);
+    await expect(createEnclaveHTTPClient("enclave.example", { kind: "repoPin", repo: "bad repo" }, {}, { documentFetch: docs.fetch })).rejects.toBeInstanceOf(ConfigurationError);
+    await expect(createEnclaveHTTPClient("enclave.example", { kind: "signedBy", keys: [] }, {}, { documentFetch: docs.fetch })).rejects.toBeInstanceOf(ConfigurationError);
+    await expect(createEnclaveHTTPClient("enclave.example", { kind: "projectPin", project: "org/project", registryIDs: [] }, {}, { documentFetch: docs.fetch })).rejects.toThrow(/registryIDs must not be empty/);
     expect(docs.calls).toHaveLength(0);
     expect(network.seen).toHaveLength(0);
   });
 
-  it("refuses the fetch option under the TLS transport mode, naming the EHBP mode, and accepts it where EHBP is the default", () => {
+  it("resolves the transport, keeping the EHBP fetch and the proxy inside the EHBP variant", () => {
     const network = recordingFetch(runtimeFetch);
-    const refused = /fetch option .* requires transportMode "ehbp"/;
-    expect(() => checkEnclaveOptions("enclave.example", { fetch: network.fetch, transportMode: "tls" })).toThrow(refused);
-    expect(() => checkEnclaveOptions("enclave.example", { fetch: network.fetch }, { process: { versions: { node: "22.0.0" } } })).toThrow(refused);
-    expect(checkEnclaveOptions("enclave.example", { fetch: network.fetch, transportMode: "ehbp" })).toEqual({ mode: "ehbp", baseURL: "" });
-    // A browser resolves no mode to EHBP, so the option needs no mode there; the TLS mode is refused for the browser's own reason.
+    const node = { process: { versions: { node: "22.0.0" } } };
+    expect(checkEnclaveOptions("enclave.example", {}, node)).toEqual({ mode: "tls", proxyURL: "" });
+    expect(checkEnclaveOptions("enclave.example", { transport: { kind: "ehbp", fetch: network.fetch } })).toEqual({ mode: "ehbp", proxyURL: "", fetch: network.fetch });
+    expect(checkEnclaveOptions("enclave.example", { transport: { kind: "ehbp", proxyURL: "https://proxy.example/relay" } })).toEqual({ mode: "ehbp", proxyURL: "https://proxy.example/relay/" });
+    expect(checkEnclaveOptions("enclave.example", { transport: { kind: "ehbp", proxyURL: "" } })).toEqual({ mode: "ehbp", proxyURL: "" });
+    expect(checkEnclaveOptions("enclave.example", { transport: { kind: "ehbp", proxyURL: "http://localhost:8080/relay" } }).proxyURL).toBe("http://localhost:8080/relay/");
+    expect(checkEnclaveOptions("enclave.example", { transport: { kind: "ehbp", proxyURL: "http://127.0.0.1:8080/relay" } }).proxyURL).toBe("http://127.0.0.1:8080/relay/");
+    expect(checkEnclaveOptions("enclave.example", { transport: { kind: "ehbp", proxyURL: "http://[::1]:8080/relay" } }).proxyURL).toBe("http://[::1]:8080/relay/");
+    for (const proxyURL of ["http://app.localhost/relay", "http://0.0.0.0:8080/relay"]) {
+      expect(() => checkEnclaveOptions("enclave.example", { transport: { kind: "ehbp", proxyURL } }), proxyURL).toThrow(/HTTP is allowed only for localhost/);
+    }
+    expect(() => checkEnclaveOptions("enclave.example", { transport: { kind: "ehbp", proxyURL: "https://enclave.example:443/" } })).toThrow(/enclave's own origin; leave proxyURL unset/);
+    expect(() => resolveTransport({ kind: "quic" } as unknown as Transport)).toThrow(/transport must have kind "tls" or "ehbp", not "quic"/);
+    // A browser resolves no transport to EHBP; TLS is refused for the browser's own reason.
     const worker = { self: {} } as unknown as Parameters<typeof checkEnclaveOptions>[2];
-    expect(checkEnclaveOptions("enclave.example", { fetch: network.fetch }, worker)).toEqual({ mode: "ehbp", baseURL: "" });
-    expect(() => checkEnclaveOptions("enclave.example", { fetch: network.fetch, transportMode: "tls" }, worker)).toThrow(/browsers don't expose/);
+    expect(checkEnclaveOptions("enclave.example", {}, worker)).toEqual({ mode: "ehbp", proxyURL: "" });
+    expect(() => checkEnclaveOptions("enclave.example", { transport: { kind: "tls" } }, worker)).toThrow(/browsers don't expose/);
     expect(network.seen).toHaveLength(0);
   });
 
   it("verifies before returning and reports a failed verification without constructing the client", async () => {
     const docs = documents();
-    const pending = createEnclaveHTTPClient(tls.host, { repo: "tinfoilsh/repo" }, { verifier: verifier(() => ({})), transportMode: "tls" }, { documentFetch: docs.fetch, sleep: async () => {} });
+    const pending = createEnclaveHTTPClient(tls.host, { kind: "repoPin", repo: "tinfoilsh/repo" }, { transport: { kind: "tls" } }, { verifier: verifier(() => ({})), documentFetch: docs.fetch, sleep: async () => {} });
     await expect(pending).rejects.toBeInstanceOf(AttestationError);
     expect(docs.calls.length).toBe(2);
   });
@@ -183,10 +217,9 @@ describe("EnclaveHTTPClient.create", () => {
       const controller = new AbortController();
       const pending = createEnclaveHTTPClient(
         tls.host,
-        { repo: "tinfoilsh/repo" },
-        { verifier: verifier(() => ({ tls: TEST_PIN })), transportMode: "tls", signal: controller.signal },
-        { documentFetch, tls: { ca: TEST_CERT } },
-      );
+        { kind: "repoPin", repo: "tinfoilsh/repo" },
+        { transport: { kind: "tls" }, signal: controller.signal },
+        { verifier: verifier(() => ({ tls: TEST_PIN })), documentFetch, tls: { ca: TEST_CERT } });
       await started;
       const reason = new Error("gave up");
       controller.abort(reason);
@@ -209,19 +242,18 @@ describe("EnclaveHTTPClient over TLS", () => {
     docs = documents();
     client = await createEnclaveHTTPClient(
       tls.host,
-      { repo: "tinfoilsh/repo" },
-      { verifier: verifier(() => ({ tls: TEST_PIN })), transportMode: "tls" },
-      { documentFetch: docs.fetch, tls: { ca: TEST_CERT } },
-    );
+      { kind: "repoPin", repo: "tinfoilsh/repo" },
+      { transport: { kind: "tls" } },
+      { verifier: verifier(() => ({ tls: TEST_PIN })), documentFetch: docs.fetch, tls: { ca: TEST_CERT } });
   });
 
   it("is verified on creation and exposes the facts", async () => {
     expect(docs.calls).toEqual([`https://${tls.host}/.well-known/tinfoil-attestation?nonce=${docs.calls[0]!.split("nonce=")[1]}`]);
-    expect(Object.keys(client)).toEqual(["fetch", "baseURL", "enclave", "pin"]);
+    expect(Object.keys(client)).toEqual(["fetch", "baseURL", "enclave"]);
     expect(() => ((client as { enclave: string }).enclave = "evil.example")).toThrow(TypeError);
     expect(client.enclave).toBe(tls.host);
-    expect(client.pin).toEqual({ repo: "tinfoilsh/repo", project: "" });
-    expect(Object.isFrozen(client.pin)).toBe(true);
+    expect(client.trust).toEqual({ kind: "repoPin", repo: "tinfoilsh/repo" });
+    expect(Object.isFrozen(client.trust)).toBe(true);
     expect(client.baseURL).toBe(`https://${tls.host}/`);
     expect(client.current?.tlsPublicKeyFP).toBe(TEST_PIN);
     expect((await client.ensureVerified()).codeDigest).toBe("11".repeat(32));
@@ -246,6 +278,13 @@ describe("EnclaveHTTPClient over TLS", () => {
     await expect(client.fetch(`http://${tls.host}/models`)).rejects.toBeInstanceOf(ConfigurationError);
   });
 
+  it("sends request bodies as they are, never adding or changing a user_cache_secret member", async () => {
+    for (const body of ['{"model":"test","messages":[]}', '{"model":"test","user_cache_secret":""}', '{"model":"test","user_cache_secret":"mine"}']) {
+      await client.fetch(`https://${tls.host}/v1/chat/completions`, { method: "POST", body, headers: { "content-type": "application/json" } });
+      expect(new TextDecoder().decode(tls.seen[tls.seen.length - 1]!.body)).toBe(body);
+    }
+  });
+
   it("streams a response as the server writes it", async () => {
     const res = await client.fetch(`${tls.origin}/sse`);
     const reader = res.body!.getReader();
@@ -256,36 +295,52 @@ describe("EnclaveHTTPClient over TLS", () => {
   });
 
   it("backs an OpenAI client on the enclave's /v1/ API over the pinned connection", async () => {
-    const ai = await createEnclaveOpenAIClient(
-      tls.host,
-      { repo: "tinfoilsh/repo" },
-      { verifier: verifier(() => ({ tls: TEST_PIN })), transportMode: "tls" },
-      { apiKey: "k" },
-      { documentFetch: docs.fetch, tls: { ca: TEST_CERT } },
-    );
+    const ai = await openAIOver(createEnclaveHTTPClient(tls.host, { kind: "repoPin", repo: "tinfoilsh/repo" }, { transport: { kind: "tls" } }, { verifier: verifier(() => ({ tls: TEST_PIN })), documentFetch: docs.fetch, tls: { ca: TEST_CERT } }), { apiKey: "k" });
     expect(ai.baseURL).toBe(`https://${tls.host}/v1/`);
     expect(ai.httpClient).toBeInstanceOf(EnclaveHTTPClient);
     const completion = await ai.chat.completions.create({ model: "test", messages: [{ role: "user", content: "hi" }] });
     expect(completion.choices[0]!.message.content).toBe("pinned");
     expect(tls.seen[tls.seen.length - 1]!.headers.authorization).toBe("Bearer k");
-    expect(() => new (EnclaveOpenAIClient as any)(Symbol("x"), ai.httpClient, {})).toThrow(ConfigurationError);
+    expect(() => new OpenAIClient(Symbol("x") as never)).toThrow(ConfigurationError);
+  });
+
+  it("sets the base URL itself, after the caller's options, so that a base URL from the options or the environment has no effect", async () => {
+    const saved = process.env.OPENAI_BASE_URL;
+    process.env.OPENAI_BASE_URL = "https://evil.example/v1/";
+    try {
+      const options = { apiKey: "k", baseURL: "https://evil.example/v1/", dataResidency: "eu" } as unknown as OpenAIClientOptions;
+      for (const ai of [new OpenAIClient(client, undefined, options), new OpenAIClient(client, undefined, { apiKey: "k" })]) {
+        expect(ai.baseURL).toBe(`https://${tls.host}/v1/`);
+        const completion = await ai.chat.completions.create({ model: "test", messages: [{ role: "user", content: "hi" }] });
+        expect(completion.choices[0]!.message.content).toBe("pinned");
+        expect(tls.seen[tls.seen.length - 1]!.path).toBe("/v1/chat/completions");
+      }
+      const custom = new OpenAIClient(client, { apiPath: "/openai/v1" }, { apiKey: "k" });
+      expect(custom.baseURL).toBe(`https://${tls.host}/openai/v1/`);
+      expect(custom.withOptions({ timeout: 1 }).baseURL).toBe(`https://${tls.host}/openai/v1/`);
+    } finally {
+      if (saved === undefined) delete process.env.OPENAI_BASE_URL;
+      else process.env.OPENAI_BASE_URL = saved;
+    }
+  });
+
+  it("refuses an invalid API path without any network I/O", () => {
+    const before = tls.seen.length;
+    for (const apiPath of ["v1/", "//evil.example/v1", "https://evil.example/v1", "/v1?x=1", "/v1#f", "/v1/../admin", "/v1/./x", "/v1/%2e%2e/x", "/v1/.%2E/x", "/v1%2fadmin", "/v1\\..\\x", "/v1/ x", "/v1/%zz", 7 as unknown as string]) {
+      expect(() => new OpenAIClient(client, { apiPath }, { apiKey: "k" }), String(apiPath)).toThrow(ConfigurationError);
+    }
+    expect(tls.seen.length).toBe(before);
   });
 
   it("keeps the attested transport and its own settings through option changes and clones", async () => {
-    const ai = await createEnclaveOpenAIClient(
-      tls.host,
-      { repo: "tinfoilsh/repo" },
-      { verifier: verifier(() => ({ tls: TEST_PIN })), transportMode: "tls" },
-      { apiKey: "k", timeout: 1234, maxRetries: 0, defaultHeaders: { "x-custom": "kept" }, dangerouslyAllowBrowser: true },
-      { documentFetch: docs.fetch, tls: { ca: TEST_CERT } },
-    );
+    const ai = await openAIOver(createEnclaveHTTPClient(tls.host, { kind: "repoPin", repo: "tinfoilsh/repo" }, { transport: { kind: "tls" } }, { verifier: verifier(() => ({ tls: TEST_PIN })), documentFetch: docs.fetch, tls: { ca: TEST_CERT } }), { apiKey: "k", timeout: 1234, maxRetries: 0, defaultHeaders: { "x-custom": "kept" }, dangerouslyAllowBrowser: true });
     const evil: Fetch = async () => new Response("intercepted");
     const fetchOf = (client: unknown): Fetch => (client as { fetch: Fetch }).fetch;
     expect(() => ((ai as unknown as { fetch: Fetch }).fetch = evil)).toThrow(TypeError);
     expect(() => ((ai as unknown as { baseURL: string }).baseURL = "https://evil.example/")).toThrow(TypeError);
     expect(() => ((ai as unknown as { httpClient: unknown }).httpClient = {})).toThrow(TypeError);
     const clone = ai.withOptions({ apiKey: "k2", baseURL: "https://evil.example/", fetch: evil } as Parameters<typeof ai.withOptions>[0]);
-    expect(clone).toBeInstanceOf(EnclaveOpenAIClient);
+    expect(clone).toBeInstanceOf(OpenAIClient);
     expect(clone.httpClient).toBe(ai.httpClient);
     expect(clone.baseURL).toBe(`https://${tls.host}/v1/`);
     expect(fetchOf(clone)).toBe(fetchOf(ai));
@@ -307,16 +362,10 @@ describe("EnclaveHTTPClient over TLS", () => {
   });
 
   it("refuses the options that would choose another transport in withOptions, and keeps the others", async () => {
-    const options = { verifier: verifier(() => ({ tls: TEST_PIN })), transportMode: "tls" as const };
+    const options: EnclaveOptions = { transport: { kind: "tls" } };
     // An option the caller holds as undefined or null is unset, as the OpenAI client takes it.
     const unset = { dataResidency: undefined, provider: null, workloadIdentity: undefined, credential: null, x509Transport: null };
-    const ai = await createEnclaveOpenAIClient(
-      tls.host,
-      { repo: "tinfoilsh/repo" },
-      options,
-      { apiKey: "k", organization: "org", defaultQuery: { q: "1" }, defaultHeaders: { "x-custom": "kept" }, timeout: 1234, maxRetries: 0, ...unset } as Parameters<typeof createEnclaveOpenAIClient>[3],
-      { documentFetch: docs.fetch, tls: { ca: TEST_CERT } },
-    );
+    const ai = await openAIOver(createEnclaveHTTPClient(tls.host, { kind: "repoPin", repo: "tinfoilsh/repo" }, options, { documentFetch: docs.fetch, tls: { ca: TEST_CERT }, verifier: verifier(() => ({ tls: TEST_PIN })) }), { apiKey: "k", organization: "org", defaultQuery: { q: "1" }, defaultHeaders: { "x-custom": "kept" }, timeout: 1234, maxRetries: 0, ...unset } as OpenAIClientOptions);
     expectWithOptionsRefusesTransportOptions(ai);
     const clone = ai.withOptions({ timeout: 5_000, organization: "org2" });
     for (const [client, organization] of [[ai, "org"], [clone, "org2"]] as const) {
@@ -330,16 +379,16 @@ describe("EnclaveHTTPClient over TLS", () => {
   });
 
   it("lets a clone replace the credential in either form", async () => {
-    const options = { verifier: verifier(() => ({ tls: TEST_PIN })), transportMode: "tls" as const };
-    const seams = { documentFetch: docs.fetch, tls: { ca: TEST_CERT } };
+    const options: EnclaveOptions = { transport: { kind: "tls" } };
+    const seams = { documentFetch: docs.fetch, tls: { ca: TEST_CERT }, verifier: verifier(() => ({ tls: TEST_PIN })) };
     const allowed = (client: unknown): boolean | undefined => (client as { _options: { dangerouslyAllowBrowser?: boolean } })._options.dangerouslyAllowBrowser;
-    const withToken = await createEnclaveOpenAIClient(tls.host, { repo: "tinfoilsh/repo" }, options, { bearerToken: "jwt" }, seams);
+    const withToken = await openAIOver(createEnclaveHTTPClient(tls.host, { kind: "repoPin", repo: "tinfoilsh/repo" }, options, seams), { bearerToken: "jwt" });
     expect(withToken.apiKey).toBe("jwt");
     expect(allowed(withToken)).toBe(true);
     const keyed = withToken.withOptions({ apiKey: "k" });
     expect(keyed.apiKey).toBe("k");
     expect(allowed(keyed)).toBeUndefined();
-    const withKey = await createEnclaveOpenAIClient(tls.host, { repo: "tinfoilsh/repo" }, options, { apiKey: "k" }, seams);
+    const withKey = await openAIOver(createEnclaveHTTPClient(tls.host, { kind: "repoPin", repo: "tinfoilsh/repo" }, options, seams), { apiKey: "k" });
     const tokened = withKey.withOptions({ bearerToken: "jwt2" });
     expect(tokened.apiKey).toBe("jwt2");
     expect(allowed(tokened)).toBe(true);
@@ -350,7 +399,8 @@ describe("EnclaveHTTPClient over TLS", () => {
 describe("EnclaveHTTPClient.close over TLS", () => {
   /** A server of this group's own, so the connections counted are only those of the clients made here. */
   let own: TlsServer;
-  const options: EnclaveOptions = { verifier: verifier(() => ({ tls: TEST_PIN })), transportMode: "tls" };
+  const options: EnclaveOptions = { transport: { kind: "tls" } };
+  const pinned = verifier(() => ({ tls: TEST_PIN }));
 
   beforeAll(async () => {
     own = await startTlsServer((seen) =>
@@ -364,7 +414,7 @@ describe("EnclaveHTTPClient.close over TLS", () => {
 
   it("closes the pooled connection, keeps the last verification, refuses further use, and closes again without effect", async () => {
     const docs = documents();
-    const client = await createEnclaveHTTPClient(own.host, { repo: "tinfoilsh/repo" }, options, { documentFetch: docs.fetch, tls: { ca: TEST_CERT } });
+    const client = await createEnclaveHTTPClient(own.host, { kind: "repoPin", repo: "tinfoilsh/repo" }, options, { documentFetch: docs.fetch, tls: { ca: TEST_CERT }, verifier: pinned });
     expect(await (await client.fetch(`${own.origin}/models`)).text()).toBe("ok");
     expect(own.openConnections()).toBe(1);
     await client.close();
@@ -380,7 +430,7 @@ describe("EnclaveHTTPClient.close over TLS", () => {
   });
 
   it("ends a response still streaming over the pooled connection", async () => {
-    const client = await createEnclaveHTTPClient(own.host, { repo: "tinfoilsh/repo" }, options, { documentFetch: documents().fetch, tls: { ca: TEST_CERT } });
+    const client = await createEnclaveHTTPClient(own.host, { kind: "repoPin", repo: "tinfoilsh/repo" }, options, { documentFetch: documents().fetch, tls: { ca: TEST_CERT }, verifier: pinned });
     const reader = (await client.fetch(`${own.origin}/sse`)).body!.getReader();
     expect(new TextDecoder().decode((await reader.read()).value)).toBe("data: a\n\n");
     await client.close();
@@ -389,14 +439,14 @@ describe("EnclaveHTTPClient.close over TLS", () => {
   });
 
   it("closes at the end of an `await using` block, and an OpenAI client closes the HTTP client under it", async () => {
-    const client = await createEnclaveHTTPClient(own.host, { repo: "tinfoilsh/repo" }, options, { documentFetch: documents().fetch, tls: { ca: TEST_CERT } });
+    const client = await createEnclaveHTTPClient(own.host, { kind: "repoPin", repo: "tinfoilsh/repo" }, options, { documentFetch: documents().fetch, tls: { ca: TEST_CERT }, verifier: pinned });
     {
       await using scoped = client;
       expect(scoped.current).toBeDefined();
     }
     await expect(client.ensureVerified()).rejects.toThrow(/client is closed/);
 
-    const ai = await createEnclaveOpenAIClient(own.host, { repo: "tinfoilsh/repo" }, options, { apiKey: "k", maxRetries: 0 }, { documentFetch: documents().fetch, tls: { ca: TEST_CERT } });
+    const ai = await openAIOver(createEnclaveHTTPClient(own.host, { kind: "repoPin", repo: "tinfoilsh/repo" }, options, { documentFetch: documents().fetch, tls: { ca: TEST_CERT }, verifier: pinned }), { apiKey: "k", maxRetries: 0 });
     const clone = ai.withOptions({ apiKey: "k2" });
     {
       await using scoped = clone;
@@ -418,13 +468,12 @@ describe("EnclaveHTTPClient over EHBP", () => {
     });
     const proxied = await createEnclaveHTTPClient(
       "enclave.example",
-      {},
-      { verifier: verifier(() => ({ tls: "ab".repeat(32), hpke: ehbp.publicKeyHex })), transportMode: "ehbp", baseURL: `${ehbp.origin}/`, fetch: network.fetch },
-      { documentFetch: docs.fetch },
-    );
+      AUTHORIZED,
+      { transport: { kind: "ehbp", proxyURL: `${ehbp.origin}/`, fetch: network.fetch } },
+      { verifier: verifier(() => ({ tls: "ab".repeat(32), hpke: ehbp.publicKeyHex })), documentFetch: docs.fetch });
     expect(proxied.baseURL).toBe(`${ehbp.origin}/`);
     expect(proxied.enclave).toBe("enclave.example");
-    expect(proxied.pin).toEqual({ repo: "", project: "" });
+    expect(proxied.trust).toEqual(AUTHORIZED);
     const res = await proxied.fetch(`${ehbp.origin}/echo`, { method: "POST", body: "prompt" });
     expect(await res.json()).toEqual({ path: "/echo", sealed: true, enclave: "https://enclave.example", text: "prompt" });
     const bodiless = await (await proxied.fetch(`${ehbp.origin}/echo`)).json();
@@ -450,10 +499,9 @@ describe("EnclaveHTTPClient over EHBP", () => {
     try {
       const client = await createEnclaveHTTPClient(
         "enclave.example",
-        {},
-        { verifier: verifier(() => ({ tls: "ab".repeat(32), hpke: ehbp.publicKeyHex })), transportMode: "ehbp", baseURL: `${ehbp.origin}/`, fetch: network.fetch },
-        {},
-      );
+        AUTHORIZED,
+        { transport: { kind: "ehbp", proxyURL: `${ehbp.origin}/`, fetch: network.fetch } },
+        { verifier: verifier(() => ({ tls: "ab".repeat(32), hpke: ehbp.publicKeyHex })) });
       expect(runtime.mock.calls.map(([input]) => String(input instanceof Request ? input.url : input))).toEqual([expect.stringMatching(/^https:\/\/enclave\.example\/\.well-known\/tinfoil-attestation\?nonce=/)]);
       expect(network.seen).toHaveLength(0);
 
@@ -483,25 +531,32 @@ describe("EnclaveHTTPClient over EHBP", () => {
   });
 
   it("ends the base URL with a slash, keeps requests on its origin, and gives an OpenAI client the same paths either way", async () => {
-    const options = (baseURL: string): EnclaveOptions => ({ verifier: verifier(() => ({ tls: "ab".repeat(32), hpke: ehbp.publicKeyHex })), transportMode: "ehbp", baseURL });
-    const bare = await createEnclaveHTTPClient("enclave.example", {}, options(ehbp.origin), { documentFetch: documents().fetch });
+    const options = (baseURL: string): EnclaveOptions => ({ transport: { kind: "ehbp", proxyURL: baseURL } });
+    const sealing = verifier(() => ({ tls: "ab".repeat(32), hpke: ehbp.publicKeyHex }));
+    const bare = await createEnclaveHTTPClient("enclave.example", AUTHORIZED, options(ehbp.origin), { documentFetch: documents().fetch, verifier: sealing });
     expect(bare.baseURL).toBe(`${ehbp.origin}/`);
     expect((await (await bare.fetch(new URL("echo", bare.baseURL), { method: "POST", body: "under" })).json()).text).toBe("under");
     await expect(bare.fetch("https://other.example/echo")).rejects.toThrow(/client is bound to enclave/);
-    const slashed = await createEnclaveHTTPClient("enclave.example", {}, options(`${ehbp.origin}/`), { documentFetch: documents().fetch });
+    const slashed = await createEnclaveHTTPClient("enclave.example", AUTHORIZED, options(`${ehbp.origin}/`), { documentFetch: documents().fetch, verifier: sealing });
     expect(slashed.baseURL).toBe(`${ehbp.origin}/`);
-    const padded = await createEnclaveHTTPClient("enclave.example", {}, options(`  ${ehbp.origin}/v1  `), { documentFetch: documents().fetch });
+    const padded = await createEnclaveHTTPClient("enclave.example", AUTHORIZED, options(`  ${ehbp.origin}/v1  `), { documentFetch: documents().fetch, verifier: sealing });
     expect(padded.baseURL).toBe(`${ehbp.origin}/v1/`);
 
+    // The proxy's path is where it is mounted; the API path joins under it, whether or not the proxy URL ends with a slash.
     const paths: string[] = [];
-    for (const base of [`${ehbp.origin}/v1`, `${ehbp.origin}/v1/`]) {
-      const ai = await createEnclaveOpenAIClient("enclave.example", {}, options(base), { apiKey: "k" }, { documentFetch: documents().fetch });
-      expect(ai.baseURL).toBe(`${ehbp.origin}/v1/`);
+    for (const [base, apiPath, want] of [
+      [`${ehbp.origin}/relay`, undefined, `${ehbp.origin}/relay/v1/`],
+      [`${ehbp.origin}/relay/`, undefined, `${ehbp.origin}/relay/v1/`],
+      [`${ehbp.origin}/relay`, "/openai/v1", `${ehbp.origin}/relay/openai/v1/`],
+      [`${ehbp.origin}/relay/`, "/openai/v1/", `${ehbp.origin}/relay/openai/v1/`],
+    ] as const) {
+      const ai = await openAIOver(createEnclaveHTTPClient("enclave.example", AUTHORIZED, options(base), { documentFetch: documents().fetch, verifier: sealing }), { apiKey: "k" }, { apiPath });
+      expect(ai.baseURL).toBe(want);
       const completion = await ai.chat.completions.create({ model: "test", messages: [{ role: "user", content: "hi" }] });
       expect(completion.choices[0]!.message.content).toBe("sealed");
       paths.push(ehbp.seen[ehbp.seen.length - 1]!.path);
     }
-    expect(paths).toEqual(["/v1/chat/completions", "/v1/chat/completions"]);
+    expect(paths).toEqual(["/relay/v1/chat/completions", "/relay/v1/chat/completions", "/relay/openai/v1/chat/completions", "/relay/openai/v1/chat/completions"]);
   });
 
   it("replays once after the enclave rotates its key, re-verifying in between", async () => {
@@ -510,10 +565,9 @@ describe("EnclaveHTTPClient over EHBP", () => {
     const docs = documents();
     const client = await createEnclaveHTTPClient(
       "enclave.example",
-      {},
-      { verifier: verifier(() => ({ tls: "ab".repeat(32), hpke: verified++ === 0 ? stale : ehbp.publicKeyHex })), transportMode: "ehbp", baseURL: `${ehbp.origin}/` },
-      { documentFetch: docs.fetch, sleep: async () => {} },
-    );
+      AUTHORIZED,
+      { transport: { kind: "ehbp", proxyURL: `${ehbp.origin}/` } },
+      { verifier: verifier(() => ({ tls: "ab".repeat(32), hpke: verified++ === 0 ? stale : ehbp.publicKeyHex })), documentFetch: docs.fetch, sleep: async () => {} });
     expect(client.current?.hpkePublicKey).toBe(stale);
     const before = ehbp.seen.length;
     const res = await client.fetch(`${ehbp.origin}/echo`, { method: "POST", body: "again" });
@@ -526,10 +580,9 @@ describe("EnclaveHTTPClient over EHBP", () => {
   it("closes with nothing to release, and a sealed exchange in flight completes", async () => {
     const client = await createEnclaveHTTPClient(
       "enclave.example",
-      {},
-      { verifier: verifier(() => ({ tls: "ab".repeat(32), hpke: ehbp.publicKeyHex })), transportMode: "ehbp", baseURL: `${ehbp.origin}/` },
-      { documentFetch: documents().fetch },
-    );
+      AUTHORIZED,
+      { transport: { kind: "ehbp", proxyURL: `${ehbp.origin}/` } },
+      { verifier: verifier(() => ({ tls: "ab".repeat(32), hpke: ehbp.publicKeyHex })), documentFetch: documents().fetch });
     const inFlight = client.fetch(`${ehbp.origin}/echo`, { method: "POST", body: "still going" });
     await client.close();
     expect((await (await inFlight).json()).text).toBe("still going");
@@ -540,25 +593,14 @@ describe("EnclaveHTTPClient over EHBP", () => {
   it("runs the caller's verification check and backs an OpenAI client on the proxy base URL", async () => {
     const seen: string[] = [];
     const docs = documents();
-    const ai = await createEnclaveOpenAIClient(
-      "enclave.example",
-      {},
-      {
-        verifier: verifier(() => ({ tls: "ab".repeat(32), hpke: ehbp.publicKeyHex })),
-        transportMode: "ehbp",
-        baseURL: `${ehbp.origin}/`,
-        verificationCheck: (v) => void seen.push(v.hpkePublicKey!),
-      },
-      { apiKey: "k" },
-      { documentFetch: docs.fetch },
-    );
+    const ai = await openAIOver(createEnclaveHTTPClient("enclave.example", AUTHORIZED, { transport: { kind: "ehbp", proxyURL: `${ehbp.origin}/` }, verificationCheck: (v) => void seen.push(v.hpkePublicKey!) }, { verifier: verifier(() => ({ tls: "ab".repeat(32), hpke: ehbp.publicKeyHex })), documentFetch: docs.fetch }), { apiKey: "k" });
     expect(seen).toEqual([ehbp.publicKeyHex]);
-    expect(ai.baseURL).toBe(`${ehbp.origin}/`);
+    expect(ai.baseURL).toBe(`${ehbp.origin}/v1/`);
     expect(ai.httpClient).toBeInstanceOf(EnclaveHTTPClient);
     const completion = await ai.chat.completions.create({ model: "test", messages: [{ role: "user", content: "hi" }] });
     expect(completion.choices[0]!.message.content).toBe("sealed");
     const last = ehbp.seen[ehbp.seen.length - 1]!;
-    expect(last.path).toBe("/chat/completions");
+    expect(last.path).toBe("/v1/chat/completions");
     expect(last.sealed).toBe(true);
     expect(last.headers["x-tinfoil-enclave-url"]).toBe("https://enclave.example");
     expect(last.headers.authorization).toBe("Bearer k");

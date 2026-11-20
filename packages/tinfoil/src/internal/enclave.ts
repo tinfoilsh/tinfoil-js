@@ -20,8 +20,8 @@ import {
   type Verification,
 } from "@tinfoilsh/verifier";
 import { AttestationError, ConfigurationError, messageOf, NetworkError, stripCategory, TinfoilError, withMessage } from "../errors.js";
-import type { Fetch, VerificationCheck } from "../options.js";
-import { fetchDocument } from "./fetch.js";
+import type { AttestationFetcher, Fetch, VerificationCheck } from "../options.js";
+import { fetchDocument, fetchDocumentWith } from "./fetch.js";
 
 export const VERIFICATION_RETRIES = 1;
 export const VERIFICATION_RETRY_DELAY_MS = 1_000;
@@ -41,6 +41,8 @@ export interface EnclaveConfig {
   readonly verifier?: Verifier;
   /** Called with each verification that passes the verifier; a throw rejects it without a retry. */
   readonly verificationCheck?: VerificationCheck;
+  /** How each attestation document is obtained; undefined fetches it directly, or through `relay`. */
+  readonly fetchAttestation?: AttestationFetcher;
   /** Seams for tests: the fetch used for documents, the clock, the nonce source and the retry delay. */
   readonly fetch?: Fetch;
   readonly clock?: () => Date;
@@ -63,6 +65,7 @@ export class Enclave {
   readonly #verifier: Verifier;
   readonly #check: VerificationCheck | undefined;
   readonly #fetch: Fetch;
+  readonly #fetchAttestation: AttestationFetcher | undefined;
   readonly #clock: () => Date;
   readonly #nonce: () => Uint8Array;
   readonly #sleep: (ms: number, signal?: AbortSignal) => Promise<void>;
@@ -74,6 +77,7 @@ export class Enclave {
     this.#verifier = verifier;
     this.#check = config.verificationCheck;
     this.#fetch = config.fetch ?? ((input, init) => fetch(input, init));
+    this.#fetchAttestation = config.fetchAttestation;
     this.#clock = config.clock ?? (() => new Date());
     this.#nonce = config.nonce ?? randomNonce;
     this.#sleep = config.sleep ?? sleep;
@@ -145,7 +149,10 @@ export class Enclave {
 
   async #fetchVerification(signal: AbortSignal | undefined): Promise<Verification> {
     const nonce = this.#nonce();
-    const doc = await fetchDocument(this.#host, this.#relay, nonce, this.#fetch, signal);
+    const doc =
+      this.#fetchAttestation === undefined
+        ? await fetchDocument(this.#host, this.#relay, nonce, this.#fetch, signal)
+        : await fetchDocumentWith(this.#fetchAttestation, this.#host, nonce, signal);
     let verified: Verification;
     try {
       verified = await this.#verifier.verifyV3At(doc, nonce, this.#pin, this.#clock());

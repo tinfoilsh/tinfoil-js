@@ -10,6 +10,7 @@ import type { Verification } from "@tinfoilsh/verifier";
 import { ehbpOptionsFor, type EnclaveClientSeams } from "./enclave-client.js";
 import { ConfigurationError } from "./errors.js";
 import { resolveUserCacheSecret } from "./internal/cachesecret.js";
+import { registerRoute } from "./internal/api-path.js";
 import { asyncDispose } from "./internal/dispose.js";
 import { fetchCatalogWith } from "./internal/gateway/catalog.js";
 import { GatewayPolicy } from "./internal/gateway/policy.js";
@@ -28,7 +29,7 @@ export const DEFAULT_GATEWAY_URL = "https://inference-gateway.tinfoil.sh/v1/";
 /** @internal Seams for tests: the enclave client's, the catalog fetch, and the secret resolution. */
 export interface GatewayClientSeams extends Omit<EnclaveClientSeams, "tls"> {
   readonly catalogFetch?: Fetch;
-  readonly resolveSecret?: (explicit: string | undefined) => Promise<string>;
+  readonly resolveSecret?: (explicit: string | undefined) => string;
 }
 
 /** Only this module holds the token the constructor requires, so untyped code that calls it is refused. */
@@ -50,10 +51,15 @@ export async function createGatewayHTTPClient(options: GatewayOptions, seams: Ga
   // Credentials in the URL would go out in plaintext to the gateway with every request.
   if (base.username !== "" || base.password !== "") throw new ConfigurationError("gateway base URL must not carry a username or password");
   // The rules every base URL follows, such as no query string or fragment; HTTPS is already required above.
-  validateBaseURL(given);
+  validateBaseURL(given, "gateway URL");
   const baseURL = normalizeBaseURL(given);
-  const policy = await GatewayPolicy.create(options.modelPins, options.pinnedModelsOnly ?? false, options.verifier);
-  const secret = await (seams.resolveSecret ?? resolveUserCacheSecret)(options.userCacheSecret);
+  const policy = await GatewayPolicy.create(
+    options.modelPins,
+    options.pinnedModelsOnly ?? false,
+    options.policy,
+    seams.verifier === undefined ? undefined : () => Promise.resolve(seams.verifier!),
+  );
+  const secret = (seams.resolveSecret ?? resolveUserCacheSecret)(options.userCacheSecret);
   const transport = new GatewayTransport({
     baseURL,
     relay: base.host,
@@ -78,8 +84,8 @@ export async function createGatewayHTTPClient(options: GatewayOptions, seams: Ga
  * The HTTP client for Tinfoil inference through the gateway; see the module
  * header for what it protects. The constructor is private: type-checked
  * code cannot call it, and a call from untyped code is refused at runtime.
- * Clients come from {@link GatewayHTTPClient.create} and
- * {@link GatewayOpenAIClient.create}.
+ * Clients come from {@link GatewayHTTPClient.create}. An `OpenAIClient`
+ * from `tinfoil/openai` can be built over one.
  *
  * @experimental The gateway route is new; this API may change without a major version.
  */
@@ -95,6 +101,7 @@ export class GatewayHTTPClient {
     this.#transport = transport;
     this.fetch = fetchImpl;
     this.baseURL = baseURL;
+    registerRoute(this, "gateway");
     // The client's state lives in the transport; the client itself never changes once created.
     Object.freeze(this);
   }

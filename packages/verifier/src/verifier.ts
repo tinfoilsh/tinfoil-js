@@ -49,45 +49,137 @@ import { cloneExpected, REGISTER_SIZE, type Expected } from "./measurement.js";
 import { verificationOf, type ArtifactVerification, type ConfigVerification, type Verification } from "./verification.js";
 
 /**
- * An exact config the caller trusts, as its bytes, optionally with its name.
- * The digest and the runtime pin are taken from the bytes, so the fields of
- * the reference form are excluded: an object carrying both forms is refused
- * at compile time, not just at runtime.
+ * Who vouches for the config that an enclave runs: one of {@link Registries},
+ * {@link ConfigSigningKeys}, {@link ConfigAuthorizer}, {@link EmbeddedConfig}
+ * or {@link EmbeddedConfigReference}, told apart by `kind`. Undefined selects
+ * Tinfoil's public registry. Every choice other than undefined requires
+ * attestation-collaterals/v3.
  */
-export interface EmbeddedConfigBytes {
-  /** The /org/project/revision name; absent or "" leaves the name unpinned. */
-  readonly name?: string;
-  /** The config bytes. */
-  readonly bytes: Uint8Array;
-  readonly digest?: never;
-  readonly runtime?: never;
+export type ConfigTrust = Registries | ConfigSigningKeys | ConfigAuthorizer | EmbeddedConfig | EmbeddedConfigReference;
+
+/**
+ * Trusts configs that exactly these registries endorse, under Tinfoil's
+ * registry root, in place of the public registry alone. To keep the public
+ * registry, list {@link PUBLIC_REGISTRY_ID}: `[PUBLIC_REGISTRY_ID, ...mine]`.
+ * `ids` must be non-empty, canonical and without repeats.
+ */
+export interface Registries {
+  readonly kind: "registries";
+  readonly ids: readonly string[];
 }
 
 /**
- * An exact config the caller trusts without holding its bytes: its digest
- * and the runtime release it pins, optionally with its name. The document's
- * config endorsement is not consulted; the quote must still bind the digest.
- * The bytes form's field is excluded, so an object carrying both forms is
- * refused at compile time.
+ * Trusts configs whose endorsements these PEM-encoded P-256 public keys
+ * sign, in place of Tinfoil's registry root. This trust path uses no
+ * registry IDs and doesn't authorize artifact freshness. `keys` must not be
+ * empty.
+ */
+export interface ConfigSigningKeys {
+  readonly kind: "configSigningKeys";
+  readonly keys: readonly string[];
+}
+
+/**
+ * Replaces config endorsement verification with the caller's policy.
+ * `authorize` receives detached, untrusted material and must throw for
+ * config bytes that it doesn't authorize; a throw rejects the document at
+ * the provenance layer. It may run concurrently. Runtime, platform and
+ * hardware checks still apply. Approval authenticates no registry name or
+ * timestamp, so a `project` pin is a {@link UsageError}.
+ */
+export interface ConfigAuthorizer {
+  readonly kind: "configAuthorizer";
+  readonly authorize: (endorsement: ConfigEndorsement) => void | Promise<void>;
+}
+
+/**
+ * Trusts the exact config bytes that the caller supplies, in place of a
+ * registry endorsement; the digest and the runtime that the config pins are
+ * taken from the bytes. `name`, an /org/project/revision identity, optionally
+ * names them, and a `project` pin must then match it. The bytes must come
+ * from trusted client configuration.
+ */
+export interface EmbeddedConfig {
+  readonly kind: "embeddedConfig";
+  /** The /org/project/revision name; absent or "" leaves the name unpinned. */
+  readonly name?: string;
+  readonly bytes: Uint8Array;
+}
+
+/**
+ * Trusts an exact config that the caller identifies without disclosing its
+ * bytes: the hex SHA-256 `digest` of its bytes and the `runtime` release that
+ * it pins. The quote must still bind the digest. Otherwise it is
+ * {@link EmbeddedConfig}.
  */
 export interface EmbeddedConfigReference {
+  readonly kind: "embeddedConfigReference";
   /** The /org/project/revision name; absent or "" leaves the name unpinned. */
   readonly name?: string;
   /** Lowercase hex SHA-256 of the config bytes. */
   readonly digest: string;
-  /** The runtime release the config pins (its `cvm-version`). */
+  /** The runtime release that the config pins (its `cvm-version`). */
   readonly runtime: RuntimeReference;
-  readonly bytes?: never;
 }
 
-/** Caller-trusted reference values that replace endorsement checks for the components supplied. */
-export interface EmbeddedReferences {
-  /** The exact config: its bytes, or its digest and runtime pin when the bytes themselves are not disclosed. */
-  readonly config?: EmbeddedConfigBytes | EmbeddedConfigReference;
-  /** The exact runtime manifest the config pins. */
+/**
+ * How the runtime and platform artifacts are trusted: {@link EndorsedArtifacts}
+ * or {@link EmbeddedArtifacts}, told apart by `kind`. Undefined selects
+ * `{ kind: "endorsedArtifacts" }`.
+ */
+export type ArtifactTrust = EndorsedArtifacts | EmbeddedArtifacts;
+
+/**
+ * Trusts runtime and platform artifacts that the document's endorsements
+ * authenticate and whose freshness approvals `freshnessKeys` sign:
+ * PEM-encoded P-256 public keys. Undefined `freshnessKeys` selects Tinfoil's
+ * public keys, which approve artifacts only and authorize no config. An
+ * explicit key set requires attestation-collaterals/v3, and an empty one is
+ * a {@link UsageError}.
+ */
+export interface EndorsedArtifacts {
+  readonly kind: "endorsedArtifacts";
+  readonly freshnessKeys?: readonly string[];
+}
+
+/**
+ * Trusts caller-supplied runtime and platform artifacts in place of their
+ * endorsements, and requires attestation-collaterals/v3. `runtime` is the
+ * exact runtime manifest that the config pins, and `platform` is a
+ * platform-endorsements/v2 policy artifact. No endorsement is consulted for
+ * a supplied artifact, even if the document carries one. An artifact that
+ * is left out is still endorsed, with its freshness approval signed by
+ * `freshnessKeys`, as {@link EndorsedArtifacts} describes. At least one
+ * artifact must be supplied, and `freshnessKeys` must be left out when both
+ * are, since nothing is left for them to verify. Hardware authentication,
+ * component bindings and pins remain mandatory. These values must come from
+ * trusted client configuration.
+ */
+export interface EmbeddedArtifacts {
+  readonly kind: "embeddedArtifacts";
   readonly runtime?: Uint8Array;
-  /** A platform-endorsements/v2 policy artifact. */
   readonly platform?: Uint8Array;
+  readonly freshnessKeys?: readonly string[];
+}
+
+/**
+ * The checks that a verifier applies on top of its config trust, as plain
+ * data. Every field is optional, and the empty policy keeps every default:
+ * no register pins, the seven-day freshness bound, and runtime and platform
+ * artifacts that Tinfoil's public keys endorse.
+ */
+export interface Policy {
+  /**
+   * Registers that the enclave must match in addition to the release's: each
+   * set register fills one that the release leaves open, and must equal one
+   * that the release fixes. Pins for one platform reject every enclave on the
+   * other. It is copied, so later changes by the caller have no effect.
+   */
+  readonly pinnedRegisters?: Expected;
+  /** How old an authenticated witness may be; 0 or undefined selects seven days, and a negative age is a {@link UsageError}. */
+  readonly freshnessMaxAgeMs?: number;
+  /** How the runtime and platform artifacts are trusted; undefined selects `{ kind: "endorsedArtifacts" }`. */
+  readonly artifacts?: ArtifactTrust;
 }
 
 /**
@@ -102,43 +194,6 @@ export interface Pin {
   readonly repo?: string;
   /** A config registry project, `org/project[@revision][@sha256:digest]`. */
   readonly project?: string;
-}
-
-export interface VerifierOptions {
-  /** Registers the enclave must match in addition to the release's. */
-  readonly pinnedRegisters?: Expected;
-  /** The freshness window; 0 or undefined selects seven days. */
-  readonly freshnessMaxAgeMs?: number;
-  /** PEM-encoded P-256 public keys that approve configs, replacing Tinfoil's. */
-  readonly configSigningKeys?: readonly string[];
-  /** PEM-encoded P-256 public keys that approve artifact freshness, replacing Tinfoil's. */
-  readonly freshnessSigningKeys?: readonly string[];
-  /** Authorizes an unsigned config; throwing rejects the document at the provenance layer. */
-  readonly configAuthorizer?: (endorsement: ConfigEndorsement) => void | Promise<void>;
-  /**
-   * The exact registry IDs a config approval may be accepted under, replacing
-   * public-only trust: an approval certified for any other registry rejects.
-   * To accept the public registry alongside others, list it:
-   * `[PUBLIC_REGISTRY_ID, ...mine]`. Needs registry trust, so it conflicts
-   * with config signing keys, an embedded config and a config authorizer.
-   * Must be non-empty, canonical and without repeats.
-   */
-  readonly configRegistryIDs?: readonly string[];
-  /**
-   * Caller-trusted reference values, each replacing the document's
-   * endorsement of that component: `config` pins the exact config, as
-   * `{ bytes, name? }` (the digest and runtime pin are taken from the bytes)
-   * or `{ digest, runtime, name? }`; `runtime` pins the exact runtime
-   * manifest, which on its own must be the release the document's config
-   * endorsement names, and with an embedded config must be the one that
-   * config pins; `platform` pins a platform-endorsements/v2 policy
-   * artifact. At least one must be present.
-   * An embedded config selects its own trust source, so it conflicts with
-   * `configSigningKeys`, `configAuthorizer` and `configRegistryIDs`; with
-   * both `runtime` and `platform` embedded, `freshnessSigningKeys` has no
-   * endorsed artifact to verify and is refused.
-   */
-  readonly embeddedReferences?: EmbeddedReferences;
 }
 
 /**
@@ -167,7 +222,8 @@ interface Embedded {
   readonly platform?: Uint8Array;
 }
 
-interface Policy {
+/** The policy and config trust as the verifier holds them: validated and copied. */
+interface Settings {
   readonly embedded: Embedded;
   readonly pinnedRegisters?: Expected;
   readonly freshnessMaxAgeMs: number;
@@ -188,7 +244,7 @@ interface References {
 
 /** The parts a built verifier is made of. */
 interface Parts {
-  readonly policy: Policy;
+  readonly policy: Settings;
   readonly prov: ProvenanceClient;
   readonly configVerifier: ConfigVerifier;
   readonly freshnessVerifier: FreshnessVerifier;
@@ -216,9 +272,7 @@ export class Verifier {
    * not be mutated.
    */
   readonly pinnedRegisters: Expected | undefined;
-  /** Whether the caller, rather than an endorsement, authorizes the config. */
-  readonly callerAuthorizesConfig: boolean;
-  readonly #policy: Policy;
+  readonly #policy: Settings;
   readonly #prov: ProvenanceClient;
   readonly #configVerifier: ConfigVerifier;
   readonly #freshnessVerifier: FreshnessVerifier;
@@ -233,7 +287,6 @@ export class Verifier {
     this.#roots = parts.roots;
     this.freshnessMaxAgeMs = parts.policy.freshnessMaxAgeMs;
     this.pinnedRegisters = parts.policy.pinnedRegisters === undefined ? undefined : Object.freeze(cloneExpected(parts.policy.pinnedRegisters));
-    this.callerAuthorizesConfig = parts.policy.embedded.configReference !== undefined || parts.policy.configAuthorizer !== undefined;
     // The properties describe the policy the verifier enforces, so neither can be changed after it is built.
     Object.freeze(this);
   }
@@ -243,12 +296,16 @@ export class Verifier {
   }
 
   /**
-   * Builds a verifier. Defaults use the embedded production trust roots,
-   * Tinfoil's public signing keys, and a seven-day freshness bound.
-   * Throws UsageError for invalid options.
+   * Builds a verifier that trusts configs as `config` selects and applies
+   * `policy`. Undefined `config` selects Tinfoil's public registry, and an
+   * undefined or empty `policy` keeps every default: the embedded production
+   * trust roots, Tinfoil's public artifact signing keys and a seven-day
+   * freshness bound. Both are copied, so later changes by the caller have no
+   * effect. Throws UsageError for an invalid field, an unknown `kind` among
+   * them.
    */
-  static async create(options: VerifierOptions = {}): Promise<Verifier> {
-    return buildVerifier(options, {});
+  static async create(config?: ConfigTrust, policy?: Policy): Promise<Verifier> {
+    return buildVerifier(config, policy, {});
   }
 
   /**
@@ -570,64 +627,154 @@ export class Verifier {
   }
 }
 
-/** Validates every option, resolves the trust material and assembles the verifier. */
-async function assemble(options: VerifierOptions, roots: InjectedRoots): Promise<Verifier> {
+/** Validates the config trust and the policy, resolves the trust material and assembles the verifier. */
+async function assemble(config: ConfigTrust | undefined, policy: Policy | undefined, roots: InjectedRoots): Promise<Verifier> {
   const prov = roots.sigstore ? await ProvenanceClient.fromJSON(roots.sigstore) : await ProvenanceClient.default();
-  const pinnedRegisters = options.pinnedRegisters === undefined ? undefined : validPins(options.pinnedRegisters);
-  const freshnessMaxAgeMs = freshnessBound(options.freshnessMaxAgeMs);
-  const configKeys = options.configSigningKeys === undefined ? undefined : await keysOf("config signing keys", options.configSigningKeys);
-  const freshnessKeys = options.freshnessSigningKeys === undefined ? undefined : await keysOf("freshness signing keys", options.freshnessSigningKeys);
-  if (options.configAuthorizer !== undefined && typeof options.configAuthorizer !== "function") {
-    throw new UsageError("config authorizer must be a function");
-  }
-  const embedded = options.embeddedReferences === undefined ? {} : await embeddedOf(options.embeddedReferences);
-  if (embedded.configReference !== undefined && configKeys !== undefined) {
-    throw new UsageError("embedded config and config signing keys select conflicting trust sources");
-  }
-  if (options.configAuthorizer !== undefined && (embedded.configReference !== undefined || configKeys !== undefined)) {
-    throw new UsageError("config authorizer conflicts with embedded config or config signing keys");
-  }
-  const configRegistryIDs = options.configRegistryIDs === undefined ? undefined : usage(() => registryIDsOf(options.configRegistryIDs!));
-  if (configRegistryIDs !== undefined && (embedded.configReference !== undefined || options.configAuthorizer !== undefined)) {
-    throw new UsageError("config authority pins require endorsement verification");
-  }
-  if (configRegistryIDs !== undefined && configKeys !== undefined) {
-    throw new UsageError("config registry ID policy requires Tinfoil registry root verification");
-  }
-  if (embedded.runtime !== undefined && embedded.platform !== undefined && freshnessKeys !== undefined) {
-    throw new UsageError("freshness signing keys have no endorsed artifact to verify");
-  }
+  if (policy !== undefined && (typeof policy !== "object" || policy === null)) throw new UsageError("policy must be an object");
+  const pinnedRegisters = policy?.pinnedRegisters === undefined ? undefined : validPins(policy.pinnedRegisters);
+  const freshnessMaxAgeMs = freshnessBound(policy?.freshnessMaxAgeMs);
+  // The artifacts come first, so that an embedded config can check an embedded runtime against itself.
+  const artifacts = await artifactTrustOf(policy?.artifacts);
+  const trust = await configTrustOf(config, artifacts.runtime);
   const publicKeys = await publicSigningKeys();
   // Without caller-pinned config keys, the public keys are the registry
   // roots as well: they issue the signing certificates of certified approvals.
   const registryKeys = roots.registryRoots === undefined ? publicKeys : await keysOf("registry roots", roots.registryRoots);
-  const configVerifier = configKeys === undefined ? new ConfigVerifier(prov.root, registryKeys, registryKeys) : new ConfigVerifier(prov.root, configKeys);
-  const freshnessVerifier = new FreshnessVerifier(prov.root, freshnessKeys ?? publicKeys);
-  const policy: Policy = {
-    embedded,
+  const configVerifier = trust.configKeys === undefined ? new ConfigVerifier(prov.root, registryKeys, registryKeys) : new ConfigVerifier(prov.root, trust.configKeys);
+  const freshnessVerifier = new FreshnessVerifier(prov.root, artifacts.freshnessKeys ?? publicKeys);
+  const settings: Settings = {
+    embedded: {
+      ...(trust.configReference === undefined ? {} : { configReference: trust.configReference }),
+      ...(artifacts.runtime === undefined ? {} : { runtime: artifacts.runtime }),
+      ...(artifacts.platform === undefined ? {} : { platform: artifacts.platform }),
+    },
     pinnedRegisters,
     freshnessMaxAgeMs,
-    configAuthorizer: options.configAuthorizer,
-    configRegistryIDs,
-    configKeysPinned: configKeys !== undefined,
-    freshnessKeysPinned: freshnessKeys !== undefined,
+    configAuthorizer: trust.configAuthorizer,
+    configRegistryIDs: trust.configRegistryIDs,
+    configKeysPinned: trust.configKeys !== undefined,
+    freshnessKeysPinned: artifacts.freshnessKeys !== undefined,
   };
-  return construct({ policy, prov, configVerifier, freshnessVerifier, roots: { amd: roots.amd, intel: roots.intel } });
+  return construct({ policy: settings, prov, configVerifier, freshnessVerifier, roots: { amd: roots.amd, intel: roots.intel } });
 }
 
 /**
- * @internal Validates the options and assembles the verifier under `roots`,
- * where an absent root selects the embedded production anchor; any failure
- * is a UsageError. {@link Verifier.create} is this with no roots injected.
- * Not exported from the package entry.
+ * @internal Validates the config trust and the policy and assembles the
+ * verifier under `roots`, where an absent root selects the embedded
+ * production anchor; any failure is a UsageError. {@link Verifier.create} is
+ * this with no roots injected. Not exported from the package entry.
  */
-export async function buildVerifier(options: VerifierOptions, roots: InjectedRoots): Promise<Verifier> {
+export async function buildVerifier(config: ConfigTrust | undefined, policy: Policy | undefined, roots: InjectedRoots): Promise<Verifier> {
   try {
-    return await assemble(options, roots);
+    return await assemble(config, policy, roots);
   } catch (err) {
     if (err instanceof UsageError) throw err;
     throw new UsageError(message(err), { cause: err });
   }
+}
+
+/** An {@link ArtifactTrust}, validated and copied. */
+interface ArtifactSettings {
+  readonly freshnessKeys?: PinnedKey[];
+  readonly runtime?: Uint8Array;
+  readonly platform?: Uint8Array;
+}
+
+/** Validates and copies `artifacts`; undefined selects the endorsed artifacts under Tinfoil's keys. */
+async function artifactTrustOf(artifacts: ArtifactTrust | undefined): Promise<ArtifactSettings> {
+  if (artifacts === undefined) return {};
+  switch (kindOf(artifacts, "artifact trust")) {
+    case "endorsedArtifacts": {
+      const a = artifacts as EndorsedArtifacts;
+      return a.freshnessKeys === undefined ? {} : { freshnessKeys: await keysOf("freshness signing keys", a.freshnessKeys) };
+    }
+    case "embeddedArtifacts": {
+      const a = artifacts as EmbeddedArtifacts;
+      const runtime = optionalBytes("embedded runtime", a.runtime);
+      const platform = optionalBytes("embedded platform", a.platform);
+      if (runtime === undefined && platform === undefined) throw new UsageError("embedded artifacts must contain a runtime or a platform");
+      if (runtime !== undefined && platform !== undefined && a.freshnessKeys !== undefined) {
+        throw new UsageError("freshness signing keys have no endorsed artifact to verify");
+      }
+      const freshnessKeys = a.freshnessKeys === undefined ? undefined : await keysOf("freshness signing keys", a.freshnessKeys);
+      if (runtime !== undefined) decodeManifest(runtime);
+      if (platform !== undefined && parseArtifact(platform).format !== ARTIFACT_FORMAT_V2) {
+        throw new UsageError("embedded platform requires platform-endorsements/v2");
+      }
+      return {
+        ...(freshnessKeys === undefined ? {} : { freshnessKeys }),
+        ...(runtime === undefined ? {} : { runtime }),
+        ...(platform === undefined ? {} : { platform }),
+      };
+    }
+    default:
+      throw new UsageError(`artifact trust must have kind "endorsedArtifacts" or "embeddedArtifacts", not ${describeKind(artifacts)}`);
+  }
+}
+
+/** A {@link ConfigTrust}, validated and copied; every member is unset under the public registry. */
+interface ConfigTrustSettings {
+  readonly configRegistryIDs?: readonly string[];
+  readonly configKeys?: PinnedKey[];
+  readonly configAuthorizer?: (endorsement: ConfigEndorsement) => void | Promise<void>;
+  readonly configReference?: ConfigReference;
+}
+
+/**
+ * Validates and copies `config`; undefined selects the public registry. An
+ * embedded config is checked against `embeddedRuntime`, the caller's own
+ * runtime manifest when it embeds one: both come from the caller, so a
+ * manifest that the config doesn't pin is rejected here rather than at
+ * verification.
+ */
+async function configTrustOf(config: ConfigTrust | undefined, embeddedRuntime: Uint8Array | undefined): Promise<ConfigTrustSettings> {
+  if (config === undefined) return {};
+  switch (kindOf(config, "config trust")) {
+    case "registries":
+      return { configRegistryIDs: usage(() => registryIDsOf((config as Registries).ids)) };
+    case "configSigningKeys":
+      return { configKeys: await keysOf("config signing keys", (config as ConfigSigningKeys).keys) };
+    case "configAuthorizer": {
+      const authorize = (config as ConfigAuthorizer).authorize;
+      if (typeof authorize !== "function") throw new UsageError("config authorizer must be a function");
+      return { configAuthorizer: authorize };
+    }
+    case "embeddedConfig":
+    case "embeddedConfigReference": {
+      const reference = await configReferenceOf(config as EmbeddedConfig | EmbeddedConfigReference);
+      if (reference.name !== "") usage(() => parseConfigName(reference.name));
+      usage(() => decodeLowerHex("config digest", reference.digest, 32));
+      usage(() => validateRuntimeReference(reference.runtime));
+      if (embeddedRuntime !== undefined) await parseManifest(embeddedRuntime, reference.runtime);
+      return { configReference: reference };
+    }
+    default:
+      throw new UsageError(
+        `config trust must have kind "registries", "configSigningKeys", "configAuthorizer", "embeddedConfig" or "embeddedConfigReference", not ${describeKind(config)}`,
+      );
+  }
+}
+
+/** The `kind` of a sum-type value that untyped code may have passed as anything; a non-object is a UsageError. */
+function kindOf(value: unknown, what: string): unknown {
+  if (typeof value !== "object" || value === null) throw new UsageError(`${what} must be an object with a kind`);
+  return (value as { kind?: unknown }).kind;
+}
+
+/** How an unknown `kind` is named in an error. */
+function describeKind(value: unknown): string {
+  const kind = (value as { kind?: unknown }).kind;
+  if (kind === undefined) return "a value without one";
+  if (typeof kind === "string") return JSON.stringify(kind);
+  if (typeof kind === "number" || typeof kind === "boolean" || typeof kind === "bigint" || kind === null) return String(kind);
+  return `a ${typeof kind}`;
+}
+
+/** A copy of caller-supplied bytes, or undefined when they are absent; anything but a Uint8Array is a UsageError. */
+function optionalBytes(what: string, bytes: unknown): Uint8Array | undefined {
+  if (bytes === undefined) return undefined;
+  if (!(bytes instanceof Uint8Array)) throw new UsageError(`${what} must be a Uint8Array`);
+  return bytes.slice();
 }
 
 interface ConfigPins {
@@ -717,6 +864,7 @@ function freshnessBound(maxAgeMs: number | undefined): number {
 }
 
 async function keysOf(what: string, pems: readonly string[]): Promise<PinnedKey[]> {
+  if (!Array.isArray(pems) || pems.some((pem) => typeof pem !== "string")) throw new UsageError(`${what} must be a list of PEM strings`);
   if (pems.length === 0) throw new UsageError(`${what} must not be empty`);
   try {
     return await pinnedKeys(pems);
@@ -726,53 +874,19 @@ async function keysOf(what: string, pems: readonly string[]): Promise<PinnedKey[
 }
 
 /**
- * Validates the embedded references and settles the config reference: the
- * caller's own, or one derived from embedded config bytes. Both come from
- * the caller, so a runtime manifest the reference does not pin is rejected
- * here rather than at verification.
+ * The config reference that an embedded config settles to: derived from its
+ * bytes, or a copy of the caller's digest and runtime pin.
  */
-async function embeddedOf(refs: EmbeddedReferences): Promise<Embedded> {
-  if (refs.config === undefined && refs.runtime === undefined && refs.platform === undefined) {
-    throw new UsageError("embedded references must contain at least one component");
-  }
-  const configReference = refs.config === undefined ? undefined : await configReferenceOf(refs.config);
-  if (configReference !== undefined) {
-    const reference = configReference;
-    if (reference.name !== "") usage(() => parseConfigName(reference.name));
-    usage(() => decodeLowerHex("config digest", reference.digest, 32));
-    usage(() => validateRuntimeReference(reference.runtime));
-    if (refs.runtime !== undefined) await parseManifest(refs.runtime, reference.runtime);
-  }
-  if (refs.runtime !== undefined) decodeManifest(refs.runtime);
-  if (refs.platform !== undefined && parseArtifact(refs.platform).format !== ARTIFACT_FORMAT_V2) {
-    throw new UsageError("embedded platform requires platform-endorsements/v2");
-  }
-  return {
-    ...(configReference === undefined ? {} : { configReference }),
-    ...(refs.runtime === undefined ? {} : { runtime: refs.runtime.slice() }),
-    ...(refs.platform === undefined ? {} : { platform: refs.platform.slice() }),
-  };
-}
-
-/**
- * The config reference an embedded config settles to: derived from its
- * bytes, or a copy of the caller's digest and runtime pin. The type admits
- * one form or the other; an object from untyped code that has both or
- * neither is refused.
- */
-async function configReferenceOf(config: EmbeddedConfigBytes | EmbeddedConfigReference): Promise<ConfigReference> {
-  if (typeof config !== "object" || config === null) throw new UsageError("embedded config must be an object");
-  const hasBytes = (config as Partial<EmbeddedConfigBytes>).bytes !== undefined;
-  const hasDigest = (config as Partial<EmbeddedConfigReference>).digest !== undefined;
-  if (hasBytes === hasDigest) throw new UsageError("embedded config is either its bytes or its digest and runtime pin, not both or neither");
-  if (hasBytes) {
-    const { name, bytes } = config as EmbeddedConfigBytes;
+async function configReferenceOf(config: EmbeddedConfig | EmbeddedConfigReference): Promise<ConfigReference> {
+  if (config.kind === "embeddedConfig") {
+    const { name, bytes } = config;
     if (!(bytes instanceof Uint8Array)) throw new UsageError("embedded config bytes must be a Uint8Array");
+    if (name !== undefined && typeof name !== "string") throw new UsageError("embedded config name must be a string");
     // Copied once so the digest and the runtime pin come from the same bytes, whatever the caller does to its buffer meanwhile.
     const copy = bytes.slice();
     return { name: name ?? "", digest: toHex(await sha256(copy)), runtime: usage(() => configRuntime(copy)) };
   }
-  return usage(() => referenceCopyOf(config as EmbeddedConfigReference));
+  return usage(() => referenceCopyOf(config));
 }
 
 /** A copy of the caller's config reference with every field a string; validation follows. */

@@ -1,7 +1,6 @@
 /**
- * The rules for a client's base URL: where requests go instead of the
- * enclave's own origin, which is a path on that origin or a proxy on
- * another.
+ * The rules for a client's route URL: an EHBP proxy that requests go to
+ * instead of the enclave's own origin, or the gateway's URL.
  */
 import { ConfigurationError } from "../../errors.js";
 import { originOf } from "./origin.js";
@@ -14,23 +13,23 @@ import { originOf } from "./origin.js";
  * a request can't be built from, and which no error repeats: they are
  * refused before any error that names the URL.
  */
-export function validateBaseURL(baseURL: string): void {
+export function validateBaseURL(baseURL: string, name = "base URL"): void {
   let origin: string;
   try {
     origin = originOf(baseURL);
   } catch (err) {
-    throw new ConfigurationError(`invalid base URL: ${(err as Error).message}`, { cause: err });
+    throw new ConfigurationError(`invalid ${name}: ${(err as Error).message}`, { cause: err });
   }
   const url = new URL(baseURL);
   if (url.username !== "" || url.password !== "") {
-    throw new ConfigurationError("invalid base URL: a username or password can't be part of a base URL");
+    throw new ConfigurationError(`invalid ${name}: a username or password can't be part of a ${name}`);
   }
   if (baseURL.includes("?") || baseURL.includes("#")) {
-    throw new ConfigurationError(`invalid base URL: a query string or fragment can't be part of a base URL: ${JSON.stringify(baseURL)}`);
+    throw new ConfigurationError(`invalid ${name}: a query string or fragment can't be part of a ${name}: ${JSON.stringify(baseURL)}`);
   }
   if (origin.startsWith("https://")) return;
   if (!isLoopback(url.hostname)) {
-    throw new ConfigurationError("invalid base URL: HTTP is allowed only for localhost or a loopback IP address; use HTTPS to protect request headers");
+    throw new ConfigurationError(`invalid ${name}: HTTP is allowed only for localhost or a loopback IP address; use HTTPS to protect request headers`);
   }
 }
 
@@ -57,18 +56,21 @@ export function isLoopback(host: string): boolean {
   return /^(0*:)+0*1$/.test(bare) || bare === "::1";
 }
 
-/** Requires a TLS-mode base URL to use the enclave's own origin, since a pinned connection can't pass through a proxy. */
-export function validateTLSBaseURL(baseURL: string, enclave: string): void {
-  if (baseURL === "") return;
-  let baseOrigin: string;
+/**
+ * Refuses a proxy URL on the enclave's own origin, which would send
+ * requests directly to the enclave under the name of a proxy.
+ */
+export function refuseEnclaveOriginProxy(proxyURL: string, enclave: string): void {
+  if (proxyURL === "") return;
+  let proxyOrigin: string;
   let enclaveOrigin: string;
   try {
-    baseOrigin = originOf(baseURL);
+    proxyOrigin = originOf(proxyURL);
     enclaveOrigin = originOf(`https://${enclave}`);
   } catch (err) {
-    throw new ConfigurationError(`invalid base URL: ${(err as Error).message}`, { cause: err });
+    throw new ConfigurationError(`invalid proxy URL: ${(err as Error).message}`, { cause: err });
   }
-  if (baseOrigin !== enclaveOrigin) {
-    throw new ConfigurationError(`a base URL off the verified enclave origin ${JSON.stringify(enclaveOrigin)} is a proxy, which requires the EHBP transport mode`);
+  if (proxyOrigin === enclaveOrigin) {
+    throw new ConfigurationError(`invalid proxy URL: ${JSON.stringify(enclaveOrigin)} is the enclave's own origin; leave proxyURL unset to connect directly`);
   }
 }

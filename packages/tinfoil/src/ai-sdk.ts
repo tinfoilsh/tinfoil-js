@@ -8,4 +8,4 @@
  * map: a bundler substitutes the internal modules that the browser field
  * lists, so neither entry needs a browser build of its own.
  */
-export { createTinfoil, type TinfoilProvider, type TinfoilProviderOptions, type TinfoilProviderEnclave } from "./internal/ai-sdk.js";
+export { createTinfoil, type TinfoilProvider, type TinfoilProviderOptions, type TinfoilProviderBaseOptions, type TinfoilProviderEnclave } from "./internal/ai-sdk.js";

@@ -9,40 +9,62 @@
  * exports the factory, so the AI SDK stays out of bundles that don't use it.
  */
 import { createOpenAICompatible, type OpenAICompatibleProvider } from "@ai-sdk/openai-compatible";
-import { createEnclaveHTTPClient, EnclaveHTTPClient, openAIURLOf, type EnclaveClientSeams } from "../enclave-client.js";
+import { createEnclaveHTTPClient, EnclaveHTTPClient, type EnclaveClientSeams } from "../enclave-client.js";
+import { apiBaseURL, validateAPIPath } from "./api-path.js";
 import { ConfigurationError } from "../errors.js";
 import { checkAPIKeyRuntime } from "./credential.js";
 import type { RuntimeGlobals } from "./platform.js";
-import type { EnclaveOptions, RouterOptions } from "../options.js";
+import type { EnclaveOptions, RouterListFetcher, RouterOptions } from "../options.js";
 import { createRouterHTTPClient, RouterHTTPClient, type RouterClientSeams } from "../router-client.js";
+import type { Trust } from "../trust.js";
 
 /** The enclave a provider is bound to instead of the discovered router. */
 export interface TinfoilProviderEnclave {
   readonly host: string;
-  /** A GitHub repository, `owner/name[@tag][@sha256:digest]`. */
-  readonly repo?: string;
-  /** A config registry project, `org/project[@revision][@sha256:digest]`. */
-  readonly project?: string;
+  /** Who vouches for the enclave's config, as for {@link EnclaveHTTPClient.create}. */
+  readonly trust: Trust;
+}
+
+/** The options of {@link createTinfoil} that both routes take. */
+export interface TinfoilProviderBaseOptions extends Pick<RouterOptions & EnclaveOptions, "transport" | "policy" | "verificationCheck" | "fetchAttestation" | "signal"> {
+  /** A long-lived API key, sent as the bearer credential. It belongs on a server, never in a page. */
+  readonly apiKey?: string;
+  /** A credential a browser page may hold, such as a short-lived token from the application's own sign-in. */
+  readonly bearerToken?: string;
+  /**
+   * The path of the API on the enclave or router, joined under the EHBP
+   * proxy when one is set and under the enclave's origin otherwise; undefined
+   * selects `/v1/`. As for the OpenAI client's `apiPath`.
+   */
+  readonly apiPath?: string;
+  /** Headers added to every request, after the credential. */
+  readonly headers?: Readonly<Record<string, string>>;
 }
 
 /**
  * Configures {@link createTinfoil}. Exactly one credential is given: an
  * `apiKey` on a server, or a `bearerToken` a browser page may hold. The
  * remaining options configure the attested client: the router client's when
- * `enclave` is unset, otherwise the enclave client's. `fetch` is the network
- * implementation that carries the client's sealed requests in the `"ehbp"`
- * transport mode, as for the clients, and is refused with `"tls"`.
+ * `enclave` is unset, otherwise the enclave client's. `userCacheSecret` is
+ * the router client's option: an enclave client never adds a
+ * `user_cache_secret`, so the two can't be given together.
  */
-export interface TinfoilProviderOptions extends Pick<RouterOptions & EnclaveOptions, "transportMode" | "baseURL" | "verifier" | "verificationCheck" | "userCacheSecret" | "signal" | "fetch"> {
-  /** A long-lived API key, sent as the bearer credential. It belongs on a server, never in a page. */
-  readonly apiKey?: string;
-  /** A credential a browser page may hold, such as a short-lived token from the application's own sign-in. */
-  readonly bearerToken?: string;
-  /** Binds the provider to this enclave rather than the discovered router. */
-  readonly enclave?: TinfoilProviderEnclave;
-  /** Headers added to every request, after the credential. */
-  readonly headers?: Readonly<Record<string, string>>;
-}
+export type TinfoilProviderOptions = TinfoilProviderBaseOptions &
+  (
+    | {
+        readonly enclave?: undefined;
+        /** As for the router client's `userCacheSecret`. */
+        readonly userCacheSecret?: string;
+        /** As for the router client's `fetchRouterList`. */
+        readonly fetchRouterList?: RouterListFetcher;
+      }
+    | {
+        /** Binds the provider to this enclave rather than the discovered router. */
+        readonly enclave: TinfoilProviderEnclave;
+        readonly userCacheSecret?: never;
+        readonly fetchRouterList?: never;
+      }
+  );
 
 /** The AI SDK provider, with the attested client its requests go through. */
 export interface TinfoilProvider extends OpenAICompatibleProvider {
@@ -75,19 +97,32 @@ function credentialOf(options: TinfoilProviderOptions, globals: RuntimeGlobals |
 export async function createTinfoilProvider(options: TinfoilProviderOptions, seams: TinfoilProviderSeams): Promise<TinfoilProvider> {
   // The credential is checked first, so a provider without one fails before any network I/O.
   const credential = credentialOf(options, seams.globals);
+  if (options.apiPath !== undefined && options.apiPath !== "") validateAPIPath(options.apiPath);
   const clientOptions = {
-    transportMode: options.transportMode,
-    baseURL: options.baseURL,
-    verifier: options.verifier,
+    transport: options.transport,
+    policy: options.policy,
     verificationCheck: options.verificationCheck,
-    userCacheSecret: options.userCacheSecret,
+    fetchAttestation: options.fetchAttestation,
     signal: options.signal,
-    fetch: options.fetch,
   };
-  const client = options.enclave === undefined ? await createRouterHTTPClient(clientOptions, seams) : await createEnclaveHTTPClient(options.enclave.host, { repo: options.enclave.repo, project: options.enclave.project }, clientOptions, seams);
+  let client: EnclaveHTTPClient | RouterHTTPClient;
+  if (options.enclave === undefined) {
+    client = await createRouterHTTPClient({ ...clientOptions, userCacheSecret: options.userCacheSecret, fetchRouterList: options.fetchRouterList }, seams);
+  } else {
+    if (typeof options.enclave !== "object" || options.enclave === null) throw new ConfigurationError("enclave must be an object with a host and a trust");
+    // Untyped code can give both; an enclave client has no cache secret to apply it to.
+    const secret = (options as { readonly userCacheSecret?: unknown }).userCacheSecret;
+    if ((options as { readonly fetchRouterList?: unknown }).fetchRouterList !== undefined) {
+      throw new ConfigurationError("fetchRouterList is the router's option; an enclave client discovers no router");
+    }
+    if (secret !== undefined && secret !== "") {
+      throw new ConfigurationError("userCacheSecret is the router's option; an enclave client never adds a user_cache_secret, so set it in each request body instead");
+    }
+    client = await createEnclaveHTTPClient(options.enclave.host, options.enclave.trust, clientOptions, seams);
+  }
   const provider = createOpenAICompatible({
     name: "tinfoil",
-    baseURL: openAIURLOf(client),
+    baseURL: apiBaseURL(client, options.apiPath),
     apiKey: credential,
     ...(options.headers === undefined ? {} : { headers: { ...options.headers } }),
     // The client's fetch has the global fetch's call signature, which is all a DOM or Node `typeof fetch` is. Bun's

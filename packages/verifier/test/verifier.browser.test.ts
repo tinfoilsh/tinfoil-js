@@ -20,7 +20,6 @@ describe("verifier in a browser", () => {
     const v = await verifier.Verifier.create();
     expect(v).toBeInstanceOf(verifier.Verifier);
     expect(v.freshnessMaxAgeMs).toBe(7 * 24 * 60 * 60 * 1000);
-    expect(v.callerAuthorizesConfig).toBe(false);
     expect(v.pinnedRegisters).toBeUndefined();
   });
 
