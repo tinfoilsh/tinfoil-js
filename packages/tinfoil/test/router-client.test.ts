@@ -11,7 +11,7 @@ import { join } from "node:path";
 import { PROTOCOL } from "ehbp";
 import { APIConnectionError } from "openai";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
-import { AttestationError, ConfigurationError, NetworkError, TinfoilError } from "../src/errors.js";
+import { AttestationError, ConfigurationError, findTinfoilError, NetworkError, TinfoilError } from "../src/errors.js";
 import type { RuntimeGlobals } from "../src/internal/platform.js";
 import { createTinfoilClient, OpenAIClient } from "../src/openai-client.js";
 import type { Fetch, RouterOptions, Transport } from "../src/options.js";
@@ -428,6 +428,7 @@ describe("errors through the OpenAI API surface", () => {
     expect(failure).toBeInstanceOf(APIConnectionError);
     expect(failure.cause).toBeInstanceOf(AttestationError);
     expect((failure.cause as Error).message).toMatch(/rejected on refresh/);
+    expect(findTinfoilError(failure)).toBe(failure.cause);
     // The default maxRetries of 2 means three attempts, each verifying again.
     expect(checks()).toBe(3);
   }, 15_000);
@@ -441,6 +442,7 @@ describe("errors through the OpenAI API surface", () => {
     const once = await rejection(ai.withOptions({ maxRetries: 0 }).chat.completions.create(request));
     expect(once).toBeInstanceOf(APIConnectionError);
     expect(once.cause).toBeInstanceOf(AttestationError);
+    expect(findTinfoilError(once)?.category).toBe("attestation");
     expect(checks()).toBe(4);
     const perRequest = await rejection(ai.chat.completions.create(request, { maxRetries: 0 }));
     expect(perRequest.cause).toBeInstanceOf(AttestationError);

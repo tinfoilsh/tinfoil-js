@@ -37,6 +37,7 @@ const EXPORTS = [
   "ConfigurationError",
   "NetworkError",
   "AttestationError",
+  "findTinfoilError",
   // session recovery
   "sessionRecoveryToken",
   "serializeSessionRecoveryToken",
