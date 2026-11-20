@@ -91,7 +91,9 @@ const OPENAI_CLIENT_MEMBERS = { httpClient: "property", withOptions: "method" } 
 /** The type-only exports, pinned under the test typecheck: a removed or renamed type fails compilation here. */
 type TypeExports = [
   surface.Fetch,
-  surface.TransportMode,
+  surface.Transport,
+  surface.TLS,
+  surface.EHBP,
   surface.VerificationCheck,
   surface.CallOptions,
   surface.EnclaveOptions,
@@ -331,11 +333,11 @@ describe("public surface", () => {
   it("checks enclave client options before any network I/O", async () => {
     const fetches = countingFetch();
     await expect(createEnclaveHTTPClient("", { kind: "repoPin", repo: "tinfoilsh/repo" }, {}, { documentFetch: fetches.fetch })).rejects.toBeInstanceOf(surface.ConfigurationError);
-    await expect(createEnclaveOpenAIClient("enclave.example", { kind: "repoPin", repo: "tinfoilsh/repo" }, { baseURL: "http://proxy.example/" }, {}, { documentFetch: fetches.fetch })).rejects.toBeInstanceOf(
+    await expect(createEnclaveOpenAIClient("enclave.example", { kind: "repoPin", repo: "tinfoilsh/repo" }, { transport: { kind: "ehbp", proxyURL: "http://proxy.example/" } }, {}, { documentFetch: fetches.fetch })).rejects.toBeInstanceOf(
       surface.ConfigurationError,
     );
-    // The fetch option carries sealed requests, so it is refused with the TLS mode before either fetch is called.
-    await expect(createEnclaveHTTPClient("enclave.example", { kind: "repoPin", repo: "tinfoilsh/repo" }, { transportMode: "tls", fetch: fetches.fetch }, { documentFetch: fetches.fetch })).rejects.toBeInstanceOf(
+    // A proxy on the enclave's own origin is refused before either fetch is called.
+    await expect(createEnclaveHTTPClient("enclave.example", { kind: "repoPin", repo: "tinfoilsh/repo" }, { transport: { kind: "ehbp", proxyURL: "https://enclave.example/relay", fetch: fetches.fetch } }, { documentFetch: fetches.fetch })).rejects.toBeInstanceOf(
       surface.ConfigurationError,
     );
     expect(fetches.calls).toBe(0);
@@ -350,10 +352,8 @@ describe("public surface", () => {
   });
 
   it("checks router client options before any network I/O", async () => {
-    await expect(surface.RouterHTTPClient.create({ transportMode: "tls", baseURL: "https://proxy.example/" })).rejects.toBeInstanceOf(
-      surface.ConfigurationError,
-    );
-    await expect(surface.RouterOpenAIClient.create({ baseURL: "http://proxy.example/" })).rejects.toBeInstanceOf(surface.ConfigurationError);
+    await expect(surface.RouterHTTPClient.create({ transport: { kind: "ehbp", proxyURL: "https://proxy.example/?" } })).rejects.toBeInstanceOf(surface.ConfigurationError);
+    await expect(surface.RouterOpenAIClient.create({ transport: { kind: "ehbp", proxyURL: "http://proxy.example/" } })).rejects.toBeInstanceOf(surface.ConfigurationError);
   });
 
   it("refuses the OpenAI options that would choose another transport before any network I/O", async () => {
@@ -378,9 +378,9 @@ describe("public surface", () => {
   it("fetches nothing before rejecting router client options", async () => {
     const fetches = countingFetch();
     const seams = { routersFetch: fetches.fetch, documentFetch: fetches.fetch };
-    await expect(createRouterHTTPClient({ transportMode: "tls", baseURL: "https://proxy.example/" }, seams)).rejects.toBeInstanceOf(surface.ConfigurationError);
-    await expect(createRouterOpenAIClient({ baseURL: "http://proxy.example/" }, {}, seams)).rejects.toBeInstanceOf(surface.ConfigurationError);
-    await expect(createRouterOpenAIClient({ transportMode: "tls", fetch: fetches.fetch }, {}, seams)).rejects.toBeInstanceOf(surface.ConfigurationError);
+    await expect(createRouterHTTPClient({ transport: { kind: "ehbp", proxyURL: "https://proxy.example/#" } }, seams)).rejects.toBeInstanceOf(surface.ConfigurationError);
+    await expect(createRouterOpenAIClient({ transport: { kind: "ehbp", proxyURL: "http://proxy.example/" } }, {}, seams)).rejects.toBeInstanceOf(surface.ConfigurationError);
+    await expect(createRouterOpenAIClient({ transport: { kind: "quic" } as never }, {}, seams)).rejects.toBeInstanceOf(surface.ConfigurationError);
     expect(fetches.calls).toBe(0);
   });
 });

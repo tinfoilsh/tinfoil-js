@@ -8,7 +8,7 @@
 import { KEY_SPKI_FP_SHA256_V1_FORMAT, KEY_X25519_HPKE_V1_FORMAT, UsageError, type Verification, type Verifier } from "@tinfoilsh/verifier";
 import { Identity, PROTOCOL } from "ehbp";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
-import { checkNetworkFetch, createEnclaveHTTPClient, EnclaveHTTPClient, resolveTransportMode, type EnclaveClientSeams } from "../src/enclave-client.js";
+import { createEnclaveHTTPClient, EnclaveHTTPClient, resolveTransport, type EnclaveClientSeams } from "../src/enclave-client.js";
 import { ConfigurationError } from "../src/errors.js";
 import { resetProcessUserCacheSecretForTests, resolveUserCacheSecret } from "../src/internal/cachesecret.js";
 import { PLATFORM } from "../src/internal/platform.js";
@@ -103,12 +103,12 @@ describe("the browser entry", () => {
   });
 
   it("defaults to the EHBP transport and refuses TLS, naming the browser limitation", async () => {
-    expect(resolveTransportMode(undefined)).toBe("ehbp");
-    expect(() => resolveTransportMode("tls")).toThrow(/browsers don't expose/);
-    const rejected = browserEntry.EnclaveHTTPClient.create(ENCLAVE, { kind: "repoPin", repo: "tinfoilsh/repo" }, { transportMode: "tls" });
+    expect(resolveTransport(undefined).mode).toBe("ehbp");
+    expect(() => resolveTransport({ kind: "tls" })).toThrow(/browsers don't expose/);
+    const rejected = browserEntry.EnclaveHTTPClient.create(ENCLAVE, { kind: "repoPin", repo: "tinfoilsh/repo" }, { transport: { kind: "tls" } });
     await expect(rejected).rejects.toBeInstanceOf(browserEntry.ConfigurationError);
-    await expect(rejected).rejects.toThrow(/"tls" transport mode pins the server certificate, which browsers don't expose/);
-    await expect(browserEntry.RouterHTTPClient.create({ transportMode: "tls" })).rejects.toThrow(/browsers don't expose/);
+    await expect(rejected).rejects.toThrow(/TLS transport \(\{ kind: "tls" \}\) pins the server certificate, which browsers don't expose/);
+    await expect(browserEntry.RouterHTTPClient.create({ transport: { kind: "tls" } })).rejects.toThrow(/browsers don't expose/);
   });
 
   it("keeps one in-memory cache secret for the page, without warning", async () => {
@@ -141,7 +141,7 @@ describe("EnclaveHTTPClient in a browser", () => {
       documents.count++;
       return new Response(new Uint8Array([1]));
     };
-    const client = await createEnclaveHTTPClient(ENCLAVE, { kind: "repoPin", repo: "tinfoilsh/repo" }, { fetch: network.fetch }, { verifier: verifier(peer.publicKeyHex), documentFetch: counting, sleep: async () => {} });
+    const client = await createEnclaveHTTPClient(ENCLAVE, { kind: "repoPin", repo: "tinfoilsh/repo" }, { transport: { kind: "ehbp", fetch: network.fetch } }, { verifier: verifier(peer.publicKeyHex), documentFetch: counting, sleep: async () => {} });
     expect(documents.count).toBe(1);
     expect(network.seen).toHaveLength(0);
     const res = await client.fetch(`https://${ENCLAVE}/echo`, { method: "POST", body: "prompt", headers: { authorization: "Bearer t" } });
@@ -155,11 +155,9 @@ describe("EnclaveHTTPClient in a browser", () => {
     expect(network.seen).toHaveLength(2);
     expect(documents.count).toBe(1);
 
-    // The option's own check runs in the browser build too; the factory refuses the TLS mode for the browser's reason before it reaches that check.
-    expect(() => checkNetworkFetch("tls", network.fetch)).toThrow(/fetch option .* requires transportMode "ehbp"/);
-    expect(() => checkNetworkFetch("ehbp", network.fetch)).not.toThrow();
+    // The factory refuses the TLS transport for the browser's reason.
     const before = peer.seen.length;
-    await expect(createEnclaveHTTPClient(ENCLAVE, { kind: "repoPin", repo: "tinfoilsh/repo" }, { fetch: network.fetch, transportMode: "tls" }, { verifier: verifier(peer.publicKeyHex), documentFetch: counting })).rejects.toThrow(/browsers don't expose/);
+    await expect(createEnclaveHTTPClient(ENCLAVE, { kind: "repoPin", repo: "tinfoilsh/repo" }, { transport: { kind: "tls" } }, { verifier: verifier(peer.publicKeyHex), documentFetch: counting })).rejects.toThrow(/browsers don't expose/);
     expect(documents.count).toBe(1);
     expect(peer.seen.length).toBe(before);
     expect(network.seen).toHaveLength(2);

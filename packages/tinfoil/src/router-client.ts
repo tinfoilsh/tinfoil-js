@@ -5,12 +5,11 @@
  * created and tries routers for at most 30 seconds before falling back.
  */
 import type { Verification } from "@tinfoilsh/verifier";
-import { attestedFetch, buildVerifier, checkNetworkFetch, modeFor, resolveTransportMode, setOpenAIURL, type EnclaveClientSeams } from "./enclave-client.js";
+import { attestedFetch, buildVerifier, modeFor, resolveTransport, setOpenAIURL, type EnclaveClientSeams } from "./enclave-client.js";
 import { ConfigurationError } from "./errors.js";
 import { resolveUserCacheSecret } from "./internal/cachesecret.js";
 import { asyncDispose } from "./internal/dispose.js";
 import { discoverRouter } from "./internal/router.js";
-import { normalizeBaseURL, validateBaseURL } from "./internal/transport/base-url.js";
 import type { KeyedTransport } from "./internal/transport/transport.js";
 import { registerWebSocketAccess } from "./internal/websocket.js";
 import type { CallOptions, Fetch, RouterOptions } from "./options.js";
@@ -30,21 +29,12 @@ let construct: (transport: KeyedTransport, baseURL: string, openAIURL: string, f
 
 /** @internal The factory with its test seams; {@link RouterHTTPClient.create} is this without them. */
 export async function createRouterHTTPClient(options: RouterOptions, seams: RouterClientSeams): Promise<RouterHTTPClient> {
-  const mode = resolveTransportMode(options.transportMode, seams.globals);
-  checkNetworkFetch(mode, options.fetch);
-  let baseURL = options.baseURL ?? "";
-  if (baseURL !== "") {
-    validateBaseURL(baseURL);
-    if (mode === "tls") {
-      throw new ConfigurationError('a base URL is a proxy when discovering the router, which requires transportMode "ehbp"');
-    }
-    baseURL = normalizeBaseURL(baseURL);
-  }
+  const resolved = resolveTransport(options.transport, seams.globals);
   const verifier = await buildVerifier(undefined, options.policy, seams);
   const transport = await discoverRouter({
     verifier,
     verificationCheck: options.verificationCheck,
-    mode: modeFor(mode, options.fetch, seams),
+    mode: modeFor(resolved, seams),
     signal: options.signal,
     routersFetch: seams.routersFetch,
     documentFetch: seams.documentFetch,
@@ -54,11 +44,12 @@ export async function createRouterHTTPClient(options: RouterOptions, seams: Rout
   });
   const secret = await (seams.resolveSecret ?? resolveUserCacheSecret)(options.userCacheSecret);
   const host = transport.enclave().host();
+  const proxyURL = resolved.proxyURL;
   const client = construct(
     transport,
-    baseURL !== "" ? baseURL : `https://${host}/`,
-    baseURL !== "" ? baseURL : `https://${host}/v1/`,
-    attestedFetch(transport, host, baseURL, secret),
+    proxyURL !== "" ? proxyURL : `https://${host}/`,
+    proxyURL !== "" ? proxyURL : `https://${host}/v1/`,
+    attestedFetch(transport, host, proxyURL, secret),
   );
   registerWebSocketAccess(client, transport, seams.tls ?? {});
   // Discovery leaves its fallback unverified. A verification that the
@@ -86,7 +77,7 @@ export async function createRouterHTTPClient(options: RouterOptions, seams: Rout
 export class RouterHTTPClient {
   /** As {@link EnclaveHTTPClient.fetch}. */
   readonly fetch: Fetch;
-  /** Where requests go: the `baseURL` option, or the router's own origin. Always ends with `/`, so a relative path resolves against it with `new URL(path, client.baseURL)`. */
+  /** Where requests go: the EHBP proxy, or the router's own origin. Always ends with `/`, so a relative path resolves against it with `new URL(path, client.baseURL)`. */
   readonly baseURL: string;
   /** The host of the verified router, even when `baseURL` is a proxy. */
   readonly enclave: string;

@@ -11,7 +11,7 @@ import { Identity } from "ehbp";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { AttestationError, ConfigurationError, NetworkError } from "../src/errors.js";
 import { Enclave } from "../src/internal/enclave.js";
-import { isLoopback, normalizeBaseURL, validateBaseURL, validateTLSBaseURL } from "../src/internal/transport/base-url.js";
+import { isLoopback, normalizeBaseURL, refuseEnclaveOriginProxy, validateBaseURL } from "../src/internal/transport/base-url.js";
 import { checkEHBP, ehbpMode } from "../src/internal/transport/ehbp.js";
 import { ENCLAVE_URL_HEADER, withEnclaveURL } from "../src/internal/transport/header.js";
 import { withReplay } from "../src/internal/transport/replay.js";
@@ -333,10 +333,11 @@ describe("base URL rules", () => {
     expect(normalizeBaseURL("HTTPS://Proxy.Example.com:443/v1")).toBe("https://proxy.example.com/v1/");
   });
 
-  it("requires a TLS-mode base URL to stay on the enclave's origin", () => {
-    expect(() => validateTLSBaseURL("", "enclave.example")).not.toThrow();
-    expect(() => validateTLSBaseURL("https://enclave.example:443/v1/", "enclave.example")).not.toThrow();
-    expect(() => validateTLSBaseURL("https://proxy.example/v1/", "enclave.example")).toThrow(/is a proxy, which requires the EHBP transport mode/);
-    expect(() => validateTLSBaseURL("not a url", "enclave.example")).toThrow(ConfigurationError);
+  it("refuses a proxy URL on the enclave's own origin, which is no proxy", () => {
+    expect(() => refuseEnclaveOriginProxy("", "enclave.example")).not.toThrow();
+    expect(() => refuseEnclaveOriginProxy("https://proxy.example/v1/", "enclave.example")).not.toThrow();
+    expect(() => refuseEnclaveOriginProxy("https://enclave.example:443/v1/", "enclave.example")).toThrow(/enclave's own origin/);
+    expect(() => refuseEnclaveOriginProxy("https://ENCLAVE.example/relay", "enclave.example")).toThrow(/enclave's own origin/);
+    expect(() => refuseEnclaveOriginProxy("not a url", "enclave.example")).toThrow(ConfigurationError);
   });
 });

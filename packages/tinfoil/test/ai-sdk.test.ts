@@ -15,7 +15,7 @@ import { EnclaveHTTPClient } from "../src/enclave-client.js";
 import { ConfigurationError } from "../src/errors.js";
 import type { RuntimeGlobals } from "../src/internal/platform.js";
 import { createTinfoilClient } from "../src/openai-client.js";
-import type { Fetch } from "../src/options.js";
+import type { Fetch, Transport } from "../src/options.js";
 import { RouterHTTPClient } from "../src/router-client.js";
 import { KEY_SPKI_FP_SHA256_V1_FORMAT, KEY_X25519_HPKE_V1_FORMAT, UsageError, type Verification, type Verifier } from "../../verifier/src/index.js";
 import { startEhbpServer, type EhbpServer } from "./helpers/ehbp-server.js";
@@ -117,9 +117,8 @@ describe("createTinfoil's option checks", () => {
       [{ apiKey: "" }, /credential is required/],
       [{ apiKey: "k", bearerToken: "t" }, /not both/],
       [{ apiKey: "k", enclave: { host: "", trust: { kind: "repoPin", repo: ROUTER_REPO } } }, /host is required/],
-      [{ apiKey: "k", transportMode: "tls", baseURL: "https://proxy.example/" }, /ehbp/],
-      [{ apiKey: "k", transportMode: "quic" as never }, /unknown transport mode/],
-      [{ apiKey: "k", transportMode: "tls", fetch: network.fetch }, /fetch option .* requires transportMode "ehbp"/],
+      [{ transport: { kind: "ehbp", proxyURL: "http://proxy.example/" }, apiKey: "k" }, /HTTP is allowed only for localhost/],
+      [{ transport: { kind: "quic" } as unknown as Transport, apiKey: "k" }, /transport must have kind/],
       [{ apiKey: "k", enclave: { host: "enclave.example", trust: { kind: "projectPin", project: "org/project", registryIDs: [] } } }, /registryIDs must not be empty/],
       [{ apiKey: "k", enclave: { host: "enclave.example", repo: ROUTER_REPO } as never }, /trust is required/],
     ];
@@ -141,18 +140,18 @@ describe("createTinfoil's option checks", () => {
     await expect(failure).rejects.toThrow(/bearerToken/);
     expect(s.documentFetches).toBe(0);
     // The worker's transport check runs through the same globals: TLS is refused there.
-    const pinned = createTinfoilProvider({ bearerToken: "t", transportMode: "tls" }, { verifier: verifier({ tls: TEST_PIN }), ...s, globals: worker });
+    const pinned = createTinfoilProvider({ transport: { kind: "tls" }, bearerToken: "t" }, { verifier: verifier({ tls: TEST_PIN }), ...s, globals: worker });
     await expect(pinned).rejects.toBeInstanceOf(ConfigurationError);
     await expect(pinned).rejects.toThrow(/browsers don't expose/);
     expect(s.documentFetches).toBe(0);
     // A bearer token over sealed bodies is accepted there; the server runtime accepts either credential and either mode.
     const sealed = await createTinfoilProvider(
-      { bearerToken: "t", enclave: { host: "enclave.example", trust: { kind: "eitherPin", repo: "tinfoilsh/repo", project: "tinfoilsh/project" } }, baseURL: `${ehbp.origin}/` },
+      { bearerToken: "t", enclave: { host: "enclave.example", trust: { kind: "eitherPin", repo: "tinfoilsh/repo", project: "tinfoilsh/project" } }, transport: { kind: "ehbp", proxyURL: `${ehbp.origin}/` } },
       { verifier: verifier({ tls: "ab".repeat(32), hpke: ehbp.publicKeyHex }), ...seams([]), globals: worker });
     expect(sealed.httpClient).toBeInstanceOf(EnclaveHTTPClient);
     expect((sealed.httpClient as EnclaveHTTPClient).trust).toEqual({ kind: "eitherPin", repo: "tinfoilsh/repo", project: "tinfoilsh/project" });
     const node = { process: { versions: { node: "22.0.0" } } } as RuntimeGlobals;
-    await expect(createTinfoilProvider({ apiKey: "k", transportMode: "tls" }, { verifier: verifier({ tls: TEST_PIN }), ...s, globals: node })).resolves.toBeDefined();
+    await expect(createTinfoilProvider({ transport: { kind: "tls" }, apiKey: "k" }, { verifier: verifier({ tls: TEST_PIN }), ...s, globals: node })).resolves.toBeDefined();
   });
 
   it("refuses an API key outside a server with the same error as the OpenAI client", async () => {
@@ -178,7 +177,7 @@ describe("the provider over the discovered router", () => {
 
   beforeAll(async () => {
     s = seams([tls.host]);
-    tinfoil = await createTinfoilProvider({ apiKey: "secret-key", transportMode: "tls", headers: { "x-app": "demo" } }, { ...s, verifier: verifier({ tls: TEST_PIN }) });
+    tinfoil = await createTinfoilProvider({ transport: { kind: "tls" }, apiKey: "secret-key", headers: { "x-app": "demo" } }, { ...s, verifier: verifier({ tls: TEST_PIN }) });
   });
 
   it("is bound to the verified router and exposes it", () => {
@@ -264,7 +263,7 @@ describe("the provider over one enclave", () => {
   it("seals bodies to the enclave's key through a proxy and exposes the enclave client", async () => {
     const s = seams([]);
     const tinfoil = await createTinfoilProvider(
-      { bearerToken: "short-lived", enclave: { host: "enclave.example", trust: { kind: "repoPin", repo: "tinfoilsh/repo" } }, transportMode: "ehbp", baseURL: `${ehbp.origin}/` },
+      { transport: { kind: "ehbp", proxyURL: `${ehbp.origin}/` }, bearerToken: "short-lived", enclave: { host: "enclave.example", trust: { kind: "repoPin", repo: "tinfoilsh/repo" } } },
       { ...s, verifier: verifier({ tls: "ab".repeat(32), hpke: ehbp.publicKeyHex }) });
     const client = tinfoil.httpClient;
     expect(client).toBeInstanceOf(EnclaveHTTPClient);
@@ -287,7 +286,7 @@ describe("the provider's fetch option", () => {
     const network = recordingFetch((input, init) => fetch(input, init));
     const s = seams(["router.example"]);
     const tinfoil = await createTinfoilProvider(
-      { apiKey: "secret-key", transportMode: "ehbp", baseURL: `${ehbp.origin}/`, fetch: network.fetch },
+      { transport: { kind: "ehbp", proxyURL: `${ehbp.origin}/`, fetch: network.fetch }, apiKey: "secret-key" },
       { ...s, verifier: verifier({ tls: "ab".repeat(32), hpke: ehbp.publicKeyHex }) });
     expect(tinfoil.httpClient).toBeInstanceOf(RouterHTTPClient);
     expect(s.documentFetches).toBe(1);

@@ -16,7 +16,9 @@ export {
 } from "./session-recovery.js";
 export type {
   Fetch,
-  TransportMode,
+  Transport,
+  TLS,
+  EHBP,
   VerificationCheck,
   CallOptions,
   EnclaveOptions,

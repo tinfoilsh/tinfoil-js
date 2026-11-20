@@ -33,7 +33,7 @@ describe("Bun version floors", () => {
     expect(defaultTransportMode(bun(MIN_BUN_FOR_TLS_MODE))).toBe("tls");
     expect(defaultTransportMode(node)).toBe("tls");
     expect(() => checkTransportMode("tls", bun("1.3.14"))).toThrow(ConfigurationError);
-    expect(() => checkTransportMode("tls", bun("1.3.14"))).toThrow(/Bun 1.3.14 checks only after sending the request; use Bun 1.4.0 or later, or "ehbp"/);
+    expect(() => checkTransportMode("tls", bun("1.3.14"))).toThrow(/Bun 1.3.14 checks only after sending the request; use Bun 1.4.0 or later, or the EHBP transport/);
     expect(() => checkTransportMode("ehbp", bun("1.3.14"))).not.toThrow();
     expect(() => checkTransportMode("tls", bun(MIN_BUN_FOR_TLS_MODE))).not.toThrow();
     expect(() => checkTransportMode("tls", node)).not.toThrow();

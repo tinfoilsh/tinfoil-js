@@ -67,7 +67,7 @@ describe("createTinfoil in a browser", () => {
   it("lives on its own entry, not the main one, and refuses the TLS transport", async () => {
     expect(typeof createTinfoil).toBe("function");
     expect("createTinfoil" in browserEntry).toBe(false);
-    await expect(createTinfoil({ bearerToken: "t", transportMode: "tls" })).rejects.toBeInstanceOf(ConfigurationError);
+    await expect(createTinfoil({ transport: { kind: "tls" }, bearerToken: "t" })).rejects.toBeInstanceOf(ConfigurationError);
   });
 
   it("refuses a long-lived API key in a page and names the bearer token as the credential, as the OpenAI client does", async () => {

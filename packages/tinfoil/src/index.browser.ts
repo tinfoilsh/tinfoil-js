@@ -11,7 +11,7 @@
  * project type-checks a few names that this build refuses with a
  * `ConfigurationError` when they are called: the pinned WebSockets
  * (`createWebSocket` and `pinnedWebSocketOptions`), realtime sessions
- * (`createRealtimeWebSocket`), and the `"tls"` transport mode, since a
+ * (`createRealtimeWebSocket`), and the TLS transport (`{ kind: "tls" }`), since a
  * browser exposes nothing of the TLS connection that they would pin.
  */
 export * from "./surface.js";

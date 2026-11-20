@@ -7,7 +7,7 @@
  */
 import { describe, expect, it } from "bun:test";
 import { RouterHTTPClient, RouterOpenAIClient } from "../src/index.js";
-import type { TransportMode } from "../src/options.js";
+import type { Transport } from "../src/options.js";
 import { completeChat, SHA256_HEX } from "./helpers/live.js";
 
 const RUN_INTEGRATION = process.env.RUN_TINFOIL_INTEGRATION === "true";
@@ -25,12 +25,12 @@ describe("RouterHTTPClient under Bun on the live router", () => {
   );
 });
 
-for (const transportMode of ["tls", "ehbp"] as const satisfies readonly TransportMode[]) {
+for (const transportMode of ["tls", "ehbp"] as const satisfies readonly Transport["kind"][]) {
   describe(`RouterOpenAIClient under Bun over ${transportMode} on the live router`, () => {
     it.skipIf(!RUN_INTEGRATION || apiKey === "")(
       "verifies a router and completes a chat through it",
       async () => {
-        const ai = await RouterOpenAIClient.create({ transportMode }, { apiKey });
+        const ai = await RouterOpenAIClient.create({ transport: { kind: transportMode } }, { apiKey });
         const router = ai.httpClient;
         expect(ai.baseURL).toBe(`https://${router.enclave}/v1/`);
         const completed = await completeChat(ai);

@@ -18,19 +18,58 @@ import type { ClientOptions as WsClientOptions } from "ws";
 export type Fetch = (...args: Parameters<typeof globalThis.fetch>) => ReturnType<typeof globalThis.fetch>;
 
 /**
- * How a client protects its traffic to an enclave.
- *
- * - `"tls"` pins each connection to the attested TLS key. It protects the
- *   whole request and response and needs a direct connection, so it is the
- *   default where the runtime checks the connection before it sends over
- *   it (Node, and Bun 1.4.0 or later; an older Bun refuses it).
- * - `"ehbp"` seals request and response bodies to the attested HPKE key, so
- *   they stay private through a proxy. The method, URL and headers aren't
- *   sealed, and neither is a request without a body or its response. It
- *   refuses protocol upgrades and CONNECT tunnels. It is the only mode in
- *   browsers, and the default there.
+ * How a client protects its traffic to an enclave: {@link TLS} or
+ * {@link EHBP}, told apart by `kind`. Undefined selects the platform's
+ * default: `{ kind: "tls" }` where the runtime checks a connection before it
+ * sends over it (Node, Bun 1.4.0 or later, and Deno 2.8.0 or later), and
+ * `{ kind: "ehbp" }` in browsers and on an older Bun or Deno, which refuse
+ * TLS. An unknown `kind` is a {@link ConfigurationError}.
  */
-export type TransportMode = "tls" | "ehbp";
+export type Transport = TLS | EHBP;
+
+/**
+ * Pins each connection to the attested TLS key. It protects the whole
+ * request and response, and needs a direct connection to the enclave, so it
+ * takes no URL: requests go to the enclave's own HTTPS origin.
+ */
+export interface TLS {
+  readonly kind: "tls";
+}
+
+/**
+ * Seals request and response bodies to the attested HPKE key, so that they
+ * stay private through a proxy. The method, URL and headers aren't sealed,
+ * and neither is a request without a body or its response. It refuses
+ * protocol upgrades and CONNECT tunnels, because nothing after the handshake
+ * would be sealed.
+ */
+export interface EHBP {
+  readonly kind: "ehbp";
+  /**
+   * A proxy that forwards requests to the enclave, and that requests are
+   * sent to; undefined or "" sends them directly to the enclave. Its path, if
+   * any, is where the proxy is mounted, not the API path: an OpenAI client
+   * joins its API path under it. Requests to the proxy carry
+   * `X-Tinfoil-Enclave-Url` so that it can forward them. The proxy must use
+   * HTTPS, since EHBP doesn't seal headers such as the API key; `http://` is
+   * accepted only when its host is localhost or a loopback IP address. A URL
+   * with a username or password, a query or a fragment, even an empty one,
+   * is a {@link ConfigurationError}, and so is an enclave client's proxy on
+   * the enclave's own origin, which is no proxy: leave it unset to connect
+   * directly.
+   */
+  readonly proxyURL?: string;
+  /**
+   * The network implementation that sends the sealed requests, for a native
+   * HTTP bridge or a trusted relay. It receives each request after its body
+   * is sealed, and the response that it returns is opened by the client; a
+   * request without a body passes through it unsealed, as EHBP leaves it.
+   * The method, URL and headers aren't sealed, so a relay sees them, the API
+   * key included. Attestation documents and the router list are still
+   * fetched with the runtime's fetch. Undefined selects the runtime's fetch.
+   */
+  readonly fetch?: Fetch;
+}
 
 /**
  * Called with each verification that passes the verifier, before the client
@@ -148,20 +187,8 @@ export interface PinnedWebSocket {
 
 /** Configures an {@link EnclaveHTTPClient}. */
 export interface EnclaveOptions {
-  /** Defaults to `"tls"` on Node and Bun 1.4.0 or later, `"ehbp"` in browsers and on an older Bun, which refuses `"tls"`. */
-  readonly transportMode?: TransportMode;
-  /**
-   * A path on the enclave's own HTTPS origin, or a proxy on another origin,
-   * which requires `"ehbp"`. Requests to a proxy carry `X-Tinfoil-Enclave-Url`
-   * so it can forward them. A proxy must use HTTPS, since EHBP doesn't seal
-   * headers such as the API key; `http://` is accepted only for localhost or
-   * a loopback IP address. It is made to end with `/`; a query string or
-   * fragment is a {@link ConfigurationError}. For the OpenAI clients this is
-   * the API root, used as the OpenAI SDK uses its `baseURL`: nothing is
-   * appended, so a proxy that expects the enclave's own paths needs `/v1/`
-   * on the end.
-   */
-  readonly baseURL?: string;
+  /** How requests to the enclave are protected; undefined selects the platform's default, as {@link Transport} describes. */
+  readonly transport?: Transport;
   /**
    * The verification policy, as plain data; undefined selects the defaults.
    * The client builds its verifier from the trust argument and this policy,
@@ -176,37 +203,18 @@ export interface EnclaveOptions {
    * opaque random value, not a raw user ID or API key.
    */
   readonly userCacheSecret?: string;
-  /**
-   * The network implementation that sends the client's requests in the
-   * `"ehbp"` transport mode, for a native HTTP bridge or a trusted relay. It
-   * receives each request after its body is sealed, and the response that it
-   * returns is opened by the client; a request without a body passes through
-   * it unsealed, as the mode leaves it. The method, URL and headers aren't
-   * sealed, so a relay sees them, the API key included. Attestation documents
-   * are still fetched with the runtime's fetch. Undefined selects the
-   * runtime's fetch. Refused with `transportMode: "tls"`, which pins the
-   * connection itself and sends nothing through a caller's fetch.
-   */
-  readonly fetch?: Fetch;
   /** Aborts the verification the factory performs before it returns. */
   readonly signal?: AbortSignal;
 }
 
 /** Configures a {@link RouterHTTPClient}. */
 export interface RouterOptions {
-  /** Defaults to `"tls"` on Node and Bun 1.4.0 or later, `"ehbp"` in browsers and on an older Bun, which refuses `"tls"`. */
-  readonly transportMode?: TransportMode;
   /**
-   * A proxy that forwards requests to the router discovery chooses, which
-   * requires `"ehbp"`: the router isn't known before discovery, so a base URL
-   * can't name its origin. Requests carry `X-Tinfoil-Enclave-Url`. The proxy
-   * must use HTTPS; `http://` is accepted only for localhost or a loopback IP
-   * address. It is made to end with `/`; a query string or fragment is a
-   * {@link ConfigurationError}. For the OpenAI clients this is the API root,
-   * used as the OpenAI SDK uses its `baseURL`: nothing is appended, so a
-   * proxy that expects the enclave's own paths needs `/v1/` on the end.
+   * How requests to the router are protected; undefined selects the
+   * platform's default, as {@link Transport} describes. An EHBP proxy
+   * forwards requests to the router that discovery chooses.
    */
-  readonly baseURL?: string;
+  readonly transport?: Transport;
   /**
    * The verification policy, as plain data; undefined selects the defaults.
    * The router's config trust is fixed to its repository.
@@ -228,13 +236,6 @@ export interface RouterOptions {
    * for it. Use an opaque random value, not a raw user ID or API key.
    */
   readonly userCacheSecret?: string;
-  /**
-   * As {@link EnclaveOptions.fetch}: the network implementation that sends
-   * the client's sealed requests in the `"ehbp"` transport mode. The router
-   * list and attestation documents are still fetched with the runtime's
-   * fetch. Refused with `transportMode: "tls"`.
-   */
-  readonly fetch?: Fetch;
   /** Aborts discovery and the verification the factory performs before it returns. */
   readonly signal?: AbortSignal;
 }
@@ -309,9 +310,10 @@ export interface GatewayOptions {
    */
   readonly catalog?: () => Catalog;
   /**
-   * As {@link EnclaveOptions.fetch}: the network implementation that sends
-   * the client's sealed requests to the gateway. The catalog and attestation
-   * documents are still fetched with the runtime's fetch.
+   * As {@link EHBP.fetch}: the network implementation that sends the
+   * client's sealed requests to the gateway, which always uses EHBP. The
+   * catalog and attestation documents are still fetched with the runtime's
+   * fetch.
    */
   readonly fetch?: Fetch;
   /** Aborts the catalog fetch the factory performs before it returns. */

@@ -61,7 +61,7 @@ afterAll(() => {
 });
 
 function client(pin: string): Promise<EnclaveHTTPClient> {
-  return createEnclaveHTTPClient(host, { kind: "repoPin", repo: "tinfoilsh/repo" }, { transportMode: "tls" }, { verifier: verifier(pin), documentFetch, tls: { ca: cert } });
+  return createEnclaveHTTPClient(host, { kind: "repoPin", repo: "tinfoilsh/repo" }, { transport: { kind: "tls" } }, { verifier: verifier(pin), documentFetch, tls: { ca: cert } });
 }
 
 function opened(socket: PinnedWebSocket): Promise<void> {

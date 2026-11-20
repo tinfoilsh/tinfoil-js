@@ -50,7 +50,7 @@ export async function createGatewayHTTPClient(options: GatewayOptions, seams: Ga
   // Credentials in the URL would go out in plaintext to the gateway with every request.
   if (base.username !== "" || base.password !== "") throw new ConfigurationError("gateway base URL must not carry a username or password");
   // The rules every base URL follows, such as no query string or fragment; HTTPS is already required above.
-  validateBaseURL(given);
+  validateBaseURL(given, "gateway URL");
   const baseURL = normalizeBaseURL(given);
   const policy = await GatewayPolicy.create(
     options.modelPins,

@@ -10,7 +10,10 @@
  */
 import type { Verification } from "@tinfoilsh/verifier";
 import { AttestationError, stripCategory } from "../../errors.js";
-import type { Fetch, TransportMode } from "../../options.js";
+import type { Fetch } from "../../options.js";
+
+/** The transport a {@link Mode} implements, as the `kind` of the `Transport` option names it. */
+export type TransportMode = "tls" | "ehbp";
 import type { Enclave } from "../enclave.js";
 import { VerifiedEnclave, type State } from "../verified.js";
 import { requestURL } from "./origin.js";

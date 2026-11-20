@@ -27,12 +27,12 @@ describe("the HTTP entry", () => {
 
   it("exposes the HTTP options and verification facts without requiring the root entry", () => {
     expectTypeOf<[
-      http.Fetch, http.TransportMode, http.VerificationCheck, http.CallOptions,
+      http.Fetch, http.Transport, http.TLS, http.EHBP, http.VerificationCheck, http.CallOptions,
       http.EnclaveOptions, http.RouterOptions, http.GatewayOptions, http.ModelPin,
       http.Catalog, http.CatalogEntry, http.ReplicaVerification, http.ErrorCategory,
       http.SessionRecoveryToken,
     ]>().toEqualTypeOf<[
-      root.Fetch, root.TransportMode, root.VerificationCheck, root.CallOptions,
+      root.Fetch, root.Transport, root.TLS, root.EHBP, root.VerificationCheck, root.CallOptions,
       root.EnclaveOptions, root.RouterOptions, root.GatewayOptions, root.ModelPin,
       root.Catalog, root.CatalogEntry, root.ReplicaVerification, root.ErrorCategory,
       root.SessionRecoveryToken,
