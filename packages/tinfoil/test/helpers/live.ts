@@ -8,11 +8,12 @@
  * and on the text only when the model finished its answer.
  */
 import type OpenAI from "openai";
+import type { Trust } from "../../src/trust.js";
 
 export const LIVE_HOST = "inference.tinfoil.sh";
 export const LIVE_REPO = "tinfoilsh/confidential-model-router";
 /** The router's name is Tinfoil's in both namespaces. */
-export const LIVE_PIN = { repo: LIVE_REPO, project: LIVE_REPO };
+export const LIVE_PIN: Trust = { kind: "eitherPin", repo: LIVE_REPO, project: LIVE_REPO };
 export const LIVE_MODEL = "gpt-oss-120b";
 /** The finish reasons a completed request ends with: the answer finished, or the token budget ran out. */
 export const TERMINAL_FINISH_REASONS: readonly string[] = ["stop", "length"];

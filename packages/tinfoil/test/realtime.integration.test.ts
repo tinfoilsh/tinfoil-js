@@ -10,11 +10,12 @@ import { EnclaveOpenAIClient } from "../src/openai-client.js";
 import type { PinnedWebSocket } from "../src/options.js";
 import { createRealtimeWebSocket } from "../src/realtime.js";
 import { createWebSocket } from "../src/websocket.js";
+import type { Trust } from "../src/trust.js";
 
 const RUN_INTEGRATION = process.env.RUN_TINFOIL_INTEGRATION === "true";
 const HOST = "inference.tinfoil.sh";
 const ROUTER = "tinfoilsh/confidential-model-router";
-const PIN = { repo: ROUTER, project: ROUTER };
+const PIN: Trust = { kind: "eitherPin", repo: ROUTER, project: ROUTER };
 const MODEL = "voxtral-mini-4b-realtime";
 const apiKey = process.env.TINFOIL_API_KEY ?? "";
 

@@ -73,16 +73,16 @@ const EXPORTS = [
  * tests, where one is built.
  */
 type Members<T> = Record<Extract<keyof T, string>, "property" | "getter" | "method">;
-const ATTESTED_CLIENT_MEMBERS: Members<surface.EnclaveHTTPClient> & Members<surface.RouterHTTPClient> = {
+const ROUTER_CLIENT_MEMBERS: Members<surface.RouterHTTPClient> = {
   fetch: "property",
   baseURL: "property",
   enclave: "property",
-  pin: "property",
   current: "getter",
   ensureVerified: "method",
   reverify: "method",
   close: "method",
 };
+const ENCLAVE_CLIENT_MEMBERS: Members<surface.EnclaveHTTPClient> = { ...ROUTER_CLIENT_MEMBERS, trust: "getter" };
 const GATEWAY_CLIENT_MEMBERS: Members<surface.GatewayHTTPClient> = { fetch: "property", baseURL: "property", current: "getter", models: "method", ensureVerified: "method", close: "method" };
 const UNVERIFIED_CLIENT_MEMBERS: Members<unsafeEntry.UnverifiedClient> = { fetch: "property", baseURL: "property", keyOrigin: "property" };
 /** What the OpenAI subclasses add to the OpenAI client. */
@@ -239,10 +239,9 @@ describe("public surface", () => {
   });
 
   it("shapes the HTTP clients as specified: a `create` factory, state as properties, and the verification methods", () => {
-    for (const cls of [surface.EnclaveHTTPClient, surface.RouterHTTPClient]) {
-      expect(staticsOf(cls)).toEqual(["create"]);
-      expectShape(cls, ATTESTED_CLIENT_MEMBERS);
-    }
+    for (const cls of [surface.EnclaveHTTPClient, surface.RouterHTTPClient]) expect(staticsOf(cls)).toEqual(["create"]);
+    expectShape(surface.EnclaveHTTPClient, ENCLAVE_CLIENT_MEMBERS);
+    expectShape(surface.RouterHTTPClient, ROUTER_CLIENT_MEMBERS);
     expect(staticsOf(surface.GatewayHTTPClient)).toEqual(["create"]);
     expectShape(surface.GatewayHTTPClient, GATEWAY_CLIENT_MEMBERS);
   });
@@ -331,12 +330,12 @@ describe("public surface", () => {
 
   it("checks enclave client options before any network I/O", async () => {
     const fetches = countingFetch();
-    await expect(createEnclaveHTTPClient("", { repo: "tinfoilsh/repo" }, {}, { documentFetch: fetches.fetch })).rejects.toBeInstanceOf(surface.ConfigurationError);
-    await expect(createEnclaveOpenAIClient("enclave.example", { repo: "tinfoilsh/repo" }, { baseURL: "http://proxy.example/" }, {}, { documentFetch: fetches.fetch })).rejects.toBeInstanceOf(
+    await expect(createEnclaveHTTPClient("", { kind: "repoPin", repo: "tinfoilsh/repo" }, {}, { documentFetch: fetches.fetch })).rejects.toBeInstanceOf(surface.ConfigurationError);
+    await expect(createEnclaveOpenAIClient("enclave.example", { kind: "repoPin", repo: "tinfoilsh/repo" }, { baseURL: "http://proxy.example/" }, {}, { documentFetch: fetches.fetch })).rejects.toBeInstanceOf(
       surface.ConfigurationError,
     );
     // The fetch option carries sealed requests, so it is refused with the TLS mode before either fetch is called.
-    await expect(createEnclaveHTTPClient("enclave.example", { repo: "tinfoilsh/repo" }, { transportMode: "tls", fetch: fetches.fetch }, { documentFetch: fetches.fetch })).rejects.toBeInstanceOf(
+    await expect(createEnclaveHTTPClient("enclave.example", { kind: "repoPin", repo: "tinfoilsh/repo" }, { transportMode: "tls", fetch: fetches.fetch }, { documentFetch: fetches.fetch })).rejects.toBeInstanceOf(
       surface.ConfigurationError,
     );
     expect(fetches.calls).toBe(0);
@@ -363,7 +362,7 @@ describe("public surface", () => {
     const factories: Record<string, (options: surface.OpenAIOptions) => Promise<unknown>> = {
       createClient: (options) => createTinfoilClient(options, router),
       RouterOpenAIClient: (options) => createRouterOpenAIClient({}, options, router),
-      EnclaveOpenAIClient: (options) => createEnclaveOpenAIClient("enclave.example", { repo: "tinfoilsh/repo" }, {}, options, { documentFetch: fetches.fetch }),
+      EnclaveOpenAIClient: (options) => createEnclaveOpenAIClient("enclave.example", { kind: "repoPin", repo: "tinfoilsh/repo" }, {}, options, { documentFetch: fetches.fetch }),
       GatewayOpenAIClient: (options) => createGatewayOpenAIClient({}, options, { catalogFetch: fetches.fetch, documentFetch: fetches.fetch }),
     };
     for (const [name, factory] of Object.entries(factories)) {

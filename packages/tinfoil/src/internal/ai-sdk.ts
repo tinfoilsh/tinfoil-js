@@ -15,14 +15,13 @@ import { checkAPIKeyRuntime } from "./credential.js";
 import type { RuntimeGlobals } from "./platform.js";
 import type { EnclaveOptions, RouterOptions } from "../options.js";
 import { createRouterHTTPClient, RouterHTTPClient, type RouterClientSeams } from "../router-client.js";
+import type { Trust } from "../trust.js";
 
 /** The enclave a provider is bound to instead of the discovered router. */
 export interface TinfoilProviderEnclave {
   readonly host: string;
-  /** A GitHub repository, `owner/name[@tag][@sha256:digest]`. */
-  readonly repo?: string;
-  /** A config registry project, `org/project[@revision][@sha256:digest]`. */
-  readonly project?: string;
+  /** Who vouches for the enclave's config, as for {@link EnclaveHTTPClient.create}. */
+  readonly trust: Trust;
 }
 
 /**
@@ -33,7 +32,7 @@ export interface TinfoilProviderEnclave {
  * implementation that carries the client's sealed requests in the `"ehbp"`
  * transport mode, as for the clients, and is refused with `"tls"`.
  */
-export interface TinfoilProviderOptions extends Pick<RouterOptions & EnclaveOptions, "transportMode" | "baseURL" | "verifier" | "verificationCheck" | "userCacheSecret" | "signal" | "fetch"> {
+export interface TinfoilProviderOptions extends Pick<RouterOptions & EnclaveOptions, "transportMode" | "baseURL" | "policy" | "verificationCheck" | "userCacheSecret" | "signal" | "fetch"> {
   /** A long-lived API key, sent as the bearer credential. It belongs on a server, never in a page. */
   readonly apiKey?: string;
   /** A credential a browser page may hold, such as a short-lived token from the application's own sign-in. */
@@ -78,13 +77,13 @@ export async function createTinfoilProvider(options: TinfoilProviderOptions, sea
   const clientOptions = {
     transportMode: options.transportMode,
     baseURL: options.baseURL,
-    verifier: options.verifier,
+    policy: options.policy,
     verificationCheck: options.verificationCheck,
     userCacheSecret: options.userCacheSecret,
     signal: options.signal,
     fetch: options.fetch,
   };
-  const client = options.enclave === undefined ? await createRouterHTTPClient(clientOptions, seams) : await createEnclaveHTTPClient(options.enclave.host, { repo: options.enclave.repo, project: options.enclave.project }, clientOptions, seams);
+  const client = options.enclave === undefined ? await createRouterHTTPClient(clientOptions, seams) : await createEnclaveHTTPClient(options.enclave.host, options.enclave.trust, clientOptions, seams);
   const provider = createOpenAICompatible({
     name: "tinfoil",
     baseURL: openAIURLOf(client),

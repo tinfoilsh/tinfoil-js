@@ -23,9 +23,13 @@ export type {
   RouterOptions,
   GatewayOptions,
   ModelPin,
-  Pin,
+  Policy,
+  ArtifactTrust,
+  EndorsedArtifacts,
+  EmbeddedArtifacts,
   Catalog,
   CatalogEntry,
   ReplicaVerification,
 } from "./options.js";
+export type { Trust, RepoPin, ProjectPin, SignedBy, AuthorizedBy, EmbeddedConfig, EitherPin } from "./trust.js";
 export { SDK_VERSION } from "./version.js";

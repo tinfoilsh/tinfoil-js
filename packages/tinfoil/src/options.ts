@@ -3,9 +3,9 @@
  * Every client checks its options before any network I/O, so a misconfigured
  * client fails at creation rather than on its first request.
  */
-import type { Verification, Verifier } from "@tinfoilsh/verifier";
+import type { Policy, Verification } from "@tinfoilsh/verifier";
 
-export type { Pin } from "@tinfoilsh/verifier";
+export type { ArtifactTrust, EmbeddedArtifacts, EndorsedArtifacts, Policy } from "@tinfoilsh/verifier";
 import type { ClientOptions as WsClientOptions } from "ws";
 
 /**
@@ -162,8 +162,12 @@ export interface EnclaveOptions {
    * on the end.
    */
   readonly baseURL?: string;
-  /** The verification policy; undefined selects the defaults. */
-  readonly verifier?: Verifier;
+  /**
+   * The verification policy, as plain data; undefined selects the defaults.
+   * The client builds its verifier from the trust argument and this policy,
+   * so an invalid field is a {@link ConfigurationError}.
+   */
+  readonly policy?: Policy;
   readonly verificationCheck?: VerificationCheck;
   /**
    * The default prompt-cache scope for the client's requests. Only Tinfoil's
@@ -203,8 +207,11 @@ export interface RouterOptions {
    * proxy that expects the enclave's own paths needs `/v1/` on the end.
    */
   readonly baseURL?: string;
-  /** The verification policy; undefined selects the defaults. */
-  readonly verifier?: Verifier;
+  /**
+   * The verification policy, as plain data; undefined selects the defaults.
+   * The router's config trust is fixed to its repository.
+   */
+  readonly policy?: Policy;
   /**
    * Called for each router tried during discovery and whenever the client
    * verifies again. A rejection during discovery moves on to the next router;
@@ -239,8 +246,12 @@ export interface RouterOptions {
  */
 export interface ModelPin {
   readonly repo: string;
-  /** The pin's policy: undefined inherits {@link GatewayOptions.verifier}. */
-  readonly verifier?: Verifier;
+  /**
+   * The pin's policy: undefined inherits {@link GatewayOptions.policy}, and a
+   * policy replaces it entirely, so an unset field takes the SDK's default
+   * rather than the gateway's.
+   */
+  readonly policy?: Policy;
 }
 
 /**
@@ -282,8 +293,8 @@ export interface GatewayOptions {
   /** Pins models to repositories. With `pinnedModelsOnly`, only pinned models are served, which requires at least one pin. */
   readonly modelPins?: ReadonlyMap<string, ModelPin>;
   readonly pinnedModelsOnly?: boolean;
-  /** The policy for unpinned models; undefined selects the defaults. */
-  readonly verifier?: Verifier;
+  /** The policy for unpinned models, and for pinned models whose pin has none; undefined selects the defaults. */
+  readonly policy?: Policy;
   /** Called with each replica's verification, for pinned and unpinned models. A rejected replica is skipped for the next replica of the model. */
   readonly verificationCheck?: VerificationCheck;
   /** As for {@link RouterOptions.userCacheSecret}. */

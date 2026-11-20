@@ -60,9 +60,8 @@ describe("createTinfoil in a browser", () => {
   beforeAll(async () => {
     const documentFetch: Fetch = async () => new Response(new Uint8Array([1]));
     tinfoil = await createTinfoilProvider(
-      { bearerToken: "short-lived", enclave: { host: ENCLAVE, repo: "tinfoilsh/repo" }, verifier: verifier(peer.publicKeyHex) },
-      { documentFetch, sleep: async () => {}, ehbp: { fetch: fetchOf(peer) } },
-    );
+      { bearerToken: "short-lived", enclave: { host: ENCLAVE, trust: { kind: "repoPin", repo: "tinfoilsh/repo" } } },
+      { verifier: verifier(peer.publicKeyHex), documentFetch, sleep: async () => {}, ehbp: { fetch: fetchOf(peer) } });
   });
 
   it("lives on its own entry, not the main one, and refuses the TLS transport", async () => {

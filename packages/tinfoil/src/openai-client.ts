@@ -37,8 +37,9 @@ import { createGatewayHTTPClient, GatewayHTTPClient, type GatewayClientSeams } f
 import { checkAPIKeyRuntime, registerCredential, type CredentialResolver } from "./internal/credential.js";
 import { asyncDispose } from "./internal/dispose.js";
 import type { RuntimeGlobals } from "./internal/platform.js";
-import type { EnclaveOptions, GatewayOptions, Pin, RouterOptions } from "./options.js";
+import type { EnclaveOptions, GatewayOptions, RouterOptions } from "./options.js";
 import { createRouterHTTPClient, RouterHTTPClient, type RouterClientSeams } from "./router-client.js";
+import type { Trust } from "./trust.js";
 
 /**
  * The OpenAI options that would route requests away from the attested
@@ -263,13 +264,13 @@ export function createClient(options?: OpenAIOptions): Promise<TinfoilClient> {
 /** @internal The enclave OpenAI factory with its test seams; {@link EnclaveOpenAIClient.create} is this without them. */
 export async function createEnclaveOpenAIClient(
   host: string,
-  pin: Pin,
+  trust: Trust,
   options: EnclaveOptions,
   openaiOptions: OpenAIOptions,
   seams: EnclaveClientSeams,
 ): Promise<EnclaveOpenAIClient> {
   checkOpenAIOptions(openaiOptions, seams.globals);
-  const httpClient = await createEnclaveHTTPClient(host, pin, options, seams);
+  const httpClient = await createEnclaveHTTPClient(host, trust, options, seams);
   return constructEnclave(httpClient, openaiOptions);
 }
 
@@ -310,8 +311,8 @@ export class EnclaveOpenAIClient extends OpenAI {
   }
 
   /** Creates an enclave client as {@link EnclaveHTTPClient.create} does, and an OpenAI client over it. */
-  static create(host: string, pin: Pin, options?: EnclaveOptions, openaiOptions?: OpenAIOptions): Promise<EnclaveOpenAIClient> {
-    return createEnclaveOpenAIClient(host, pin, options ?? {}, openaiOptions ?? {}, {});
+  static create(host: string, trust: Trust, options?: EnclaveOptions, openaiOptions?: OpenAIOptions): Promise<EnclaveOpenAIClient> {
+    return createEnclaveOpenAIClient(host, trust, options ?? {}, openaiOptions ?? {}, {});
   }
 }
 

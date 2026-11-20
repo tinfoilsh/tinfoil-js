@@ -8,8 +8,8 @@ import { describe, expect, it, vi } from "vitest";
 import { ConfigurationError } from "../src/errors.js";
 import { DEFAULT_ROUTER_URL, discoverRouter, FALLBACK_ROUTER_HOST, fetchRouters, MAX_ROUTER_BYTES, type DiscoveryConfig } from "../src/internal/router.js";
 import { tlsMode } from "../src/internal/transport/tls.js";
-import type { Fetch, Pin } from "../src/options.js";
-import { KEY_SPKI_FP_SHA256_V1_FORMAT, UsageError, type Verification, type Verifier } from "../../verifier/src/index.js";
+import type { Fetch } from "../src/options.js";
+import { KEY_SPKI_FP_SHA256_V1_FORMAT, UsageError, type Pin, type Verification, type Verifier } from "../../verifier/src/index.js";
 
 const PIN = "ab".repeat(32);
 

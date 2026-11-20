@@ -4,8 +4,8 @@
  * otherwise inference.tinfoil.sh. Discovery runs again each time a client is
  * created and tries routers for at most 30 seconds before falling back.
  */
-import type { Pin, Verification } from "@tinfoilsh/verifier";
-import { attestedFetch, checkNetworkFetch, modeFor, resolveTransportMode, setOpenAIURL, type EnclaveClientSeams } from "./enclave-client.js";
+import type { Verification } from "@tinfoilsh/verifier";
+import { attestedFetch, buildVerifier, checkNetworkFetch, modeFor, resolveTransportMode, setOpenAIURL, type EnclaveClientSeams } from "./enclave-client.js";
 import { ConfigurationError } from "./errors.js";
 import { resolveUserCacheSecret } from "./internal/cachesecret.js";
 import { asyncDispose } from "./internal/dispose.js";
@@ -40,8 +40,9 @@ export async function createRouterHTTPClient(options: RouterOptions, seams: Rout
     }
     baseURL = normalizeBaseURL(baseURL);
   }
+  const verifier = await buildVerifier(undefined, options.policy, seams);
   const transport = await discoverRouter({
-    verifier: options.verifier,
+    verifier,
     verificationCheck: options.verificationCheck,
     mode: modeFor(mode, options.fetch, seams),
     signal: options.signal,
@@ -89,8 +90,6 @@ export class RouterHTTPClient {
   readonly baseURL: string;
   /** The host of the verified router, even when `baseURL` is a proxy. */
   readonly enclave: string;
-  /** The repository and registry project the router is verified against. */
-  readonly pin: Required<Pin>;
   readonly #transport: KeyedTransport;
 
   private constructor(token: typeof TOKEN, transport: KeyedTransport, baseURL: string, openAIURL: string, fetchImpl: Fetch) {
@@ -99,7 +98,6 @@ export class RouterHTTPClient {
     this.fetch = fetchImpl;
     this.baseURL = baseURL;
     this.enclave = transport.enclave().host();
-    this.pin = transport.enclave().pin();
     setOpenAIURL(this, openAIURL);
     // The client's state lives in the transport; the client itself never changes once created.
     Object.freeze(this);

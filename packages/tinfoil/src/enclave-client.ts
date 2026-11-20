@@ -4,11 +4,11 @@
  * when the verification expires or is rejected, and refuses requests to any
  * origin other than the one it is bound to.
  */
-import type { Pin, Verification } from "@tinfoilsh/verifier";
+import { Verifier, type ConfigTrust, type Policy, type Verification } from "@tinfoilsh/verifier";
 import { ConfigurationError } from "./errors.js";
 import { withCacheSecret } from "./internal/cachesecret.js";
 import { asyncDispose } from "./internal/dispose.js";
-import { Enclave, type EnclaveConfig } from "./internal/enclave.js";
+import { Enclave, fromVerify, type EnclaveConfig } from "./internal/enclave.js";
 import { normalizeBaseURL, validateBaseURL, validateTLSBaseURL } from "./internal/transport/base-url.js";
 import { ehbpMode, type EHBPOptions } from "./internal/transport/ehbp.js";
 import { withEnclaveURL } from "./internal/transport/header.js";
@@ -19,9 +19,15 @@ import { tlsMode, type TLSOptions } from "./internal/transport/tls.js";
 import { isKeyRejection, KeyedTransport, type Mode } from "./internal/transport/transport.js";
 import { registerWebSocketAccess } from "./internal/websocket.js";
 import type { CallOptions, EnclaveOptions, Fetch, TransportMode } from "./options.js";
+import { cloneTrust, verifierInputs, type Trust } from "./trust.js";
 
-/** @internal Seams for tests: the fetch that retrieves attestation documents, the clock, the modes' settings, and the globals the runtime is identified by. */
+/**
+ * @internal Seams for tests: the fetch that retrieves attestation documents,
+ * the clock, the modes' settings, the globals the runtime is identified by,
+ * and a verifier that replaces the one built from the trust and the policy.
+ */
 export interface EnclaveClientSeams {
+  readonly verifier?: Verifier;
   readonly documentFetch?: Fetch;
   readonly globals?: RuntimeGlobals;
   readonly clock?: () => Date;
@@ -103,19 +109,37 @@ export function checkEnclaveOptions(host: string, options: EnclaveOptions, globa
   return { mode, baseURL: baseURL === "" ? "" : normalizeBaseURL(baseURL) };
 }
 
+/**
+ * @internal The verifier for `config` and `policy`, built before any network
+ * I/O; the verifier's usage error is a {@link ConfigurationError}. The
+ * seams' verifier replaces it.
+ */
+export async function buildVerifier(config: ConfigTrust | undefined, policy: Policy | undefined, seams: Pick<EnclaveClientSeams, "verifier">): Promise<Verifier> {
+  if (seams.verifier !== undefined) return seams.verifier;
+  try {
+    return await Verifier.create(config, policy);
+  } catch (err) {
+    throw fromVerify(err);
+  }
+}
+
 /** Only this module holds the token the constructor requires, so untyped code that calls it is refused. */
 const TOKEN: unique symbol = Symbol("EnclaveHTTPClient");
 
 /** Calls the private constructor; the class assigns it, as the only place the constructor can be called. */
-let construct: (transport: KeyedTransport, baseURL: string, openAIURL: string, fetchImpl: Fetch) => EnclaveHTTPClient;
+let construct: (transport: KeyedTransport, trust: Trust, baseURL: string, openAIURL: string, fetchImpl: Fetch) => EnclaveHTTPClient;
 
 /** @internal The factory with its test seams; {@link EnclaveHTTPClient.create} is this without them. */
-export async function createEnclaveHTTPClient(host: string, pin: Pin, options: EnclaveOptions, seams: EnclaveClientSeams): Promise<EnclaveHTTPClient> {
+export async function createEnclaveHTTPClient(host: string, trust: Trust, options: EnclaveOptions, seams: EnclaveClientSeams): Promise<EnclaveHTTPClient> {
+  const { config, pin } = verifierInputs(trust);
   const { mode, baseURL } = checkEnclaveOptions(host, options, seams.globals);
+  const verifier = await buildVerifier(config, options.policy, seams);
+  // Copied once the verifier has checked its values, so that the copy is of a valid trust.
+  const trustCopy = cloneTrust(trust);
   const enclave = await Enclave.create({
     host,
     pin,
-    verifier: options.verifier,
+    verifier,
     verificationCheck: options.verificationCheck,
     fetch: seams.documentFetch,
     clock: seams.clock,
@@ -125,6 +149,7 @@ export async function createEnclaveHTTPClient(host: string, pin: Pin, options: E
   const transport = new KeyedTransport(enclave, modeFor(mode, options.fetch, seams), seams.clock);
   const client = construct(
     transport,
+    trustCopy,
     baseURL !== "" ? baseURL : `https://${host}/`,
     baseURL !== "" ? baseURL : `https://${host}/v1/`,
     attestedFetch(transport, host, baseURL, options.userCacheSecret ?? ""),
@@ -162,17 +187,16 @@ export class EnclaveHTTPClient {
   readonly baseURL: string;
   /** The host of the verified enclave, even when `baseURL` is a proxy. */
   readonly enclave: string;
-  /** The pin the enclave is verified against; an unset part is "". */
-  readonly pin: Required<Pin>;
   readonly #transport: KeyedTransport;
+  readonly #trust: Trust;
 
-  private constructor(token: typeof TOKEN, transport: KeyedTransport, baseURL: string, openAIURL: string, fetchImpl: Fetch) {
+  private constructor(token: typeof TOKEN, transport: KeyedTransport, trust: Trust, baseURL: string, openAIURL: string, fetchImpl: Fetch) {
     if (token !== TOKEN) throw new ConfigurationError("EnclaveHTTPClient is created with EnclaveHTTPClient.create");
     this.#transport = transport;
+    this.#trust = trust;
     this.fetch = fetchImpl;
     this.baseURL = baseURL;
     this.enclave = transport.enclave().host();
-    this.pin = transport.enclave().pin();
     setOpenAIURL(this, openAIURL);
     // The client's state lives in the transport; the client itself never changes once created.
     Object.freeze(this);
@@ -183,13 +207,18 @@ export class EnclaveHTTPClient {
   }
 
   /**
-   * A client for the enclave at `host`, verified against `pin`. An empty
-   * `pin` accepts configs authorized by the verifier option. Options are
-   * checked before any network I/O; the enclave is verified before the client
-   * is returned.
+   * A client for the enclave at `host`, verified under `trust`, which names
+   * who vouches for the enclave's config, and the `policy` option. The trust
+   * and the options are checked before any network I/O, and the enclave is
+   * verified before the client is returned.
    */
-  static create(host: string, pin: Pin, options?: EnclaveOptions): Promise<EnclaveHTTPClient> {
-    return createEnclaveHTTPClient(host, pin, options ?? {}, {});
+  static create(host: string, trust: Trust, options?: EnclaveOptions): Promise<EnclaveHTTPClient> {
+    return createEnclaveHTTPClient(host, trust, options ?? {}, {});
+  }
+
+  /** A copy of the trust that the enclave is verified under; changing the copy has no effect on the client. */
+  get trust(): Trust {
+    return cloneTrust(this.#trust);
   }
 
   /** The last successful verification, unchecked: it may have expired or been rejected. */

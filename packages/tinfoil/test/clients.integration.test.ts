@@ -41,7 +41,6 @@ describe.each<TransportMode>(["tls", "ehbp"])("RouterOpenAIClient against %s on 
     async () => {
       await using ai = await RouterOpenAIClient.create({ transportMode }, { apiKey });
       const router = ai.httpClient;
-      expect(router.pin).toEqual(PIN);
       expect(router.current?.tlsPublicKeyFP).toMatch(SHA256_HEX);
       expect(ai.baseURL).toBe(`https://${router.enclave}/v1/`);
       await completeChat(ai);

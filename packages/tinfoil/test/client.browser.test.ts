@@ -105,7 +105,7 @@ describe("the browser entry", () => {
   it("defaults to the EHBP transport and refuses TLS, naming the browser limitation", async () => {
     expect(resolveTransportMode(undefined)).toBe("ehbp");
     expect(() => resolveTransportMode("tls")).toThrow(/browsers don't expose/);
-    const rejected = browserEntry.EnclaveHTTPClient.create(ENCLAVE, { repo: "tinfoilsh/repo" }, { transportMode: "tls" });
+    const rejected = browserEntry.EnclaveHTTPClient.create(ENCLAVE, { kind: "repoPin", repo: "tinfoilsh/repo" }, { transportMode: "tls" });
     await expect(rejected).rejects.toBeInstanceOf(browserEntry.ConfigurationError);
     await expect(rejected).rejects.toThrow(/"tls" transport mode pins the server certificate, which browsers don't expose/);
     await expect(browserEntry.RouterHTTPClient.create({ transportMode: "tls" })).rejects.toThrow(/browsers don't expose/);
@@ -124,7 +124,7 @@ describe("the browser entry", () => {
 
 describe("EnclaveHTTPClient in a browser", () => {
   it("verifies, seals requests to the enclave's key, and restricts the origin", async () => {
-    const client = await createEnclaveHTTPClient(ENCLAVE, { repo: "tinfoilsh/repo" }, { verifier: verifier(peer.publicKeyHex) }, seams());
+    const client = await createEnclaveHTTPClient(ENCLAVE, { kind: "repoPin", repo: "tinfoilsh/repo" }, {}, { ...seams(), verifier: verifier(peer.publicKeyHex) });
     expect(client).toBeInstanceOf(EnclaveHTTPClient);
     expect(client.enclave).toBe(ENCLAVE);
     expect(client.baseURL).toBe(`https://${ENCLAVE}/`);
@@ -141,7 +141,7 @@ describe("EnclaveHTTPClient in a browser", () => {
       documents.count++;
       return new Response(new Uint8Array([1]));
     };
-    const client = await createEnclaveHTTPClient(ENCLAVE, { repo: "tinfoilsh/repo" }, { verifier: verifier(peer.publicKeyHex), fetch: network.fetch }, { documentFetch: counting, sleep: async () => {} });
+    const client = await createEnclaveHTTPClient(ENCLAVE, { kind: "repoPin", repo: "tinfoilsh/repo" }, { fetch: network.fetch }, { verifier: verifier(peer.publicKeyHex), documentFetch: counting, sleep: async () => {} });
     expect(documents.count).toBe(1);
     expect(network.seen).toHaveLength(0);
     const res = await client.fetch(`https://${ENCLAVE}/echo`, { method: "POST", body: "prompt", headers: { authorization: "Bearer t" } });
@@ -159,20 +159,20 @@ describe("EnclaveHTTPClient in a browser", () => {
     expect(() => checkNetworkFetch("tls", network.fetch)).toThrow(/fetch option .* requires transportMode "ehbp"/);
     expect(() => checkNetworkFetch("ehbp", network.fetch)).not.toThrow();
     const before = peer.seen.length;
-    await expect(createEnclaveHTTPClient(ENCLAVE, { repo: "tinfoilsh/repo" }, { verifier: verifier(peer.publicKeyHex), fetch: network.fetch, transportMode: "tls" }, { documentFetch: counting })).rejects.toThrow(/browsers don't expose/);
+    await expect(createEnclaveHTTPClient(ENCLAVE, { kind: "repoPin", repo: "tinfoilsh/repo" }, { fetch: network.fetch, transportMode: "tls" }, { verifier: verifier(peer.publicKeyHex), documentFetch: counting })).rejects.toThrow(/browsers don't expose/);
     expect(documents.count).toBe(1);
     expect(peer.seen.length).toBe(before);
     expect(network.seen).toHaveLength(2);
   });
 
   it("closes, refusing further use while keeping the last verification, and disposes with the async-dispose symbol", async () => {
-    const client = await createEnclaveHTTPClient(ENCLAVE, { repo: "tinfoilsh/repo" }, { verifier: verifier(peer.publicKeyHex) }, seams());
+    const client = await createEnclaveHTTPClient(ENCLAVE, { kind: "repoPin", repo: "tinfoilsh/repo" }, {}, { ...seams(), verifier: verifier(peer.publicKeyHex) });
     await client.close();
     await client.close();
     expect(client.current?.hpkePublicKey).toBe(peer.publicKeyHex);
     await expect(client.fetch(`https://${ENCLAVE}/echo`, { method: "POST", body: "x" })).rejects.toThrow(/client is closed/);
     await expect(client.ensureVerified()).rejects.toBeInstanceOf(ConfigurationError);
-    const disposed = await createEnclaveHTTPClient(ENCLAVE, { repo: "tinfoilsh/repo" }, { verifier: verifier(peer.publicKeyHex) }, seams());
+    const disposed = await createEnclaveHTTPClient(ENCLAVE, { kind: "repoPin", repo: "tinfoilsh/repo" }, {}, { ...seams(), verifier: verifier(peer.publicKeyHex) });
     const dispose = (disposed as unknown as Record<symbol, () => Promise<void>>)[Symbol.asyncDispose ?? Symbol.for("Symbol.asyncDispose")];
     expect(typeof dispose).toBe("function");
     await dispose.call(disposed);
@@ -180,21 +180,21 @@ describe("EnclaveHTTPClient in a browser", () => {
   });
 
   it("reports an enclave without an EHBP key as an attestation failure", async () => {
-    await expect(createEnclaveHTTPClient(ENCLAVE, { repo: "tinfoilsh/repo" }, { verifier: verifier(undefined) }, seams())).rejects.toBeInstanceOf(browserEntry.AttestationError);
+    await expect(createEnclaveHTTPClient(ENCLAVE, { kind: "repoPin", repo: "tinfoilsh/repo" }, {}, { ...seams(), verifier: verifier(undefined) })).rejects.toBeInstanceOf(browserEntry.AttestationError);
   });
 
   it("replays once after the enclave rotates its key", async () => {
     const stale = await (await Identity.generate()).getPublicKeyHex();
     let verifications = 0;
     const rotating = { ...verifier(peer.publicKeyHex), verifyV3At: (...args: unknown[]) => (verifier(verifications++ === 0 ? stale : peer.publicKeyHex).verifyV3At as (...a: unknown[]) => Promise<Verification>)(...args) } as Verifier;
-    const client = await createEnclaveHTTPClient(ENCLAVE, { repo: "tinfoilsh/repo" }, { verifier: rotating }, seams());
+    const client = await createEnclaveHTTPClient(ENCLAVE, { kind: "repoPin", repo: "tinfoilsh/repo" }, {}, { ...seams(), verifier: rotating });
     const res = await client.fetch(`https://${ENCLAVE}/echo`, { method: "POST", body: "again" });
     expect((await res.json()).text).toBe("again");
     expect(verifications).toBe(2);
   });
 
   it("delivers a sealed streamed response chunk by chunk", async () => {
-    const client = await createEnclaveHTTPClient(ENCLAVE, { repo: "tinfoilsh/repo" }, { verifier: verifier(peer.publicKeyHex) }, seams());
+    const client = await createEnclaveHTTPClient(ENCLAVE, { kind: "repoPin", repo: "tinfoilsh/repo" }, {}, { ...seams(), verifier: verifier(peer.publicKeyHex) });
     const res = await client.fetch(`https://${ENCLAVE}/sse`, { method: "POST", body: "{}" });
     const reader = res.body!.getReader();
     const decoder = new TextDecoder();
@@ -219,7 +219,7 @@ describe("EnclaveHTTPClient in a browser", () => {
       sealedForms.push(new Response(forRelay, { status: response.status, headers: response.headers }));
       return new Response(forClient, { status: response.status, headers: response.headers });
     };
-    const client = await createEnclaveHTTPClient(ENCLAVE, { repo: "tinfoilsh/repo" }, { verifier: verifier(peer.publicKeyHex) }, { ...seams(), ehbp: { fetch: relay } });
+    const client = await createEnclaveHTTPClient(ENCLAVE, { kind: "repoPin", repo: "tinfoilsh/repo" }, {}, { verifier: verifier(peer.publicKeyHex), ...seams(), ehbp: { fetch: relay } });
     const res = await client.fetch(`https://${ENCLAVE}/echo`, { method: "POST", body: "resume me" });
     const token = browserEntry.serializeSessionRecoveryToken(await browserEntry.sessionRecoveryToken(res));
     expect(await res.json()).toEqual({ path: "/echo", sealed: true, text: "resume me" });
@@ -232,7 +232,7 @@ describe("EnclaveHTTPClient in a browser", () => {
 
 describe("OpenAI clients in a browser", () => {
   it("refuses an API key, even with dangerouslyAllowBrowser, naming the bearer token, before any I/O", async () => {
-    const options = { verifier: verifier(peer.publicKeyHex) };
+    const options = {};
     const documents = { count: 0 };
     const counting: Fetch = async () => {
       documents.count++;
@@ -242,8 +242,8 @@ describe("OpenAI clients in a browser", () => {
     const refused = [
       browserEntry.createClient({ apiKey: "k" }),
       browserEntry.RouterOpenAIClient.create({}, { apiKey: "k", dangerouslyAllowBrowser: true }),
-      createEnclaveOpenAIClient(ENCLAVE, { repo: "tinfoilsh/repo" }, options, { apiKey: "k" }, { ...seams(), documentFetch: counting }),
-      createEnclaveOpenAIClient(ENCLAVE, { repo: "tinfoilsh/repo" }, options, { apiKey: "k", dangerouslyAllowBrowser: true }, { ...seams(), documentFetch: counting }),
+      createEnclaveOpenAIClient(ENCLAVE, { kind: "repoPin", repo: "tinfoilsh/repo" }, options, { apiKey: "k" }, { ...seams(), documentFetch: counting, verifier: verifier(peer.publicKeyHex) }),
+      createEnclaveOpenAIClient(ENCLAVE, { kind: "repoPin", repo: "tinfoilsh/repo" }, options, { apiKey: "k", dangerouslyAllowBrowser: true }, { ...seams(), documentFetch: counting, verifier: verifier(peer.publicKeyHex) }),
       createGatewayOpenAIClient({ url: "https://gateway.example/v1/" }, { apiKey: "k" }, { ...seams(), catalogFetch: counting, documentFetch: counting }),
     ];
     for (const failure of refused) {
@@ -255,14 +255,13 @@ describe("OpenAI clients in a browser", () => {
   });
 
   it("refuses an API key given to a clone in a page", async () => {
-    const ai = await createEnclaveOpenAIClient(ENCLAVE, { repo: "tinfoilsh/repo" }, { verifier: verifier(peer.publicKeyHex) }, { bearerToken: "jwt" }, seams());
+    const ai = await createEnclaveOpenAIClient(ENCLAVE, { kind: "repoPin", repo: "tinfoilsh/repo" }, {}, { bearerToken: "jwt" }, { ...seams(), verifier: verifier(peer.publicKeyHex) });
     expect(() => ai.withOptions({ apiKey: "k" })).toThrow(ConfigurationError);
     expect(ai.withOptions({ bearerToken: "jwt2" }).apiKey).toBe("jwt2");
   });
 
   it("allows a bearer token and sends it as the credential", async () => {
-    const options = { verifier: verifier(peer.publicKeyHex) };
-    const ai = await createEnclaveOpenAIClient(ENCLAVE, { repo: "tinfoilsh/repo" }, options, { bearerToken: "jwt" }, seams());
+    const ai = await createEnclaveOpenAIClient(ENCLAVE, { kind: "repoPin", repo: "tinfoilsh/repo" }, {}, { bearerToken: "jwt" }, { ...seams(), verifier: verifier(peer.publicKeyHex) });
     expect(ai).toBeInstanceOf(EnclaveOpenAIClient);
     expect(ai.apiKey).toBe("jwt");
     const reply = await ai.chat.completions.create({ model: "test", messages: [{ role: "user", content: "hi" }] });
@@ -273,7 +272,7 @@ describe("OpenAI clients in a browser", () => {
   });
 
   it("creates the recommended client over the discovered router with the cache secret spliced in", async () => {
-    const ai = await createTinfoilClient({ bearerToken: "jwt" }, seams(), { verifier: verifier(peer.publicKeyHex) });
+    const ai = await createTinfoilClient({ bearerToken: "jwt" }, { ...seams(), verifier: verifier(peer.publicKeyHex) }, {});
     expect(ai).toBeInstanceOf(TinfoilClient);
     expect(ai.httpClient).toBeInstanceOf(RouterHTTPClient);
     expect(ai.httpClient.enclave).toBe(ENCLAVE);
@@ -290,10 +289,10 @@ describe("the gateway in a browser", () => {
   it("fetches the catalog, verifies a replica through the gateway, and seals a completion to it", async () => {
     const peerFetch = fetchOf(peer);
     const gatewaySeams = { ...seams(), catalogFetch: peerFetch, documentFetch: peerFetch };
-    const http = await createGatewayHTTPClient({ verifier: verifier(peer.publicKeyHex), url: "https://gateway.example/v1/" }, gatewaySeams);
+    const http = await createGatewayHTTPClient({ url: "https://gateway.example/v1/" }, { ...gatewaySeams, verifier: verifier(peer.publicKeyHex) });
     expect(http).toBeInstanceOf(GatewayHTTPClient);
     expect(await http.models()).toEqual(["test-model"]);
-    const ai = await createGatewayOpenAIClient({ verifier: verifier(peer.publicKeyHex), url: "https://gateway.example/v1/" }, { bearerToken: "jwt" }, gatewaySeams);
+    const ai = await createGatewayOpenAIClient({ url: "https://gateway.example/v1/" }, { bearerToken: "jwt" }, { ...gatewaySeams, verifier: verifier(peer.publicKeyHex) });
     const reply = await ai.chat.completions.create({ model: "test-model", messages: [{ role: "user", content: "hi" }] });
     expect(reply.choices[0]!.message.content).toBe("sealed");
     const last = peer.seen[peer.seen.length - 1]!;
@@ -312,12 +311,12 @@ describe("WebSockets in a browser", () => {
       calls.documents++;
       return new Response(new Uint8Array([1]));
     };
-    const http = await createEnclaveHTTPClient(ENCLAVE, { repo: "tinfoilsh/repo" }, { verifier: verifier(peer.publicKeyHex) }, { ...seams(), documentFetch: counting });
+    const http = await createEnclaveHTTPClient(ENCLAVE, { kind: "repoPin", repo: "tinfoilsh/repo" }, {}, { verifier: verifier(peer.publicKeyHex), ...seams(), documentFetch: counting });
     const before = calls.documents;
     await expect(createWebSocket(http, "/v1/realtime")).rejects.toThrow(/browsers don't expose/);
     await expect(pinnedWebSocketOptions(http)).rejects.toBeInstanceOf(ConfigurationError);
     expect(calls.documents).toBe(before);
-    const ai = await createEnclaveOpenAIClient(ENCLAVE, { repo: "tinfoilsh/repo" }, { verifier: verifier(peer.publicKeyHex) }, { bearerToken: "jwt" }, { ...seams(), documentFetch: counting });
+    const ai = await createEnclaveOpenAIClient(ENCLAVE, { kind: "repoPin", repo: "tinfoilsh/repo" }, {}, { bearerToken: "jwt" }, { verifier: verifier(peer.publicKeyHex), ...seams(), documentFetch: counting });
     const beforeRealtime = calls.documents;
     await expect(createRealtimeWebSocket(ai, { model: "m" })).rejects.toBeInstanceOf(ConfigurationError);
     expect(calls.documents).toBe(beforeRealtime);
