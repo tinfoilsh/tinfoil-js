@@ -26,32 +26,39 @@ export const DEFAULT_API_PATH = "/v1/";
 
 /**
  * The characters that a path may hold as it is written in a URL: RFC 3986
- * `pchar` and `/`. Anything else, such as a backslash, a space or a control
- * character, would be rewritten by the URL parser, which could turn it into
- * a separator or a dot segment.
+ * `pchar` and `/`, with `%` only as the start of an escape. Anything else,
+ * such as a backslash, a space or a control character, would be rewritten
+ * by the URL parser, which could turn it into a separator or a dot segment.
  */
-const PATH_CHARS = /^[A-Za-z0-9\-._~!$&'()*+,;=:@%/]*$/;
+const PATH_CHARS = /^(?:[A-Za-z0-9\-._~!$&'()*+,;=:@/]|%[0-9A-Fa-f]{2})*$/;
 
 /**
- * Requires an absolute path without a query, a fragment, an encoded slash,
- * or a "." or ".." segment, percent-encoded or not, so that it can only name
- * a path under its root.
+ * `segment` with each escape replaced by the byte that it encodes, one
+ * character per byte, so that an escape of any byte decodes, whether or not
+ * the bytes are valid UTF-8. The caller has checked that every `%` starts a
+ * well-formed escape.
+ */
+function decodeBytes(segment: string): string {
+  return segment.replace(/%([0-9A-Fa-f]{2})/g, (_, hex: string) => String.fromCharCode(parseInt(hex, 16)));
+}
+
+/**
+ * Requires an RFC 3986 `path-absolute` of path characters and well-formed
+ * `%XX` escapes, and refuses a leading `//`, a query, a fragment, a "." or
+ * ".." segment, percent-encoded or not, and an encoded slash or backslash,
+ * so that it can only name a path under its root. Any other well-formed
+ * escape is accepted, including one of a byte that isn't valid UTF-8.
  */
 export function validateAPIPath(apiPath: string): void {
   if (typeof apiPath !== "string") throw new ConfigurationError("invalid API path: it must be a string, such as /v1/");
   const invalid = (why: string): ConfigurationError => new ConfigurationError(`invalid API path ${JSON.stringify(apiPath)}: ${why}`);
   if (!apiPath.startsWith("/") || apiPath.startsWith("//")) throw invalid("it must be an absolute path, such as /v1/");
   if (apiPath.includes("?") || apiPath.includes("#")) throw invalid("it must not carry a query or a fragment");
-  if (!PATH_CHARS.test(apiPath)) throw invalid("it does not parse as a URL path");
+  if (!PATH_CHARS.test(apiPath)) throw invalid("it must consist only of RFC 3986 path characters and well-formed percent escapes");
   for (const segment of apiPath.split("/")) {
-    let decoded: string;
-    try {
-      decoded = decodeURIComponent(segment);
-    } catch {
-      throw invalid("it has an invalid percent-encoding");
-    }
+    const decoded = decodeBytes(segment);
     if (decoded === "." || decoded === ".." || decoded.includes("/") || decoded.includes("\\")) {
-      throw invalid('it must not contain a "." or ".." segment or an encoded slash');
+      throw invalid('it must not contain a "." or ".." segment or an encoded slash or backslash');
     }
   }
 }
