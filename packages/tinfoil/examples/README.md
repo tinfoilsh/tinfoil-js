@@ -7,7 +7,7 @@ or all of them with `./examples/run-all.sh`.
 
 | Example | Shows |
 | --- | --- |
-| [`chat/`](chat/) | A basic chat completion with `createClient` |
+| [`chat/`](chat/) | A basic chat completion with `createClient` from `tinfoil/openai` |
 | [`streaming/`](streaming/) | Streaming chat completions |
 | [`ai-sdk/`](ai-sdk/) | The Vercel AI SDK on the server with `createTinfoil` from `tinfoil/ai-sdk` |
 | [`ai-sdk-react/`](ai-sdk-react/) | The Vercel AI SDK's `useChat` in a browser app (pattern files, not runnable) |

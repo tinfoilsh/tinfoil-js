@@ -18,15 +18,16 @@ What to install depends on the entry point that you import:
 
 | Entry point | Install |
 |---|---|
-| `tinfoil` (the OpenAI clients), `tinfoil/http` and `tinfoil/unsafe` | `npm install tinfoil@next` |
+| `tinfoil` (the attested HTTP clients and pinned WebSockets), `tinfoil/http` and `tinfoil/unsafe` | `npm install tinfoil@next` |
+| `tinfoil/openai` (the OpenAI client) | `npm install tinfoil@next openai` |
 | `tinfoil/ai-sdk` (the Vercel AI SDK provider) | `npm install tinfoil@next ai @ai-sdk/openai-compatible` |
 
-`ai` and `@ai-sdk/openai-compatible` are optional peer dependencies, so installing `tinfoil` doesn't install them. `tinfoil/ai-sdk` imports `@ai-sdk/openai-compatible`; `ai` is what your own code calls with the provider. Importing `tinfoil/ai-sdk` without `@ai-sdk/openai-compatible` fails with a module-not-found error that names the package.
+`openai`, `ai` and `@ai-sdk/openai-compatible` are optional peer dependencies, so installing `tinfoil` doesn't install them. `tinfoil/openai` imports `openai`, and `tinfoil/ai-sdk` imports `@ai-sdk/openai-compatible`; `ai` is what your own code calls with the provider. Importing either entry without its package fails with a module-not-found error that names the package.
 
 ## Quick Start
 
 ```typescript
-import { createClient } from "tinfoil";
+import { createClient } from "tinfoil/openai";
 
 // Discovers Tinfoil's inference router and verifies it before returning.
 const client = await createClient({ apiKey: "<YOUR_API_KEY>" });
@@ -37,31 +38,62 @@ const completion = await client.chat.completions.create({
 });
 ```
 
-Router and enclave clients are async factories that verify before returning, and they verify again by themselves when the verification expires or the enclave's key changes. Gateway clients are async factories too, but verify a model's replica before its first request. `createClient` takes the OpenAI client's own options (except `baseURL` and `fetch`, which the attested transport owns) plus `bearerToken`, and returns a client with the same API as `new OpenAI(...)`. Anything about the route itself lives on the configurable clients: `RouterOpenAIClient.create(routerOptions, openaiOptions)` for the discovered router with a proxy, transport mode, verifier or cache-secret setting; `EnclaveOpenAIClient.create(host, pin, options, openaiOptions)` for one enclave instead of the router; and `RouterHTTPClient.create()` / `EnclaveHTTPClient.create(host, pin)` for a verified `fetch` to any HTTP API. A `pin` names the workload the enclave must run: `{ repo }` for a GitHub repository (`owner/name[@tag][@sha256:digest]`), `{ project }` for a config registry project (`org/project[@revision][@sha256:digest]`), or both to accept either; neither is satisfied by the other's collateral. An empty pin is a `ConfigurationError` unless the `verifier` option configures its own config trust. An HTTP client's `close()` releases its pooled connections and refuses further use, and both kinds of client support `await using` (an OpenAI client closes the HTTP client under it).
+Router and enclave clients are async factories that verify before returning, and they verify again by themselves when the verification expires or the enclave's key changes. Gateway clients are async factories too, but verify a model's replica before its first request. `createClient` takes the OpenAI client's own options (except `baseURL` and `fetch`, which the attested transport owns) plus `bearerToken`, and returns an `OpenAIClient` with the same API as `new OpenAI(...)`, over a `RouterHTTPClient` created with the default options. For anything about the route itself, create the HTTP client and then an `OpenAIClient` over it:
+
+```typescript
+import { EnclaveHTTPClient, RouterHTTPClient } from "tinfoil";
+import { OpenAIClient } from "tinfoil/openai";
+
+// One enclave, verified against a GitHub repository.
+const enclave = await EnclaveHTTPClient.create("enclave.example.com", { kind: "repoPin", repo: "owner/name" });
+const client = new OpenAIClient(enclave, {}, { apiKey: "<YOUR_API_KEY>" });
+
+// The discovered router, with a verification policy of your own.
+const router = await RouterHTTPClient.create({ policy: { freshnessMaxAgeMs: 24 * 60 * 60 * 1000 } });
+```
+
+`new OpenAIClient(httpClient, options?, openaiOptions?)` takes an `EnclaveHTTPClient`, `RouterHTTPClient` or `GatewayHTTPClient` and does no network I/O. It sets the OpenAI base URL itself, after your OpenAI options, so a `baseURL`, `OPENAI_BASE_URL` in the environment and `dataResidency` have no effect: the base URL is `options.apiPath` (`/v1/` by default) under the HTTP client's EHBP proxy or the enclave's origin, or the gateway's URL for a gateway client, which takes no `apiPath`. An HTTP client's `close()` releases its pooled connections and refuses further use, and both kinds of client support `await using` (an OpenAI client closes the HTTP client under it).
+
+### Trust, policy and transport
+
+`EnclaveHTTPClient.create(host, trust, options?)` takes a required `trust`, which names who vouches for the config that the enclave runs, as one object told apart by `kind`:
+
+| `trust` | Accepts |
+|---|---|
+| `{ kind: "repoPin", repo }` | v2 collateral for a GitHub repository `owner/name[@tag][@sha256:digest]` |
+| `{ kind: "projectPin", project, registryIDs? }` | v3 collateral for a config registry project `org/project[@revision][@sha256:digest]`, endorsed by the public registry, or by exactly the `registryIDs` given (list `PUBLIC_REGISTRY_ID` from `@tinfoilsh/verifier` to keep it); an empty list is a `ConfigurationError` |
+| `{ kind: "signedBy", keys, project? }` | v3 configs that your PEM-encoded P-256 `keys` sign, optionally for one `project` |
+| `{ kind: "authorizedBy", authorize }` | v3 configs that your `authorize` callback accepts |
+| `{ kind: "embeddedConfig", bytes, name? }` | v3 collateral for exactly these config bytes |
+| `{ kind: "eitherPin", repo, project }` | either of `repoPin` and `projectPin`, for the migration from v2 to v3 collateral |
+
+The router's trust is fixed to its repository, and the gateway client takes `modelPins` instead. Every client takes `policy`, the verifier's policy as plain data: `pinnedRegisters`, `freshnessMaxAgeMs` and `artifacts` (`{ kind: "endorsedArtifacts", freshnessKeys? }` or `{ kind: "embeddedArtifacts", runtime?, platform?, freshnessKeys? }`). The enclave and router clients take `transport`: `{ kind: "tls" }`, which pins each connection to the attested key, or `{ kind: "ehbp", proxyURL?, fetch? }`, which seals request and response bodies to the attested key so that they stay private through a proxy. Unset, it is TLS on Node and Bun and EHBP in browsers. The trust, the policy and the options are checked before any network I/O: an invalid value, or an unknown `kind`, is a `ConfigurationError`.
 
 Never put `apiKey` in browser code: the OpenAI clients and the AI SDK provider refuse it outside Node and Bun, `dangerouslyAllowBrowser` or not. Route browser requests through a [proxy server](https://docs.tinfoil.sh/guides/proxy-server) that adds the key, and authenticate the browser with a token of your own:
 
 ```typescript
-import { RouterOpenAIClient } from "tinfoil";
+import { RouterHTTPClient } from "tinfoil";
+import { OpenAIClient } from "tinfoil/openai";
 
-const client = await RouterOpenAIClient.create({ baseURL: "https://proxy.example.com/v1/" }, { bearerToken: "<SESSION_TOKEN>" });
+const router = await RouterHTTPClient.create({ transport: { kind: "ehbp", proxyURL: "https://proxy.example.com/" } });
+const client = new OpenAIClient(router, {}, { bearerToken: "<SESSION_TOKEN>" });
 ```
 
-Browsers use the EHBP transport, the default and the only one available there. The package's type declarations are shared with the Node build, so a browser project type-checks a few names that throw a `ConfigurationError` when called: `createWebSocket` and `pinnedWebSocketOptions` (a verified WebSocket pins the server certificate, which browsers don't expose to scripts), `createRealtimeWebSocket` (a realtime session runs over such a WebSocket), and `transportMode: "tls"` (the `"tls"` transport mode pins the server certificate too; `"ehbp"` seals request and response bodies to the enclave's key instead).
+Browsers use the EHBP transport, the default and the only one available there. The package's type declarations are shared with the Node build, so a browser project type-checks a few names that throw a `ConfigurationError` when called: `createWebSocket` and `pinnedWebSocketOptions` (a verified WebSocket pins the server certificate, which browsers don't expose to scripts), `createRealtimeWebSocket` (a realtime session runs over such a WebSocket), and `transport: { kind: "tls" }` (the TLS transport pins the server certificate too; EHBP seals request and response bodies to the enclave's key instead).
 
-Bun pins the TLS connection from Bun 1.4.0, the first release whose `fetch` checks the server certificate before it sends the request; on an older Bun the default transport mode is `"ehbp"` and `transportMode: "tls"` is refused with a `ConfigurationError`. `createWebSocket` needs Bun 1.4.4 or later, the first release whose WebSocket runs the certificate check at all, and is refused on an older Bun before anything is sent. `pinnedWebSocketOptions` and `createRealtimeWebSocket` hand settings to the `ws` library, which Bun replaces with its own WebSocket, so they are available on Node only.
+Bun pins the TLS connection from Bun 1.4.0, the first release whose `fetch` checks the server certificate before it sends the request; on an older Bun the default transport is EHBP and `transport: { kind: "tls" }` is refused with a `ConfigurationError`. `createWebSocket` needs Bun 1.4.4 or later, the first release whose WebSocket runs the certificate check at all, and is refused on an older Bun before anything is sent. `pinnedWebSocketOptions` and `createRealtimeWebSocket` hand settings to the `ws` library, which Bun replaces with its own WebSocket, so they are available on Node only.
 
-Deno pins the TLS connection from Deno 2.8.0, the first release whose Node compatibility layer runs the certificate check for both requests and WebSockets; on an older Deno the default transport mode is `"ehbp"`, and `transportMode: "tls"` and `createWebSocket` are refused with a `ConfigurationError`.
+Deno pins the TLS connection from Deno 2.8.0, the first release whose Node compatibility layer runs the certificate check for both requests and WebSockets; on an older Deno the default transport is EHBP, and `transport: { kind: "tls" }` and `createWebSocket` are refused with a `ConfigurationError`.
 
 **WebSockets from the `openai` package aren't pinned.** The `openai` package's WebSocket classes (`ResponsesWS`, `LiveWS` and its sideband and forks, `OpenAIRealtimeWS`, `OpenAIRealtimeWebSocket` and `OpenAIRealtimeTranslationWS`) take an OpenAI client and open their own WebSocket. Given a Tinfoil client, they connect to its base URL with its API key or bearer token, but without the TLS pin, so the connection isn't bound to the verified enclave. With an enclave or router client:
 
-- For a realtime session, use `createRealtimeWebSocket` instead of `OpenAIRealtimeWS`. It always connects to the verified enclave, even when the client sends its requests through a proxy `baseURL`.
+- For a realtime session, use `createRealtimeWebSocket` instead of `OpenAIRealtimeWS`. It always connects to the verified enclave, even when the client sends its requests through an EHBP proxy.
 - For a WebSocket that you drive yourself, `createWebSocket` opens a raw pinned WebSocket to a path on the verified enclave.
-- `ResponsesWS`, `LiveWS` and its sideband and forks, and `OpenAIRealtimeTranslationWS` have no Tinfoil replacement. On Node, pass them the pinned settings, for example `new ResponsesWS(client, await pinnedWebSocketOptions(client.httpClient))`. That pins the connection only when the client has no `baseURL` option, because the class connects to the client's base URL: then it connects to the enclave itself over `wss://`. Behind a proxy `baseURL`, the pinned handshake fails, because the proxy doesn't hold the enclave's key, and over an `http://` base URL there is no TLS to pin at all.
+- `ResponsesWS`, `LiveWS` and its sideband and forks, and `OpenAIRealtimeTranslationWS` have no Tinfoil replacement. On Node, pass them the pinned settings, for example `new ResponsesWS(client, await pinnedWebSocketOptions(client.httpClient))`. That pins the connection only when the HTTP client has no EHBP proxy, because the class connects to the client's base URL: then it connects to the enclave itself over `wss://`. Behind a proxy, the pinned handshake fails, because the proxy doesn't hold the enclave's key, and over an `http://` proxy there is no TLS to pin at all.
 
 `OpenAIRealtimeWebSocket` uses the runtime's built-in WebSocket and can't be pinned. The gateway client offers no pinned WebSocket, so don't give it to any of these classes.
 
-The request body is still encrypted to the verified enclave's key; the proxy only forwards it. `baseURL` is the API root, as for `new OpenAI({ baseURL })`: the client appends `chat/completions` and the other OpenAI paths to it, so a proxy that forwards paths as they are takes the enclave's `/v1/`. Multi-user services must scope prompt caches to each end user with `userCacheSecret` or a per-request `user_cache_secret`; see [Prompt caching](https://docs.tinfoil.sh/sdk/prompt-caching).
+The request body is still encrypted to the verified enclave's key; the proxy only forwards it, to the enclave named in the `X-Tinfoil-Enclave-Url` header. A `proxyURL`'s path is where the proxy is mounted, not the API path: an `OpenAIClient` joins its `apiPath` (`/v1/` by default) under it, so `https://proxy.example.com/relay` and `https://proxy.example.com/relay/` both give `https://proxy.example.com/relay/v1/`. Multi-user services must scope prompt caches to each end user with the router client's `userCacheSecret` or a per-request `user_cache_secret`; an enclave client never adds one. See [Prompt caching](https://docs.tinfoil.sh/sdk/prompt-caching).
 
 ### HTTP-only and lazy imports
 
@@ -70,7 +102,7 @@ If you supply your own API client and need only the verified HTTP transport, imp
 ```typescript
 import { RouterHTTPClient, type RouterOptions } from "tinfoil/http";
 
-const options: RouterOptions = { transportMode: "ehbp" };
+const options: RouterOptions = { transport: { kind: "ehbp" } };
 const client = await RouterHTTPClient.create(options);
 // Pass client.fetch to your API client, and close it when finished.
 ```
@@ -79,32 +111,32 @@ To defer downloading and evaluating the transport until a user needs it, dynamic
 
 ```typescript
 const { RouterHTTPClient } = await import("tinfoil/http");
-const client = await RouterHTTPClient.create({ transportMode: "ehbp" });
+const client = await RouterHTTPClient.create({ transport: { kind: "ehbp" } });
 ```
 
-A bundler can put this dynamic import in a separate chunk, provided the transport isn't also imported eagerly elsewhere in the application. The root `tinfoil` imports remain available for the OpenAI-compatible clients and helpers, and `tinfoil/ai-sdk` remains the AI SDK entry.
+A bundler can put this dynamic import in a separate chunk, provided the transport isn't also imported eagerly elsewhere in the application. `tinfoil/openai` is the OpenAI client's entry, and `tinfoil/ai-sdk` the AI SDK's.
 
 ### Custom network transport
 
-`RouterHTTPClient.create`, `EnclaveHTTPClient.create` and `GatewayHTTPClient.create`, and the route options of the OpenAI clients over them (`RouterOpenAIClient.create(routerOptions, openaiOptions)` and the enclave and gateway equivalents), take a `fetch` option: a fetch-compatible network implementation that carries their requests in the EHBP transport mode, for a native HTTP bridge (such as Tauri's) or a trusted relay. The AI SDK provider's `createTinfoil` takes it too. `createClient` takes only the OpenAI options, so it doesn't take it.
+The EHBP transport of `RouterHTTPClient.create` and `EnclaveHTTPClient.create` takes a `fetch`: a fetch-compatible network implementation that carries their sealed requests, for a native HTTP bridge (such as Tauri's) or a trusted relay. `GatewayHTTPClient.create`, which always uses EHBP, takes it as its `fetch` option, and the AI SDK provider's `createTinfoil` takes it in its `transport`. `createClient` takes only the OpenAI options, so it doesn't take it; build an `OpenAIClient` over an HTTP client instead.
 
 ```typescript
 import { RouterHTTPClient } from "tinfoil/http";
 
 // nativeFetch: a fetch-compatible function that sends the sealed requests.
-const client = await RouterHTTPClient.create({ fetch: nativeFetch, transportMode: "ehbp" }); // "ehbp" is already the default in browsers
+const client = await RouterHTTPClient.create({ transport: { kind: "ehbp", fetch: nativeFetch } });
 ```
 
-The client verifies the enclave and seals each request body before calling it, and opens the response that it returns; attestation documents, the router list and the gateway catalog are still fetched with the runtime's fetch. The function must return a standard `Response` and honour the request's signal, and a relay must pass the sealed body and the protocol headers through unchanged. The method, URL and headers aren't sealed, so a relay sees the API key: use only a relay that you trust, over HTTPS. A request without a body passes through it unsealed, as the mode leaves it. The option is refused with `transportMode: "tls"`, which pins the connection itself.
+The client verifies the enclave and seals each request body before calling it, and opens the response that it returns; attestation documents, the router list and the gateway catalog are still fetched with the runtime's fetch. The function must return a standard `Response` and honour the request's signal, and a relay must pass the sealed body and the protocol headers through unchanged. The method, URL and headers aren't sealed, so a relay sees the API key: use only a relay that you trust, over HTTPS. A request without a body passes through it unsealed, as EHBP leaves it. The TLS transport has no `fetch`, since it pins the connection itself.
 
 ## Errors
 
-The clients throw three error classes, each a `TinfoilError` with a `category`, and with the underlying failure as `cause` when there is one: `ConfigurationError` (invalid options, or a closed client), `NetworkError` (the enclave or its attestation couldn't be reached) and `AttestationError` (the enclave couldn't be trusted: when verification rejected the document, `cause` is the verifier's `VerificationError` whose `layer` names the rejecting check; a key that doesn't match the attested one, or one the enclave no longer holds after rotation, is an `AttestationError` too). Switch on `category` (`"configuration"`, `"network"` or `"attestation"`), which is the stable discriminant; each error's `name` matches its class, for logs and stack traces. The factories, `ensureVerified()`, `reverify()` and an HTTP client's `fetch` throw them directly. A call through the OpenAI API surface, such as `client.chat.completions.create(...)`, goes through the OpenAI client's request loop, which catches whatever the attested `fetch` throws, retries the request `maxRetries` times (2 by default, with backoff; only a request whose body is a stream isn't retried) and then throws `APIConnectionError` with the client's error as its `cause`. So an enclave that fails to verify again on a request surfaces as an `APIConnectionError` whose `cause` is an `AttestationError`, after three verification attempts; pass `maxRetries: 0` to the client or the request to see the first failure. Errors from the API itself (`AuthenticationError`, `RateLimitError` and the rest) keep the OpenAI client's types; all of them are re-exported from the package root.
+The clients throw three error classes, each a `TinfoilError` with a `category`, and with the underlying failure as `cause` when there is one: `ConfigurationError` (invalid options, or a closed client), `NetworkError` (the enclave or its attestation couldn't be reached) and `AttestationError` (the enclave couldn't be trusted: when verification rejected the document, `cause` is the verifier's `VerificationError` whose `layer` names the rejecting check; a key that doesn't match the attested one, or one the enclave no longer holds after rotation, is an `AttestationError` too). Switch on `category` (`"configuration"`, `"network"` or `"attestation"`), which is the stable discriminant; each error's `name` matches its class, for logs and stack traces. The factories, `ensureVerified()`, `reverify()` and an HTTP client's `fetch` throw them directly. A call through the OpenAI API surface, such as `client.chat.completions.create(...)`, goes through the OpenAI client's request loop, which catches whatever the attested `fetch` throws, retries the request `maxRetries` times (2 by default, with backoff; only a request whose body is a stream isn't retried) and then throws `APIConnectionError` with the client's error as its `cause`. So an enclave that fails to verify again on a request surfaces as an `APIConnectionError` whose `cause` is an `AttestationError`, after three verification attempts; pass `maxRetries: 0` to the client or the request to see the first failure. Errors from the API itself (`AuthenticationError`, `RateLimitError` and the rest) keep the OpenAI client's types; all of them are re-exported from `tinfoil/openai`.
 
 ## Documentation
 
 - [JavaScript SDK documentation](https://docs.tinfoil.sh/sdk/javascript-sdk), which describes the 1.x API until 2.0 is released; for 2.0, use this README and the migration guide below.
-- Realtime transcription over WebSockets uses `createRealtimeWebSocket(client, { model })`, which opens a session over a WebSocket pinned to the attested key.
+- Realtime transcription over WebSockets uses `createRealtimeWebSocket(client, { model })` from `tinfoil/openai`, which opens a session over a WebSocket pinned to the attested key.
 - [Examples](packages/tinfoil/examples/), including the Vercel AI SDK provider (`createTinfoil` from `tinfoil/ai-sdk`) on the server and in React.
 - [Migrating from 1.x to 2.0](https://github.com/tinfoilsh/tinfoil-js/blob/main/MIGRATION.md).
 - The resources a client exposes, such as `chat`, `responses`, `embeddings`, and `audio`, keep the OpenAI methods and types; see the [OpenAI Node client documentation](https://github.com/openai/openai-node).
