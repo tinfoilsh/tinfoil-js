@@ -85,8 +85,11 @@ export interface EHBP {
  * A client calls it for every verification: when it is created, whenever it
  * verifies again after an expiry or a key rotation, and, on the router
  * route, for each router that discovery tries and for the fallback.
- * `signal` ends after 30 seconds, or when the caller that waits for the
- * verification stops waiting; the client stops waiting then too. A thrown
+ * `signal` ends after 30 seconds. A verification can serve many requests,
+ * so it isn't any one caller's: a caller's cancellation ends only that
+ * caller's wait, and the fetch goes on until it settles or the 30 seconds
+ * pass. The client stops waiting when `signal` ends, even if the fetcher
+ * ignores it. A thrown
  * error is reported as a {@link NetworkError} that wraps it, unless it
  * already is an SDK error. It may be called concurrently.
  */

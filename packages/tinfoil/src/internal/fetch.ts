@@ -40,7 +40,15 @@ export function attestationURL(host: string, relay: string | undefined, nonce: U
  * the timeout applies either way.
  */
 export async function fetchDocument(host: string, relay: string | undefined, nonce: Uint8Array, fetchImpl: Fetch = fetch, signal?: AbortSignal): Promise<Uint8Array> {
-  const target = attestationURL(host, relay, nonce);
+  return fetchDocumentAt(attestationURL(host, relay, nonce), fetchImpl, signal);
+}
+
+/**
+ * GET the attestation document at `target` under the bounds of a direct
+ * fetch; anything that fails is a {@link NetworkError}, unless it already is
+ * an SDK error.
+ */
+async function fetchDocumentAt(target: string, fetchImpl: Fetch, signal: AbortSignal | undefined): Promise<Uint8Array> {
   try {
     const response = await getFollowingRedirects(target, fetchImpl, signal);
     if (response.status > 299) {
@@ -63,24 +71,15 @@ export async function fetchDocument(host: string, relay: string | undefined, non
 export async function fetchRelayedDocument(relayURL: string, host: string, nonce: Uint8Array, fetchImpl: Fetch, signal?: AbortSignal): Promise<Uint8Array> {
   attestationURL(host, undefined, nonce);
   const target = `${relayURL.replace(/\/$/, "")}${ATTESTATION_ENDPOINT}?nonce=${toHex(nonce)}&enclave=${encodeURIComponent(host)}`;
-  try {
-    const response = await getFollowingRedirects(target, fetchImpl, signal);
-    if (response.status > 299) {
-      await response.body?.cancel();
-      throw new Error(`HTTP GET ${target}: ${response.status} ${response.statusText}`);
-    }
-    return await readBounded(response, MAX_ATTESTATION_BYTES, "attestation document");
-  } catch (err) {
-    if (err instanceof TinfoilError) throw err;
-    throw new NetworkError(messageOf(err), { cause: err });
-  }
+  return fetchDocumentAt(target, fetchImpl, signal);
 }
 
 /**
  * The document that a caller's fetcher returns for `host` and `nonce`. The
- * fetcher gets its own copy of the nonce and a signal that ends when
- * `signal` does or after the fetch timeout, and its wait ends then too, even
- * if the fetcher ignores the signal. A fetcher's error is a
+ * fetcher gets its own copy of the nonce and a signal that ends after the
+ * fetch timeout, or when `signal` does; a verification that several callers
+ * share passes no `signal`, so that one caller's cancellation doesn't end it.
+ * The wait ends with the fetcher's signal, even if the fetcher ignores it. A fetcher's error is a
  * {@link NetworkError} that wraps it unless it already is an SDK error; a
  * result that isn't a `Uint8Array` is a {@link ConfigurationError}, and one
  * over the size limit a {@link NetworkError}.
