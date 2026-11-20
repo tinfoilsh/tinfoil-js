@@ -44,34 +44,35 @@ export function pathEligible(request: RequestShape): boolean {
 
 /**
  * Resolves the client-level secret: a non-empty explicit option wins, then
- * the process's generated secret, on every runtime. Never throws; "" means
- * that no secret could be generated.
+ * the process's generated secret, on every runtime. Throws the error that
+ * `crypto.getRandomValues` throws, unchanged, when the secret has to be
+ * generated and secure randomness is unavailable.
  */
 export function resolveUserCacheSecret(explicit: string | undefined): string {
   if (explicit !== undefined && explicit !== "") return explicit;
   return processUserCacheSecret();
 }
 
-/** A fresh 256-bit random secret, hex-encoded; "" when no secure randomness is available. */
+/**
+ * A fresh 256-bit random secret, hex-encoded. Throws the error that
+ * `crypto.getRandomValues` throws, unchanged, rather than return a
+ * predictable value.
+ */
 export function newUserCacheSecret(): string {
-  try {
-    const bytes = new Uint8Array(32);
-    crypto.getRandomValues(bytes);
-    return Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
-  } catch {
-    console.warn("[tinfoil] could not generate a user cache secret; requests stay in the tenant-wide cache namespace");
-    return "";
-  }
+  const bytes = new Uint8Array(32);
+  crypto.getRandomValues(bytes);
+  return Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
 }
 
 /**
  * One secret for the life of the process (or page), generated on first use
  * and shared by every client in it. It isolates this process's cache
- * namespace; continuity resets when the process exits.
+ * namespace; continuity resets when the process exits. A generation that
+ * throws records nothing, so the next call tries again.
  */
 let processSecret: string | undefined;
 function processUserCacheSecret(): string {
-  if (processSecret === undefined) processSecret = newUserCacheSecret();
+  processSecret ??= newUserCacheSecret();
   return processSecret;
 }
 

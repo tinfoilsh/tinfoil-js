@@ -113,7 +113,11 @@ export class GatewayHTTPClient {
   /**
    * Checks the options before any network I/O, then fetches the catalog
    * before returning. A model's replicas are verified on its first request,
-   * so `modelPins` may name models the catalog doesn't list.
+   * so `modelPins` may name models the catalog doesn't list. Without a
+   * non-empty `userCacheSecret`, the client uses the secret that is generated
+   * once for the current runtime; when it can't be generated, because
+   * `crypto.getRandomValues` throws, the promise rejects with that error
+   * unchanged, before any network I/O.
    */
   static create(options?: GatewayOptions): Promise<GatewayHTTPClient> {
     return createGatewayHTTPClient(options ?? {}, {});

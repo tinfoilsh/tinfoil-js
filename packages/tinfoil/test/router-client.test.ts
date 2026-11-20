@@ -13,6 +13,7 @@ import { APIConnectionError } from "openai";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { AttestationError, ConfigurationError, NetworkError, TinfoilError } from "../src/errors.js";
 import type { RuntimeGlobals } from "../src/internal/platform.js";
+import { resetProcessUserCacheSecretForTests } from "../src/internal/cachesecret.js";
 import { createTinfoilClient, OpenAIClient } from "../src/openai-client.js";
 import type { Fetch, RouterOptions, Transport } from "../src/options.js";
 import { createRouterHTTPClient, RouterHTTPClient, type RouterClientSeams } from "../src/router-client.js";
@@ -273,6 +274,24 @@ describe("the router clients' default cache secret", () => {
     expect(readFileSync(join(home, ".tinfoil", "user_cache_secret"), "utf8")).toBe("from-file");
     expect(readdirSync(join(home, ".tinfoil"))).toEqual(["user_cache_secret"]);
     for (const c of [first, second, pinned]) await c.close();
+  });
+
+  it("fails construction with the random source's own error before any network I/O, and generates again next time", async () => {
+    resetProcessUserCacheSecretForTests();
+    const failure = new Error("no secure randomness");
+    const random = vi.spyOn(crypto, "getRandomValues").mockImplementationOnce(() => {
+      throw failure;
+    });
+    try {
+      const s = seams([tls.host], { resolveSecret: undefined, verifier: verifier({ tls: TEST_PIN }) });
+      await expect(createRouterHTTPClient({ transport: { kind: "tls" } }, s)).rejects.toBe(failure);
+      expect(s.listCalls).toBe(0);
+      const client = await createRouterHTTPClient({ transport: { kind: "tls" } }, seams([tls.host], { resolveSecret: undefined, verifier: verifier({ tls: TEST_PIN }) }));
+      expect(JSON.parse(await sent(client, BODY)).user_cache_secret).toMatch(/^[0-9a-f]{64}$/);
+      await client.close();
+    } finally {
+      random.mockRestore();
+    }
   });
 });
 

@@ -123,6 +123,19 @@ describe("GatewayHTTPClient.create", () => {
   });
 });
 
+describe("GatewayHTTPClient.create when no cache secret can be generated", () => {
+  it("fails with the error unchanged before any network I/O", async () => {
+    const failure = new Error("no secure randomness");
+    const s = seams({
+      resolveSecret: () => {
+        throw failure;
+      },
+    });
+    await expect(createGatewayHTTPClient({ url: GATEWAY_URL }, { ...s, verifier: verifier(gateway.publicKeyHex) })).rejects.toBe(failure);
+    expect(s.calls).toEqual([]);
+  });
+});
+
 describe("GatewayHTTPClient", () => {
   let client: GatewayHTTPClient;
   let s: ReturnType<typeof seams>;
