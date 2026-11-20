@@ -19,7 +19,7 @@ export interface RuntimeGlobals {
   readonly Deno?: { readonly version?: { readonly deno?: string } };
 }
 
-/** Never a server in the browser build: the secret stays in memory and the transport default is EHBP. */
+/** Never a server in the browser build: the transport default is EHBP, and an API key and a pinned WebSocket are refused. */
 export function isServerRuntime(_globals: RuntimeGlobals = globalThis as RuntimeGlobals): boolean {
   return false;
 }

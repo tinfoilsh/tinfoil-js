@@ -55,7 +55,7 @@ function toLocal(calls?: string[]): Fetch {
 
 function seams(extra: Partial<GatewayClientSeams> = {}): GatewayClientSeams & { calls: string[] } {
   const calls: string[] = [];
-  return { calls, catalogFetch: toLocal(calls), documentFetch: toLocal(calls), sleep: async () => {}, ehbp: { fetch: toLocal() }, resolveSecret: async (s) => s || "resolved-secret", ...extra };
+  return { calls, catalogFetch: toLocal(calls), documentFetch: toLocal(calls), sleep: async () => {}, ehbp: { fetch: toLocal() }, resolveSecret: (s) => s || "resolved-secret", ...extra };
 }
 
 function completion(content: string): unknown {

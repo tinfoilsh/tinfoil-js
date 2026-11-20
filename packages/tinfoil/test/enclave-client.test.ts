@@ -275,6 +275,13 @@ describe("EnclaveHTTPClient over TLS", () => {
     await expect(client.fetch(`http://${tls.host}/models`)).rejects.toBeInstanceOf(ConfigurationError);
   });
 
+  it("sends request bodies as they are, never adding or changing a user_cache_secret member", async () => {
+    for (const body of ['{"model":"test","messages":[]}', '{"model":"test","user_cache_secret":""}', '{"model":"test","user_cache_secret":"mine"}']) {
+      await client.fetch(`https://${tls.host}/v1/chat/completions`, { method: "POST", body, headers: { "content-type": "application/json" } });
+      expect(new TextDecoder().decode(tls.seen[tls.seen.length - 1]!.body)).toBe(body);
+    }
+  });
+
   it("streams a response as the server writes it", async () => {
     const res = await client.fetch(`${tls.origin}/sse`);
     const reader = res.body!.getReader();

@@ -29,7 +29,7 @@ export const DEFAULT_GATEWAY_URL = "https://inference-gateway.tinfoil.sh/v1/";
 /** @internal Seams for tests: the enclave client's, the catalog fetch, and the secret resolution. */
 export interface GatewayClientSeams extends Omit<EnclaveClientSeams, "tls"> {
   readonly catalogFetch?: Fetch;
-  readonly resolveSecret?: (explicit: string | undefined) => Promise<string>;
+  readonly resolveSecret?: (explicit: string | undefined) => string;
 }
 
 /** Only this module holds the token the constructor requires, so untyped code that calls it is refused. */
@@ -59,7 +59,7 @@ export async function createGatewayHTTPClient(options: GatewayOptions, seams: Ga
     options.policy,
     seams.verifier === undefined ? undefined : () => Promise.resolve(seams.verifier!),
   );
-  const secret = await (seams.resolveSecret ?? resolveUserCacheSecret)(options.userCacheSecret);
+  const secret = (seams.resolveSecret ?? resolveUserCacheSecret)(options.userCacheSecret);
   const transport = new GatewayTransport({
     baseURL,
     relay: base.host,

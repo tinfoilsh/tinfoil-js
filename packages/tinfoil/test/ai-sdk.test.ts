@@ -62,7 +62,7 @@ function seams(routers: string[]): TinfoilProviderSeams & { documentFetches: num
     documentFetch,
     sleep: async () => {},
     tls: { ca: TEST_CERT },
-    resolveSecret: async (explicit: string | undefined) => explicit || "resolved-secret",
+    resolveSecret: (explicit: string | undefined) => explicit || "resolved-secret",
   });
 }
 
@@ -120,6 +120,7 @@ describe("createTinfoil's option checks", () => {
       [{ transport: { kind: "ehbp", proxyURL: "http://proxy.example/" }, apiKey: "k" }, /HTTP is allowed only for localhost/],
       [{ transport: { kind: "quic" } as unknown as Transport, apiKey: "k" }, /transport must have kind/],
       [{ apiKey: "k", apiPath: "v1/" }, /invalid API path/],
+      [{ apiKey: "k", enclave: { host: "enclave.example", trust: { kind: "repoPin", repo: ROUTER_REPO } }, userCacheSecret: "s" } as unknown as TinfoilProviderOptions, /userCacheSecret is the router's option/],
       [{ apiKey: "k", enclave: { host: "enclave.example", trust: { kind: "projectPin", project: "org/project", registryIDs: [] } } }, /registryIDs must not be empty/],
       [{ apiKey: "k", enclave: { host: "enclave.example", repo: ROUTER_REPO } as never }, /trust is required/],
     ];
@@ -277,7 +278,7 @@ describe("the provider over one enclave", () => {
     expect(seen.sealed).toBe(true);
     expect(seen.headers["authorization"]).toBe("Bearer short-lived");
     expect(seen.headers["x-tinfoil-enclave-url"]).toBe("https://enclave.example");
-    // An enclave client scopes the cache only when told to.
+    // An enclave client never adds a cache secret.
     expect(JSON.parse(new TextDecoder().decode(seen.body))).not.toHaveProperty("user_cache_secret");
   });
 });

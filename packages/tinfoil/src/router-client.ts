@@ -19,7 +19,7 @@ import type { CallOptions, Fetch, RouterOptions } from "./options.js";
 export interface RouterClientSeams extends EnclaveClientSeams {
   readonly routersFetch?: Fetch;
   /** Resolves the cache secret when the option is empty. */
-  readonly resolveSecret?: (explicit: string | undefined) => Promise<string>;
+  readonly resolveSecret?: (explicit: string | undefined) => string;
 }
 
 /** Only this module holds the token the constructor requires, so untyped code that calls it is refused. */
@@ -43,7 +43,7 @@ export async function createRouterHTTPClient(options: RouterOptions, seams: Rout
     nonce: seams.nonce,
     sleep: seams.sleep,
   });
-  const secret = await (seams.resolveSecret ?? resolveUserCacheSecret)(options.userCacheSecret);
+  const secret = (seams.resolveSecret ?? resolveUserCacheSecret)(options.userCacheSecret);
   const host = transport.enclave().host();
   const proxyURL = resolved.proxyURL;
   const client = construct(

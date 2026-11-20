@@ -203,7 +203,7 @@ function docCommentOf(source: string, name: string): string | undefined {
 
 /** The `tinfoil/ai-sdk` entry: the AI SDK provider alone, so the AI SDK stays out of bundles that don't use it. */
 const AI_SDK_EXPORTS = ["createTinfoil"];
-type AiSdkTypeExports = [aiSdk.TinfoilProvider, aiSdk.TinfoilProviderOptions, aiSdk.TinfoilProviderEnclave];
+type AiSdkTypeExports = [aiSdk.TinfoilProvider, aiSdk.TinfoilProviderOptions, aiSdk.TinfoilProviderBaseOptions, aiSdk.TinfoilProviderEnclave];
 const aiSdkTypeExports: AiSdkTypeExports | undefined = undefined;
 void aiSdkTypeExports;
 

@@ -25,19 +25,12 @@ export interface TinfoilProviderEnclave {
   readonly trust: Trust;
 }
 
-/**
- * Configures {@link createTinfoil}. Exactly one credential is given: an
- * `apiKey` on a server, or a `bearerToken` a browser page may hold. The
- * remaining options configure the attested client: the router client's when
- * `enclave` is unset, otherwise the enclave client's.
- */
-export interface TinfoilProviderOptions extends Pick<RouterOptions & EnclaveOptions, "transport" | "policy" | "verificationCheck" | "userCacheSecret" | "signal"> {
+/** The options of {@link createTinfoil} that both routes take. */
+export interface TinfoilProviderBaseOptions extends Pick<RouterOptions & EnclaveOptions, "transport" | "policy" | "verificationCheck" | "signal"> {
   /** A long-lived API key, sent as the bearer credential. It belongs on a server, never in a page. */
   readonly apiKey?: string;
   /** A credential a browser page may hold, such as a short-lived token from the application's own sign-in. */
   readonly bearerToken?: string;
-  /** Binds the provider to this enclave rather than the discovered router. */
-  readonly enclave?: TinfoilProviderEnclave;
   /**
    * The path of the API on the enclave or router, joined under the EHBP
    * proxy when one is set and under the enclave's origin otherwise; undefined
@@ -47,6 +40,28 @@ export interface TinfoilProviderOptions extends Pick<RouterOptions & EnclaveOpti
   /** Headers added to every request, after the credential. */
   readonly headers?: Readonly<Record<string, string>>;
 }
+
+/**
+ * Configures {@link createTinfoil}. Exactly one credential is given: an
+ * `apiKey` on a server, or a `bearerToken` a browser page may hold. The
+ * remaining options configure the attested client: the router client's when
+ * `enclave` is unset, otherwise the enclave client's. `userCacheSecret` is
+ * the router client's option: an enclave client never adds a
+ * `user_cache_secret`, so the two can't be given together.
+ */
+export type TinfoilProviderOptions = TinfoilProviderBaseOptions &
+  (
+    | {
+        readonly enclave?: undefined;
+        /** As for the router client's `userCacheSecret`. */
+        readonly userCacheSecret?: string;
+      }
+    | {
+        /** Binds the provider to this enclave rather than the discovered router. */
+        readonly enclave: TinfoilProviderEnclave;
+        readonly userCacheSecret?: never;
+      }
+  );
 
 /** The AI SDK provider, with the attested client its requests go through. */
 export interface TinfoilProvider extends OpenAICompatibleProvider {
@@ -84,10 +99,19 @@ export async function createTinfoilProvider(options: TinfoilProviderOptions, sea
     transport: options.transport,
     policy: options.policy,
     verificationCheck: options.verificationCheck,
-    userCacheSecret: options.userCacheSecret,
     signal: options.signal,
   };
-  const client = options.enclave === undefined ? await createRouterHTTPClient(clientOptions, seams) : await createEnclaveHTTPClient(options.enclave.host, options.enclave.trust, clientOptions, seams);
+  let client: EnclaveHTTPClient | RouterHTTPClient;
+  if (options.enclave === undefined) {
+    client = await createRouterHTTPClient({ ...clientOptions, userCacheSecret: options.userCacheSecret }, seams);
+  } else {
+    // Untyped code can give both; an enclave client has no cache secret to apply it to.
+    const secret = (options as { readonly userCacheSecret?: unknown }).userCacheSecret;
+    if (secret !== undefined && secret !== "") {
+      throw new ConfigurationError("userCacheSecret is the router's option; an enclave client never adds a user_cache_secret, so set it in each request body instead");
+    }
+    client = await createEnclaveHTTPClient(options.enclave.host, options.enclave.trust, clientOptions, seams);
+  }
   const provider = createOpenAICompatible({
     name: "tinfoil",
     baseURL: apiBaseURL(client, options.apiPath),

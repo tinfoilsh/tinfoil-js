@@ -116,10 +116,10 @@ describe("the browser entry", () => {
   it("keeps one in-memory cache secret for the page, without warning", async () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     resetProcessUserCacheSecretForTests();
-    const first = await resolveUserCacheSecret(undefined);
+    const first = resolveUserCacheSecret(undefined);
     expect(first).toMatch(/^[0-9a-f]{64}$/);
-    expect(await resolveUserCacheSecret(undefined)).toBe(first);
-    expect(await resolveUserCacheSecret("mine")).toBe("mine");
+    expect(resolveUserCacheSecret(undefined)).toBe(first);
+    expect(resolveUserCacheSecret("mine")).toBe("mine");
     expect(warn).not.toHaveBeenCalled();
   });
 });
@@ -282,7 +282,7 @@ describe("OpenAI clients in a browser", () => {
     const reply = await ai.chat.completions.create({ model: "test", messages: [{ role: "user", content: "hi" }] });
     expect(reply.choices[0]!.message.content).toBe("sealed");
     const body = JSON.parse(new TextDecoder().decode(peer.seen[peer.seen.length - 1]!.body));
-    expect(body.user_cache_secret).toBe(await resolveUserCacheSecret(undefined));
+    expect(body.user_cache_secret).toBe(resolveUserCacheSecret(undefined));
     expect(body.model).toBe("test");
   });
 });

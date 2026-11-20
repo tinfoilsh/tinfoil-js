@@ -185,7 +185,13 @@ export interface PinnedWebSocket {
   removeEventListener(type: "close", listener: (event: { readonly code: number; readonly reason: string }) => void): void;
 }
 
-/** Configures an {@link EnclaveHTTPClient}. */
+/**
+ * Configures an {@link EnclaveHTTPClient}. It has no prompt-cache option:
+ * an enclave client sends request bodies as they are, and never adds or
+ * changes a `user_cache_secret` member. A caller that points one at
+ * Tinfoil's router and wants a scoped prompt cache sets that member in each
+ * request body.
+ */
 export interface EnclaveOptions {
   /** How requests to the enclave are protected; undefined selects the platform's default, as {@link Transport} describes. */
   readonly transport?: Transport;
@@ -196,13 +202,6 @@ export interface EnclaveOptions {
    */
   readonly policy?: Policy;
   readonly verificationCheck?: VerificationCheck;
-  /**
-   * The default prompt-cache scope for the client's requests. Only Tinfoil's
-   * router reads it, so set it when the enclave is a router. A non-empty
-   * `user_cache_secret` string in a request's JSON body overrides it. Use an
-   * opaque random value, not a raw user ID or API key.
-   */
-  readonly userCacheSecret?: string;
   /** Aborts the verification the factory performs before it returns. */
   readonly signal?: AbortSignal;
 }

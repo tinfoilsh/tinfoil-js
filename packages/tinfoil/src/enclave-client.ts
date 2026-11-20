@@ -152,7 +152,7 @@ export async function createEnclaveHTTPClient(host: string, trust: Trust, option
     transport,
     trustCopy,
     proxyURL !== "" ? proxyURL : `https://${host}/`,
-    attestedFetch(transport, host, proxyURL, options.userCacheSecret ?? ""),
+    attestedFetch(transport, host, proxyURL),
   );
   registerWebSocketAccess(client, transport, seams.tls ?? {});
   // A verification that the signal cuts short goes on inside the transport,
