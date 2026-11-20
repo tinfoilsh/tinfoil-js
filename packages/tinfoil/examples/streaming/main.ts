@@ -9,7 +9,7 @@
  *
  * Run from packages/tinfoil: npx ts-node examples/streaming/main.ts
  */
-import { createClient } from "tinfoil";
+import { createClient } from "tinfoil/openai";
 
 async function main() {
   try {

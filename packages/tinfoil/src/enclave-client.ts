@@ -7,6 +7,7 @@
 import { Verifier, type ConfigTrust, type Policy, type Verification } from "@tinfoilsh/verifier";
 import { ConfigurationError } from "./errors.js";
 import { withCacheSecret } from "./internal/cachesecret.js";
+import { registerRoute } from "./internal/api-path.js";
 import { asyncDispose } from "./internal/dispose.js";
 import { Enclave, fromVerify, type EnclaveConfig } from "./internal/enclave.js";
 import { normalizeBaseURL, refuseEnclaveOriginProxy, validateBaseURL } from "./internal/transport/base-url.js";
@@ -35,20 +36,6 @@ export interface EnclaveClientSeams {
   readonly sleep?: EnclaveConfig["sleep"];
   readonly tls?: TLSOptions;
   readonly ehbp?: EHBPOptions;
-}
-
-const openAIURLs = new WeakMap<object, string>();
-
-/** @internal Where an OpenAI client over `client` sends requests: the base URL option, or the enclave's `/v1/` API. */
-export function openAIURLOf(client: object): string {
-  const url = openAIURLs.get(client);
-  if (url === undefined) throw new ConfigurationError("client was not created by its factory");
-  return url;
-}
-
-/** @internal Records where an OpenAI client over `client` sends requests. */
-export function setOpenAIURL(client: object, url: string): void {
-  openAIURLs.set(client, url);
 }
 
 /** @internal A {@link Transport} as a client uses it: the mode, the proxy ("" for none, otherwise ending with `/`) and the EHBP network fetch. */
@@ -140,7 +127,7 @@ export async function buildVerifier(config: ConfigTrust | undefined, policy: Pol
 const TOKEN: unique symbol = Symbol("EnclaveHTTPClient");
 
 /** Calls the private constructor; the class assigns it, as the only place the constructor can be called. */
-let construct: (transport: KeyedTransport, trust: Trust, baseURL: string, openAIURL: string, fetchImpl: Fetch) => EnclaveHTTPClient;
+let construct: (transport: KeyedTransport, trust: Trust, baseURL: string, fetchImpl: Fetch) => EnclaveHTTPClient;
 
 /** @internal The factory with its test seams; {@link EnclaveHTTPClient.create} is this without them. */
 export async function createEnclaveHTTPClient(host: string, trust: Trust, options: EnclaveOptions, seams: EnclaveClientSeams): Promise<EnclaveHTTPClient> {
@@ -165,7 +152,6 @@ export async function createEnclaveHTTPClient(host: string, trust: Trust, option
     transport,
     trustCopy,
     proxyURL !== "" ? proxyURL : `https://${host}/`,
-    proxyURL !== "" ? proxyURL : `https://${host}/v1/`,
     attestedFetch(transport, host, proxyURL, options.userCacheSecret ?? ""),
   );
   registerWebSocketAccess(client, transport, seams.tls ?? {});
@@ -186,9 +172,8 @@ export async function createEnclaveHTTPClient(host: string, trust: Trust, option
  * An HTTP client bound to one attested enclave; see the module header. The
  * constructor is private: type-checked code cannot call it, and a call from
  * untyped code is refused at runtime. Clients come from
- * {@link EnclaveHTTPClient.create}, and from the factories built over it:
- * {@link EnclaveOpenAIClient.create} and the AI SDK provider's `enclave`
- * option.
+ * {@link EnclaveHTTPClient.create}, and from the AI SDK provider's `enclave`
+ * option. An `OpenAIClient` from `tinfoil/openai` can be built over one.
  */
 export class EnclaveHTTPClient {
   /**
@@ -204,14 +189,14 @@ export class EnclaveHTTPClient {
   readonly #transport: KeyedTransport;
   readonly #trust: Trust;
 
-  private constructor(token: typeof TOKEN, transport: KeyedTransport, trust: Trust, baseURL: string, openAIURL: string, fetchImpl: Fetch) {
+  private constructor(token: typeof TOKEN, transport: KeyedTransport, trust: Trust, baseURL: string, fetchImpl: Fetch) {
     if (token !== TOKEN) throw new ConfigurationError("EnclaveHTTPClient is created with EnclaveHTTPClient.create");
     this.#transport = transport;
     this.#trust = trust;
     this.fetch = fetchImpl;
     this.baseURL = baseURL;
     this.enclave = transport.enclave().host();
-    setOpenAIURL(this, openAIURL);
+    registerRoute(this, "enclave");
     // The client's state lives in the transport; the client itself never changes once created.
     Object.freeze(this);
   }

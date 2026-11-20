@@ -5,15 +5,17 @@
 import { describe, expect, it } from "bun:test";
 import * as aiSdk from "../src/ai-sdk.js";
 import * as surface from "../src/index.js";
+import * as openaiEntry from "../src/openai.js";
 // Resolved through the package's exports map, so these need `npm run build`.
 import * as builtHTTP from "tinfoil/http";
 import * as builtRoot from "tinfoil";
 
 describe("v3 client surface under Bun", () => {
   it("exposes the clients, the errors and the version", () => {
-    for (const name of ["createClient", "EnclaveHTTPClient", "RouterHTTPClient", "GatewayHTTPClient", "TinfoilError", "SDK_VERSION"]) {
+    for (const name of ["EnclaveHTTPClient", "RouterHTTPClient", "GatewayHTTPClient", "TinfoilError", "SDK_VERSION"]) {
       expect(name in surface).toBe(true);
     }
+    for (const name of ["createClient", "OpenAIClient"]) expect(name in openaiEntry).toBe(true);
     expect(new surface.ConfigurationError("x")).toBeInstanceOf(surface.TinfoilError);
   });
 
@@ -31,8 +33,9 @@ describe("v3 client surface under Bun", () => {
     for (const [name, value] of Object.entries(builtHTTP as Record<string, unknown>)) {
       expect(value).toBe((builtRoot as Record<string, unknown>)[name]);
     }
-    for (const name of ["createClient", "TinfoilClient", "EnclaveOpenAIClient", "RouterOpenAIClient", "GatewayOpenAIClient", "createTinfoil"]) {
+    for (const name of ["createClient", "OpenAIClient", "createTinfoil"]) {
       expect(name in builtHTTP).toBe(false);
+      expect(name in builtRoot).toBe(false);
     }
   });
 

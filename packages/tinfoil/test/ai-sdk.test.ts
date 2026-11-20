@@ -119,6 +119,7 @@ describe("createTinfoil's option checks", () => {
       [{ apiKey: "k", enclave: { host: "", trust: { kind: "repoPin", repo: ROUTER_REPO } } }, /host is required/],
       [{ transport: { kind: "ehbp", proxyURL: "http://proxy.example/" }, apiKey: "k" }, /HTTP is allowed only for localhost/],
       [{ transport: { kind: "quic" } as unknown as Transport, apiKey: "k" }, /transport must have kind/],
+      [{ apiKey: "k", apiPath: "v1/" }, /invalid API path/],
       [{ apiKey: "k", enclave: { host: "enclave.example", trust: { kind: "projectPin", project: "org/project", registryIDs: [] } } }, /registryIDs must not be empty/],
       [{ apiKey: "k", enclave: { host: "enclave.example", repo: ROUTER_REPO } as never }, /trust is required/],
     ];
@@ -296,7 +297,7 @@ describe("the provider's fetch option", () => {
     expect(text).toBe("pong");
     expect(network.seen).toHaveLength(1);
     const sealed = network.seen[0]!;
-    expect(sealed.url).toBe(`${ehbp.origin}/chat/completions`);
+    expect(sealed.url).toBe(`${ehbp.origin}/v1/chat/completions`);
     expect(sealed.headers.has(PROTOCOL.ENCAPSULATED_KEY_HEADER)).toBe(true);
     expect(sealed.headers.get("x-tinfoil-enclave-url")).toBe("https://router.example");
     expect(sealed.headers.get("authorization")).toBe("Bearer secret-key");

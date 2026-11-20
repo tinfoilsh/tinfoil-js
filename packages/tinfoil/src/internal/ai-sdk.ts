@@ -9,7 +9,8 @@
  * exports the factory, so the AI SDK stays out of bundles that don't use it.
  */
 import { createOpenAICompatible, type OpenAICompatibleProvider } from "@ai-sdk/openai-compatible";
-import { createEnclaveHTTPClient, EnclaveHTTPClient, openAIURLOf, type EnclaveClientSeams } from "../enclave-client.js";
+import { createEnclaveHTTPClient, EnclaveHTTPClient, type EnclaveClientSeams } from "../enclave-client.js";
+import { apiBaseURL, validateAPIPath } from "./api-path.js";
 import { ConfigurationError } from "../errors.js";
 import { checkAPIKeyRuntime } from "./credential.js";
 import type { RuntimeGlobals } from "./platform.js";
@@ -37,6 +38,12 @@ export interface TinfoilProviderOptions extends Pick<RouterOptions & EnclaveOpti
   readonly bearerToken?: string;
   /** Binds the provider to this enclave rather than the discovered router. */
   readonly enclave?: TinfoilProviderEnclave;
+  /**
+   * The path of the API on the enclave or router, joined under the EHBP
+   * proxy when one is set and under the enclave's origin otherwise; undefined
+   * selects `/v1/`. As for the OpenAI client's `apiPath`.
+   */
+  readonly apiPath?: string;
   /** Headers added to every request, after the credential. */
   readonly headers?: Readonly<Record<string, string>>;
 }
@@ -72,6 +79,7 @@ function credentialOf(options: TinfoilProviderOptions, globals: RuntimeGlobals |
 export async function createTinfoilProvider(options: TinfoilProviderOptions, seams: TinfoilProviderSeams): Promise<TinfoilProvider> {
   // The credential is checked first, so a provider without one fails before any network I/O.
   const credential = credentialOf(options, seams.globals);
+  if (options.apiPath !== undefined && options.apiPath !== "") validateAPIPath(options.apiPath);
   const clientOptions = {
     transport: options.transport,
     policy: options.policy,
@@ -82,7 +90,7 @@ export async function createTinfoilProvider(options: TinfoilProviderOptions, sea
   const client = options.enclave === undefined ? await createRouterHTTPClient(clientOptions, seams) : await createEnclaveHTTPClient(options.enclave.host, options.enclave.trust, clientOptions, seams);
   const provider = createOpenAICompatible({
     name: "tinfoil",
-    baseURL: openAIURLOf(client),
+    baseURL: apiBaseURL(client, options.apiPath),
     apiKey: credential,
     ...(options.headers === undefined ? {} : { headers: { ...options.headers } }),
     // The client's fetch has the global fetch's call signature, which is all a DOM or Node `typeof fetch` is. Bun's

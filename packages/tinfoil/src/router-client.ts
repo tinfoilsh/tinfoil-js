@@ -5,9 +5,10 @@
  * created and tries routers for at most 30 seconds before falling back.
  */
 import type { Verification } from "@tinfoilsh/verifier";
-import { attestedFetch, buildVerifier, modeFor, resolveTransport, setOpenAIURL, type EnclaveClientSeams } from "./enclave-client.js";
+import { attestedFetch, buildVerifier, modeFor, resolveTransport, type EnclaveClientSeams } from "./enclave-client.js";
 import { ConfigurationError } from "./errors.js";
 import { resolveUserCacheSecret } from "./internal/cachesecret.js";
+import { registerRoute } from "./internal/api-path.js";
 import { asyncDispose } from "./internal/dispose.js";
 import { discoverRouter } from "./internal/router.js";
 import type { KeyedTransport } from "./internal/transport/transport.js";
@@ -25,7 +26,7 @@ export interface RouterClientSeams extends EnclaveClientSeams {
 const TOKEN: unique symbol = Symbol("RouterHTTPClient");
 
 /** Calls the private constructor; the class assigns it, as the only place the constructor can be called. */
-let construct: (transport: KeyedTransport, baseURL: string, openAIURL: string, fetchImpl: Fetch) => RouterHTTPClient;
+let construct: (transport: KeyedTransport, baseURL: string, fetchImpl: Fetch) => RouterHTTPClient;
 
 /** @internal The factory with its test seams; {@link RouterHTTPClient.create} is this without them. */
 export async function createRouterHTTPClient(options: RouterOptions, seams: RouterClientSeams): Promise<RouterHTTPClient> {
@@ -48,7 +49,6 @@ export async function createRouterHTTPClient(options: RouterOptions, seams: Rout
   const client = construct(
     transport,
     proxyURL !== "" ? proxyURL : `https://${host}/`,
-    proxyURL !== "" ? proxyURL : `https://${host}/v1/`,
     attestedFetch(transport, host, proxyURL, secret),
   );
   registerWebSocketAccess(client, transport, seams.tls ?? {});
@@ -71,8 +71,8 @@ export async function createRouterHTTPClient(options: RouterOptions, seams: Rout
  * header. The constructor is private: type-checked code cannot call it, and
  * a call from untyped code is refused at runtime. Clients come from
  * {@link RouterHTTPClient.create}, and from the factories built over it:
- * `createClient` and {@link TinfoilClient.create},
- * {@link RouterOpenAIClient.create}, and the AI SDK provider.
+ * `createClient` from `tinfoil/openai` and the AI SDK provider. An
+ * `OpenAIClient` from `tinfoil/openai` can be built over one.
  */
 export class RouterHTTPClient {
   /** As {@link EnclaveHTTPClient.fetch}. */
@@ -83,13 +83,13 @@ export class RouterHTTPClient {
   readonly enclave: string;
   readonly #transport: KeyedTransport;
 
-  private constructor(token: typeof TOKEN, transport: KeyedTransport, baseURL: string, openAIURL: string, fetchImpl: Fetch) {
+  private constructor(token: typeof TOKEN, transport: KeyedTransport, baseURL: string, fetchImpl: Fetch) {
     if (token !== TOKEN) throw new ConfigurationError("RouterHTTPClient is created with RouterHTTPClient.create");
     this.#transport = transport;
     this.fetch = fetchImpl;
     this.baseURL = baseURL;
     this.enclave = transport.enclave().host();
-    setOpenAIURL(this, openAIURL);
+    registerRoute(this, "router");
     // The client's state lives in the transport; the client itself never changes once created.
     Object.freeze(this);
   }

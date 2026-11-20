@@ -25,6 +25,11 @@
       "import": "./dist/http.js",
       "default": "./dist/http.js"
     },
+    "./openai": {
+      "types": "./dist/openai.d.ts",
+      "import": "./dist/openai.js",
+      "default": "./dist/openai.js"
+    },
     "./ai-sdk": {
       "types": "./dist/ai-sdk.d.ts",
       "import": "./dist/ai-sdk.js",
@@ -37,7 +42,7 @@
     }
   },
   "scripts": {
-    "build": "node scripts/generate-version.mjs && tsc && node ../../scripts/prune-declarations.mjs dist dist/index.d.ts dist/index.browser.d.ts dist/http.d.ts dist/ai-sdk.d.ts dist/unsafe.d.ts",
+    "build": "node scripts/generate-version.mjs && tsc && node ../../scripts/prune-declarations.mjs dist dist/index.d.ts dist/index.browser.d.ts dist/http.d.ts dist/openai.d.ts dist/ai-sdk.d.ts dist/unsafe.d.ts",
     "test": "node scripts/generate-version.mjs && vitest run",
     "test:integration": "RUN_TINFOIL_INTEGRATION=true npm test",
     "test:bun": "node scripts/generate-version.mjs && bun test --timeout 30000 ./test/surface.bun.ts ./test/tls.bun.ts ./test/fetch-options.bun.ts ./test/ws.bun.ts",
@@ -75,18 +80,21 @@
     "@tinfoilsh/verifier": "2.0.0-rc.4",
     "@types/ws": "^8.18.1",
     "ehbp": "^0.6.0",
-    "openai": "^7.35.0",
     "ws": "^8.21.0"
   },
   "peerDependencies": {
     "@ai-sdk/openai-compatible": "^3.0.7",
-    "ai": "^6.0.168 || ^7.0.0"
+    "ai": "^6.0.168 || ^7.0.0",
+    "openai": "^7.35.0"
   },
   "peerDependenciesMeta": {
     "@ai-sdk/openai-compatible": {
       "optional": true
     },
     "ai": {
+      "optional": true
+    },
+    "openai": {
       "optional": true
     }
   },
@@ -102,6 +110,7 @@
     "ai": "^7.0.19",
     "dotenv": "^17.4.2",
     "eslint": "^10.6.0",
+    "openai": "^7.35.0",
     "playwright": "^1.61.1",
     "ts-node": "^10.9.2",
     "typescript-eslint": "^8.63.0",

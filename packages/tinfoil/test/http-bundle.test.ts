@@ -92,14 +92,27 @@ describe("the published HTTP entry", () => {
   });
 });
 
-// The AI SDK and its OpenAI-compatible provider are optional peers that only
-// `tinfoil/ai-sdk` needs, so the root entry must load and bundle without them.
+// `openai`, the AI SDK and its OpenAI-compatible provider are optional peers
+// that only `tinfoil/openai` and `tinfoil/ai-sdk` need, so the root entry must
+// load and bundle without any of them.
 describe("the published root entry", () => {
+  it("loads in Node without resolving an API adapter", () => {
+    assertLoadsWithout("tinfoil", "^(?:openai|ai)(?:/|$)|^@ai-sdk/", ".RouterHTTPClient.create");
+  });
+  it("keeps the API adapters out of a consumer", async () => {
+    const { modules } = await bundleConsumer('export { RouterHTTPClient, createWebSocket } from "tinfoil";\n');
+    expect(modules.filter((id) => /\/node_modules\/(?:openai|ai|@ai-sdk)\//.test(id))).toEqual([]);
+    expect(modules.filter((id) => /\/(?:openai-client|ai-sdk|realtime)\.js$/.test(id))).toEqual([]);
+  });
+});
+
+// The OpenAI client needs `openai` and nothing of the AI SDK.
+describe("the published OpenAI entry", () => {
   it("loads in Node without resolving the AI SDK", () => {
-    assertLoadsWithout("tinfoil", "^ai(?:/|$)|^@ai-sdk/", ".createClient");
+    assertLoadsWithout("tinfoil/openai", "^ai(?:/|$)|^@ai-sdk/", ".createClient");
   });
   it("keeps the AI SDK out of a consumer", async () => {
-    const { modules } = await bundleConsumer('export { createClient, RouterOpenAIClient } from "tinfoil";\n');
+    const { modules } = await bundleConsumer('export { createClient, OpenAIClient } from "tinfoil/openai";\n');
     expect(modules.some((id) => id.endsWith("/tinfoil/dist/openai-client.js"))).toBe(true);
     expect(modules.filter((id) => /\/node_modules\/(?:ai|@ai-sdk)\//.test(id))).toEqual([]);
     expect(modules.filter((id) => /\/ai-sdk\.js$/.test(id))).toEqual([]);

@@ -7,12 +7,13 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { AttestationError, ConfigurationError, NetworkError } from "../src/errors.js";
 import { createGatewayHTTPClient, DEFAULT_GATEWAY_URL, fetchCatalog, GatewayHTTPClient, type GatewayClientSeams } from "../src/gateway-client.js";
-import { createGatewayOpenAIClient, GatewayOpenAIClient } from "../src/openai-client.js";
+import { OpenAIClient } from "../src/openai-client.js";
 import type { Catalog, Fetch, GatewayOptions } from "../src/options.js";
 import { KEY_SPKI_FP_SHA256_V1_FORMAT, KEY_X25519_HPKE_V1_FORMAT, UsageError, type Verification, type Verifier } from "../../verifier/src/index.js";
 import { startEhbpServer, type EhbpServer } from "./helpers/ehbp-server.js";
 import { recordingFetch } from "./helpers/network.js";
 import { expectWithOptionsRefusesTransportOptions } from "./helpers/transport-options.js";
+import { openAIOver } from "./helpers/openai.js";
 
 const GATEWAY_URL = "https://gateway.example/v1/";
 const CATALOG = { "test-model": { repo: "tinfoilsh/test", hosts: ["replica-a.example", "replica-b.example"] }, other: { repo: "tinfoilsh/other", hosts: ["o.example"] } };
@@ -243,10 +244,10 @@ describe("GatewayHTTPClient with a network fetch", () => {
   });
 });
 
-describe("GatewayOpenAIClient", () => {
+describe("OpenAIClient<GatewayHTTPClient>", () => {
   it("backs an OpenAI client on the gateway URL with the option's secret", async () => {
-    const ai = await createGatewayOpenAIClient({ url: GATEWAY_URL, userCacheSecret: "option-secret" }, { apiKey: "k" }, { ...seams({ resolveSecret: undefined }), verifier: verifier(gateway.publicKeyHex) });
-    expect(ai).toBeInstanceOf(GatewayOpenAIClient);
+    const ai = await openAIOver(createGatewayHTTPClient({ url: GATEWAY_URL, userCacheSecret: "option-secret" }, { ...seams({ resolveSecret: undefined }), verifier: verifier(gateway.publicKeyHex) }), { apiKey: "k" });
+    expect(ai).toBeInstanceOf(OpenAIClient);
     expect(ai.baseURL).toBe(GATEWAY_URL);
     expect(ai.httpClient).toBeInstanceOf(GatewayHTTPClient);
     const reply = await ai.chat.completions.create({ model: "test-model", messages: [{ role: "user", content: "hi" }] });
@@ -257,7 +258,10 @@ describe("GatewayOpenAIClient", () => {
     const sent = JSON.parse(new TextDecoder().decode(last.body)) as Record<string, unknown>;
     expect(sent.cache_salt).toMatch(/^[A-Za-z0-9_-]{43}$/);
     expect(sent.user_cache_secret).toBeUndefined();
-    expect(() => new (GatewayOpenAIClient as any)(Symbol("x"), ai.httpClient, {})).toThrow(ConfigurationError);
+    expect(() => new OpenAIClient(Symbol("x") as never)).toThrow(ConfigurationError);
     expectWithOptionsRefusesTransportOptions(ai);
+    // The gateway's URL already carries the API path, so an API path of the caller's own is refused.
+    expect(() => new OpenAIClient(ai.httpClient, { apiPath: "/v1/" }, { apiKey: "k" })).toThrow(/a gateway client's URL already carries the API path/);
+    expect(new OpenAIClient(ai.httpClient, { apiPath: "" }, { apiKey: "k" }).baseURL).toBe(GATEWAY_URL);
   });
 });

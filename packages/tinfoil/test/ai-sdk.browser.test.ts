@@ -11,6 +11,7 @@ import { createTinfoilProvider, type TinfoilProvider } from "../src/internal/ai-
 import { ConfigurationError } from "../src/errors.js";
 import type { Fetch } from "../src/options.js";
 import * as browserEntry from "../src/index.browser.js";
+import * as openaiEntry from "../src/openai.js";
 import { createEhbpPeer, fetchOf, paced, type EhbpPeer } from "./helpers/ehbp-peer.js";
 
 const ENCLAVE = "enclave.example";
@@ -76,7 +77,7 @@ describe("createTinfoil in a browser", () => {
     await expect(failure).rejects.toThrow(/bearerToken/);
     const rejection = (p: Promise<unknown>): Promise<Error> => p.then(() => Promise.reject(new Error("resolved")), (e: unknown) => e as Error);
     const provider = await rejection(failure);
-    const client = await rejection(browserEntry.createClient({ apiKey: "long-lived" }));
+    const client = await rejection(openaiEntry.createClient({ apiKey: "long-lived" }));
     expect(client).toBeInstanceOf(ConfigurationError);
     expect(client.message).toBe(provider.message);
   });

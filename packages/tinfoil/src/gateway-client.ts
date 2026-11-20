@@ -10,6 +10,7 @@ import type { Verification } from "@tinfoilsh/verifier";
 import { ehbpOptionsFor, type EnclaveClientSeams } from "./enclave-client.js";
 import { ConfigurationError } from "./errors.js";
 import { resolveUserCacheSecret } from "./internal/cachesecret.js";
+import { registerRoute } from "./internal/api-path.js";
 import { asyncDispose } from "./internal/dispose.js";
 import { fetchCatalogWith } from "./internal/gateway/catalog.js";
 import { GatewayPolicy } from "./internal/gateway/policy.js";
@@ -83,8 +84,8 @@ export async function createGatewayHTTPClient(options: GatewayOptions, seams: Ga
  * The HTTP client for Tinfoil inference through the gateway; see the module
  * header for what it protects. The constructor is private: type-checked
  * code cannot call it, and a call from untyped code is refused at runtime.
- * Clients come from {@link GatewayHTTPClient.create} and
- * {@link GatewayOpenAIClient.create}.
+ * Clients come from {@link GatewayHTTPClient.create}. An `OpenAIClient`
+ * from `tinfoil/openai` can be built over one.
  *
  * @experimental The gateway route is new; this API may change without a major version.
  */
@@ -100,6 +101,7 @@ export class GatewayHTTPClient {
     this.#transport = transport;
     this.fetch = fetchImpl;
     this.baseURL = baseURL;
+    registerRoute(this, "gateway");
     // The client's state lives in the transport; the client itself never changes once created.
     Object.freeze(this);
   }
