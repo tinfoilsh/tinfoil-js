@@ -397,7 +397,7 @@ describe("KeyedTransport", () => {
      * the bound fetch sends is recorded with the key it went out under.
      */
     async function failing() {
-      const fail: { next: "attestation" | "network" | undefined } = { next: undefined };
+      const fail: { next: "attestation" | "network" | undefined; gate?: Promise<void>; fetched?: () => void } = { next: undefined };
       const sent: string[] = [];
       const released: string[] = [];
       const peer = { key: "" };
@@ -414,6 +414,8 @@ describe("KeyedTransport", () => {
           },
         } as unknown as Verifier,
         fetch: async () => {
+          fail.fetched?.();
+          if (fail.gate !== undefined) await fail.gate;
           if (fail.next === "network") throw new TypeError("fetch failed");
           return new Response(new Uint8Array([1]));
         },
@@ -478,8 +480,26 @@ describe("KeyedTransport", () => {
       await t.ensureVerified();
       fail.next = "network";
       await expect(t.reverify()).rejects.toThrow(NetworkError);
+
+      // An abort while the re-verification is under way stops the caller
+      // waiting; the verification goes on, and its network failure keeps
+      // the cached one too.
+      let open!: () => void;
+      fail.gate = new Promise<void>((resolve) => (open = resolve));
+      const started = new Promise<void>((resolve) => (fail.fetched = resolve));
+      const controller = new AbortController();
       const reason = new Error("gave up");
-      await expect(t.reverify(AbortSignal.abort(reason))).rejects.toBe(reason);
+      const aborted = t.reverify(controller.signal);
+      await started;
+      controller.abort(reason);
+      await expect(aborted).rejects.toBe(reason);
+      expect(t.current()?.tlsPublicKeyFP).toBe("k1");
+      // Another call joins the verification still under way and sees its failure.
+      const joined = t.reverify();
+      open();
+      fail.gate = undefined;
+      fail.fetched = undefined;
+      await expect(joined).rejects.toThrow(NetworkError);
       expect(await (await t.fetch(`https://${HOST}/v1/chat`)).text()).toBe("k1");
       expect(sent).toEqual(["k1"]);
       expect(released).toEqual([]);
