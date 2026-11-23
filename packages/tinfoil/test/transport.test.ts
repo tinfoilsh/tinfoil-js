@@ -388,6 +388,139 @@ describe("KeyedTransport", () => {
     expect(t.current()).toBeUndefined();
   });
 
+  describe("after a failed re-verification", () => {
+    /**
+     * A transport whose verifications carry the key `k<n>` for the n-th
+     * verification, and whose next verification fails as `fail.next` says:
+     * an attestation failure, where the verifier rejects the document, or a
+     * network failure, where the document can't be fetched. Each request
+     * the bound fetch sends is recorded with the key it went out under.
+     */
+    async function failing() {
+      const fail: { next: "attestation" | "network" | undefined; gate?: Promise<void>; fetched?: () => void } = { next: undefined };
+      const sent: string[] = [];
+      const released: string[] = [];
+      const peer = { key: "" };
+      let verified = 0;
+      const now = new Date("2026-01-01T00:00:00Z");
+      const enclave = await Enclave.create({
+        host: HOST,
+        pin: {},
+        verifier: {
+          checkPinVerifiability: () => {},
+          verifyV3At: async (...args: unknown[]) => {
+            if (fail.next === "attestation") throw new Error("nonce mismatch");
+            return (keyedVerifier(() => `k${++verified}`, new Date(now.getTime() + 60_000)).verifyV3At as (...a: unknown[]) => Promise<Verification>)(...args);
+          },
+        } as unknown as Verifier,
+        fetch: async () => {
+          fail.fetched?.();
+          if (fail.gate !== undefined) await fail.gate;
+          if (fail.next === "network") throw new TypeError("fetch failed");
+          return new Response(new Uint8Array([1]));
+        },
+        clock: () => now,
+        sleep: async () => {},
+      });
+      const mode: Mode = {
+        name: "tls",
+        validateRequest: () => {},
+        bind(v) {
+          const key = v.tlsPublicKeyFP!;
+          return {
+            fetch: async () => {
+              if (peer.key !== "" && peer.key !== key) throw new PeerLacksKeyError("peer changed key");
+              sent.push(key);
+              return new Response(key);
+            },
+            close: () => void released.push(`closed ${key}`),
+            retire: () => void released.push(`retired ${key}`),
+          };
+        },
+      };
+      const t = new KeyedTransport(enclave, mode, () => now);
+      return { t, fail, sent, released, peer, verifications: () => verified };
+    }
+
+    it("discards a fresh verification when the failure is an attestation failure, so the next request verifies again and sends nothing until one succeeds", async () => {
+      const { t, fail, sent, released } = await failing();
+      expect(await (await t.fetch(`https://${HOST}/v1/chat`)).text()).toBe("k1");
+
+      fail.next = "attestation";
+      await expect(t.reverify()).rejects.toThrow(AttestationError);
+      // The binding's idle connections are released at once, not when a newer verification replaces it.
+      expect(released).toEqual(["retired k1"]);
+      // The last verification is still reported, but no request goes out under it.
+      expect(t.current()?.tlsPublicKeyFP).toBe("k1");
+      await expect(t.fetch(`https://${HOST}/v1/chat`)).rejects.toThrow(AttestationError);
+      await expect(t.ensureVerified()).rejects.toThrow(AttestationError);
+      expect(sent).toEqual(["k1"]);
+
+      fail.next = undefined;
+      expect(await (await t.fetch(`https://${HOST}/v1/chat`)).text()).toBe("k2");
+      expect(sent).toEqual(["k1", "k2"]);
+      // The discarded binding is released once, and closed with the rest when the transport closes.
+      expect(released).toEqual(["retired k1"]);
+      t.close();
+      expect(released).toEqual(["retired k1", "closed k2", "closed k1"]);
+    });
+
+    it("discards it after a one-shot verification's attestation failure as well", async () => {
+      const { t, fail, sent } = await failing();
+      await t.ensureVerified();
+      fail.next = "attestation";
+      await expect(t.verifyOnce()).rejects.toThrow(AttestationError);
+      fail.next = undefined;
+      expect(await (await t.fetch(`https://${HOST}/v1/chat`)).text()).toBe("k2");
+      expect(sent).toEqual(["k2"]);
+    });
+
+    it("keeps a fresh verification after a network failure or the caller's abort, so the next request goes out under it without verifying again", async () => {
+      const { t, fail, sent, released, verifications } = await failing();
+      await t.ensureVerified();
+      fail.next = "network";
+      await expect(t.reverify()).rejects.toThrow(NetworkError);
+
+      // An abort while the re-verification is under way stops the caller
+      // waiting; the verification goes on, and its network failure keeps
+      // the cached one too.
+      let open!: () => void;
+      fail.gate = new Promise<void>((resolve) => (open = resolve));
+      const started = new Promise<void>((resolve) => (fail.fetched = resolve));
+      const controller = new AbortController();
+      const reason = new Error("gave up");
+      const aborted = t.reverify(controller.signal);
+      await started;
+      controller.abort(reason);
+      await expect(aborted).rejects.toBe(reason);
+      expect(t.current()?.tlsPublicKeyFP).toBe("k1");
+      // Another call joins the verification still under way and sees its failure.
+      const joined = t.reverify();
+      open();
+      fail.gate = undefined;
+      fail.fetched = undefined;
+      await expect(joined).rejects.toThrow(NetworkError);
+      expect(await (await t.fetch(`https://${HOST}/v1/chat`)).text()).toBe("k1");
+      expect(sent).toEqual(["k1"]);
+      expect(released).toEqual([]);
+      expect(verifications()).toBe(1);
+    });
+
+    it("discards the verification after a key rejection whose recovery fails attestation, and recovers on a later request once attestation succeeds", async () => {
+      const { t, fail, sent, peer } = await failing();
+      await t.ensureVerified();
+      peer.key = "k2";
+      fail.next = "attestation";
+      const replayed = withReplay(t.fetch, isKeyRejection);
+      await expect(replayed(`https://${HOST}/v1/chat`, { method: "POST", body: "payload" })).rejects.toThrow(AttestationError);
+      await expect(t.fetch(`https://${HOST}/v1/chat`)).rejects.toThrow(AttestationError);
+      expect(sent).toEqual([]);
+      fail.next = undefined;
+      expect(await (await t.fetch(`https://${HOST}/v1/chat`)).text()).toBe("k2");
+      expect(sent).toEqual(["k2"]);
+    });
+  });
+
   it("reports a key rejection it cannot replay, because the body is a stream, as an attestation error that is no longer replayable", async () => {
     const t = await transport(
       () => "k1",

@@ -9,7 +9,7 @@ import { Identity, PROTOCOL } from "ehbp";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { checkEnclaveOptions, createEnclaveHTTPClient, EnclaveHTTPClient, resolveTransport, type EnclaveClientSeams } from "../src/enclave-client.js";
 import { checkTransportMode, defaultTransportMode, isBun, isServerRuntime } from "../src/internal/platform.js";
-import { AttestationError, ConfigurationError } from "../src/errors.js";
+import { AttestationError, ConfigurationError, NetworkError } from "../src/errors.js";
 import { OpenAIClient, type OpenAIClientOptions } from "../src/openai-client.js";
 import type { EnclaveOptions, Fetch, Transport } from "../src/options.js";
 import type { Trust } from "../src/trust.js";
@@ -454,6 +454,75 @@ describe("EnclaveHTTPClient.close over TLS", () => {
     }
     await expect(ai.httpClient.ensureVerified()).rejects.toThrow(/client is closed/);
     await expect(ai.chat.completions.create({ model: "test", messages: [{ role: "user", content: "hi" }] })).rejects.toThrow();
+  });
+});
+
+describe("EnclaveHTTPClient after a failed re-verification over TLS", () => {
+  /** A server of this group's own, so the connections and requests counted are only those of the clients made here. */
+  let own: TlsServer;
+
+  beforeAll(async () => {
+    own = await startTlsServer(() => ({ body: "ok" }));
+  });
+
+  afterAll(async () => {
+    await own.close();
+  });
+
+  /** A client whose next verification fails as `fail.next` says: the verifier rejecting the document, or the document fetch failing. */
+  async function failingClient() {
+    const fail: { next: "attestation" | "network" | undefined } = { next: undefined };
+    const docs = documents();
+    const pinned = verifier(() => ({ tls: TEST_PIN }));
+    const seams: EnclaveClientSeams = {
+      tls: { ca: TEST_CERT },
+      sleep: async () => {},
+      verifier: {
+        ...pinned,
+        verifyV3At: async (...args: Parameters<Verifier["verifyV3At"]>) => {
+          if (fail.next === "attestation") throw new Error("nonce mismatch");
+          return pinned.verifyV3At(...args);
+        },
+      } as unknown as Verifier,
+      documentFetch: async (input, init) => {
+        if (fail.next === "network") throw new TypeError("fetch failed");
+        return docs.fetch(input, init);
+      },
+    };
+    const client = await createEnclaveHTTPClient(own.host, { kind: "repoPin", repo: "tinfoilsh/repo" }, { transport: { kind: "tls" } }, seams);
+    return { client, fail, docs };
+  }
+
+  it("stops sending under the cached verification after an attestation failure, closes its pooled connection, and recovers on a later request", async () => {
+    const { client, fail, docs } = await failingClient();
+    const seen = own.seen.length;
+    expect(await (await client.fetch(`${own.origin}/models`)).text()).toBe("ok");
+    expect(own.openConnections()).toBe(1);
+
+    fail.next = "attestation";
+    await expect(client.reverify()).rejects.toThrow(AttestationError);
+    await vi.waitFor(() => expect(own.openConnections()).toBe(0));
+    await expect(client.fetch(`${own.origin}/models`)).rejects.toThrow(AttestationError);
+    expect(own.seen.length).toBe(seen + 1);
+
+    fail.next = undefined;
+    const verified = docs.calls.length;
+    expect(await (await client.fetch(`${own.origin}/models`)).text()).toBe("ok");
+    expect(docs.calls.length).toBe(verified + 1);
+    expect(own.seen.length).toBe(seen + 2);
+    await client.close();
+  });
+
+  it("keeps sending under the cached verification and its pooled connection after a network failure, without verifying again", async () => {
+    const { client, fail, docs } = await failingClient();
+    expect(await (await client.fetch(`${own.origin}/models`)).text()).toBe("ok");
+    fail.next = "network";
+    await expect(client.reverify()).rejects.toThrow(NetworkError);
+    const verified = docs.calls.length;
+    expect(await (await client.fetch(`${own.origin}/models`)).text()).toBe("ok");
+    expect(docs.calls.length).toBe(verified);
+    expect(own.openConnections()).toBe(1);
+    await client.close();
   });
 });
 

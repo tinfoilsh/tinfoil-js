@@ -4,8 +4,11 @@
  * publishes each verification together with whatever a transport binds to
  * its keys, so a request never sends under keys other than those of the
  * verification it checked. Concurrent callers share one verification,
- * including its failure. No network I/O happens until the first request or
- * `ensureVerified`.
+ * including its failure. A re-verification that fails with an
+ * {@link AttestationError} discards the verification that it was replacing,
+ * even one that is still fresh, so the next request verifies again; any
+ * other failure leaves a fresh verification in use. No network I/O happens
+ * until the first request or `ensureVerified`.
  */
 import type { Verification } from "@tinfoilsh/verifier";
 import { AttestationError } from "../errors.js";
@@ -20,6 +23,8 @@ export interface State<T> {
 
 interface Entry<T> extends State<T> {
   rejected: boolean;
+  /** Whether the binding has already been released, as a discarded state's is. */
+  released: boolean;
 }
 
 export class VerifiedEnclave<T = void> {
@@ -83,7 +88,25 @@ export class VerifiedEnclave<T = void> {
   close(): void {
     if (this.#closed) return;
     this.#closed = true;
-    if (this.#current !== undefined) this.#release(this.#current.bound);
+    if (this.#current !== undefined) this.#releaseEntry(this.#current);
+  }
+
+  #releaseEntry(entry: Entry<T>): void {
+    if (entry.released) return;
+    entry.released = true;
+    this.#release(entry.bound);
+  }
+
+  /**
+   * Discards `replaced` after a re-verification of it failed with an
+   * attestation error: no request is sent under it again, and what its
+   * binding holds idle (pooled connections tied to its keys) is released
+   * now. A newer state that has been published since is kept.
+   */
+  #discard(replaced: Entry<T> | undefined): void {
+    if (replaced === undefined || this.#current !== replaced) return;
+    replaced.rejected = true;
+    this.#releaseEntry(replaced);
   }
 
   #valid(entry: Entry<T>): boolean {
@@ -111,11 +134,25 @@ export class VerifiedEnclave<T = void> {
     }
   }
 
-  /** Verifies the enclave and publishes the result as the current state. */
+  /**
+   * Verifies the enclave and publishes the result as the current state. An
+   * attestation failure discards the state that the refresh was replacing;
+   * a network failure, a configuration error or a close leaves it as it is.
+   */
   async #refresh(verify: (e: Enclave) => Promise<Verification>): Promise<void> {
+    const replacing = this.#current;
+    try {
+      await this.#publish(verify);
+    } catch (err) {
+      if (err instanceof AttestationError) this.#discard(replacing);
+      throw err;
+    }
+  }
+
+  async #publish(verify: (e: Enclave) => Promise<Verification>): Promise<void> {
     const verification = await verify(this.#enclave);
     const bound = await this.#bind(verification);
-    const entry: Entry<T> = { verification, bound, rejected: false };
+    const entry: Entry<T> = { verification, bound, rejected: false, released: false };
     // A close during the refresh already released the current binding; this one is not published.
     if (this.#closed) {
       this.#release(bound);
@@ -127,7 +164,7 @@ export class VerifiedEnclave<T = void> {
       throw new AttestationError(FRESHNESS_EXPIRED);
     }
     // What the replaced state holds is tied to its keys.
-    if (this.#current !== undefined) this.#release(this.#current.bound);
+    if (this.#current !== undefined) this.#releaseEntry(this.#current);
     this.#current = entry;
   }
 }

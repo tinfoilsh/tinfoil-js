@@ -239,7 +239,18 @@ export class EnclaveHTTPClient {
     return this.#transport.ensureVerified(options?.signal);
   }
 
-  /** Verifies again even if the cached verification is still valid. */
+  /**
+   * Verifies again even if the cached verification is still valid. A failure
+   * rejects the promise. When the failure is an {@link AttestationError},
+   * the cached verification is discarded even if it is still fresh: no
+   * request is sent under it again, its pooled connections aren't reused,
+   * and the next request or `ensureVerified` verifies again, failing if the
+   * problem persists and recovering if it doesn't. Any other failure, such
+   * as a {@link NetworkError} or a {@link ConfigurationError}, keeps a
+   * cached verification that is still valid in use. When the signal aborts,
+   * the call stops waiting, but the verification that it started still
+   * finishes, and its outcome is handled in the same way.
+   */
   reverify(options?: CallOptions): Promise<Verification> {
     return this.#transport.reverify(options?.signal);
   }
