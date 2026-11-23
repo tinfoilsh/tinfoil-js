@@ -12,6 +12,7 @@ import { join, relative } from "node:path";
 import { describe, expect, it } from "vitest";
 import { ExitCode, run, Stage, type Measurement } from "../conformance/adapter.js";
 import { decodeLiveRequest, isAuthority } from "../conformance/live.js";
+import { checkReport, failedStep, type Report, type ReportedOutput } from "../conformance/report.js";
 import { FORMAT_V2, FORMAT_V3 } from "../src/document/collateral/collateral.js";
 import { NONCE_SIZE, SEV_SNP_REPORT_V1_FORMAT } from "../src/document/document.js";
 import { buildDocument } from "./helpers/builder.js";
@@ -28,6 +29,12 @@ interface Fixture {
     code_digest?: string;
     code_measurement?: Measurement;
     enclave_measurement?: Measurement;
+    /**
+     * When declared, what a full-verify vector expects of the report: the
+     * layer of the failed step, every step's status, and the partial facts.
+     */
+    failed_step?: string;
+    report?: Report;
   };
 }
 
@@ -53,6 +60,13 @@ describe.skipIf(files.length === 0)("v3 conformance fixtures", () => {
     if (!f.expected.accepted && f.expected.code) {
       expect(output.rejection?.code).toBe(f.expected.code);
     }
+    // Every full-verify report must agree with its verdict, and match what the vector declares of it.
+    expect(checkReport(output)).toBeUndefined();
+    if (f.expected.failed_step) expect(failedStep(output.report)).toBe(f.expected.failed_step);
+    if (f.expected.report) {
+      expect(output.report?.steps).toEqual(f.expected.report.steps);
+      expect(output.report?.partial_facts).toEqual(f.expected.report.partial_facts);
+    }
     if (f.expected.accepted) {
       const o = output.outputs ?? {};
       const e = f.expected;
@@ -61,6 +75,36 @@ describe.skipIf(files.length === 0)("v3 conformance fixtures", () => {
       if (e.code_digest) expect(o.code_digest).toBe(e.code_digest);
       if (e.code_measurement) expect(o.code_measurement).toEqual(e.code_measurement);
       if (e.enclave_measurement) expect(o.enclave_measurement).toEqual(e.enclave_measurement);
+    }
+  });
+});
+
+describe("the report check", () => {
+  const steps = (...statuses: string[]) => statuses.map((status, i) => ({ layer: ["envelope", "provenance", "quote", "policy"][i]!, status }));
+  const valid = (): ReportedOutput => ({
+    stage: Stage.Verify,
+    accepted: false,
+    rejection: { code: "PROVENANCE_REJECTED" },
+    report: { steps: steps("passed", "failed", "not_run", "not_run"), partial_facts: { measured: { tls_public_key_fp: "a".repeat(64) } } },
+  });
+
+  it("accepts a consistent report, and rejects each inconsistency", () => {
+    expect(checkReport(valid())).toBeUndefined();
+    const mutations: Record<string, (o: ReportedOutput) => void> = {
+      "wrong layer": (o) => (o.rejection = { code: "QUOTE_REJECTED" }),
+      "ran after": (o) => (o.report!.steps[2]!.status = "passed"),
+      "expected early": (o) => (o.report!.partial_facts!.expected = {}),
+      "no measured": (o) => delete o.report!.partial_facts!.measured,
+      "cpu early": (o) => (o.report!.partial_facts!.measured!.cpu_measurement = { type: "t", registers: [] }),
+      "three steps": (o) => o.report!.steps.pop(),
+      "no partial facts": (o) => delete o.report!.partial_facts,
+      accepted: (o) => (o.accepted = true),
+      "another stage": (o) => (o.stage = Stage.CheckEnvelope),
+    };
+    for (const [name, mutate] of Object.entries(mutations)) {
+      const o = valid();
+      mutate(o);
+      expect(checkReport(o), name).toBeDefined();
     }
   });
 });
