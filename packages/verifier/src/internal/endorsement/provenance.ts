@@ -15,7 +15,7 @@ import { parseRegister, type ExpectedSevSnp, type ExpectedTdx } from "../../meas
 import { ARTIFACT_FORMAT, ARTIFACT_FORMAT_V2, parse as parseArtifact, type Artifact } from "../policy/artifact.js";
 import type { Shape } from "../policy/shape.js";
 import { parseBundle, type Bundle } from "../sigstore/bundle.js";
-import { statementSubjects, verifyCertificateBundle, workflowIdentityPattern, type SigningIdentity, type Subject } from "../sigstore/certificate.js";
+import { statementSubjects, verifyCertificateBundle, workflowIdentityPattern, type IdentityPattern, type SigningIdentity, type Subject } from "../sigstore/certificate.js";
 import { embeddedTrustedRoot, parseTrustedRoot, type TrustedRoot } from "../sigstore/trusted-root.js";
 import { RUNTIME_REPO } from "../../document/collateral/runtime.js";
 import {
@@ -102,7 +102,7 @@ export class ProvenanceClient {
    * carries `hexDigest`, or the subject named `subjectName` does, exactly
    * once), and returns what it proved.
    */
-  async verifyBundle(bundleJson: JsonValue, sanPattern: RegExp, hexDigest: string, subjectName?: string): Promise<VerifiedRelease> {
+  async verifyBundle(bundleJson: JsonValue, sanPattern: IdentityPattern, hexDigest: string, subjectName?: string): Promise<VerifiedRelease> {
     const bundle = parseBundle(bundleJson);
     const verified = await verifyCertificateBundle(this.root, bundle, sanPattern, hexDigest, subjectName);
     return {

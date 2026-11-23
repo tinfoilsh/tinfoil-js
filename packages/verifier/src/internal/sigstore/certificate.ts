@@ -48,10 +48,16 @@ export interface SigningIdentity {
   readonly subjectAlternativeName: string;
   readonly issuer: string;
   readonly runnerEnvironment: string;
+  readonly sourceRepositoryURI: string;
   readonly sourceRepositoryIdentifier: string;
   readonly sourceRepositoryOwnerIdentifier: string;
   readonly sourceRepositoryRef: string;
   readonly sourceRepositoryDigest: string;
+}
+
+/** What a signing certificate's SAN must match: an anchored regular expression, or another test of the whole SAN. */
+export interface IdentityPattern {
+  test(san: string): boolean;
 }
 
 /** What verification proved about a certificate-signed bundle. */
@@ -75,7 +81,7 @@ export interface VerifiedBundle {
 export async function verifyCertificateBundle(
   root: TrustedRoot,
   bundle: Bundle,
-  sanPattern: RegExp,
+  sanPattern: IdentityPattern,
   digestHex: string,
   subjectName?: string,
 ): Promise<VerifiedBundle> {
@@ -160,7 +166,7 @@ const SHA256_HEX = /^[0-9a-fA-F]{64}$/;
 class WorkflowIdentityPolicy implements VerificationPolicy {
   identity: SigningIdentity | undefined;
 
-  constructor(private readonly sanPattern: RegExp) {}
+  constructor(private readonly sanPattern: IdentityPattern) {}
 
   verify(cert: X509Certificate): void {
     const san = cert.extSubjectAltName?.uri;
@@ -183,6 +189,7 @@ class WorkflowIdentityPolicy implements VerificationPolicy {
       subjectAlternativeName: san,
       issuer,
       runnerEnvironment: runner,
+      sourceRepositoryURI: cert.extSourceRepositoryURI?.sourceRepositoryURI ?? "",
       sourceRepositoryIdentifier: cert.extSourceRepositoryIdentifier?.sourceRepositoryIdentifier ?? "",
       sourceRepositoryOwnerIdentifier: cert.extSourceRepositoryOwnerIdentifier?.sourceRepositoryOwnerIdentifier ?? "",
       sourceRepositoryRef: cert.extSourceRepositoryRef?.sourceRepositoryRef ?? "",
