@@ -75,7 +75,8 @@ export interface AuthorizedBy {
  * supplies, which must come from trusted client configuration. `name`
  * optionally associates them with an /org/project/revision identity. It has
  * no pin, because a pin would only compare the caller's input against the
- * caller's input.
+ * caller's input. The attestation must still prove every container build
+ * that the config requires.
  */
 export interface EmbeddedConfig {
   readonly kind: "embeddedConfig";

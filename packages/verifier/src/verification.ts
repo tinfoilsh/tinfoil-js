@@ -27,8 +27,9 @@ export interface ConfigVerification {
   readonly signatureTime?: Date;
   /**
    * The container images whose build the config requires and the attestation
-   * proves. Undefined when the config requires none, its bytes are not in the
-   * attestation, or the config is embedded.
+   * proves. Undefined when the config requires none or the verifier has no
+   * bytes to read: the attestation does not carry them and the caller did not
+   * embed them.
    */
   readonly containers?: readonly ContainerVerification[];
 }

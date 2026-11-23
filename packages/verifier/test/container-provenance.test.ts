@@ -16,7 +16,7 @@ import { dangerousTestOnlyDecode, dangerousTestOnlyVerifier } from "../conforman
 import { CONFIG_ENDORSEMENT_V2_FORMAT, CONFIG_ID, CONFIG_V1_FORMAT, FORMAT_V3, NotFoundError, ROLE_REFERENCE_VALUES } from "../src/document/collateral/collateral.js";
 import { CONTAINER_PROVENANCE_V1_FORMAT } from "../src/document/collateral/container.js";
 import { NONCE_SIZE, SEV_SNP_REPORT_V1_FORMAT } from "../src/document/document.js";
-import { VerificationError } from "../src/errors.js";
+import { UsageError, VerificationError } from "../src/errors.js";
 import { sha256, toHex } from "../src/internal/bytes.js";
 import { CONFIG_ENDORSEMENT_PREDICATE_TYPE_V2, IN_TOTO_STATEMENT_V1, REGISTRY_ID_PREFIX } from "../src/internal/endorsement/approval.js";
 import { authenticateContainer, authenticatedContainer, containerIdentity, refMatches } from "../src/internal/endorsement/container.js";
@@ -29,7 +29,7 @@ import { GITHUB_OIDC_ISSUER, RUNNER_ENVIRONMENT_GITHUB_HOSTED, type SigningIdent
 import { endorsementReference, timestampInput } from "../src/internal/sigstore/timestamp.js";
 import { SIGSTORE_TRUSTED_ROOT_JSON } from "../src/trust/sigstore-trusted-root.js";
 import type { ContainerVerification } from "../src/verification.js";
-import { resolveContainers, type ConfigTrust } from "../src/verifier.js";
+import { resolveContainers, Verifier, type ConfigTrust } from "../src/verifier.js";
 import { b64, buildDocument, type WireEntry } from "./helpers/builder.js";
 import { build, newLog, newSigner, rootJson, toJson } from "./helpers/keyed.js";
 import { newRegistry, registryCertificate } from "./helpers/registry.js";
@@ -571,8 +571,10 @@ describe("a config that requires container provenance", () => {
     commit: RECORDED.commit,
   });
 
+  /** A collateral entry that carries config bytes. */
+  const plain = async (config: Uint8Array): Promise<WireEntry> => ({ id: CONFIG_ID, role: ROLE_REFERENCE_VALUES, format: CONFIG_V1_FORMAT, data: JSON.stringify({ config_base64: b64(config) }) });
+
   describe("authorized by the caller", () => {
-    const plain = async (config: Uint8Array): Promise<WireEntry> => ({ id: CONFIG_ID, role: ROLE_REFERENCE_VALUES, format: CONFIG_V1_FORMAT, data: JSON.stringify({ config_base64: b64(config) }) });
     /** The rejection of a document that carries the config and the given proofs. */
     const verify = async (containers: string, ...proofs: WireEntry[]): Promise<VerificationError> => {
       const doc = await documentOf([await plain(await configOf(containers)), ...proofs]);
@@ -621,6 +623,86 @@ describe("a config that requires container provenance", () => {
       const err = await verify(container("app") + provenance + "      gitlab: {}\n", proof("container", RECORDED.digest));
       expect(err.layer).toBe("provenance");
       expect(err.message).toContain(`containers[0].provenance has unknown field "gitlab"`);
+    });
+  });
+
+  // An embedded config is held to the builds it requires. The requirements
+  // of one embedded in full come from the caller's bytes, so a document
+  // cannot leave them out; one embedded by reference is checked when the
+  // document carries the bytes of that digest.
+  describe("embedded by the caller", () => {
+    const requiring = (): Promise<Uint8Array> => configOf(container("app") + provenance);
+    const inFull = (bytes: Uint8Array): ConfigTrust => ({ kind: "embeddedConfig", bytes });
+    const byReference = async (bytes: Uint8Array): Promise<ConfigTrust> => ({
+      kind: "embeddedConfigReference",
+      digest: toHex(await sha256(bytes)),
+      runtime: { repo: "tinfoilsh/cvmimage", tag: "v1.2.3", digest: toHex(await sha256(manifest)) },
+    });
+    /** The rejection of a document that carries the given collateral. */
+    const verify = async (trust: ConfigTrust, ...collateral: WireEntry[]): Promise<VerificationError> => {
+      const verifier = await Verifier.create(trust, embeddedArtifacts);
+      const err = await verifier.verifyV3At(await documentOf(collateral), nonce, {}, new Date()).catch((e: unknown) => e);
+      expect(err).toBeInstanceOf(VerificationError);
+      return err as VerificationError;
+    };
+    const missing = `container "app" requires provenance: collateral entry not found`;
+
+    describe("in full", () => {
+      it("passes a document that carries the proof", async () => {
+        expect((await verify(inFull(await requiring()), proof("container", RECORDED.digest))).layer).toBe("quote");
+      });
+
+      it("rejects a document without the proof, whatever config bytes it carries", async () => {
+        const config = await requiring();
+        for (const collateral of [[], [await plain(config)], [await plain(await configOf(container("app")))]]) {
+          const err = await verify(inFull(config), ...collateral);
+          expect(err.layer).toBe("provenance");
+          expect(err.message).toContain(missing);
+          expect((err.cause as { cause?: unknown }).cause).toBeInstanceOf(NotFoundError);
+        }
+      });
+
+      it("rejects a proof from another workflow", async () => {
+        const config = await configOf(container("app") + provenance.replace(RECORDED.workflow, "release.yml"));
+        const err = await verify(inFull(config), proof("container", RECORDED.digest));
+        expect(err.layer).toBe("provenance");
+        expect(err.message).toContain(`container "app": verifying container provenance`);
+      });
+
+      it("checks nothing for a config that requires no build", async () => {
+        expect((await verify(inFull(await configOf(container("app"))))).layer).toBe("quote");
+      });
+
+      it("refuses, when the verifier is built, a requirement it cannot read", async () => {
+        const config = await configOf(container("app") + provenance + "      gitlab: {}\n");
+        const err = await Verifier.create(inFull(config), embeddedArtifacts).catch((e: unknown) => e);
+        expect(err).toBeInstanceOf(UsageError);
+        expect((err as Error).message).toContain(`containers[0].provenance has unknown field "gitlab"`);
+      });
+    });
+
+    describe("by reference", () => {
+      it("passes a document that carries the config bytes and the proof", async () => {
+        const config = await requiring();
+        expect((await verify(await byReference(config), await plain(config), proof("container", RECORDED.digest))).layer).toBe("quote");
+      });
+
+      it("rejects a document that carries the config bytes without the proof", async () => {
+        const config = await requiring();
+        const err = await verify(await byReference(config), await plain(config));
+        expect(err.layer).toBe("provenance");
+        expect(err.message).toContain(missing);
+      });
+
+      it("checks nothing when the document carries no config bytes", async () => {
+        expect((await verify(await byReference(await requiring()))).layer).toBe("quote");
+      });
+
+      it("checks nothing when the document carries the bytes of another config", async () => {
+        const config = await requiring();
+        const other = new Uint8Array([...config, "\n".charCodeAt(0)]);
+        expect((await verify(await byReference(config), await plain(other))).layer).toBe("quote");
+      });
     });
   });
 

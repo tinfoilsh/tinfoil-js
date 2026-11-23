@@ -99,7 +99,8 @@ export interface ConfigAuthorizer {
  * registry endorsement; the digest and the runtime that the config pins are
  * taken from the bytes. `name`, an /org/project/revision identity, optionally
  * names them, and a `project` pin must then match it. The bytes must come
- * from trusted client configuration.
+ * from trusted client configuration. The attestation must still prove every
+ * container build that the config requires.
  */
 export interface EmbeddedConfig {
   readonly kind: "embeddedConfig";
@@ -112,7 +113,8 @@ export interface EmbeddedConfig {
  * Trusts an exact config that the caller identifies without disclosing its
  * bytes: the hex SHA-256 `digest` of its bytes and the `runtime` release that
  * it pins. The quote must still bind the digest. Otherwise it is
- * {@link EmbeddedConfig}.
+ * {@link EmbeddedConfig}, except that the container builds the config
+ * requires are checked only when the attestation carries the config bytes.
  */
 export interface EmbeddedConfigReference {
   readonly kind: "embeddedConfigReference";
@@ -216,6 +218,8 @@ interface ConfigReference {
   readonly name: string;
   readonly digest: string;
   readonly runtime: RuntimeReference;
+  /** The bytes of a config embedded in full. A config embedded by reference has none. */
+  readonly bytes?: Uint8Array;
 }
 
 interface Embedded {
@@ -516,9 +520,10 @@ export class Verifier {
   async #resolveConfig(doc: Document, pins: ConfigPins, now: Date): Promise<{ expected: RuntimeReference; config: ConfigVerification }> {
     const embedded = this.#policy.embedded.configReference;
     if (embedded !== undefined) {
+      const containers = await resolveContainers(this.#prov, doc, await embeddedConfigBytes(embedded, doc));
       return {
         expected: embedded.runtime,
-        config: { source: "embedded", name: embedded.name, digest: embedded.digest, reference: "", signingKeyHint: "", registryID: "" },
+        config: { source: "embedded", name: embedded.name, digest: embedded.digest, reference: "", signingKeyHint: "", registryID: "", ...(containers.length === 0 ? {} : { containers }) },
       };
     }
     const material = doc.configEndorsement();
@@ -684,10 +689,11 @@ export async function buildVerifier(config: ConfigTrust | undefined, policy: Pol
 /**
  * @internal Authenticates the build of every container image for which the
  * config requires provenance. `config` is the bytes bound to the approved
- * digest; a document that omits them carries no requirement the verifier can
- * read. The attested runtime attaches them for every config that declares
- * provenance, which config validation ties to disclosure. Not exported from
- * the package entry.
+ * digest; without them there is no requirement the verifier can read. A
+ * caller that embeds a config in full supplies them. Otherwise the document
+ * carries them: the attested runtime attaches them for every config that
+ * declares provenance, which config validation ties to disclosure. Not
+ * exported from the package entry.
  */
 export async function resolveContainers(prov: ProvenanceClient, doc: Document, config: Uint8Array | undefined): Promise<ContainerVerification[]> {
   if (config === undefined || config.length === 0) return [];
@@ -709,6 +715,22 @@ export async function resolveContainers(prov: ProvenanceClient, doc: Document, c
     containers.push({ container: requirement.container, digest: built.digest, repository: built.repository, workflow: built.workflow, ref: built.ref, commit: built.commit });
   }
   return containers;
+}
+
+/**
+ * The bytes of the embedded config: the caller's, or for a config embedded
+ * by reference those the document carries, if they are the bytes of the
+ * trusted digest.
+ */
+async function embeddedConfigBytes(embedded: ConfigReference, doc: Document): Promise<Uint8Array | undefined> {
+  if (embedded.bytes !== undefined) return embedded.bytes;
+  let config: Uint8Array | undefined;
+  try {
+    config = doc.configEndorsement().config;
+  } catch {
+    return undefined;
+  }
+  return config !== undefined && toHex(await sha256(config)) === embedded.digest ? config : undefined;
 }
 
 /** An {@link ArtifactTrust}, validated and copied. */
@@ -913,16 +935,19 @@ async function keysOf(what: string, pems: readonly string[]): Promise<PinnedKey[
 
 /**
  * The config reference that an embedded config settles to: derived from its
- * bytes, or a copy of the caller's digest and runtime pin.
+ * bytes and kept with them, or a copy of the caller's digest and runtime pin.
  */
 async function configReferenceOf(config: EmbeddedConfig | EmbeddedConfigReference): Promise<ConfigReference> {
   if (config.kind === "embeddedConfig") {
     const { name, bytes } = config;
     if (!(bytes instanceof Uint8Array)) throw new UsageError("embedded config bytes must be a Uint8Array");
     if (name !== undefined && typeof name !== "string") throw new UsageError("embedded config name must be a string");
-    // Copied once so the digest and the runtime pin come from the same bytes, whatever the caller does to its buffer meanwhile.
+    // Copied once so the digest, the runtime pin and the container requirements come from the same bytes, whatever the caller does to its buffer meanwhile.
     const copy = bytes.slice();
-    return { name: name ?? "", digest: toHex(await sha256(copy)), runtime: usage(() => configRuntime(copy)) };
+    const runtime = usage(() => configRuntime(copy));
+    // The requirements are enforced at verification; a config whose requirements cannot be read is refused here.
+    usage(() => configContainerProvenance(copy));
+    return { name: name ?? "", digest: toHex(await sha256(copy)), runtime, bytes: copy };
   }
   return usage(() => referenceCopyOf(config));
 }
