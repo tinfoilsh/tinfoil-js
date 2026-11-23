@@ -24,6 +24,7 @@ import {
   type CpuEndorsements,
 } from "./collateral/collateral.js";
 import type { ConfigEndorsement } from "./collateral/config.js";
+import { CONTAINER_PROVENANCE_V1_FORMAT, type ContainerProvenanceCollateral } from "./collateral/container.js";
 import { RUNTIME_ID, type RuntimeCollateral } from "./collateral/runtime.js";
 import type { Freshness, SigstoreRef } from "./collateral/sigstore.js";
 
@@ -181,6 +182,18 @@ export class Document {
   /** The unambiguous platform reference of a config-based document (v3 collateral). */
   configPlatform(): SigstoreRef {
     return cloneRef(configPlatform(this.#d.collateral));
+  }
+
+  /**
+   * The decoded, unauthenticated build attestation for the container image
+   * with the given lowercase hex SHA-256 digest. Throws NotFoundError when absent.
+   */
+  containerProvenance(digest: string): ContainerProvenanceCollateral {
+    const p = this.#d.collateral.containers.get(digest);
+    if (p === undefined) {
+      throw new NotFoundError(`document carries no ${CONTAINER_PROVENANCE_V1_FORMAT} reference-values entry for sha256:${digest}`);
+    }
+    return { digest: p.digest, bundle: cloneJsonValue(p.bundle) };
   }
 
   /**

@@ -6,6 +6,7 @@
 import { arr, object, raw, str } from "../../internal/json/decode.js";
 import { JsonError, type JsonObject, type JsonValue } from "../../internal/json/index.js";
 import { decodeConfigEndorsement, type ConfigEndorsement } from "./config.js";
+import { CONTAINER_PROVENANCE_V1_FORMAT, decodeContainerProvenance, type ContainerProvenanceCollateral } from "./container.js";
 import { decodeRuntime, PLATFORM_ID, RUNTIME_ID, RUNTIME_V1_FORMAT, type RuntimeCollateral } from "./runtime.js";
 import { decodeAmdCrl, decodeAmdVcek, type AmdCrl, type AmdVcek } from "./sev.js";
 import { decodeFreshness, decodeSigstoreRef, type Freshness, type SigstoreRef } from "./sigstore.js";
@@ -59,7 +60,7 @@ export interface CpuEndorsements {
   readonly intelPcs?: IntelPcs;
 }
 
-/** Decoded collateral: the first entry per purpose, freshness by id. */
+/** Decoded collateral: the first entry per purpose, freshness by id, container build attestations by image digest. */
 export interface CollateralSet {
   readonly cpu: CpuEndorsements;
   readonly sigstoreCode?: SigstoreRef;
@@ -67,6 +68,8 @@ export interface CollateralSet {
   readonly config?: ConfigEndorsement;
   readonly runtime?: RuntimeCollateral;
   readonly freshness: ReadonlyMap<string, Freshness>;
+  /** The container build attestations by image digest. */
+  readonly containers: ReadonlyMap<string, ContainerProvenanceCollateral>;
   /** @internal for configPlatform(): platform entries seen, and the one with id "platform". */
   readonly platformCount: number;
   readonly configPlatform?: SigstoreRef;
@@ -103,6 +106,7 @@ export function decode(entries: readonly Entry[]): CollateralSet {
   validate(entries);
   const cpu: { amdVcek?: AmdVcek; amdCrl?: AmdCrl; intelPcs?: IntelPcs } = {};
   const freshness = new Map<string, Freshness>();
+  const containers = new Map<string, ContainerProvenanceCollateral>();
   let sigstoreCode: SigstoreRef | undefined;
   let sigstorePlatform: SigstoreRef | undefined;
   let config: ConfigEndorsement | undefined;
@@ -149,12 +153,15 @@ export function decode(entries: readonly Entry[]): CollateralSet {
       const v = decodeSigstoreRef(entry);
       sigstorePlatform ??= v;
       if (entry.id === PLATFORM_ID) configPlatform = v;
+    } else if (entry.role === ROLE_REFERENCE_VALUES && entry.format === CONTAINER_PROVENANCE_V1_FORMAT) {
+      const v = decodeContainerProvenance(entry);
+      if (!containers.has(v.digest)) containers.set(v.digest, v);
     } else if (entry.role === ROLE_REFERENCE_VALUES && entry.format === SIGSTORE_FRESHNESS_V1_FORMAT) {
       // validate already rejected duplicate ids.
       freshness.set(entry.id, decodeFreshness(entry));
     }
   }
-  return { cpu, sigstoreCode, sigstorePlatform, config, runtime, freshness, platformCount, configPlatform };
+  return { cpu, sigstoreCode, sigstorePlatform, config, runtime, freshness, containers, platformCount, configPlatform };
 }
 
 function validate(entries: readonly Entry[]): void {

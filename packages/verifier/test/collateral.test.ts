@@ -33,6 +33,7 @@ import {
   SUBJECT_CPU,
   type CollateralSet,
 } from "../src/document/collateral/collateral.js";
+import { CONTAINER_PROVENANCE_V1_FORMAT } from "../src/document/collateral/container.js";
 import {
   PLATFORM_ID,
   RUNTIME_ID,
@@ -259,6 +260,41 @@ describe("collateral set decoding", () => {
         [FRESHNESS_ID_PLATFORM, { format: SIGSTORE_FRESHNESS_V1_FORMAT, bundle: strictParse(enc(`{"b":2}`)) }],
       ]),
     );
+  });
+
+  describe("container build attestations", () => {
+    const first = "ab".repeat(32);
+    const second = "cd".repeat(32);
+    const attestation = (id: string, data: string, role = ROLE_REFERENCE_VALUES): WireEntry => ({ id, role, format: CONTAINER_PROVENANCE_V1_FORMAT, data });
+    const data = (digest: string, bundle: string): string => `{"digest":${q(digest)},"sigstore_bundle":${bundle}}`;
+
+    it("are keyed by image digest, and the first entry for a digest wins", () => {
+      const set = decodeWire([attestation("one", data(first, `{"a":1}`)), attestation("two", data(second, `{"b":2}`)), attestation("again", data(first, `{"c":3}`))]);
+      expect(set.containers).toEqual(
+        new Map([
+          [first, { digest: first, bundle: strictParse(enc(`{"a":1}`)) }],
+          [second, { digest: second, bundle: strictParse(enc(`{"b":2}`)) }],
+        ]),
+      );
+      expect(decodeWire([]).containers.size).toBe(0);
+    });
+
+    it.each<[string, string, string]>([
+      ["uppercase digest", data(first.toUpperCase(), `{"a":1}`), "container digest is not lowercase hex"],
+      ["prefixed digest", data("sha256:" + first, `{"a":1}`), "container digest is not lowercase hex"],
+      ["short digest", data(first.slice(2), `{"a":1}`), "container digest must be 32 bytes, got 31"],
+      ["missing digest", `{"sigstore_bundle":{"a":1}}`, "container digest must be 32 bytes, got 0"],
+      ["missing bundle", `{"digest":${q(first)}}`, "is missing sigstore_bundle"],
+      ["null bundle", data(first, "null"), "is missing sigstore_bundle"],
+      ["unknown member", `{"digest":${q(first)},"sigstore_bundle":{},"repo":"o/r"}`, `unknown object member name "repo"`],
+    ])("reject %s, even after a well-formed entry for the same image", (_name, malformed, wantErr) => {
+      expect(() => decodeWire([attestation("one", malformed)])).toThrow(wantErr);
+      expect(() => decodeWire([attestation("one", data(first, `{"a":1}`)), attestation("two", malformed)])).toThrow(wantErr);
+    });
+
+    it("are not read under the endorsement role", () => {
+      expect(decodeWire([attestation("one", `{"digest":"malformed"}`, ROLE_ENDORSEMENT)]).containers.size).toBe(0);
+    });
   });
 
   describe("sigstore references require a bundle and a digest", () => {

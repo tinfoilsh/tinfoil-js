@@ -29,6 +29,7 @@ import {
   SUBJECT_CPU,
   type CollateralSet,
 } from "../src/document/collateral/collateral.js";
+import { CONTAINER_PROVENANCE_V1_FORMAT } from "../src/document/collateral/container.js";
 import {
   computeReportData,
   CRYPTO_MATERIAL_ID_HPKE,
@@ -367,6 +368,17 @@ describe("document parsing", () => {
     await expect(parse(marshalDocument(raw), nonce)).rejects.toThrow(`duplicate collateral entry id "cpu-endorsement"`);
   });
 
+  it("rejects a malformed container build attestation, and reads a well-formed one", async () => {
+    const nonce = testNonce();
+    const digest = "ab".repeat(32);
+    const { raw } = await buildTestDocument(nonce);
+    const attestation: WireEntry = { id: "container", role: ROLE_REFERENCE_VALUES, format: CONTAINER_PROVENANCE_V1_FORMAT, data: `{"digest":"${digest}","sigstore_bundle":{}}` };
+    raw.collateral.push(attestation);
+    expect((await parse(marshalDocument(raw), nonce)).containerProvenance(digest).digest).toBe(digest);
+    attestation.data = `{"digest":"sha256:${digest}","sigstore_bundle":{}}`;
+    await expect(parse(marshalDocument(raw), nonce)).rejects.toThrow("container digest is not lowercase hex");
+  });
+
   it("freshness selects the witness by artifact id", () => {
     const doc = documentWithCollateral("", [
       {
@@ -600,6 +612,28 @@ describe("collateral accessors", () => {
     const witnessAgain = doc.freshness(FRESHNESS_ID_CODE);
     expect(witnessAgain.format).toBe(SIGSTORE_FRESHNESS_V1_FORMAT);
     expect((bundleMember(witnessAgain.bundle, "b") as { raw: string }).raw).toBe("2");
+  });
+
+  it("containerProvenance selects the attestation by image digest and returns copies", () => {
+    const first = "ab".repeat(32);
+    const second = "cd".repeat(32);
+    const attestation = (id: string, digest: string, bundle: string): WireEntry => ({
+      id,
+      role: ROLE_REFERENCE_VALUES,
+      format: CONTAINER_PROVENANCE_V1_FORMAT,
+      data: `{"digest":"${digest}","sigstore_bundle":${bundle}}`,
+    });
+    const doc = documentWithCollateral("", [attestation("one", first, `{"a":[1]}`), attestation("two", second, `{"b":2}`), attestation("again", first, `{"c":3}`)]);
+    const provenance = doc.containerProvenance(first);
+    (provenance as { digest: string }).digest = "changed";
+    (bundleMember(provenance.bundle, "a") as JsonValue[]).push("x");
+
+    const again = doc.containerProvenance(first);
+    expect(again.digest).toBe(first);
+    expect(bundleMember(again.bundle, "a")).toHaveLength(1);
+    expect((bundleMember(doc.containerProvenance(second).bundle, "b") as { raw: string }).raw).toBe("2");
+    expect(() => doc.containerProvenance("ef".repeat(32))).toThrow(NotFoundError);
+    expect(() => doc.containerProvenance("ef".repeat(32))).toThrow(`no ${CONTAINER_PROVENANCE_V1_FORMAT} reference-values entry for sha256:${"ef".repeat(32)}`);
   });
 });
 
