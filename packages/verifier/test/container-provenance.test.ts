@@ -123,6 +123,72 @@ third: &repository tinfoilsh/third
     expect(configContainerProvenance(enc(text))).toEqual([required]);
   });
 
+  describe("resolves merge keys", () => {
+    const build = `{github: {repository: tinfoilsh/inference, repository_id: 902195777, workflow: containers.yml, ref: "refs/tags/vllm-v*"}}`;
+    const other = "ef".repeat(32);
+
+    it("reads a container that merges another one", () => {
+      const text = `containers:
+  - &primary
+    name: primary
+    image: ${image}
+    provenance: ${build}
+  - <<: *primary
+    name: replica
+`;
+      expect(configContainerProvenance(enc(text))).toEqual([
+        { ...required, container: "primary" },
+        { ...required, container: "replica" },
+      ]);
+    });
+
+    it("puts a key of the mapping itself before a merged one, wherever the merge key is written", () => {
+      const text = `base: &base {name: base, image: "${image}", provenance: ${build}}
+containers:
+  - <<: *base
+    name: unconstrained
+    provenance: ~
+  - name: other
+    image: example.com/other@sha256:${other}
+    <<: *base
+`;
+      expect(configContainerProvenance(enc(text))).toEqual([{ ...required, container: "other", digest: other }]);
+    });
+
+    it("puts an earlier merged mapping before a later one, and follows the merges of a merged mapping", () => {
+      const text = `build: &build {provenance: ${build}}
+named: &named {<<: *build, name: model, image: example.com/wrong:latest}
+none: &none {provenance: ~}
+containers:
+  - <<: [{image: "${image}"}, *named, *none]
+  - <<: [*none, *named]
+`;
+      expect(configContainerProvenance(enc(text))).toEqual([required]);
+    });
+
+    it("reads containers that the root mapping merges", () => {
+      const text = `base: &base\n  containers:\n    - name: model\n      image: ${image}\n      provenance: ${build}\n<<: *base\n`;
+      expect(configContainerProvenance(enc(text))).toEqual([required]);
+      expect(configContainerProvenance(enc(text + "containers: []\n"))).toEqual([]);
+    });
+
+    it("takes a quoted merge key as an ordinary key, and does not merge inside a requirement", () => {
+      const quoted = `containers:\n  - "<<": {provenance: ${build}}\n    name: model\n    image: ${image}\n`;
+      expect(configContainerProvenance(enc(quoted))).toEqual([]);
+      const inside = `build: &build ${build}\ncontainers:\n  - name: model\n    image: ${image}\n    provenance:\n      <<: *build\n`;
+      expect(() => configContainerProvenance(enc(inside))).toThrow('containers[0].provenance has unknown field "<<"');
+    });
+
+    it("follows a long chain of merges, and reads a mapping merged many times once", () => {
+      const links = 5000;
+      const chain = Array.from({ length: links }, (_, i) => `link${i}: &link${i} {${i === 0 ? `provenance: ${build}` : `<<: *link${i - 1}`}}\n`).join("");
+      const text = `${chain}containers:\n${`  - {<<: *link${links - 1}, name: model, image: "${image}"}\n`.repeat(links)}`;
+      const requirements = configContainerProvenance(enc(text));
+      expect(requirements).toHaveLength(links);
+      expect(requirements[links - 1]).toEqual(required);
+    });
+  });
+
   it.each<[string, string, string, string]>([
     ["unknown kind of requirement", image, "    provenance:\n      gitlab:\n        project: a/b\n", 'containers[1].provenance has unknown field "gitlab"'],
     ["extra requirement", image, github + "      require_signed_commits: true\n", 'containers[1].provenance has unknown field "require_signed_commits"'],
@@ -162,16 +228,38 @@ third: &repository tinfoilsh/third
     expect(() => read(replace("containers.yml", "a".repeat(252) + ".yml"))).toThrow("must be a workflow file name");
   });
 
-  // The ID is compared with a certificate as text, so only its one decimal spelling is read.
-  it.each([["0"], ["-5"], ["+5"], ["0755"], ["0x10"], ["0o17"], ["1_000"], ["5.0"], ["5.5"], ["1e3"], ['"5"'], ["!!int 5"], ["9223372036854775808"], ["10000000000000000000"], ["1" + "0".repeat(40)], ["true"], ["[5]"], ["~"]])(
-    "rejects the repository ID %s",
-    (id) => {
-      expect(() => read(replace("902195777", id))).toThrow("containers[1].provenance.github.repository_id must be the repository's numeric ID");
-    },
-  );
+  // The ID is compared with a certificate as text, and YAML libraries disagree on other spellings of an integer.
+  it.each<[string, string]>([
+    ["with a leading zero", "0902195777"],
+    ["in hex", "0x35c66b01"],
+    ["in octal", "0o6561465401"],
+    ["with a sign", "+902195777"],
+    ["grouped", "902_195_777"],
+    ["as a float", "9.02195777e8"],
+    ["as a float with an integral value", "902195777.0"],
+    ["as a string", '"902195777"'],
+    ["tagged as a string", "!!str 902195777"],
+    ["as a block scalar", ">-\n          902195777"],
+    ["negative", "-902195777"],
+    ["zero", "0"],
+    ["too long", "9".repeat(19)],
+    ["as a list", "[902195777]"],
+    ["as a mapping", "{id: 902195777}"],
+    ["as null", "~"],
+    ["as a boolean", "true"],
+    ["in hex and tagged as an integer", "!!int 0x35c66b01"],
+  ])("rejects a repository ID %s", (_name, id) => {
+    expect(() => read(replace("902195777", id))).toThrow("containers[1].provenance.github.repository_id must be the repository's numeric ID");
+  });
 
-  it.each([["1"], ["999999999999999999"], ["9223372036854775807"]])("reads the repository ID %s as written", (id) => {
-    expect(read(replace("902195777", id))).toEqual([{ ...required, repositoryID: id }]);
+  it.each<[string, string, string]>([
+    ["of one digit", "1", "1"],
+    ["of 18 digits", "9".repeat(18), "9".repeat(18)],
+    ["beyond the integers a number holds exactly", "100000000000000001", "100000000000000001"],
+    ["tagged as an integer", "!!int 902195777", "902195777"],
+    ["quoted and tagged as an integer", '!!int "902195777"', "902195777"],
+  ])("reads a repository ID %s as its text", (_name, id, want) => {
+    expect(read(replace("902195777", id))).toEqual([{ ...required, repositoryID: want }]);
   });
 
   describe("rejects a config whose requirements it cannot read in full", () => {
@@ -179,10 +267,16 @@ third: &repository tinfoilsh/third
     it.each<[string, string, string | RegExp]>([
       // A mapping that combines a non-scalar key with a merge key crashes some YAML decoders.
       ["a sequence key beside a merge key", "? [a]\n: 1\n<<: {b: 2}\ncontainers: []\n", "parsing config provenance: config has a key that is not an untagged scalar"],
-      ["a merge key beside a sequence key", "<<: {b: 2}\n? [a]\n: 1\n", "parsing config provenance: config has a merge key, which is not supported"],
+      ["a merge key beside a sequence key", "<<: {b: 2}\n? [a]\n: 1\n", "parsing config provenance: config has a key that is not an untagged scalar"],
       ["a mapping key beside a merge key", "? {a: 1}\n: 1\n<<: {b: 2}\n", "parsing config provenance: config has a key that is not an untagged scalar"],
-      ["containers supplied by a merge key", `<<: {containers: [{name: app, image: "${image}", provenance: ${requirement}}]}\n`, "config has a merge key"],
-      ["a requirement supplied by a merge key", `base: &base\n  provenance: ${requirement}\ncontainers:\n  - <<: *base\n    name: app\n    image: ${image}\n`, "containers[0] has a merge key"],
+      ["a merge of a scalar", "containers:\n  - <<: app\n    name: app\n", "parsing config provenance: containers[0] merges a value that is not a mapping"],
+      ["a merge of nothing", "containers:\n  - <<:\n    name: app\n", "parsing config provenance: containers[0] merges a value that is not a mapping"],
+      ["a merge of an aliased sequence", "base: &base [{name: app}]\ncontainers:\n  - <<: *base\n", "parsing config provenance: containers[0] merges a value that is not a mapping"],
+      ["a merge of a sequence that holds a scalar", "containers:\n  - <<: [{name: app}, app]\n", "parsing config provenance: containers[0] merges a value that is not a mapping"],
+      ["a mapping merged into itself", `containers:\n  - &app\n    name: app\n    image: ${image}\n    <<: *app\n`, "parsing config provenance: containers[0] merges a mapping into itself"],
+      ["two merge keys", "base: &base {name: app}\ncontainers:\n  - <<: *base\n    <<: *base\n", 'parsing config provenance: containers[0] mapping key "<<" already defined'],
+      ["a repeated key in a merged mapping", `base: &base {provenance: ~, provenance: ${requirement}}\ncontainers:\n  - <<: *base\n    name: app\n    image: ${image}\n`, 'containers[0] mapping key "provenance" already defined'],
+      ["a tagged key in a merged mapping", `base: &base {!!binary cHJvdmVuYW5jZQ==: ${requirement}}\ncontainers:\n  - <<: *base\n    name: app\n    image: ${image}\n`, "containers[0] has a key that is not an untagged scalar"],
       ["a requirement under an alias key", `key: &key provenance\ncontainers:\n  - name: app\n    image: ${image}\n    *key : ${requirement}\n`, "containers[0] has a key that is not an untagged scalar"],
       ["a requirement under a tagged key", `containers:\n  - name: app\n    image: ${image}\n    !!binary cHJvdmVuYW5jZQ==: ${requirement}\n`, "containers[0] has a key that is not an untagged scalar"],
       ["containers under a tagged key", `!!binary Y29udGFpbmVycw==:\n  - name: app\n    image: ${image}\n    provenance: ${requirement}\n`, "config has a key that is not an untagged scalar"],
@@ -206,11 +300,27 @@ third: &repository tinfoilsh/third
       expect(() => configContainerProvenance(new Uint8Array([...enc("containers: "), 0xff, 0x0a]))).toThrow("parsing config provenance: config is not valid UTF-8");
     });
 
-    // A null tag does not make a mapping absent.
-    it("reads a requirement that is tagged as null", () => {
-      const text = `containers:\n  - name: model\n    image: ${image}\n    provenance: !!null {github: {repository: tinfoilsh/inference, repository_id: 902195777, workflow: containers.yml, ref: "refs/tags/vllm-v*"}}\n`;
-      expect(configContainerProvenance(enc(text))).toEqual([required]);
+    // A null tag must not make a requirement read as absent.
+    it.each<[string, string, string]>([
+      ["requirement", `    provenance: !!null {github: {repository: a/b, repository_id: 1, workflow: w.yml, ref: refs/tags/v1}}\n`, "containers[1].provenance must be a mapping"],
+      ["detail", `    provenance:\n      github: !!null {repository: a/b, repository_id: 1, workflow: w.yml, ref: refs/tags/v1}\n`, "containers[1].provenance.github must be a mapping"],
+    ])("a null-tagged %s", (_name, provenance, want) => {
+      expect(() => read(provenance)).toThrow(want);
     });
+
+    it.each<[string, string, string]>([
+      ["requirement tagged as a string", `    provenance: !!str {github: {repository: a/b, repository_id: 1, workflow: w.yml, ref: refs/tags/v1}}\n`, "containers[1].provenance must be a mapping"],
+      ["detail with a tag of its own", `    provenance:\n      github: !build {repository: a/b, repository_id: 1, workflow: w.yml, ref: refs/tags/v1}\n`, "containers[1].provenance.github must be a mapping"],
+      ["null-tagged scalar that is not null", "    provenance: !!null github\n", "containers[1].provenance must be a mapping"],
+    ])("a %s", (_name, provenance, want) => {
+      expect(() => read(provenance)).toThrow(want);
+    });
+  });
+
+  it("reads a requirement that is tagged as a mapping, and none from a null that is tagged as one", () => {
+    const tagged = `    provenance: !!map\n      github: !!map {repository: tinfoilsh/inference, repository_id: 902195777, workflow: containers.yml, ref: "refs/tags/vllm-v*"}\n`;
+    expect(read(tagged)).toEqual([required]);
+    expect(read("    provenance: !!null ~\n")).toEqual([]);
   });
 
   describe("when the YAML parser throws", () => {
