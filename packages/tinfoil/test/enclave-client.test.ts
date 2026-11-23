@@ -13,13 +13,14 @@ import { AttestationError, ConfigurationError, NetworkError } from "../src/error
 import { OpenAIClient, type OpenAIClientOptions } from "../src/openai-client.js";
 import type { EnclaveOptions, Fetch, Transport } from "../src/options.js";
 import type { Trust } from "../src/trust.js";
-import { KEY_SPKI_FP_SHA256_V1_FORMAT, KEY_X25519_HPKE_V1_FORMAT, UsageError, type Verification, type Verifier } from "../../verifier/src/index.js";
+import { KEY_SPKI_FP_SHA256_V1_FORMAT, KEY_X25519_HPKE_V1_FORMAT, UsageError, type VerificationReport, type VerifiedFacts, type Verifier } from "../../verifier/src/index.js";
 import { createWebSocket, pinnedWebSocketOptions } from "../src/websocket.js";
 import { startEhbpServer, type EhbpServer } from "./helpers/ehbp-server.js";
 import { recordingFetch } from "./helpers/network.js";
 import { paced, startTlsServer, TEST_CERT, TEST_PIN, type TlsServer } from "./helpers/tls-server.js";
 import { expectWithOptionsRefusesTransportOptions } from "./helpers/transport-options.js";
 import { openAIOver } from "./helpers/openai.js";
+import { lastFacts, verifiedReport } from "./helpers/report.js";
 
 let tls: TlsServer;
 let ehbp: EhbpServer;
@@ -42,13 +43,13 @@ function verifier(keys: () => { tls?: string; hpke?: string }): Verifier {
         ...(k.tls === undefined ? [] : [{ id: "tls", format: KEY_SPKI_FP_SHA256_V1_FORMAT, data: k.tls }]),
         ...(k.hpke === undefined ? [] : [{ id: "hpke", format: KEY_X25519_HPKE_V1_FORMAT, data: k.hpke }]),
       ];
-      return {
+      return verifiedReport({
         cryptoMaterial: material.map((m) => ({ ...m })),
         tlsPublicKeyFP: k.tls,
         hpkePublicKey: k.hpke,
         codeDigest: "11".repeat(32),
         freshnessExpiresAt: new Date(Date.now() + 60_000),
-      } as unknown as Verification;
+      });
     },
   } as unknown as Verifier;
 }
@@ -255,8 +256,8 @@ describe("EnclaveHTTPClient over TLS", () => {
     expect(client.trust).toEqual({ kind: "repoPin", repo: "tinfoilsh/repo" });
     expect(Object.isFrozen(client.trust)).toBe(true);
     expect(client.baseURL).toBe(`https://${tls.host}/`);
-    expect(client.current?.tlsPublicKeyFP).toBe(TEST_PIN);
-    expect((await client.ensureVerified()).codeDigest).toBe("11".repeat(32));
+    expect(lastFacts(client)?.tlsPublicKeyFP).toBe(TEST_PIN);
+    expect((await client.ensureVerified()).verifiedFacts?.codeDigest).toBe("11".repeat(32));
     expect(docs.calls).toHaveLength(1);
     await client.reverify();
     expect(docs.calls).toHaveLength(2);
@@ -267,7 +268,7 @@ describe("EnclaveHTTPClient over TLS", () => {
     const signal = AbortSignal.abort(reason);
     await expect(client.reverify({ signal })).rejects.toBe(reason);
     await expect(client.ensureVerified({ signal })).rejects.toBe(reason);
-    expect(client.current?.tlsPublicKeyFP).toBe(TEST_PIN);
+    expect(lastFacts(client)?.tlsPublicKeyFP).toBe(TEST_PIN);
     expect(docs.calls).toHaveLength(2);
   });
 
@@ -420,7 +421,7 @@ describe("EnclaveHTTPClient.close over TLS", () => {
     await client.close();
     await vi.waitFor(() => expect(own.openConnections()).toBe(0));
     await client.close();
-    expect(client.current?.tlsPublicKeyFP).toBe(TEST_PIN);
+    expect(lastFacts(client)?.tlsPublicKeyFP).toBe(TEST_PIN);
     for (const call of [client.fetch(`${own.origin}/models`), client.ensureVerified(), client.reverify(), createWebSocket(client, "/x"), pinnedWebSocketOptions(client)]) {
       await expect(call).rejects.toBeInstanceOf(ConfigurationError);
       await expect(call).rejects.toThrow(/client is closed/);
@@ -442,7 +443,7 @@ describe("EnclaveHTTPClient.close over TLS", () => {
     const client = await createEnclaveHTTPClient(own.host, { kind: "repoPin", repo: "tinfoilsh/repo" }, options, { documentFetch: documents().fetch, tls: { ca: TEST_CERT }, verifier: pinned });
     {
       await using scoped = client;
-      expect(scoped.current).toBeDefined();
+      expect(scoped.lastVerification()).toBeDefined();
     }
     await expect(client.ensureVerified()).rejects.toThrow(/client is closed/);
 
@@ -637,13 +638,13 @@ describe("EnclaveHTTPClient over EHBP", () => {
       AUTHORIZED,
       { transport: { kind: "ehbp", proxyURL: `${ehbp.origin}/` } },
       { verifier: verifier(() => ({ tls: "ab".repeat(32), hpke: verified++ === 0 ? stale : ehbp.publicKeyHex })), documentFetch: docs.fetch, sleep: async () => {} });
-    expect(client.current?.hpkePublicKey).toBe(stale);
+    expect(lastFacts(client)?.hpkePublicKey).toBe(stale);
     const before = ehbp.seen.length;
     const res = await client.fetch(`${ehbp.origin}/echo`, { method: "POST", body: "again" });
     expect((await res.json()).text).toBe("again");
     expect(verified).toBe(2);
     expect(ehbp.seen.length).toBe(before + 1);
-    expect(client.current?.hpkePublicKey).toBe(ehbp.publicKeyHex);
+    expect(lastFacts(client)?.hpkePublicKey).toBe(ehbp.publicKeyHex);
   });
 
   it("closes with nothing to release, and a sealed exchange in flight completes", async () => {
@@ -656,7 +657,7 @@ describe("EnclaveHTTPClient over EHBP", () => {
     await client.close();
     expect((await (await inFlight).json()).text).toBe("still going");
     await expect(client.fetch(`${ehbp.origin}/echo`, { method: "POST", body: "x" })).rejects.toThrow(/client is closed/);
-    expect(client.current?.hpkePublicKey).toBe(ehbp.publicKeyHex);
+    expect(lastFacts(client)?.hpkePublicKey).toBe(ehbp.publicKeyHex);
   });
 
   it("runs the caller's verification check and backs an OpenAI client on the proxy base URL", async () => {

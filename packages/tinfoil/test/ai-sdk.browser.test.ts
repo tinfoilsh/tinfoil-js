@@ -3,7 +3,7 @@
  * EHBP peer behind a mocked fetch, generating text through sealed bodies and
  * streaming an answer chunk by chunk.
  */
-import { KEY_SPKI_FP_SHA256_V1_FORMAT, KEY_X25519_HPKE_V1_FORMAT, UsageError, type Verification, type Verifier } from "@tinfoilsh/verifier";
+import { KEY_SPKI_FP_SHA256_V1_FORMAT, KEY_X25519_HPKE_V1_FORMAT, UsageError, type VerificationReport, type VerifiedFacts, type Verifier } from "@tinfoilsh/verifier";
 import { generateText, streamText } from "ai";
 import { beforeAll, describe, expect, it } from "vitest";
 import { createTinfoil } from "../src/ai-sdk.js";
@@ -13,6 +13,7 @@ import type { Fetch } from "../src/options.js";
 import * as browserEntry from "../src/index.browser.js";
 import * as openaiEntry from "../src/openai.js";
 import { createEhbpPeer, fetchOf, paced, type EhbpPeer } from "./helpers/ehbp-peer.js";
+import { verifiedReport } from "./helpers/report.js";
 
 const ENCLAVE = "enclave.example";
 const MODEL = "test-model";
@@ -25,7 +26,7 @@ function verifier(hpke: string): Verifier {
       if (repo === "") throw new UsageError("repo required");
     },
     verifyV3At: async () =>
-      ({
+      verifiedReport({
         cryptoMaterial: [
           { id: "tls", format: KEY_SPKI_FP_SHA256_V1_FORMAT, data: "ab".repeat(32) },
           { id: "hpke", format: KEY_X25519_HPKE_V1_FORMAT, data: hpke },
@@ -34,7 +35,7 @@ function verifier(hpke: string): Verifier {
         hpkePublicKey: hpke,
         codeDigest: "11".repeat(32),
         freshnessExpiresAt: new Date(Date.now() + 60_000),
-      }) as unknown as Verification,
+      }),
   } as unknown as Verifier;
 }
 

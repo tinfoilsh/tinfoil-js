@@ -10,9 +10,9 @@
  *
  * @experimental The gateway route is new; this API may change without a major version.
  */
-import type { Verification } from "@tinfoilsh/verifier";
+import type { VerificationReport } from "@tinfoilsh/verifier";
 import { AttestationError, ConfigurationError, messageOf, NetworkError, type TinfoilError } from "../../errors.js";
-import type { Catalog, Fetch, ReplicaVerification, VerificationCheck } from "../../options.js";
+import type { Catalog, Fetch, OnVerification, ReplicaVerification, VerificationCheck } from "../../options.js";
 import { closedError } from "../dispose.js";
 import { Enclave, type EnclaveConfig } from "../enclave.js";
 import { checkEHBP, ehbpMode, type EHBPOptions } from "../transport/ehbp.js";
@@ -36,6 +36,8 @@ export interface GatewayTransportConfig {
   readonly catalog?: () => Catalog;
   readonly policy: GatewayPolicy;
   readonly verificationCheck?: VerificationCheck;
+  /** Called with the outcome of each attempt to verify a replica. */
+  readonly onVerification?: OnVerification;
   /** The resolved client-level cache secret; "" scopes nothing. */
   readonly secret: string;
   /** Seams for tests. */
@@ -90,11 +92,11 @@ export class GatewayTransport {
   }
 
   /**
-   * A valid verification of a replica serving `model`, trying replicas in a
-   * fixed order for the model so repeated calls verify the same replica
-   * while it stays valid. Stops once `signal` aborts.
+   * The report of a valid verification of a replica serving `model`, trying
+   * replicas in a fixed order for the model so repeated calls verify the
+   * same replica while it stays valid. Stops once `signal` aborts.
    */
-  async ensureVerified(model: string, signal?: AbortSignal): Promise<Verification> {
+  async ensureVerified(model: string, signal?: AbortSignal): Promise<VerificationReport> {
     if (this.#closed) throw closedError();
     const catalog = await this.#catalog(signal);
     const { hosts, replica } = this.#config.policy.resolve(model, catalog);
@@ -113,14 +115,17 @@ export class GatewayTransport {
     throw failure;
   }
 
-  /** The last successful verification of each replica used so far, unchecked, in host order. */
-  verifications(): ReplicaVerification[] {
+  /**
+   * The last attempt to verify each replica that the transport has tried to
+   * verify, failed replicas included, unchecked, in host order.
+   */
+  lastVerification(): ReplicaVerification[] {
     const results: ReplicaVerification[] = [];
     for (const [key, rt] of this.#replicas) {
-      const verification = rt.keyed.current();
-      if (verification === undefined) continue;
+      const attempt = rt.keyed.lastVerification();
+      if (attempt === undefined) continue;
       const [host, reference, pinnedModel] = key.split("\0") as [string, string, string];
-      results.push({ host, models: [...rt.models].sort(), reference, pinnedModel, verification });
+      results.push(Object.freeze({ host, models: Object.freeze([...rt.models].sort()), reference, pinnedModel, ...attempt }));
     }
     return results.sort((a, b) => compare(a.host, b.host) || compare(a.reference, b.reference) || compare(a.pinnedModel, b.pinnedModel));
   }
@@ -128,8 +133,8 @@ export class GatewayTransport {
   /**
    * Closes every replica's transport, including one still being built, and
    * refuses further use: requests, the model listing and verification calls
-   * reject as closed, while {@link verifications} still reports the last
-   * ones. Closing again does nothing.
+   * reject as closed, while {@link lastVerification} still reports the
+   * last attempts. Closing again does nothing.
    */
   close(): void {
     if (this.#closed) return;
@@ -227,6 +232,7 @@ export class GatewayTransport {
       pin: { repo: r.ref, project: r.ref },
       verifier: c.policy.verifierFor(r),
       verificationCheck: c.verificationCheck,
+      onVerification: c.onVerification,
       fetch: c.documentFetch,
       clock: c.clock,
       nonce: c.nonce,

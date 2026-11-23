@@ -9,6 +9,7 @@ import { generateText, streamText } from "ai";
 import { describe, expect, it } from "vitest";
 import { createTinfoil } from "../src/internal/ai-sdk.js";
 import { LIVE_MODEL, SHA256_HEX, TERMINAL_FINISH_REASONS } from "./helpers/live.js";
+import { lastFacts } from "./helpers/report.js";
 
 const RUN_INTEGRATION = process.env.RUN_TINFOIL_INTEGRATION === "true";
 const apiKey = process.env.TINFOIL_API_KEY ?? "";
@@ -21,7 +22,7 @@ describe("createTinfoil against the live router", () => {
     async () => {
       const tinfoil = await createTinfoil({ apiKey });
       await using client = tinfoil.httpClient;
-      expect(client.current?.tlsPublicKeyFP).toMatch(SHA256_HEX);
+      expect(lastFacts(client)?.tlsPublicKeyFP).toMatch(SHA256_HEX);
 
       const generated = await generateText({ model: tinfoil(LIVE_MODEL), prompt: "Say the single word: pong", maxOutputTokens: MAX_OUTPUT_TOKENS });
       expect(TERMINAL_FINISH_REASONS).toContain(generated.finishReason);

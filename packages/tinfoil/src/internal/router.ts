@@ -7,7 +7,7 @@
  */
 import type { Pin, Verifier } from "@tinfoilsh/verifier";
 import { wrapNetwork } from "../errors.js";
-import type { AttestationFetcher, Fetch, RouterListFetcher, VerificationCheck } from "../options.js";
+import type { AttestationFetcher, Fetch, OnVerification, RouterListFetcher, VerificationCheck } from "../options.js";
 import { Enclave, type EnclaveConfig } from "./enclave.js";
 import { getFollowingRedirects, isAuthority, readBounded, untilAborted } from "./fetch.js";
 import { KeyedTransport, type Mode } from "./transport/transport.js";
@@ -26,6 +26,8 @@ export const MAX_ROUTER_BYTES = 32 << 20;
 export interface DiscoveryConfig {
   readonly verifier?: Verifier;
   readonly verificationCheck?: VerificationCheck;
+  /** Called with the outcome of each attempt to verify a router: each candidate, and the fallback once it is verified. */
+  readonly onVerification?: OnVerification;
   readonly mode: Mode;
   readonly signal?: AbortSignal;
   /** How each router's attestation document is obtained; undefined fetches it directly. */
@@ -56,6 +58,7 @@ export async function discoverRouter(config: DiscoveryConfig): Promise<KeyedTran
       pin: DEFAULT_ROUTER_PIN,
       verifier: config.verifier,
       verificationCheck: config.verificationCheck,
+      onVerification: config.onVerification,
       fetchAttestation: config.fetchAttestation,
       fetch: config.documentFetch,
       clock: config.clock,

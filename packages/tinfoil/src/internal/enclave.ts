@@ -7,6 +7,8 @@
  * inside its freshness window, and accepted by the caller's verification
  * check. A network or attestation failure is retried once after a second; a
  * configuration error or a rejection by the verification check is not.
+ * Each verification resolves to the verifier's report, whose verified facts
+ * are set.
  */
 import {
   CRYPTO_MATERIAL_ID_HPKE,
@@ -17,10 +19,11 @@ import {
   UsageError,
   Verifier,
   type Pin,
-  type Verification,
+  type VerificationReport,
+  type VerifiedFacts,
 } from "@tinfoilsh/verifier";
 import { AttestationError, ConfigurationError, messageOf, NetworkError, stripCategory, TinfoilError, withMessage } from "../errors.js";
-import type { AttestationFetcher, Fetch, VerificationCheck } from "../options.js";
+import type { AttestationFetcher, Fetch, OnVerification, VerificationCheck } from "../options.js";
 import { fetchDocument, fetchDocumentWith } from "./fetch.js";
 
 export const VERIFICATION_RETRIES = 1;
@@ -28,6 +31,9 @@ export const VERIFICATION_RETRY_DELAY_MS = 1_000;
 
 /** The message of a verification whose witnesses no longer authorize requests. */
 export const FRESHNESS_EXPIRED = "attestation freshness witnesses have expired; retry verification with fresh evidence";
+
+/** A report of a verification that passed, so that its verified facts are set. */
+export type VerifiedReport = VerificationReport & { readonly verifiedFacts: VerifiedFacts };
 
 /** Describes an {@link Enclave}. */
 export interface EnclaveConfig {
@@ -41,6 +47,8 @@ export interface EnclaveConfig {
   readonly verifier?: Verifier;
   /** Called with each verification that passes the verifier; a throw rejects it without a retry. */
   readonly verificationCheck?: VerificationCheck;
+  /** Called with the outcome of each attempt to verify the enclave, through {@link Enclave.notify}. */
+  readonly onVerification?: OnVerification;
   /** How each attestation document is obtained; undefined fetches it directly, or through `relay`. */
   readonly fetchAttestation?: AttestationFetcher;
   /** Seams for tests: the fetch used for documents, the clock, the nonce source and the retry delay. */
@@ -64,6 +72,7 @@ export class Enclave {
   readonly #pin: Required<Pin>;
   readonly #verifier: Verifier;
   readonly #check: VerificationCheck | undefined;
+  readonly #onVerification: OnVerification | undefined;
   readonly #fetch: Fetch;
   readonly #fetchAttestation: AttestationFetcher | undefined;
   readonly #clock: () => Date;
@@ -76,6 +85,7 @@ export class Enclave {
     this.#pin = Object.freeze({ repo: config.pin.repo ?? "", project: config.pin.project ?? "" });
     this.#verifier = verifier;
     this.#check = config.verificationCheck;
+    this.#onVerification = config.onVerification;
     this.#fetch = config.fetch ?? ((input, init) => fetch(input, init));
     this.#fetchAttestation = config.fetchAttestation;
     this.#clock = config.clock ?? (() => new Date());
@@ -109,27 +119,49 @@ export class Enclave {
     return this.#verifier;
   }
 
-  /** Fetches and verifies the enclave's attestation, retrying once after a network or attestation failure. */
-  verify(signal?: AbortSignal): Promise<Verification> {
-    return this.#verify(VERIFICATION_RETRIES, signal);
+  /**
+   * Fetches and verifies the enclave's attestation, retrying once after a
+   * network or attestation failure. Each attempt that fails and is retried
+   * is passed to `retried` before the retry starts; the outcome of the last
+   * attempt is the result.
+   */
+  verify(signal?: AbortSignal, retried?: (err: TinfoilError) => void): Promise<VerifiedReport> {
+    return this.#verify(VERIFICATION_RETRIES, signal, retried);
   }
 
   /** Verifies like {@link verify} but doesn't retry, so a caller trying several enclaves moves on quickly. */
-  verifyOnce(signal?: AbortSignal): Promise<Verification> {
-    return this.#verify(0, signal);
+  verifyOnce(signal?: AbortSignal): Promise<VerifiedReport> {
+    return this.#verify(0, signal, undefined);
   }
 
-  async #verify(retries: number, signal: AbortSignal | undefined): Promise<Verification> {
+  /**
+   * Reports the outcome of an attempt to verify the enclave to the
+   * `onVerification` callback, if there is one. The caller passes a report
+   * that no one else holds. A throw from the callback doesn't reach the
+   * caller: it is rethrown asynchronously, as an uncaught error.
+   */
+  notify(report: VerificationReport | undefined, error: TinfoilError | undefined): void {
+    if (this.#onVerification === undefined) return;
+    try {
+      this.#onVerification(this.#host, report, error);
+    } catch (err) {
+      queueMicrotask(() => {
+        throw err;
+      });
+    }
+  }
+
+  async #verify(retries: number, signal: AbortSignal | undefined, retried: ((err: TinfoilError) => void) | undefined): Promise<VerifiedReport> {
     let firstErr: TinfoilError | undefined;
     for (let attempt = 0; ; attempt++) {
       signal?.throwIfAborted();
       let err: TinfoilError | undefined;
       try {
         const verified = await this.#fetchVerification(signal);
-        this.#checkFreshness(verified);
-        await this.#checkVerification(verified);
+        this.#checkFreshness(verified.verifiedFacts);
+        await this.#checkVerification(verified.verifiedFacts);
         // The verification check can outlast the freshness window; a retry fetches fresh evidence.
-        this.#checkFreshness(verified);
+        this.#checkFreshness(verified.verifiedFacts);
         return verified;
       } catch (e) {
         // A caller that gave up gets its own reason back, not the failure its abort caused.
@@ -143,34 +175,36 @@ export class Enclave {
         throw err;
       }
       firstErr = err;
+      retried?.(err);
       await this.#sleep(VERIFICATION_RETRY_DELAY_MS, signal);
     }
   }
 
-  async #fetchVerification(signal: AbortSignal | undefined): Promise<Verification> {
+  async #fetchVerification(signal: AbortSignal | undefined): Promise<VerifiedReport> {
     const nonce = this.#nonce();
     const doc =
       this.#fetchAttestation === undefined
         ? await fetchDocument(this.#host, this.#relay, nonce, this.#fetch, signal)
         : await fetchDocumentWith(this.#fetchAttestation, this.#host, nonce, signal);
-    let verified: Verification;
+    let report: VerificationReport;
     try {
-      verified = await this.#verifier.verifyV3At(doc, nonce, this.#pin, this.#clock());
+      report = await this.#verifier.verifyV3At(doc, nonce, this.#pin, this.#clock());
     } catch (err) {
       throw fromVerify(err);
     }
-    validateTransportKeys(verified);
-    return verified;
+    if (report.verifiedFacts === undefined) throw new AttestationError("verification passed without verified facts");
+    validateTransportKeys(report.verifiedFacts);
+    return report as VerifiedReport;
   }
 
-  #checkFreshness(v: Verification): void {
+  #checkFreshness(v: VerifiedFacts): void {
     const expiresAt = v.freshnessExpiresAt;
     if (expiresAt === undefined || !(this.#clock().getTime() < expiresAt.getTime())) {
       throw new AttestationError(FRESHNESS_EXPIRED);
     }
   }
 
-  async #checkVerification(v: Verification): Promise<void> {
+  async #checkVerification(v: VerifiedFacts): Promise<void> {
     if (this.#check === undefined) return;
     try {
       await this.#check(v);
@@ -180,8 +214,8 @@ export class Enclave {
   }
 }
 
-/** Whether a verification valid at `now` is still inside its freshness window. */
-export function freshAt(v: Verification, now: Date): boolean {
+/** Whether verified facts valid at `now` are still inside their freshness window. */
+export function freshAt(v: VerifiedFacts, now: Date): boolean {
   const expiresAt = v.freshnessExpiresAt;
   return expiresAt !== undefined && now.getTime() < expiresAt.getTime();
 }
@@ -190,8 +224,9 @@ export function freshAt(v: Verification, now: Date): boolean {
  * A verifier error in the client's categories, by its outermost type: a
  * usage error is the caller's configuration error, and anything else the
  * verifier rejects is an attestation failure. The verifier error remains the
- * cause. A usage error is recognized by `instanceof` first and by its name
- * otherwise, so one thrown by another loaded copy of the verifier package
+ * cause, so that a rejection's report stays reachable from it. A usage
+ * error is recognized by `instanceof` first and by its name otherwise, so
+ * one thrown by another loaded copy of the verifier package
  * (a second version installed alongside, or a bundle that failed to
  * dedupe), whose class is a different object, is still the caller's error.
  */
@@ -207,14 +242,14 @@ function isUsageErrorByName(err: unknown): boolean {
 }
 
 /** Requires the keys a transport binds traffic to: the TLS key, and the HPKE key when the document endorses one. */
-function validateTransportKeys(v: Verification): void {
+function validateTransportKeys(v: VerifiedFacts): void {
   keyFormat(v, CRYPTO_MATERIAL_ID_TLS, KEY_SPKI_FP_SHA256_V1_FORMAT);
   if (v.tlsPublicKeyFP === undefined) throw new AttestationError(`document endorses no ${JSON.stringify(CRYPTO_MATERIAL_ID_TLS)} key`);
   keyFormat(v, CRYPTO_MATERIAL_ID_HPKE, KEY_X25519_HPKE_V1_FORMAT);
 }
 
 /** Rejects an endorsed `id` key whose format is not `format`. */
-function keyFormat(v: Verification, id: string, format: string): void {
+function keyFormat(v: VerifiedFacts, id: string, format: string): void {
   for (const item of v.cryptoMaterial) {
     if (item.id === id && item.format !== format) {
       throw new AttestationError(`crypto_material item ${JSON.stringify(id)} has format ${JSON.stringify(item.format)}, want ${JSON.stringify(format)}`);

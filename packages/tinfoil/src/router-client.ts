@@ -4,7 +4,7 @@
  * otherwise inference.tinfoil.sh. Discovery runs again each time a client is
  * created and tries routers for at most 30 seconds before falling back.
  */
-import type { Verification } from "@tinfoilsh/verifier";
+import type { VerificationReport } from "@tinfoilsh/verifier";
 import { attestedFetch, buildVerifier, checkFetcher, modeFor, resolveTransport, type EnclaveClientSeams } from "./enclave-client.js";
 import { ConfigurationError } from "./errors.js";
 import { resolveUserCacheSecret } from "./internal/cachesecret.js";
@@ -13,7 +13,7 @@ import { asyncDispose } from "./internal/dispose.js";
 import { discoverRouter } from "./internal/router.js";
 import type { KeyedTransport } from "./internal/transport/transport.js";
 import { registerWebSocketAccess } from "./internal/websocket.js";
-import type { CallOptions, Fetch, RouterOptions } from "./options.js";
+import type { CallOptions, Fetch, RouterOptions, VerificationAttempt } from "./options.js";
 
 /** @internal Seams for tests: the enclave client's, and the fetch that retrieves the router list. */
 export interface RouterClientSeams extends EnclaveClientSeams {
@@ -41,6 +41,7 @@ export async function createRouterHTTPClient(options: RouterOptions, seams: Rout
   const transport = await discoverRouter({
     verifier,
     verificationCheck: options.verificationCheck,
+    onVerification: options.onVerification,
     mode: modeFor(resolved, seams),
     signal: options.signal,
     fetchAttestation: options.fetchAttestation,
@@ -119,13 +120,18 @@ export class RouterHTTPClient {
     return createRouterHTTPClient(options ?? {}, {});
   }
 
-  /** The last successful verification, unchecked: it may have expired or been rejected. */
-  get current(): Verification | undefined {
-    return this.#transport.current();
+  /**
+   * The outcome of the most recent attempt to verify the router that the
+   * client chose, as {@link EnclaveHTTPClient.lastVerification} describes.
+   * The routers that discovery tried and skipped are reported only to the
+   * `onVerification` option.
+   */
+  lastVerification(): VerificationAttempt | undefined {
+    return this.#transport.lastVerification();
   }
 
-  /** A verification valid now, verifying first only if the cached one has expired or been rejected. */
-  ensureVerified(options?: CallOptions): Promise<Verification> {
+  /** The report of a verification valid now, verifying first only if the cached one has expired or been rejected. */
+  ensureVerified(options?: CallOptions): Promise<VerificationReport> {
     return this.#transport.ensureVerified(options?.signal);
   }
 
@@ -136,7 +142,7 @@ export class RouterHTTPClient {
    * discards the cached verification, so the next request verifies again,
    * while any other failure keeps a cached verification that is still valid.
    */
-  reverify(options?: CallOptions): Promise<Verification> {
+  reverify(options?: CallOptions): Promise<VerificationReport> {
     return this.#transport.reverify(options?.signal);
   }
 

@@ -10,6 +10,7 @@ import { RouterHTTPClient } from "../src/index.js";
 import type { Transport } from "../src/options.js";
 import { completeChat, SHA256_HEX } from "./helpers/live.js";
 import { openAIOver } from "./helpers/openai.js";
+import { lastFacts } from "./helpers/report.js";
 
 const RUN_INTEGRATION = process.env.RUN_TINFOIL_INTEGRATION === "true";
 const apiKey = process.env.TINFOIL_API_KEY ?? "";
@@ -19,8 +20,8 @@ describe("RouterHTTPClient under Bun on the live router", () => {
     "discovers and verifies a router",
     async () => {
       const http = await RouterHTTPClient.create();
-      expect(http.current?.tlsPublicKeyFP).toMatch(SHA256_HEX);
-      expect(http.current?.hpkePublicKey).toMatch(SHA256_HEX);
+      expect(lastFacts(http)?.tlsPublicKeyFP).toMatch(SHA256_HEX);
+      expect(lastFacts(http)?.hpkePublicKey).toMatch(SHA256_HEX);
     },
     180_000,
   );

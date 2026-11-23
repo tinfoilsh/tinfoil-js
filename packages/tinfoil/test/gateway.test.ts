@@ -16,8 +16,9 @@ import { GatewayTransport, MAX_SEAL_REDIRECTS, rank, SEAL_HEADER, type GatewayTr
 import { shapeOf } from "../src/internal/transport/transport.js";
 import type { Catalog, Fetch, Policy } from "../src/options.js";
 import type { Pin } from "../../verifier/src/index.js";
-import { KEY_SPKI_FP_SHA256_V1_FORMAT, KEY_X25519_HPKE_V1_FORMAT, UsageError, type Verification, type Verifier } from "../../verifier/src/index.js";
+import { KEY_SPKI_FP_SHA256_V1_FORMAT, KEY_X25519_HPKE_V1_FORMAT, UsageError, type VerificationReport, type VerifiedFacts, type Verifier } from "../../verifier/src/index.js";
 import { createEhbpPeer, fetchOf, type EhbpPeer } from "./helpers/ehbp-peer.js";
+import { verifiedReport } from "./helpers/report.js";
 
 const utf8 = (s: string): Uint8Array<ArrayBuffer> => new TextEncoder().encode(s) as Uint8Array<ArrayBuffer>;
 /** The enclave an attestation request through the gateway relay is for. */
@@ -44,13 +45,13 @@ function verifier(hpke: string | ((document: string) => string), seen: Pin[] = [
         { id: "tls", format: KEY_SPKI_FP_SHA256_V1_FORMAT, data: "ab".repeat(32) },
         { id: "hpke", format: KEY_X25519_HPKE_V1_FORMAT, data: key },
       ];
-      return {
+      return verifiedReport({
         cryptoMaterial: material.map((m) => ({ ...m })),
         tlsPublicKeyFP: "ab".repeat(32),
         hpkePublicKey: key,
         codeDigest: "11".repeat(32),
         freshnessExpiresAt: new Date(Date.now() + 60_000),
-      } as unknown as Verification;
+      });
     },
   } as unknown as Verifier;
 }
@@ -529,8 +530,10 @@ describe("GatewayTransport", () => {
   it("verifies replicas in rank order until one passes, and seals only to that one", async () => {
     const order = await rank(HOSTS, SPEC_PREFIX, undefined);
     const verified: string[] = [];
+    const reported: [string, boolean][] = [];
     const g = gateway();
     const t = transport({
+      onVerification: (host, report, error) => void reported.push([host, report !== undefined && error === undefined]),
       policy: await GatewayPolicy.create(undefined, false, undefined, fixed(perHost())),
       gatewayFetch: g.fetch,
       documentFetch: async (input) => {
@@ -544,10 +547,19 @@ describe("GatewayTransport", () => {
     expect(await res.json()).toMatchObject({ path: "/v1/chat/completions", host: order[2], sealed: true });
     expect([...new Set(verified)]).toEqual(order);
     expect(g.seen).toEqual([{ seal: order[2], enclave: `https://${order[2]}`, model: MODEL, prefix: SPEC_PREFIX }]);
-    const current = t.verifications();
-    expect(current).toHaveLength(1);
-    expect(current[0]).toMatchObject({ host: order[2], models: [MODEL], reference: "tinfoilsh/test", pinnedModel: "" });
-    expect(current[0]!.verification.hpkePublicKey).toBe(keyOf(order[2]!));
+    // Every replica tried keeps its own last attempt: the two that failed their fetch, and the one sealed to.
+    const attempts = t.lastVerification();
+    expect(attempts.map((r) => r.host)).toEqual([...order].sort());
+    const passed = attempts.find((r) => r.host === order[2])!;
+    expect(passed).toMatchObject({ host: order[2], models: [MODEL], reference: "tinfoilsh/test", pinnedModel: "" });
+    expect(passed.report!.verifiedFacts!.hpkePublicKey).toBe(keyOf(order[2]!));
+    for (const failed of attempts.filter((r) => r.host !== order[2])) {
+      expect(failed.report).toBeUndefined();
+      expect(failed.error).toBeInstanceOf(NetworkError);
+      expect(failed.models).toEqual([]);
+    }
+    // Each attempt is reported with its replica's host: a failed fetch and its retry for each failing replica, then the pass.
+    expect(reported).toEqual([...order.slice(0, 2).flatMap((h) => [[h, false], [h, false]]), [order[2], true]]);
   });
 
   it("seals to the replica's own key, so a body sealed under another replica's key is rejected by the peer", async () => {
@@ -595,12 +607,12 @@ describe("GatewayTransport", () => {
     });
     expect(await t.models()).toEqual(["other", MODEL]);
     const v = await t.ensureVerified(MODEL);
-    expect(v.hpkePublicKey).toBe(keyOf(order[1]!));
+    expect(v.verifiedFacts?.hpkePublicKey).toBe(keyOf(order[1]!));
     expect([...new Set(attempts)]).toEqual([order[0], order[1]]);
     expect(pins).toEqual([{ repo: "tinfoilsh/test@v1", project: "tinfoilsh/test@v1" }]);
     await t.ensureVerified(MODEL);
     expect(pins).toHaveLength(1);
-    expect(t.verifications()[0]).toMatchObject({ host: order[1], reference: "tinfoilsh/test@v1", pinnedModel: MODEL, models: [] });
+    expect(t.lastVerification()[0]).toMatchObject({ host: order[1], reference: "tinfoilsh/test@v1", pinnedModel: MODEL, models: [] });
     await expect(t.ensureVerified("unlisted")).rejects.toBeInstanceOf(ConfigurationError);
     const aborted = new AbortController();
     aborted.abort(new Error("stop"));
@@ -619,7 +631,7 @@ describe("GatewayTransport", () => {
     const stale = await (await Identity.generate()).getPublicKeyHex();
     let verifications = 0;
     const rotating = verifier(keyOf("only.example"));
-    const flaky = { ...rotating, verifyV3At: (...args: unknown[]) => (verifier(verifications++ === 0 ? stale : keyOf("only.example")).verifyV3At as (...a: unknown[]) => Promise<Verification>)(...args) } as Verifier;
+    const flaky = { ...rotating, verifyV3At: (...args: unknown[]) => (verifier(verifications++ === 0 ? stale : keyOf("only.example")).verifyV3At as (...a: unknown[]) => Promise<VerificationReport>)(...args) } as Verifier;
     const g = gateway();
     const t = transport({ policy: await GatewayPolicy.create(undefined, false, undefined, fixed(flaky)), gatewayFetch: g.fetch, catalog: () => catalogOf({ [MODEL]: { repo: "tinfoilsh/test", hosts: ["only.example"] } }) });
     const res = await t.fetch("https://gateway.example/v1/chat/completions", { method: "POST", body: '{"model":"test-model"}', headers: { "content-type": "application/json" } });

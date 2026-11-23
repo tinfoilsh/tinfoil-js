@@ -11,18 +11,18 @@ import { ehbpMode } from "../src/internal/transport/ehbp.js";
 import { PeerLacksKeyError } from "../src/internal/transport/transport.js";
 import type { Fetch } from "../src/options.js";
 import { decryptResponseWithToken, deserializeSessionRecoveryToken, serializeSessionRecoveryToken, sessionRecoveryToken } from "../src/session-recovery.js";
-import { KEY_X25519_HPKE_V1_FORMAT, type Verification } from "../../verifier/src/index.js";
+import { KEY_X25519_HPKE_V1_FORMAT, type VerificationReport, type VerifiedFacts } from "../../verifier/src/index.js";
 import { paced, startEhbpServer, type EhbpServer } from "./helpers/ehbp-server.js";
 
 let server: EhbpServer;
 
-function verification(hpke: string): Verification {
+function verification(hpke: string): VerifiedFacts {
   return {
     cryptoMaterial: [{ id: "hpke", format: KEY_X25519_HPKE_V1_FORMAT, data: hpke }],
     tlsPublicKeyFP: "ab".repeat(32),
     hpkePublicKey: hpke,
     freshnessExpiresAt: new Date(Date.now() + 60_000),
-  } as unknown as Verification;
+  } as unknown as VerifiedFacts;
 }
 
 /**

@@ -11,7 +11,8 @@ import { createEnclaveHTTPClient, type EnclaveHTTPClient } from "../src/enclave-
 import { AttestationError, ConfigurationError } from "../src/errors.js";
 import type { Fetch, PinnedWebSocket } from "../src/options.js";
 import { createWebSocket } from "../src/websocket.js";
-import type { Verification, Verifier } from "@tinfoilsh/verifier";
+import type { VerificationReport, VerifiedFacts, Verifier } from "@tinfoilsh/verifier";
+import { verifiedReport } from "./helpers/report.js";
 
 const cert = readFileSync(new URL("./fixtures/ws-test-cert.pem", import.meta.url), "utf8");
 const key = readFileSync(new URL("./fixtures/ws-test-key.pem", import.meta.url), "utf8");
@@ -21,12 +22,12 @@ function verifier(pin: string): Verifier {
   return {
     checkPinVerifiability: () => {},
     verifyV3At: async () =>
-      ({
+      verifiedReport({
         cryptoMaterial: [{ id: "tls", format: "https://tinfoil.sh/key/spki-fp-sha256/v1", data: pin }],
         tlsPublicKeyFP: pin,
         hpkePublicKey: undefined,
         freshnessExpiresAt: new Date(Date.now() + 60_000),
-      }) as unknown as Verification,
+      }),
   } as unknown as Verifier;
 }
 

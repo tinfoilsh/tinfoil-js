@@ -10,7 +10,8 @@ import { AttestationError, ConfigurationError, NetworkError } from "../src/error
 import { attestationRelay, routerListRelay } from "../src/fetchers.js";
 import type { AttestationFetcher, Fetch, RouterListFetcher } from "../src/options.js";
 import { createRouterHTTPClient } from "../src/router-client.js";
-import { KEY_SPKI_FP_SHA256_V1_FORMAT, KEY_X25519_HPKE_V1_FORMAT, type Verification, type Verifier } from "../../verifier/src/index.js";
+import { KEY_SPKI_FP_SHA256_V1_FORMAT, KEY_X25519_HPKE_V1_FORMAT, type VerificationReport, type VerifiedFacts, type Verifier } from "../../verifier/src/index.js";
+import { verifiedReport } from "./helpers/report.js";
 
 const NONCE = new Uint8Array(32).fill(0xab);
 const NONCE_HEX = "ab".repeat(32);
@@ -37,12 +38,12 @@ function verifier(seenDocs: string[] = [], expiresAt: () => Date = () => new Dat
       const text = new TextDecoder().decode(doc);
       seenDocs.push(text);
       if (text.startsWith("bad")) throw new Error("rejected document");
-      return {
+      return verifiedReport({
         cryptoMaterial: [{ id: "tls", format: KEY_SPKI_FP_SHA256_V1_FORMAT, data: TLS_KEY }],
         tlsPublicKeyFP: TLS_KEY,
         codeDigest: "11".repeat(32),
         freshnessExpiresAt: expiresAt(),
-      } as unknown as Verification;
+      });
     },
   } as unknown as Verifier;
 }
@@ -304,9 +305,9 @@ function verifierWithHPKE(): Verifier {
   return {
     ...base,
     verifyV3At: async (...args: Parameters<Verifier["verifyV3At"]>) => {
-      const v = (await base.verifyV3At(...args)) as unknown as Record<string, unknown>;
+      const v = (await base.verifyV3At(...args)).verifiedFacts as unknown as Record<string, unknown>;
       const hpke = "ef".repeat(32);
-      return { ...v, hpkePublicKey: hpke, cryptoMaterial: [...(v.cryptoMaterial as object[]), { id: "hpke", format: KEY_X25519_HPKE_V1_FORMAT, data: hpke }] } as unknown as Verification;
+      return verifiedReport({ ...v, hpkePublicKey: hpke, cryptoMaterial: [...(v.cryptoMaterial as object[]), { id: "hpke", format: KEY_X25519_HPKE_V1_FORMAT, data: hpke }] });
     },
   } as unknown as Verifier;
 }

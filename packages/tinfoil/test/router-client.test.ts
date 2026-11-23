@@ -17,12 +17,13 @@ import { resetProcessUserCacheSecretForTests } from "../src/internal/cachesecret
 import { createTinfoilClient, OpenAIClient } from "../src/openai-client.js";
 import type { Fetch, RouterOptions, Transport } from "../src/options.js";
 import { createRouterHTTPClient, RouterHTTPClient, type RouterClientSeams } from "../src/router-client.js";
-import { KEY_SPKI_FP_SHA256_V1_FORMAT, KEY_X25519_HPKE_V1_FORMAT, UsageError, type Verification, type Verifier } from "../../verifier/src/index.js";
+import { KEY_SPKI_FP_SHA256_V1_FORMAT, KEY_X25519_HPKE_V1_FORMAT, UsageError, type VerificationReport, type VerifiedFacts, type Verifier } from "../../verifier/src/index.js";
 import { startEhbpServer, type EhbpServer } from "./helpers/ehbp-server.js";
 import { recordingFetch } from "./helpers/network.js";
 import { startTlsServer, TEST_CERT, TEST_PIN, type TlsServer } from "./helpers/tls-server.js";
 import { expectWithOptionsRefusesTransportOptions } from "./helpers/transport-options.js";
 import { openAIOver } from "./helpers/openai.js";
+import { lastFacts, verifiedReport } from "./helpers/report.js";
 
 const ROUTER_REPO = "tinfoilsh/confidential-model-router";
 const BODY = '{"model":"test","messages":[{"role":"user","content":"hi"}],"seed":9223372036854775807,"metadata":{"a":{"b":[1,2.50]}}}';
@@ -40,13 +41,13 @@ function verifier(keys: { tls?: string; hpke?: string }, expiresAt: () => Date =
         ...(keys.tls === undefined ? [] : [{ id: "tls", format: KEY_SPKI_FP_SHA256_V1_FORMAT, data: keys.tls }]),
         ...(keys.hpke === undefined ? [] : [{ id: "hpke", format: KEY_X25519_HPKE_V1_FORMAT, data: keys.hpke }]),
       ];
-      return {
+      return verifiedReport({
         cryptoMaterial: material.map((m) => ({ ...m })),
         tlsPublicKeyFP: keys.tls,
         hpkePublicKey: keys.hpke,
         codeDigest: "11".repeat(32),
         freshnessExpiresAt: expiresAt(),
-      } as unknown as Verification;
+      });
     },
   } as unknown as Verifier;
 }
@@ -187,7 +188,7 @@ describe("RouterHTTPClient over TLS", () => {
     expect(() => ((client as { enclave: string }).enclave = "evil.example")).toThrow(TypeError);
     expect(client.enclave).toBe(tls.host);
     expect(client.baseURL).toBe(`https://${tls.host}/`);
-    expect(client.current?.tlsPublicKeyFP).toBe(TEST_PIN);
+    expect(lastFacts(client)?.tlsPublicKeyFP).toBe(TEST_PIN);
     expect(s.documentHosts.filter((h) => h === tls.host)).toHaveLength(1);
   });
 
@@ -197,7 +198,7 @@ describe("RouterHTTPClient over TLS", () => {
     const verified = s.documentHosts.length;
     await expect(client.reverify({ signal })).rejects.toBe(reason);
     await expect(client.ensureVerified({ signal })).rejects.toBe(reason);
-    expect(client.current?.tlsPublicKeyFP).toBe(TEST_PIN);
+    expect(lastFacts(client)?.tlsPublicKeyFP).toBe(TEST_PIN);
     expect(s.documentHosts).toHaveLength(verified);
   });
 
@@ -336,7 +337,7 @@ describe("RouterHTTPClient.close", () => {
     const verified = s.documentHosts.length;
     await client.close();
     await client.close();
-    expect(client.current?.tlsPublicKeyFP).toBe(TEST_PIN);
+    expect(lastFacts(client)?.tlsPublicKeyFP).toBe(TEST_PIN);
     await expect(client.fetch(`${tls.origin}/v1/models`)).rejects.toThrow(/client is closed/);
     await expect(client.ensureVerified()).rejects.toBeInstanceOf(ConfigurationError);
     await expect(client.reverify()).rejects.toThrow(/client is closed/);

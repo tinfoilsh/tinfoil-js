@@ -74,7 +74,7 @@ export async function openClientWebSocket(transport: KeyedTransport, path: strin
   // A runtime that can't pin the connection is refused before any verification I/O.
   checkPinnedWebSocketCapability();
   const state = await transport.state(options.signal);
-  const key = state.verification.tlsPublicKeyFP;
+  const key = state.report.verifiedFacts.tlsPublicKeyFP;
   if (key === undefined) throw new AttestationError('document endorses no "tls" key');
   // A peer whose certificate fails the pin no longer holds the keys the connection was opened under.
   const socket = await openPinnedWebSocket(target, key, options, tls, () => transport.invalidate(state));
@@ -105,7 +105,7 @@ export async function clientWsOptions(transport: KeyedTransport, tls: TLSOptions
   // A runtime that can't use the settings is refused before any verification I/O.
   checkWsClientOptionsCapability();
   const state = await transport.state(signal);
-  const key = state.verification.tlsPublicKeyFP;
+  const key = state.report.verifiedFacts.tlsPublicKeyFP;
   if (key === undefined) throw new AttestationError('document endorses no "tls" key');
   const invalidate = (): void => transport.invalidate(state);
   return {

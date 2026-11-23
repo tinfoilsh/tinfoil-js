@@ -17,10 +17,11 @@ import type { RuntimeGlobals } from "../src/internal/platform.js";
 import { createTinfoilClient } from "../src/openai-client.js";
 import type { Fetch, Transport } from "../src/options.js";
 import { RouterHTTPClient } from "../src/router-client.js";
-import { KEY_SPKI_FP_SHA256_V1_FORMAT, KEY_X25519_HPKE_V1_FORMAT, UsageError, type Verification, type Verifier } from "../../verifier/src/index.js";
+import { KEY_SPKI_FP_SHA256_V1_FORMAT, KEY_X25519_HPKE_V1_FORMAT, UsageError, type VerificationReport, type VerifiedFacts, type Verifier } from "../../verifier/src/index.js";
 import { startEhbpServer, type EhbpServer } from "./helpers/ehbp-server.js";
 import { recordingFetch } from "./helpers/network.js";
 import { paced, startTlsServer, TEST_CERT, TEST_PIN, type Seen, type TlsServer } from "./helpers/tls-server.js";
+import { lastFacts, verifiedReport } from "./helpers/report.js";
 
 const MODEL = "test-model";
 const ROUTER_REPO = "tinfoilsh/confidential-model-router";
@@ -39,13 +40,13 @@ function verifier(keys: { tls?: string; hpke?: string }): Verifier {
         ...(keys.tls === undefined ? [] : [{ id: "tls", format: KEY_SPKI_FP_SHA256_V1_FORMAT, data: keys.tls }]),
         ...(keys.hpke === undefined ? [] : [{ id: "hpke", format: KEY_X25519_HPKE_V1_FORMAT, data: keys.hpke }]),
       ];
-      return {
+      return verifiedReport({
         cryptoMaterial: material.map((m) => ({ ...m })),
         tlsPublicKeyFP: keys.tls,
         hpkePublicKey: keys.hpke,
         codeDigest: "11".repeat(32),
         freshnessExpiresAt: new Date(Date.now() + 60_000),
-      } as unknown as Verification;
+      });
     },
   } as unknown as Verifier;
 }
@@ -178,17 +179,22 @@ describe("createTinfoil's option checks", () => {
 describe("the provider over the discovered router", () => {
   let s: ReturnType<typeof seams>;
   let tinfoil: Awaited<ReturnType<typeof createTinfoilProvider>>;
+  const reported: string[] = [];
 
   beforeAll(async () => {
     s = seams([tls.host]);
-    tinfoil = await createTinfoilProvider({ transport: { kind: "tls" }, apiKey: "secret-key", headers: { "x-app": "demo" } }, { ...s, verifier: verifier({ tls: TEST_PIN }) });
+    tinfoil = await createTinfoilProvider(
+      { transport: { kind: "tls" }, apiKey: "secret-key", headers: { "x-app": "demo" }, onVerification: (host) => void reported.push(host) },
+      { ...s, verifier: verifier({ tls: TEST_PIN }) },
+    );
   });
 
   it("is bound to the verified router and exposes it", () => {
     const client = tinfoil.httpClient;
     expect(client).toBeInstanceOf(RouterHTTPClient);
     expect(client.enclave).toBe(tls.host);
-    expect(client.current?.tlsPublicKeyFP).toBe(TEST_PIN);
+    expect(lastFacts(client)?.tlsPublicKeyFP).toBe(TEST_PIN);
+    expect(reported).toEqual([tls.host]);
     expect(Object.getOwnPropertyDescriptor(tinfoil, "httpClient")?.writable).toBe(false);
   });
 
@@ -272,7 +278,7 @@ describe("the provider over one enclave", () => {
     const client = tinfoil.httpClient;
     expect(client).toBeInstanceOf(EnclaveHTTPClient);
     expect(client.enclave).toBe("enclave.example");
-    expect(client.current?.hpkePublicKey).toBe(ehbp.publicKeyHex);
+    expect(lastFacts(client)?.hpkePublicKey).toBe(ehbp.publicKeyHex);
 
     const { text } = await generateText({ model: tinfoil(MODEL), prompt: "Say pong", maxRetries: 0 });
     expect(text).toBe("pong");

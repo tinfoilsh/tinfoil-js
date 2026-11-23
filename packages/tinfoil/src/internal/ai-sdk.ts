@@ -26,7 +26,7 @@ export interface TinfoilProviderEnclave {
 }
 
 /** The options of {@link createTinfoil} that both routes take. */
-export interface TinfoilProviderBaseOptions extends Pick<RouterOptions & EnclaveOptions, "transport" | "policy" | "verificationCheck" | "fetchAttestation" | "signal"> {
+export interface TinfoilProviderBaseOptions extends Pick<RouterOptions & EnclaveOptions, "transport" | "policy" | "verificationCheck" | "onVerification" | "fetchAttestation" | "signal"> {
   /** A long-lived API key, sent as the bearer credential. It belongs on a server, never in a page. */
   readonly apiKey?: string;
   /** A credential a browser page may hold, such as a short-lived token from the application's own sign-in. */
@@ -102,6 +102,7 @@ export async function createTinfoilProvider(options: TinfoilProviderOptions, sea
     transport: options.transport,
     policy: options.policy,
     verificationCheck: options.verificationCheck,
+    onVerification: options.onVerification,
     fetchAttestation: options.fetchAttestation,
     signal: options.signal,
   };

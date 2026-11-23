@@ -9,19 +9,19 @@ import { readFileSync } from "node:fs";
 import { ConfigurationError } from "../src/errors.js";
 import { tlsMode } from "../src/internal/transport/tls.js";
 import { PeerLacksKeyError } from "../src/internal/transport/transport.js";
-import type { Verification } from "@tinfoilsh/verifier";
+import type { VerificationReport, VerifiedFacts } from "@tinfoilsh/verifier";
 
 const cert = readFileSync(new URL("./fixtures/ws-test-cert.pem", import.meta.url), "utf8");
 const key = readFileSync(new URL("./fixtures/ws-test-key.pem", import.meta.url), "utf8");
 const PIN = createHash("sha256").update(new X509Certificate(cert).publicKey.export({ type: "spki", format: "der" })).digest("hex");
 
-function verification(fp: string): Verification {
+function verification(fp: string): VerifiedFacts {
   return {
     cryptoMaterial: [{ id: "tls", format: "https://tinfoil.sh/key/spki-fp-sha256/v1", data: fp }],
     tlsPublicKeyFP: fp,
     hpkePublicKey: undefined,
     freshnessExpiresAt: new Date(Date.now() + 60_000),
-  } as unknown as Verification;
+  } as unknown as VerifiedFacts;
 }
 
 let server: ReturnType<typeof Bun.serve>;

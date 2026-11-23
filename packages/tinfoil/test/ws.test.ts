@@ -26,9 +26,10 @@ import type { OpenAIClient, OpenAIClientOptions } from "../src/openai-client.js"
 import type { Fetch, PinnedWebSocket } from "../src/options.js";
 import { createRealtimeWebSocket } from "../src/realtime.js";
 import { createWebSocket, pinnedWebSocketOptions } from "../src/websocket.js";
-import { KEY_SPKI_FP_SHA256_V1_FORMAT, KEY_X25519_HPKE_V1_FORMAT, UsageError, type Verification, type Verifier } from "../../verifier/src/index.js";
+import { KEY_SPKI_FP_SHA256_V1_FORMAT, KEY_X25519_HPKE_V1_FORMAT, UsageError, type VerificationReport, type VerifiedFacts, type Verifier } from "../../verifier/src/index.js";
 import { TEST_CERT, TEST_KEY, TEST_PIN } from "./helpers/tls-server.js";
 import { openAIOver } from "./helpers/openai.js";
+import { verifiedReport } from "./helpers/report.js";
 
 const OTHER_PIN = "ab".repeat(32);
 
@@ -49,13 +50,13 @@ function verifier(pin: () => string): Verifier {
       if (repo.includes(" ")) throw new UsageError(`bad repo ${repo}`);
     },
     verifyV3At: async () =>
-      ({
+      verifiedReport({
         cryptoMaterial: [{ id: "tls", format: KEY_SPKI_FP_SHA256_V1_FORMAT, data: pin() }],
         tlsPublicKeyFP: pin(),
         hpkePublicKey: undefined,
         codeDigest: "11".repeat(32),
         freshnessExpiresAt: new Date(Date.now() + 60_000),
-      }) as unknown as Verification,
+      }),
   } as unknown as Verifier;
 }
 
@@ -239,7 +240,7 @@ describe("createWebSocket", () => {
     const sealing = {
       ...verifier(() => TEST_PIN),
       verifyV3At: async () =>
-        ({
+        verifiedReport({
           cryptoMaterial: [
             { id: "tls", format: KEY_SPKI_FP_SHA256_V1_FORMAT, data: TEST_PIN },
             { id: "hpke", format: KEY_X25519_HPKE_V1_FORMAT, data: hpke },
@@ -248,7 +249,7 @@ describe("createWebSocket", () => {
           hpkePublicKey: hpke,
           codeDigest: "11".repeat(32),
           freshnessExpiresAt: new Date(Date.now() + 60_000),
-        }) as unknown as Verification,
+        }),
     } as unknown as Verifier;
     const c = await createEnclaveHTTPClient(host, { kind: "repoPin", repo: "tinfoilsh/repo" }, { transport: { kind: "ehbp" } }, { verifier: sealing, documentFetch: documents().fetch, tls: { ca: TEST_CERT } });
     const socket = await createWebSocket(c, "/x");

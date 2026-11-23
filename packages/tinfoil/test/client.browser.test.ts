@@ -5,7 +5,7 @@
  * is observed chunk by chunk. The enclave is an EHBP peer behind a mocked
  * fetch, since a page can't start a server.
  */
-import { KEY_SPKI_FP_SHA256_V1_FORMAT, KEY_X25519_HPKE_V1_FORMAT, UsageError, type Verification, type Verifier } from "@tinfoilsh/verifier";
+import { KEY_SPKI_FP_SHA256_V1_FORMAT, KEY_X25519_HPKE_V1_FORMAT, UsageError, type VerificationReport, type VerifiedFacts, type Verifier } from "@tinfoilsh/verifier";
 import { Identity, PROTOCOL } from "ehbp";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { createEnclaveHTTPClient, EnclaveHTTPClient, resolveTransport, type EnclaveClientSeams } from "../src/enclave-client.js";
@@ -27,6 +27,7 @@ import { createWebSocket, pinnedWebSocketOptions } from "../src/websocket.js";
 import { createEhbpPeer, fetchOf, paced, type EhbpPeer } from "./helpers/ehbp-peer.js";
 import { recordingFetch } from "./helpers/network.js";
 import { openAIOver } from "./helpers/openai.js";
+import { lastFacts, verifiedReport } from "./helpers/report.js";
 
 const ENCLAVE = "enclave.example";
 let peer: EhbpPeer;
@@ -39,13 +40,13 @@ function verifier(hpke: string | undefined): Verifier {
     },
     verifyV3At: async () => {
       const material = [{ id: "tls", format: KEY_SPKI_FP_SHA256_V1_FORMAT, data: "ab".repeat(32) }, ...(hpke === undefined ? [] : [{ id: "hpke", format: KEY_X25519_HPKE_V1_FORMAT, data: hpke }])];
-      return {
+      return verifiedReport({
         cryptoMaterial: material.map((m) => ({ ...m })),
         tlsPublicKeyFP: "ab".repeat(32),
         hpkePublicKey: hpke,
         codeDigest: "11".repeat(32),
         freshnessExpiresAt: new Date(Date.now() + 60_000),
-      } as unknown as Verification;
+      });
     },
   } as unknown as Verifier;
 }
@@ -130,7 +131,7 @@ describe("EnclaveHTTPClient in a browser", () => {
     expect(client).toBeInstanceOf(EnclaveHTTPClient);
     expect(client.enclave).toBe(ENCLAVE);
     expect(client.baseURL).toBe(`https://${ENCLAVE}/`);
-    expect(client.current?.hpkePublicKey).toBe(peer.publicKeyHex);
+    expect(lastFacts(client)?.hpkePublicKey).toBe(peer.publicKeyHex);
     const res = await client.fetch(`https://${ENCLAVE}/echo`, { method: "POST", body: "prompt" });
     expect(await res.json()).toEqual({ path: "/echo", sealed: true, text: "prompt" });
     await expect(client.fetch("https://other.example/echo")).rejects.toThrow(/client is bound to enclave/);
@@ -169,7 +170,7 @@ describe("EnclaveHTTPClient in a browser", () => {
     const client = await createEnclaveHTTPClient(ENCLAVE, { kind: "repoPin", repo: "tinfoilsh/repo" }, {}, { ...seams(), verifier: verifier(peer.publicKeyHex) });
     await client.close();
     await client.close();
-    expect(client.current?.hpkePublicKey).toBe(peer.publicKeyHex);
+    expect(lastFacts(client)?.hpkePublicKey).toBe(peer.publicKeyHex);
     await expect(client.fetch(`https://${ENCLAVE}/echo`, { method: "POST", body: "x" })).rejects.toThrow(/client is closed/);
     await expect(client.ensureVerified()).rejects.toBeInstanceOf(ConfigurationError);
     const disposed = await createEnclaveHTTPClient(ENCLAVE, { kind: "repoPin", repo: "tinfoilsh/repo" }, {}, { ...seams(), verifier: verifier(peer.publicKeyHex) });
@@ -186,7 +187,7 @@ describe("EnclaveHTTPClient in a browser", () => {
   it("replays once after the enclave rotates its key", async () => {
     const stale = await (await Identity.generate()).getPublicKeyHex();
     let verifications = 0;
-    const rotating = { ...verifier(peer.publicKeyHex), verifyV3At: (...args: unknown[]) => (verifier(verifications++ === 0 ? stale : peer.publicKeyHex).verifyV3At as (...a: unknown[]) => Promise<Verification>)(...args) } as Verifier;
+    const rotating = { ...verifier(peer.publicKeyHex), verifyV3At: (...args: unknown[]) => (verifier(verifications++ === 0 ? stale : peer.publicKeyHex).verifyV3At as (...a: unknown[]) => Promise<VerificationReport>)(...args) } as Verifier;
     const client = await createEnclaveHTTPClient(ENCLAVE, { kind: "repoPin", repo: "tinfoilsh/repo" }, {}, { ...seams(), verifier: rotating });
     const res = await client.fetch(`https://${ENCLAVE}/echo`, { method: "POST", body: "again" });
     expect((await res.json()).text).toBe("again");
@@ -302,7 +303,7 @@ describe("the gateway in a browser", () => {
     expect(last.headers["x-tinfoil-model"]).toBe("test-model");
     const sent = JSON.parse(new TextDecoder().decode(last.body)) as Record<string, unknown>;
     expect(sent.cache_salt).toMatch(/^[A-Za-z0-9_-]{43}$/);
-    expect(ai.httpClient.current.map((r) => r.host)).toEqual(["replica.example"]);
+    expect(ai.httpClient.lastVerification().map((r) => r.host)).toEqual(["replica.example"]);
   });
 });
 

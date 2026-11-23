@@ -25,6 +25,8 @@ export type {
   TLS,
   EHBP,
   VerificationCheck,
+  VerificationAttempt,
+  OnVerification,
   CallOptions,
   EnclaveOptions,
   RouterOptions,
