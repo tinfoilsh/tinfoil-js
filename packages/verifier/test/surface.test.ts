@@ -7,14 +7,17 @@ import { describe, expect, it } from "vitest";
 import * as surface from "../src/index.js";
 import { INTEL_SGX_ROOT_CA_PEM } from "../src/trust/intel-sgx-root.js";
 import { pemBlocks } from "../src/internal/x509/der.js";
-import { verificationOf } from "../src/verification.js";
+import { ReportBuilder } from "../src/report.js";
+import { verifiedFactsOf } from "../src/verification.js";
 
 /** Every runtime export, sorted. Type-only exports are checked by compiling this file. */
 const EXPORTS = [
-  // verifier and verification
+  // verifier, report and verified facts
   "Verifier",
-  "Verification",
+  "VerificationReport",
+  "VerifiedFacts",
   "cryptoMaterialData",
+  "hpkePublicKeyFP",
   "parseReference",
   "certPubkeyFP",
   "PUBLIC_REGISTRY_ID",
@@ -51,7 +54,7 @@ const EXPORTS = [
 const VERIFIER_METHODS = ["verifyV3", "verifyV3At", "checkPinVerifiability"].sort();
 /** The policy a verifier carries as own properties, in declaration order. */
 const VERIFIER_PROPERTIES = ["freshnessMaxAgeMs", "pinnedRegisters"];
-/** The facts a verification carries as own properties, in declaration order. */
+/** The facts that verified facts carry as own properties, in declaration order. */
 const VERIFICATION_PROPERTIES = [
   "codeDigest",
   "codeTag",
@@ -63,8 +66,11 @@ const VERIFICATION_PROPERTIES = [
   "runtime",
   "platform",
   "freshnessExpiresAt",
-  "metadata",
 ];
+/** What a report carries as own properties, in declaration order: verified facts on success, partial facts on failure. */
+const REPORT_PROPERTIES = ["steps", "verifiedFacts", "metadata"];
+const FAILED_REPORT_PROPERTIES = ["steps", "partialFacts", "metadata"];
+const REPORT_METHODS = ["clone", "failedStep", "toJSON"].sort();
 const VERIFICATION_GETTERS = ["tlsPublicKeyFP", "hpkePublicKey"].sort();
 const VERIFICATION_METHODS = ["cryptoMaterialData", "toJSON"].sort();
 
@@ -85,7 +91,18 @@ type TypeExports = [
   surface.ConfigVerification,
   surface.ArtifactVerification,
   surface.VerificationMetadata,
-  surface.VerificationJSON,
+  surface.VerificationMetadataJSON,
+  surface.VerifiedFactsJSON,
+  surface.Step,
+  surface.StepStatus,
+  surface.PartialFacts,
+  surface.ExpectedFacts,
+  surface.MeasuredFacts,
+  surface.CPUEvidence,
+  surface.VerificationReportJSON,
+  surface.PartialFactsJSON,
+  surface.ExpectedFactsJSON,
+  surface.MeasuredFactsJSON,
   surface.MeasurementJSON,
   surface.ConfigVerificationJSON,
   surface.ArtifactVerificationJSON,
@@ -127,38 +144,51 @@ const gettersOf = (cls: { prototype: object }): string[] =>
  * which the surface test checks.
  */
 function privateConstructors(): void {
-  // @ts-expect-error The constructor is private; a verification comes from a verifier.
-  new surface.Verification({} as never);
+  // @ts-expect-error The constructor is private; verified facts come from a verifier.
+  new surface.VerifiedFacts({} as never);
+  // @ts-expect-error The constructor is private; a report comes from a verifier.
+  new surface.VerificationReport({} as never);
   // @ts-expect-error The constructor is private; a verifier comes from Verifier.create.
   new surface.Verifier({} as never);
 }
 void privateConstructors;
 
-/** A verification with the fewest facts, built through the verifier's internal seam. */
-const verification = (): surface.Verification =>
-  verificationOf({
+/** Verified facts with the fewest facts, built through the verifier's internal seam. */
+const verification = (): surface.VerifiedFacts =>
+  verifiedFactsOf({
     codeDigest: "",
     codeTag: "",
     configRepo: "",
     codeMeasurement: { platform: "sev-snp" },
     enclaveMeasurement: { platform: "sev-snp", launch: new Uint8Array(surface.REGISTER_SIZE) },
     cryptoMaterial: [],
-    metadata: { verifier: { name: "", version: "" }, verifiedAt: new Date(0) },
   });
+
+const METADATA = { verifier: { name: "", version: "" }, verifiedAt: new Date(0) };
+
+/** A report of a verification that every step accepted. */
+const report = (): surface.VerificationReport => new ReportBuilder().passedAll(verification(), METADATA);
+
+/** A report of a verification that the quote step rejected. */
+const rejectedReport = (): surface.VerificationReport => new ReportBuilder().failed("quote", "verification error: quote: bad", METADATA);
 
 describe("public surface", () => {
   it("exports exactly the specified names", () => {
     expect(Object.keys(surface).sort()).toEqual(EXPORTS);
   });
 
-  it("shapes the verifier and the verification as specified", () => {
+  it("shapes the verifier, the report and the verified facts as specified", () => {
     expect(typeof surface.Verifier.create).toBe("function");
     expect(Object.getOwnPropertyNames(surface.Verifier).filter((n) => !["length", "name", "prototype"].includes(n))).toEqual(["create"]);
     expect(methodsOf(surface.Verifier)).toEqual(VERIFIER_METHODS);
     expect(gettersOf(surface.Verifier)).toEqual([]);
-    expect(methodsOf(surface.Verification)).toEqual(VERIFICATION_METHODS);
-    expect(gettersOf(surface.Verification)).toEqual(VERIFICATION_GETTERS);
+    expect(methodsOf(surface.VerifiedFacts)).toEqual(VERIFICATION_METHODS);
+    expect(gettersOf(surface.VerifiedFacts)).toEqual(VERIFICATION_GETTERS);
     expect(Object.keys(verification())).toEqual(VERIFICATION_PROPERTIES);
+    expect(methodsOf(surface.VerificationReport)).toEqual(REPORT_METHODS);
+    expect(gettersOf(surface.VerificationReport)).toEqual([]);
+    expect(Object.keys(report())).toEqual(REPORT_PROPERTIES);
+    expect(Object.keys(rejectedReport())).toEqual(FAILED_REPORT_PROPERTIES);
     expect(surface.NONCE_SIZE).toBe(32);
     expect(surface.REGISTER_SIZE).toBe(48);
     expect(surface.randomNonce()).toHaveLength(32);
@@ -166,11 +196,13 @@ describe("public surface", () => {
     expect(surface.CRYPTO_MATERIAL_ID_HPKE).toBe("hpke");
   });
 
-  it("refuses untyped construction of a verifier or a verification", () => {
+  it("refuses untyped construction of a verifier, a report or verified facts", () => {
     expect(() => new (surface.Verifier as any)({ serverURL: "https://x", configRepo: "org/repo" })).toThrow(surface.UsageError);
     expect(() => new (surface.Verifier as any)({})).toThrow(/Verifier.create/);
-    expect(() => new (surface.Verification as any)(verification())).toThrow(surface.UsageError);
-    expect(() => new (surface.Verification as any)({})).toThrow(/comes from a verifier/);
+    expect(() => new (surface.VerifiedFacts as any)(verification())).toThrow(surface.UsageError);
+    expect(() => new (surface.VerifiedFacts as any)({})).toThrow(/come from a verifier/);
+    expect(() => new (surface.VerificationReport as any)(report())).toThrow(surface.UsageError);
+    expect(() => new (surface.VerificationReport as any)({})).toThrow(/comes from a verifier/);
   });
 
   it("builds a default verifier through the public entry", async () => {
@@ -183,7 +215,7 @@ describe("public surface", () => {
 
   it("classifies errors under one supertype", () => {
     const usage = new surface.UsageError("bad");
-    const rejected = new surface.VerificationError("bad", { layer: "quote" });
+    const rejected = new surface.VerificationError("bad", { layer: "quote", report: rejectedReport() });
     expect(usage).toBeInstanceOf(surface.VerifyError);
     expect(rejected).toBeInstanceOf(surface.VerifyError);
     expect(rejected.layer).toBe("quote");

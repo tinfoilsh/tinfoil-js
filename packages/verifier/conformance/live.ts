@@ -5,7 +5,7 @@
  * endorsed key, and report the facts. Test tooling: Node APIs are fine here.
  */
 import { connect } from "node:tls";
-import { certPubkeyFP, NONCE_SIZE, randomNonce, Verifier, type Verification } from "../src/index.js";
+import { certPubkeyFP, NONCE_SIZE, randomNonce, Verifier, type VerifiedFacts } from "../src/index.js";
 import { VERIFIER_NAME, VERIFIER_VERSION } from "../src/version.js";
 import { ExitCode, expectedOf, measurementOf, rejectionCode, type Output, type Result } from "./adapter.js";
 
@@ -46,15 +46,16 @@ export async function liveVerify(req: LiveRequest, log: (line: string) => void =
   const nonce = randomNonce();
   const doc = await fetchDocument(req.host, nonce, log);
 
-  let verified: Verification;
+  let verified: VerifiedFacts | undefined;
   try {
-    verified = await verifier.verifyV3(doc, nonce, { repo: req.repo, project: req.project });
+    verified = (await verifier.verifyV3(doc, nonce, { repo: req.repo, project: req.project })).verifiedFacts;
   } catch (err) {
     log(`live verification: ${err instanceof Error ? err.message : String(err)}`);
     const mapped = rejectionCode(err);
     if (mapped === undefined) throw err;
     return { output: { stage: STAGE_LIVE, accepted: false, rejection: { code: mapped.code } }, exitCode: mapped.exitCode };
   }
+  if (verified === undefined) throw new Error("an accepted document's report has no verified facts");
   const tlsFP = verified.tlsPublicKeyFP;
   const hpke = verified.hpkePublicKey;
   if (tlsFP === undefined || hpke === undefined) {

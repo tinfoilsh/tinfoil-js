@@ -37,7 +37,9 @@ describe("the verifier in a browser against the live service", () => {
     const nonce = randomNonce();
     const doc = await fetchDocument(nonce);
     const verifier = await Verifier.create();
-    const verified = await verifier.verifyV3(doc, nonce, PIN);
+    const report = await verifier.verifyV3(doc, nonce, PIN);
+    expect(report.steps.every((s) => s.status === "passed")).toBe(true);
+    const verified = report.verifiedFacts!;
     expect(verified.codeDigest).toMatch(SHA256_HEX);
     expect(verified.tlsPublicKeyFP).toMatch(SHA256_HEX);
     expect(verified.hpkePublicKey).toMatch(SHA256_HEX);

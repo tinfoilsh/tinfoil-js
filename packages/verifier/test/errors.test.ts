@@ -1,6 +1,12 @@
 /** The error types: the layer names, how a rejection carries its layer, and `instanceof` across copies of the package. */
 import { describe, expect, expectTypeOf, it, vi } from "vitest";
 import { UsageError, VerificationError, VerifyError, type KnownLayer, type Layer } from "../src/errors.js";
+import { ReportBuilder, type VerificationReport } from "../src/report.js";
+
+/** The report of a verification that `layer` rejected. */
+function rejectedAt(layer: Layer): VerificationReport {
+  return new ReportBuilder().failed(layer, `verification error: ${layer}: x`, { verifier: { name: "", version: "" }, verifiedAt: new Date(0) });
+}
 
 /** The key the errors carry their brand under, registered globally so every copy of the package shares it. */
 const BRAND = Symbol.for("@tinfoilsh/verifier.error");
@@ -20,13 +26,13 @@ describe("instanceof across copies of the package", () => {
     expect(usage instanceof UsageError).toBe(true);
     expect(usage instanceof VerifyError).toBe(true);
     expect(usage instanceof VerificationError).toBe(false);
-    const rejected = new other.VerificationError("bad report", { layer: "quote" });
+    const rejected = new other.VerificationError("bad report", { layer: "quote", report: rejectedAt("quote") });
     expect(rejected instanceof VerificationError).toBe(true);
     expect(rejected instanceof VerifyError).toBe(true);
     expect(rejected instanceof UsageError).toBe(false);
     // And the other way round, since both copies check the same brand.
     expect(new UsageError("x") instanceof other.UsageError).toBe(true);
-    expect(new VerificationError("x", { layer: "policy" }) instanceof other.VerifyError).toBe(true);
+    expect(new VerificationError("x", { layer: "policy", report: rejectedAt("policy") }) instanceof other.VerifyError).toBe(true);
     // A subclass of the other copy's class matches by prototype only, so this copy's errors are not its instances.
     class OtherSub extends other.UsageError {}
     expect(new UsageError("x") instanceof OtherSub).toBe(false);
@@ -49,12 +55,12 @@ describe("instanceof across copies of the package", () => {
     expect(mine instanceof Mine).toBe(true);
     expect(new UsageError("x") instanceof Mine).toBe(false);
     class MyRejection extends VerificationError {}
-    expect(new VerificationError("x", { layer: "quote" }) instanceof MyRejection).toBe(false);
-    expect(new MyRejection("x", { layer: "quote" }) instanceof VerificationError).toBe(true);
+    expect(new VerificationError("x", { layer: "quote", report: rejectedAt("quote") }) instanceof MyRejection).toBe(false);
+    expect(new MyRejection("x", { layer: "quote", report: rejectedAt("quote") }) instanceof VerificationError).toBe(true);
     expect(new UsageError("x") instanceof UsageError).toBe(true);
     expect(new UsageError("x") instanceof VerifyError).toBe(true);
     expect(new UsageError("x") instanceof VerificationError).toBe(false);
-    expect(new VerificationError("x", { layer: "quote" }) instanceof UsageError).toBe(false);
+    expect(new VerificationError("x", { layer: "quote", report: rejectedAt("quote") }) instanceof UsageError).toBe(false);
     for (const unrelated of [new Error("x"), { name: "UsageError", message: "x" }, Object.assign(new Error("x"), { name: "UsageError" }), null, undefined, "UsageError", 1]) {
       expect(unrelated instanceof VerifyError, String(unrelated)).toBe(false);
       expect(unrelated instanceof UsageError, String(unrelated)).toBe(false);
@@ -105,7 +111,7 @@ describe("Layer", () => {
     expectTypeOf<Exclude<Layer, KnownLayer>>().toEqualTypeOf<string & {}>();
     expect(classify("quote")).toBe("known");
     expect(classify(later)).toBe("unknown");
-    const rejected = new VerificationError("rejected", { layer: later });
+    const rejected = new VerificationError("rejected", { layer: later, report: rejectedAt(later) });
     expect(rejected.layer).toBe("a-later-layer");
     expect(rejected.message).toBe("verification error: a-later-layer: rejected");
   });

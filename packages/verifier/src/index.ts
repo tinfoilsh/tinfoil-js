@@ -1,6 +1,6 @@
 /**
  * The public surface of the v3 verifier: the verifier and its options, the
- * facts a verification proves, the error types, the measurement types, the
+ * verification report and the facts that a verification proves, the error types, the measurement types, the
  * document constants a caller needs to fetch a document and read endorsed
  * keys, the TLS fingerprint helper, and the hex helpers for the nonce and
  * the keys. Nothing else in this package is supported for direct use.
@@ -35,16 +35,31 @@ export {
 } from "./verifier.js";
 export {
   cryptoMaterialData,
-  Verification,
+  VerifiedFacts,
   type ArtifactVerification,
   type ArtifactVerificationJSON,
   type ConfigVerification,
   type ConfigVerificationJSON,
   type MeasurementJSON,
   type ReferenceSource,
-  type VerificationJSON,
   type VerificationMetadata,
+  type VerificationMetadataJSON,
+  type VerifiedFactsJSON,
 } from "./verification.js";
+export {
+  hpkePublicKeyFP,
+  VerificationReport,
+  type CPUEvidence,
+  type ExpectedFacts,
+  type ExpectedFactsJSON,
+  type MeasuredFacts,
+  type MeasuredFactsJSON,
+  type PartialFacts,
+  type PartialFactsJSON,
+  type Step,
+  type StepStatus,
+  type VerificationReportJSON,
+} from "./report.js";
 export type { ConfigEndorsement } from "./document/collateral/config.js";
 export type { RuntimeReference } from "./document/collateral/runtime.js";
 export { UsageError, VerificationError, VerifyError, type Layer } from "./errors.js";

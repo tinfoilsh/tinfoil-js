@@ -287,18 +287,20 @@ async function verifyFull(
   appraisal: Date,
 ): Promise<Result> {
   const stage = Stage.Verify;
-  let verified;
+  let report;
   try {
     // A fixture that injects no anchors runs the production entry exactly;
     // injected anchors go through the test-only seam of the same verifier.
     const injected = roots.amd !== undefined || roots.intel !== undefined || roots.sigstore !== undefined;
     const verifier = injected ? await dangerousTestOnlyVerifier(roots) : await Verifier.create();
-    verified = await verifier.verifyV3At(doc, nonce, pin, appraisal);
+    report = await verifier.verifyV3At(doc, nonce, pin, appraisal);
   } catch (err) {
     const mapped = rejectionCode(err);
     if (mapped === undefined) return { output: { stage, accepted: false }, exitCode: ExitCode.Internal };
     return { output: { stage, accepted: false, rejection: { code: mapped.code } }, exitCode: mapped.exitCode };
   }
+  const verified = report.verifiedFacts;
+  if (verified === undefined) return { output: { stage, accepted: false }, exitCode: ExitCode.Internal };
   // A document that verifies but endorses no usable channel keys is useless
   // to every real client, so the full stage requires both.
   const tlsFP = verified.tlsPublicKeyFP;
