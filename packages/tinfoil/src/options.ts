@@ -152,10 +152,12 @@ export type VerificationAttempt = { readonly report: VerificationReport; readonl
  * and `error` is set, as {@link VerificationAttempt} describes: the outcome
  * of this attempt, which `lastVerification()` returned once the attempt was
  * decided. A verification that concurrent requests share is one attempt.
- * An attempt that closing the client cuts short has no outcome, so it isn't
- * reported and doesn't change `lastVerification()`. A caller whose signal
- * aborts only stops waiting: the attempt runs on to its outcome, which is
- * reported.
+ * A verification that passes after the client was closed is abandoned
+ * before it is used, so it has no outcome: it isn't reported and doesn't
+ * change `lastVerification()`. A caller whose signal aborts only stops
+ * waiting, and the attempt runs on to its outcome; but a factory whose
+ * signal aborts closes the client that it was creating, so the same rule
+ * applies to the attempt that it abandons.
  *
  * It is called without any of the client's state held, so it may call the
  * client, for example `lastVerification()`, which returns the most recent

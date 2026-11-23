@@ -170,20 +170,21 @@ export class VerifiedEnclave<T = void> {
    * attestation failure discards the state that the refresh was replacing;
    * a network failure, a configuration error or a close leaves it as it is.
    * Each attempt, retried or final, becomes the last one as soon as its
-   * outcome is decided, and is added to `attempts`. The final attempt of a
-   * refresh that ends after the cache was closed was abandoned before its
-   * outcome was decided, so it is neither recorded nor reported.
+   * outcome is decided, and is added to `attempts`. A verification that
+   * passes after the cache was closed is abandoned before it is published,
+   * so it has no outcome: it is neither recorded nor reported, and its
+   * callers get the close. A failure that the attempt reached on its own is
+   * an outcome, even after a close.
    */
   async #refresh(verify: Verify, attempts: VerificationAttempt[]): Promise<void> {
     const replacing = this.#current;
     const record = (attempt: VerificationAttempt): void => {
-      if (this.#closed) return;
       this.#last = attempt;
       attempts.push(attempt);
     };
+    let report: VerifiedReport | undefined;
     try {
-      const report = await this.#publish(verify, (error) => record({ error }));
-      record({ report });
+      report = await this.#publish(verify, (error) => record({ error }));
     } catch (err) {
       // Every failure is reported in a category, and the error recorded is the one thrown.
       const error = wrapAttestation(err);
@@ -191,16 +192,19 @@ export class VerifiedEnclave<T = void> {
       record({ error });
       throw error;
     }
+    if (report === undefined) throw closedError();
+    record({ report });
   }
 
-  async #publish(verify: Verify, retried: (err: TinfoilError) => void): Promise<VerifiedReport> {
+  /** Verifies and publishes the new state, returning its report, or undefined when a close abandoned it. */
+  async #publish(verify: Verify, retried: (err: TinfoilError) => void): Promise<VerifiedReport | undefined> {
     const report = await verify(this.#enclave, retried);
     const bound = await this.#bind(report.verifiedFacts);
     const entry: Entry<T> = { report, bound, rejected: false, released: false };
     // A close during the refresh already released the current binding; this one is not published.
     if (this.#closed) {
       this.#release(bound);
-      throw closedError();
+      return undefined;
     }
     // Binding can outlast freshness.
     if (!this.#valid(entry)) {

@@ -323,6 +323,31 @@ describe("verification reports from the clients", () => {
     expect(client.lastVerification()?.report?.toJSON()).toEqual(before);
   });
 
+  it("records and reports a failure that a verification reaches on its own after a close", async () => {
+    const r = recorder();
+    let gate: Promise<void> | undefined;
+    let release!: () => void;
+    let fetched!: () => void;
+    const started = new Promise<void>((resolve) => (fetched = resolve));
+    const fetch: Fetch = async () => {
+      if (gate !== undefined) {
+        fetched();
+        await gate;
+      }
+      return new Response(new Uint8Array([1]));
+    };
+    const client = await createEnclaveHTTPClient(HOST, AUTHORIZED, { onVerification: r.onVerification }, seams(scripted(["pass", "reject"]), fetch));
+    gate = new Promise<void>((resolve) => (release = resolve));
+    const reverified = client.reverify().catch((e: unknown) => e);
+    await started;
+    await client.close();
+    release();
+    const err = await reverified;
+    expect(err).toBeInstanceOf(AttestationError);
+    expect(client.lastVerification()?.error).toBe(err);
+    expect(r.calls[r.calls.length - 1]).toEqual({ host: HOST, error: err });
+  });
+
   it("records no attempt for a request that fails before verifying, and keeps reporting after a close", async () => {
     const r = recorder();
     const client = await createEnclaveHTTPClient(HOST, AUTHORIZED, { onVerification: r.onVerification }, seams(scripted(["pass"]), documents().fetch));
