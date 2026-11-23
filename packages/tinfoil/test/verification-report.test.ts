@@ -298,6 +298,31 @@ describe("verification reports from the clients", () => {
     await client.close();
   });
 
+  it("neither records nor reports an attempt that a close cuts short", async () => {
+    const r = recorder();
+    let gate: Promise<void> | undefined;
+    let release!: () => void;
+    let fetched!: () => void;
+    const started = new Promise<void>((resolve) => (fetched = resolve));
+    const fetch: Fetch = async () => {
+      if (gate !== undefined) {
+        fetched();
+        await gate;
+      }
+      return new Response(new Uint8Array([1]));
+    };
+    const client = await createEnclaveHTTPClient(HOST, AUTHORIZED, { onVerification: r.onVerification }, seams(scripted(["pass"]), fetch));
+    const before = client.lastVerification()!.report!.toJSON();
+    gate = new Promise<void>((resolve) => (release = resolve));
+    const reverified = client.reverify();
+    await started;
+    await client.close();
+    release();
+    await expect(reverified).rejects.toBeInstanceOf(ConfigurationError);
+    expect(r.calls).toHaveLength(1);
+    expect(client.lastVerification()?.report?.toJSON()).toEqual(before);
+  });
+
   it("records no attempt for a request that fails before verifying, and keeps reporting after a close", async () => {
     const r = recorder();
     const client = await createEnclaveHTTPClient(HOST, AUTHORIZED, { onVerification: r.onVerification }, seams(scripted(["pass"]), documents().fetch));

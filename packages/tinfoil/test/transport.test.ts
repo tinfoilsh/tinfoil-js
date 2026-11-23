@@ -364,7 +364,7 @@ describe("KeyedTransport", () => {
     await expect(t.fetch(`http://${HOST}/`)).rejects.toThrow(/needs https/);
   });
 
-  it("releases the binding of a verification that was in flight when it closed, and reports the close to its callers", async () => {
+  it("releases the binding of a verification that was in flight when it closed, and reports the close to its callers only", async () => {
     const closed: string[] = [];
     let release!: () => void;
     const gate = new Promise<void>((resolve) => (release = resolve));
@@ -379,15 +379,18 @@ describe("KeyedTransport", () => {
       },
       clock: () => now,
       sleep: async () => {},
+      onVerification: (host) => void reported.push(host),
     });
+    const reported: string[] = [];
     const t = new KeyedTransport(enclave, fakeMode(() => "k1", closed), () => now);
     const waiting = t.ensureVerified();
     t.close();
     release();
     await expect(waiting).rejects.toThrow(/client is closed/);
     expect(closed).toEqual(["k1"]);
-    // The attempt's outcome is the close that its callers saw.
-    expect(t.lastVerification()?.error).toBeInstanceOf(ConfigurationError);
+    // The close abandoned the attempt before its outcome was decided, so it has none.
+    expect(t.lastVerification()).toBeUndefined();
+    expect(reported).toEqual([]);
   });
 
   describe("after a failed re-verification", () => {

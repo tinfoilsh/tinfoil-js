@@ -14,7 +14,8 @@
  * verification as soon as its outcome is decided, and is reported to the
  * enclave's `onVerification` callback once the refresh that made it is
  * over, so that the callback can call the cache again without waiting for
- * that refresh.
+ * that refresh. An attempt that a close cuts short has no outcome: it is
+ * neither recorded nor reported, and only its callers see the close.
  */
 import type { VerifiedFacts } from "@tinfoilsh/verifier";
 import { AttestationError, wrapAttestation, type TinfoilError } from "../errors.js";
@@ -169,11 +170,14 @@ export class VerifiedEnclave<T = void> {
    * attestation failure discards the state that the refresh was replacing;
    * a network failure, a configuration error or a close leaves it as it is.
    * Each attempt, retried or final, becomes the last one as soon as its
-   * outcome is decided, and is added to `attempts`.
+   * outcome is decided, and is added to `attempts`. The final attempt of a
+   * refresh that ends after the cache was closed was abandoned before its
+   * outcome was decided, so it is neither recorded nor reported.
    */
   async #refresh(verify: Verify, attempts: VerificationAttempt[]): Promise<void> {
     const replacing = this.#current;
     const record = (attempt: VerificationAttempt): void => {
+      if (this.#closed) return;
       this.#last = attempt;
       attempts.push(attempt);
     };
