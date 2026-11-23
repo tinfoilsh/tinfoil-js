@@ -147,16 +147,17 @@ export type VerificationAttempt = { readonly report: VerificationReport; readonl
  * expiry or a key rotation, an explicit `reverify`, each router that
  * discovery tries, and each gateway replica. It is called once the
  * verification that made the attempt is over, so that an attempt that was
- * retried is reported together with its retry.
+ * retried is reported together with its retry, in order.
  * `host` is the enclave that the attempt verified. Exactly one of `report`
- * and `error` is set, as {@link VerificationAttempt} describes, and they are
- * what the client's `lastVerification()` returns for that attempt. A
- * verification that concurrent requests share is one attempt.
+ * and `error` is set, as {@link VerificationAttempt} describes: the outcome
+ * of this attempt, which `lastVerification()` returned once the attempt was
+ * decided. A verification that concurrent requests share is one attempt.
  *
  * It is called without any of the client's state held, so it may call the
- * client, for example `lastVerification()`. It returns nothing and can't
- * change the attempt's outcome; a decision about trust belongs in a
- * {@link VerificationCheck}. A value that it throws doesn't reach the
+ * client, for example `lastVerification()`, which returns the most recent
+ * attempt: for an attempt that was retried, that is already its retry. It
+ * returns nothing and can't change the attempt's outcome; a decision about
+ * trust belongs in a {@link VerificationCheck}. A value that it throws doesn't reach the
  * client: it is rethrown asynchronously, as an uncaught error.
  */
 export type OnVerification = (host: string, report: VerificationReport | undefined, error: TinfoilError | undefined) => void;
