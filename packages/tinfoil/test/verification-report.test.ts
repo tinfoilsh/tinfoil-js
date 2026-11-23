@@ -46,7 +46,7 @@ function rejection(): VerificationError {
   b.passed("provenance");
   b.passed("quote");
   b.measured = { tlsPublicKeyFP: TEST_PIN, cpu: { measurement: { platform: "sev-snp", launch: new Uint8Array(48).fill(2) } } };
-  const report = b.failed("policy", "verification error: policy: launch measurement mismatch", METADATA);
+  const report = b.failed("policy", "launch measurement mismatch", METADATA);
   return new VerificationError("launch measurement mismatch", { layer: "policy", report });
 }
 

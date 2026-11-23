@@ -13,7 +13,7 @@ const dist = fileURLToPath(new URL("../dist/", import.meta.url));
 describePublishedDeclarations({
   dist,
   entries: [`${dist}index.d.ts`],
-  forbidden: [/@internal/, /dangerousTestOnly/i, /\bParts\b/, /ProvenanceClient/, /ConfigVerifier/, /FreshnessVerifier/, /InjectedRoots/, /buildVerifier/, /verifiedFactsOf/, /VerifiedFactsFields/, /copyVerifiedFacts/, /ReportBuilder/, /measuredKeys/, /ReportFields/, /verificationMessage/, /DecodedDocument/, /BUILT_HERE/],
+  forbidden: [/@internal/, /dangerousTestOnly/i, /\bParts\b/, /ProvenanceClient/, /ConfigVerifier/, /FreshnessVerifier/, /InjectedRoots/, /buildVerifier/, /verifiedFactsOf/, /VerifiedFactsFields/, /copyVerifiedFacts/, /ReportBuilder/, /measuredKeys/, /ReportFields/, /DecodedDocument/, /BUILT_HERE/],
   privatelyConstructed: { VerifiedFacts: "verification.d.ts", VerificationReport: "report.d.ts", Verifier: "verifier.d.ts" },
 });
 

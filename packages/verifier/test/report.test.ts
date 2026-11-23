@@ -33,7 +33,9 @@ function rejectedReport(err: unknown, layer: string): VerificationReport {
   const report = rejected.report;
   expect(report.verifiedFacts).toBeUndefined();
   expect(report.partialFacts).toBeDefined();
-  expect(report.failedStep()).toEqual({ layer, status: "failed", message: rejected.message });
+  // The step's message is the failing check's, without the error's `verification error: <layer>: ` prefix.
+  expect(report.failedStep()).toEqual({ layer, status: "failed", message: rejected.message.slice(`verification error: ${layer}: `.length) });
+  expect(report.failedStep()?.message).not.toMatch(/^verification error:/);
   expect(report.steps.map((s) => s.layer)).toEqual(["envelope", "provenance", "quote", "policy"]);
   return report;
 }
@@ -66,18 +68,18 @@ describe("VerificationReport", () => {
       codeMeasurement: { platform: "tdx", rtmr1: reg(9) },
       measurement: { platform: "tdx", mrtd: reg(1), rtmr0: reg(2), rtmr1: reg(9), rtmr2: reg(4), rtmr3: reg(5) },
     };
-    return b.failed("policy", "verification error: policy: RTMR1 mismatch", METADATA);
+    return b.failed("policy", "RTMR1 mismatch", METADATA);
   };
 
   it("starts every step as not run, and holds exactly one kind of facts", () => {
     const b = new ReportBuilder();
-    const r = b.failed("envelope", "verification error: envelope: bad", METADATA);
+    const r = b.failed("envelope", "bad", METADATA);
     expect(statuses(r)).toEqual(["failed", "not_run", "not_run", "not_run"]);
     expect(r.partialFacts).toEqual({});
     expect(r.verifiedFacts).toBeUndefined();
     expect(passed().partialFacts).toBeUndefined();
     expect(passed().failedStep()).toBeUndefined();
-    expect(failed().failedStep()).toEqual({ layer: "policy", status: "failed", message: "verification error: policy: RTMR1 mismatch" });
+    expect(failed().failedStep()).toEqual({ layer: "policy", status: "failed", message: "RTMR1 mismatch" });
   });
 
   it("is frozen with everything nested in it, and copies what it was built from", () => {
@@ -121,7 +123,7 @@ describe("VerificationReport", () => {
         { layer: "envelope", status: "passed", message: "" },
         { layer: "provenance", status: "passed", message: "" },
         { layer: "quote", status: "passed", message: "" },
-        { layer: "policy", status: "failed", message: "verification error: policy: RTMR1 mismatch" },
+        { layer: "policy", status: "failed", message: "RTMR1 mismatch" },
       ],
       partialFacts: {
         expected: {
@@ -233,6 +235,7 @@ describe("the report of a config-based verification", () => {
     const report = rejectedReport(err, "provenance");
     expect((err as VerificationError).cause).toBe(refusal);
     expect((err as VerificationError).message).toBe("verification error: provenance: authorizing config: not this config");
+    expect(report.failedStep()?.message).toBe("authorizing config: not this config");
     expect(statuses(report)).toEqual(["passed", "failed", "not_run", "not_run"]);
     expect(report.partialFacts!.expected).toBeUndefined();
     expect(report.partialFacts!.measured?.tlsPublicKeyFP).toBe(tls);

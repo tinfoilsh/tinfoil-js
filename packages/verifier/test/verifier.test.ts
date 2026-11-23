@@ -90,7 +90,9 @@ describe.skipIf(withoutVectors)(vectorsTitle("verifyV3At on the full-verify vect
         const rejected = outcome.err as VerificationError;
         expect(rejected.layer).toBe(LAYER_OF[expected.code ?? ""]);
         // The report fails the error's layer, with the error's message, and holds partial facts only.
-        expect(rejected.report.failedStep()).toEqual({ layer: rejected.layer, status: "failed", message: rejected.message });
+        expect(rejected.report.failedStep()).toEqual({ layer: rejected.layer, status: "failed", message: rejected.message.slice(`verification error: ${rejected.layer}: `.length) });
+        // A failure that the verifier attributed to the layer keeps the failing check's message as the step's.
+        if (rejected.cause instanceof Error) expect(rejected.report.failedStep()?.message).toBe(rejected.cause.message);
         expect(rejected.report.steps.map((s) => s.layer)).toEqual(["envelope", "provenance", "quote", "policy"]);
         expect(rejected.report.verifiedFacts).toBeUndefined();
         expect(rejected.report.partialFacts).toBeDefined();

@@ -103,7 +103,7 @@ export class VerificationError extends VerifyError {
   readonly report: VerificationReport;
 
   constructor(message: string, options: { layer: Layer; report: VerificationReport; cause?: unknown }) {
-    super(verificationMessage(options.layer, message), options);
+    super(`verification error: ${options.layer}: ${message}`, options);
     this.name = "VerificationError";
     this.layer = options.layer;
     this.report = options.report;
@@ -114,9 +114,4 @@ export class VerificationError extends VerifyError {
     // A copy of the package from before reports carries the brand without a report, which this class promises.
     return byPrototype(this, value) || (this === VerificationError && brandOf(value) === "VerificationError" && typeof (value as { report?: unknown }).report === "object");
   }
-}
-
-/** @internal The message of a {@link VerificationError} at `layer` with `message`. */
-export function verificationMessage(layer: Layer, message: string): string {
-  return `verification error: ${layer}: ${message}`;
 }

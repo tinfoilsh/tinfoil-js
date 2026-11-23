@@ -174,7 +174,7 @@ const report = (): surface.VerificationReport => {
 };
 
 /** A report of a verification that the quote step rejected. */
-const rejectedReport = (): surface.VerificationReport => new ReportBuilder().failed("quote", "verification error: quote: bad", METADATA);
+const rejectedReport = (): surface.VerificationReport => new ReportBuilder().failed("quote", "bad", METADATA);
 
 describe("public surface", () => {
   it("exports exactly the specified names", () => {

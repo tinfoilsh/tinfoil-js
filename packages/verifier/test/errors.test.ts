@@ -5,7 +5,7 @@ import { ReportBuilder, type VerificationReport } from "../src/report.js";
 
 /** The report of a verification that `layer` rejected. */
 function rejectedAt(layer: Layer): VerificationReport {
-  return new ReportBuilder().failed(layer, `verification error: ${layer}: x`, { verifier: { name: "", version: "" }, verifiedAt: new Date(0) });
+  return new ReportBuilder().failed(layer, "x", { verifier: { name: "", version: "" }, verifiedAt: new Date(0) });
 }
 
 /** The key the errors carry their brand under, registered globally so every copy of the package shares it. */

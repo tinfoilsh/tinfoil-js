@@ -25,7 +25,7 @@ const hex = (s: string): Uint8Array => new Uint8Array(Buffer.from(s, "hex"));
 const noBinding = (): undefined => undefined;
 
 /** The report of a verification that the quote step rejected. */
-const rejectedAtQuote = () => new ReportBuilder().failed("quote", "verification error: quote: bad report", { verifier: { name: "", version: "" }, verifiedAt: new Date(0) });
+const rejectedAtQuote = () => new ReportBuilder().failed("quote", "bad report", { verifier: { name: "", version: "" }, verifiedAt: new Date(0) });
 
 /** A vector served from a mocked fetch: the document, the nonce it is bound to, the clock, and the verifier under its roots. */
 interface Served {
@@ -118,7 +118,7 @@ describe("fromVerify", () => {
     // A copy old enough to carry no brand is recognized by the error's name.
     const unbranded = Object.assign(new Error("usage error: bad pin"), { name: "UsageError" });
     expect(fromVerify(unbranded)).toBeInstanceOf(ConfigurationError);
-    expect(fromVerify(Object.assign(new Error("verification error: quote: bad report"), { name: "VerificationError" }))).toBeInstanceOf(AttestationError);
+    expect(fromVerify(Object.assign(new Error("bad report"), { name: "VerificationError" }))).toBeInstanceOf(AttestationError);
   });
 });
 

@@ -16,7 +16,7 @@ import {
 import type { ConfigEndorsement } from "./document/collateral/config.js";
 import { validateRuntimeReference, type RuntimeReference } from "./document/collateral/runtime.js";
 import { InvalidInputError, parse as parseDocument, type Document } from "./document/document.js";
-import { UsageError, VerificationError, verificationMessage, VerifyError, type Layer } from "./errors.js";
+import { UsageError, VerificationError, VerifyError, type Layer } from "./errors.js";
 import { sha256, toHex, utf8 } from "./internal/bytes.js";
 import { decodeLowerHex } from "./internal/canonical.js";
 import {
@@ -369,7 +369,8 @@ export class Verifier {
       // A usage error passes through without a report; a step's rejection
       // becomes a VerificationError at its layer that carries the report.
       if (!(err instanceof StepFailure)) throw err;
-      const report = steps.failed(err.layer, verificationMessage(err.layer, err.message), metadata);
+      // The step names its layer, so its message is the failing check's own, without the error's prefix.
+      const report = steps.failed(err.layer, err.message, metadata);
       throw new VerificationError(err.message, { layer: err.layer, report, cause: err.cause });
     }
     return steps.passedAll(verified, metadata);

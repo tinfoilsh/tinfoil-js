@@ -42,8 +42,10 @@ export interface Step {
   readonly layer: Layer;
   readonly status: StepStatus;
   /**
-   * The message of the {@link VerificationError} for a failed step, the
-   * reason that a skipped step was skipped, and "" otherwise. It is
+   * For a failed step, the message of the check that failed: the
+   * {@link VerificationError}'s message without its `verification error:
+   * <layer>: ` prefix, since the step already names its layer. For a skipped
+   * step, the reason that it was skipped, and "" otherwise. It is
    * diagnostic: callers must not parse it.
    */
   readonly message: string;
