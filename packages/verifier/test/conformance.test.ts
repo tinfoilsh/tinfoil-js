@@ -4,17 +4,19 @@
  * Point TINFOIL_CONFORMANCE_FIXTURES at the suite's vectors/v3 directory (it
  * is searched recursively); the test is skipped when unset or missing. A
  * fixture whose stage the adapter reports as unsupported is skipped. The
- * adapter's own input decoding and the live lane's request decoding are
- * checked without fixtures.
+ * adapter's own input decoding, its container stage and the live lane's
+ * request decoding are checked without fixtures.
  */
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { join, relative } from "node:path";
 import { describe, expect, it } from "vitest";
-import { ExitCode, run, Stage, type Measurement } from "../conformance/adapter.js";
+import { capabilities, ExitCode, run, Stage, type Container, type Measurement } from "../conformance/adapter.js";
 import { decodeLiveRequest, isAuthority } from "../conformance/live.js";
-import { FORMAT_V2, FORMAT_V3 } from "../src/document/collateral/collateral.js";
+import { CONFIG_ID, CONFIG_V1_FORMAT, FORMAT_V2, FORMAT_V3, ROLE_REFERENCE_VALUES } from "../src/document/collateral/collateral.js";
+import { CONTAINER_PROVENANCE_V1_FORMAT } from "../src/document/collateral/container.js";
 import { NONCE_SIZE, SEV_SNP_REPORT_V1_FORMAT } from "../src/document/document.js";
-import { buildDocument } from "./helpers/builder.js";
+import { b64, buildDocument, type WireEntry } from "./helpers/builder.js";
+import { newLog, rootJson } from "./helpers/keyed.js";
 
 interface Fixture {
   id: string;
@@ -28,6 +30,8 @@ interface Fixture {
     code_digest?: string;
     code_measurement?: Measurement;
     enclave_measurement?: Measurement;
+    /** Undefined unless the fixture declares it; a declared empty list asserts that the accept reports no container. */
+    containers?: Container[];
   };
 }
 
@@ -61,6 +65,7 @@ describe.skipIf(files.length === 0)("v3 conformance fixtures", () => {
       if (e.code_digest) expect(o.code_digest).toBe(e.code_digest);
       if (e.code_measurement) expect(o.code_measurement).toEqual(e.code_measurement);
       if (e.enclave_measurement) expect(o.enclave_measurement).toEqual(e.enclave_measurement);
+      if (e.containers) expect(o.containers).toEqual(e.containers);
     }
   });
 });
@@ -109,6 +114,77 @@ describe("the pin of a full-verify input", () => {
     expect(await code(FORMAT_V2, { repo: "org/project", project: "not a reference" })).toBe("MALFORMED_INPUT");
     const wrongType = await run(Stage.Verify, { ...(await input(FORMAT_V2, { repo: "org/project" })), project: 7 });
     expect(wrongType.exitCode).toBe(ExitCode.Malformed);
+  });
+});
+
+describe("the container stage", () => {
+  // The recorded bundle is the published build attestation of this image,
+  // which verifies against the embedded production root.
+  const recorded = {
+    container: "app",
+    digest: "85306e3ab312a2d80466e901081e855cc53f21c4802c638f861e6ef31ba4f5d1",
+    repository: "tinfoilsh/measure-image-action",
+    workflow: "build.yml",
+    ref: "refs/tags/build-v0.14.2",
+    commit: "01a05df207140a8e8e1d2cd26028ab7c51dad9d1",
+  };
+  const requirement = `    provenance:
+      github:
+        repository: ${recorded.repository}
+        repository_id: 924941172
+        workflow: ${recorded.workflow}
+        ref: refs/tags/build-v*
+`;
+  const proof: WireEntry = {
+    id: "container",
+    role: ROLE_REFERENCE_VALUES,
+    format: CONTAINER_PROVENANCE_V1_FORMAT,
+    data: JSON.stringify({ digest: recorded.digest, sigstore_bundle: JSON.parse(readFileSync(new URL("./fixtures/sigstore/container-provenance-bundle.json", import.meta.url), "utf8")) as unknown }),
+  };
+  /** A stage input whose document carries the given collateral. */
+  const inputOf = async (collateral: WireEntry[]) => {
+    const { bytes } = await buildDocument({ nonce: new Uint8Array(NONCE_SIZE), collateralFormat: FORMAT_V3, collateral }, () => ({ format: SEV_SNP_REPORT_V1_FORMAT, report: new Uint8Array(1) }));
+    return { schema_version: "1", document_b64: b64(bytes) };
+  };
+  /** An input whose config runs the recorded image in one container, "app", under the given provenance member. */
+  const input = (provenance: string, ...proofs: WireEntry[]) => {
+    const config = `containers:\n  - name: app\n    image: ghcr.io/${recorded.repository}@sha256:${recorded.digest}\n${provenance}`;
+    return inputOf([{ id: CONFIG_ID, role: ROLE_REFERENCE_VALUES, format: CONFIG_V1_FORMAT, data: JSON.stringify({ config_base64: b64(config) }) }, ...proofs]);
+  };
+
+  it("is listed among the supported stages", () => {
+    expect((capabilities().v3 as { stages_supported: string[] }).stages_supported).toContain(Stage.AuthenticateContainers);
+  });
+
+  it("reports each container whose required build it authenticated", async () => {
+    const { output, exitCode } = await run(Stage.AuthenticateContainers, await input(requirement, proof));
+    expect(exitCode).toBe(ExitCode.Accepted);
+    expect(output).toEqual({ stage: Stage.AuthenticateContainers, accepted: true, outputs: { containers: [recorded] } });
+  });
+
+  it("reports an empty list, not an absent member, for a config that requires no build", async () => {
+    const { output, exitCode } = await run(Stage.AuthenticateContainers, await input(""));
+    expect(exitCode).toBe(ExitCode.Accepted);
+    expect(JSON.parse(JSON.stringify(output))).toStrictEqual({ stage: Stage.AuthenticateContainers, accepted: true, outputs: { containers: [] } });
+  });
+
+  it.each<[string, () => Promise<object>]>([
+    ["a missing proof", () => input(requirement)],
+    ["a proof from another workflow", () => input(requirement.replace(recorded.workflow, "release.yml"), proof)],
+    ["a requirement it cannot read", () => input(requirement + "      gitlab: {}\n", proof)],
+    ["a document without a config", () => inputOf([proof])],
+    // An injected root replaces the embedded one, under which alone the recorded proof verifies.
+    ["a proof that the injected root does not cover", async () => ({ ...(await input(requirement, proof)), sigstore_trusted_root_json_b64: b64(JSON.stringify(rootJson([await newLog("ecdsa")]))) })],
+  ])("rejects %s at the provenance layer", async (_name, stageInput) => {
+    const { output, exitCode } = await run(Stage.AuthenticateContainers, await stageInput());
+    expect(exitCode).toBe(ExitCode.Rejected);
+    expect(output).toEqual({ stage: Stage.AuthenticateContainers, accepted: false, rejection: { code: "PROVENANCE_REJECTED" } });
+  });
+
+  it("reports an undecodable document as malformed input", async () => {
+    const { output, exitCode } = await run(Stage.AuthenticateContainers, { schema_version: "1", document_b64: b64("{}") });
+    expect(exitCode).toBe(ExitCode.Malformed);
+    expect(output.rejection?.code).toBe("MALFORMED_INPUT");
   });
 });
 

@@ -7,6 +7,8 @@
  * appraise exactly the code production runs; the layer on its
  * VerificationError names the rejection. The block stages isolate one layer
  * by calling the internal document, endorsement and quote modules directly.
+ * The container stage runs the verifier's own container step instead, on a
+ * config it takes as given.
  *
  * Test roots and the appraisal clock are per-call arguments; the adapter
  * mutates no production state.
@@ -24,6 +26,7 @@ import { parseBundleBytes } from "../src/internal/sigstore/bundle.js";
 import { pinnedKeys, verifyKeyedBundle } from "../src/internal/sigstore/keyed.js";
 import { verifyTimestamp } from "../src/internal/sigstore/timestamp.js";
 import { embeddedTrustedRoot, parseTrustedRoot, type TrustedRoot } from "../src/internal/sigstore/trusted-root.js";
+import { resolveContainers } from "../src/verifier.js";
 import { dangerousTestOnlyDecode, dangerousTestOnlyVerifier, type DangerousTestOnlyRoots } from "./testing.js";
 
 export const SCHEMA_VERSION = "1";
@@ -47,6 +50,7 @@ export const Stage = {
   AuthenticateQuote: "v3-authenticate-quote",
   AuthenticateApproval: "v3-authenticate-approval",
   VerifyTimestamp: "v3-verify-timestamp",
+  AuthenticateContainers: "v3-authenticate-containers",
 } as const;
 
 export type RejectionCode =
@@ -80,6 +84,16 @@ export interface Measurement {
   registers: string[];
 }
 
+/** Mirrors a ContainerVerification as plain JSON. */
+export interface Container {
+  container: string;
+  digest: string;
+  repository: string;
+  workflow: string;
+  ref: string;
+  commit: string;
+}
+
 export interface AcceptOutputs {
   code_digest?: string;
   code_measurement?: Measurement;
@@ -89,6 +103,12 @@ export interface AcceptOutputs {
   channel_binding?: string;
   signing_key_hint?: string;
   timestamp?: string;
+  /**
+   * The container images whose required build was authenticated, in config
+   * order (v3-authenticate-containers). The stage reports an empty list for
+   * a config that requires none; other stages leave the member out.
+   */
+  containers?: Container[];
 }
 
 /** The stdout JSON (schemas/v3/output.schema.json). */
@@ -209,6 +229,19 @@ async function runStage(stage: string, raw: unknown): Promise<Result> {
           dangerousTestOnlyRoots: roots,
         });
         return accept(stage, { enclave_measurement: measurementOf(auth.measurement) });
+      });
+    }
+
+    case Stage.AuthenticateContainers: {
+      const parsed = await decodeOrUndefined(doc);
+      if (parsed === undefined) return malformed(stage);
+      return layer(stage, "PROVENANCE_REJECTED", async () => {
+        // The stage authenticates what the config requires, not the config:
+        // its bytes are read as the document carries them.
+        const containers = await resolveContainers(prov, parsed, parsed.configEndorsement().config);
+        return accept(stage, {
+          containers: containers.map((c) => ({ container: c.container, digest: c.digest, repository: c.repository, workflow: c.workflow, ref: c.ref, commit: c.commit })),
+        });
       });
     }
 
