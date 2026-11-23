@@ -230,6 +230,40 @@ describe("RouterHTTPClient over TLS", () => {
   });
 });
 
+describe("RouterHTTPClient after a failed re-verification", () => {
+  it("verifies the same router again on the next request after an attestation failure, without discovering a router again", async () => {
+    const fail = { attestation: false };
+    const pinned = verifier({ tls: TEST_PIN });
+    const s = seams([tls.host]);
+    const client = await createRouterHTTPClient(
+      { transport: { kind: "tls" } },
+      {
+        ...s,
+        verifier: {
+          ...pinned,
+          verifyV3At: async (...args: Parameters<Verifier["verifyV3At"]>) => {
+            if (fail.attestation) throw new Error("nonce mismatch");
+            return pinned.verifyV3At(...args);
+          },
+        } as unknown as Verifier,
+      },
+    );
+    const seen = tls.seen.length;
+    fail.attestation = true;
+    await expect(client.reverify()).rejects.toThrow(AttestationError);
+    await expect(client.fetch(`${tls.origin}/v1/chat/completions`, { method: "POST", headers: { "x-raw": "1" }, body: BODY })).rejects.toThrow(AttestationError);
+    expect(tls.seen.length).toBe(seen);
+
+    fail.attestation = false;
+    const res = await client.fetch(`${tls.origin}/v1/chat/completions`, { method: "POST", headers: { "x-raw": "1" }, body: BODY });
+    expect(res.status).toBe(200);
+    expect(tls.seen.length).toBe(seen + 1);
+    expect(s.listCalls).toBe(1);
+    expect(s.documentHosts.every((h) => h === tls.host)).toBe(true);
+    await client.close();
+  });
+});
+
 describe("the router clients' default cache secret", () => {
   const saved = { HOME: process.env.HOME, USERPROFILE: process.env.USERPROFILE, secret: process.env.TINFOIL_USER_CACHE_SECRET };
   let home: string;

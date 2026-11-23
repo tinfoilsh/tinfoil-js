@@ -129,7 +129,13 @@ export class RouterHTTPClient {
     return this.#transport.ensureVerified(options?.signal);
   }
 
-  /** Verifies again even if the cached verification is still valid. */
+  /**
+   * Verifies the same router again even if the cached verification is still
+   * valid, without discovering a router again. A failure is handled as
+   * {@link EnclaveHTTPClient.reverify} handles it: an {@link AttestationError}
+   * discards the cached verification, so the next request verifies again,
+   * while any other failure keeps a cached verification that is still valid.
+   */
   reverify(options?: CallOptions): Promise<Verification> {
     return this.#transport.reverify(options?.signal);
   }
