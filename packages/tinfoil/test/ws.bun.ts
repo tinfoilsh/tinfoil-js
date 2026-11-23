@@ -11,7 +11,7 @@ import { createEnclaveHTTPClient, type EnclaveHTTPClient } from "../src/enclave-
 import { AttestationError, ConfigurationError } from "../src/errors.js";
 import type { Fetch, PinnedWebSocket } from "../src/options.js";
 import { createWebSocket } from "../src/websocket.js";
-import type { VerificationReport, VerifiedFacts, Verifier } from "@tinfoilsh/verifier";
+import type { Verifier } from "@tinfoilsh/verifier";
 import { verifiedReport } from "./helpers/report.js";
 
 const cert = readFileSync(new URL("./fixtures/ws-test-cert.pem", import.meta.url), "utf8");

@@ -26,7 +26,7 @@ import type { OpenAIClient, OpenAIClientOptions } from "../src/openai-client.js"
 import type { Fetch, PinnedWebSocket } from "../src/options.js";
 import { createRealtimeWebSocket } from "../src/realtime.js";
 import { createWebSocket, pinnedWebSocketOptions } from "../src/websocket.js";
-import { KEY_SPKI_FP_SHA256_V1_FORMAT, KEY_X25519_HPKE_V1_FORMAT, UsageError, type VerificationReport, type VerifiedFacts, type Verifier } from "../../verifier/src/index.js";
+import { KEY_SPKI_FP_SHA256_V1_FORMAT, KEY_X25519_HPKE_V1_FORMAT, UsageError, type Verifier } from "../../verifier/src/index.js";
 import { TEST_CERT, TEST_KEY, TEST_PIN } from "./helpers/tls-server.js";
 import { openAIOver } from "./helpers/openai.js";
 import { verifiedReport } from "./helpers/report.js";

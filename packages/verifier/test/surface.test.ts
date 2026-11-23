@@ -167,7 +167,11 @@ const verification = (): surface.VerifiedFacts =>
 const METADATA = { verifier: { name: "", version: "" }, verifiedAt: new Date(0) };
 
 /** A report of a verification that every step accepted. */
-const report = (): surface.VerificationReport => new ReportBuilder().passedAll(verification(), METADATA);
+const report = (): surface.VerificationReport => {
+  const b = new ReportBuilder();
+  for (const layer of ["envelope", "provenance", "quote", "policy"]) b.passed(layer);
+  return b.passedAll(verification(), METADATA);
+};
 
 /** A report of a verification that the quote step rejected. */
 const rejectedReport = (): surface.VerificationReport => new ReportBuilder().failed("quote", "verification error: quote: bad", METADATA);

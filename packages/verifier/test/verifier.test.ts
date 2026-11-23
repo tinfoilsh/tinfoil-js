@@ -38,7 +38,6 @@ const LAYER_OF: Record<string, Layer> = {
   POLICY_REJECTED: "policy",
 };
 
-/** The steps of a verification that every step accepted. */
 const PASSED = ["envelope", "provenance", "quote", "policy"].map((layer) => ({ layer, status: "passed", message: "" }));
 
 const utf8 = (s: string): Uint8Array => new TextEncoder().encode(s);

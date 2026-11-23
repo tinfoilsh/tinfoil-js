@@ -13,7 +13,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { tlsMode } from "../src/internal/transport/tls.js";
 import { PeerLacksKeyError } from "../src/internal/transport/transport.js";
-import type { VerificationReport, VerifiedFacts } from "@tinfoilsh/verifier";
+import type { VerifiedFacts } from "@tinfoilsh/verifier";
 
 const cert = readFileSync(new URL("./fixtures/ws-test-cert.pem", import.meta.url), "utf8");
 const key = readFileSync(new URL("./fixtures/ws-test-key.pem", import.meta.url), "utf8");

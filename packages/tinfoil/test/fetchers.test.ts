@@ -10,7 +10,7 @@ import { AttestationError, ConfigurationError, NetworkError } from "../src/error
 import { attestationRelay, routerListRelay } from "../src/fetchers.js";
 import type { AttestationFetcher, Fetch, RouterListFetcher } from "../src/options.js";
 import { createRouterHTTPClient } from "../src/router-client.js";
-import { KEY_SPKI_FP_SHA256_V1_FORMAT, KEY_X25519_HPKE_V1_FORMAT, type VerificationReport, type VerifiedFacts, type Verifier } from "../../verifier/src/index.js";
+import { KEY_SPKI_FP_SHA256_V1_FORMAT, KEY_X25519_HPKE_V1_FORMAT, type Verifier } from "../../verifier/src/index.js";
 import { verifiedReport } from "./helpers/report.js";
 
 const NONCE = new Uint8Array(32).fill(0xab);

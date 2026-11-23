@@ -100,8 +100,10 @@ export interface ExpectedFacts {
 
 /**
  * What a rejected verification established before the step that failed.
- * Every fact in them is authenticated, except the key fingerprints, which
- * {@link MeasuredFacts} describes.
+ * Every value in them is authenticated, except the key fingerprints, which
+ * {@link MeasuredFacts} describes, and the platform that selects the layout
+ * of the code measurement before the quote step passed, which
+ * {@link ExpectedFacts} describes.
  */
 export interface PartialFacts {
   /** Undefined unless the provenance step passed or was skipped. */

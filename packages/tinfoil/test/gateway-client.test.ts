@@ -9,7 +9,7 @@ import { AttestationError, ConfigurationError, NetworkError } from "../src/error
 import { createGatewayHTTPClient, DEFAULT_GATEWAY_URL, fetchCatalog, GatewayHTTPClient, type GatewayClientSeams } from "../src/gateway-client.js";
 import { OpenAIClient } from "../src/openai-client.js";
 import type { Catalog, Fetch, GatewayOptions } from "../src/options.js";
-import { KEY_SPKI_FP_SHA256_V1_FORMAT, KEY_X25519_HPKE_V1_FORMAT, UsageError, type VerificationReport, type VerifiedFacts, type Verifier } from "../../verifier/src/index.js";
+import { KEY_SPKI_FP_SHA256_V1_FORMAT, KEY_X25519_HPKE_V1_FORMAT, UsageError, type Verifier } from "../../verifier/src/index.js";
 import { startEhbpServer, type EhbpServer } from "./helpers/ehbp-server.js";
 import { recordingFetch } from "./helpers/network.js";
 import { expectWithOptionsRefusesTransportOptions } from "./helpers/transport-options.js";

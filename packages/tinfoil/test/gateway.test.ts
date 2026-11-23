@@ -16,7 +16,7 @@ import { GatewayTransport, MAX_SEAL_REDIRECTS, rank, SEAL_HEADER, type GatewayTr
 import { shapeOf } from "../src/internal/transport/transport.js";
 import type { Catalog, Fetch, Policy } from "../src/options.js";
 import type { Pin } from "../../verifier/src/index.js";
-import { KEY_SPKI_FP_SHA256_V1_FORMAT, KEY_X25519_HPKE_V1_FORMAT, UsageError, type VerificationReport, type VerifiedFacts, type Verifier } from "../../verifier/src/index.js";
+import { KEY_SPKI_FP_SHA256_V1_FORMAT, KEY_X25519_HPKE_V1_FORMAT, UsageError, type VerificationReport, type Verifier } from "../../verifier/src/index.js";
 import { createEhbpPeer, fetchOf, type EhbpPeer } from "./helpers/ehbp-peer.js";
 import { verifiedReport } from "./helpers/report.js";
 

@@ -13,7 +13,7 @@ import { AttestationError, ConfigurationError, NetworkError } from "../src/error
 import { OpenAIClient, type OpenAIClientOptions } from "../src/openai-client.js";
 import type { EnclaveOptions, Fetch, Transport } from "../src/options.js";
 import type { Trust } from "../src/trust.js";
-import { KEY_SPKI_FP_SHA256_V1_FORMAT, KEY_X25519_HPKE_V1_FORMAT, UsageError, type VerificationReport, type VerifiedFacts, type Verifier } from "../../verifier/src/index.js";
+import { KEY_SPKI_FP_SHA256_V1_FORMAT, KEY_X25519_HPKE_V1_FORMAT, UsageError, type Verifier } from "../../verifier/src/index.js";
 import { createWebSocket, pinnedWebSocketOptions } from "../src/websocket.js";
 import { startEhbpServer, type EhbpServer } from "./helpers/ehbp-server.js";
 import { recordingFetch } from "./helpers/network.js";

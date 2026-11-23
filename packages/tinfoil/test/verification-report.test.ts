@@ -79,7 +79,6 @@ function documents(): { fetch: Fetch; down: boolean } {
   return state;
 }
 
-/** The last element of `items`. */
 const lastOf = <T>(items: readonly T[]): T | undefined => items[items.length - 1];
 
 function seams(verifier: Verifier, fetch: Fetch): EnclaveClientSeams {
@@ -122,7 +121,7 @@ describe("verification reports from the clients", () => {
     expect(rejected?.report.verifiedFacts).toBeUndefined();
     expect(rejected?.report.partialFacts?.measured?.cpu).toBeDefined();
     // The same error, and no report, from both.
-    expect(client.lastVerification()).toEqual({ error: err });
+    expect(client.lastVerification()?.error).toBe(err);
     expect(client.lastVerification()?.report).toBeUndefined();
     expect(lastOf(r.calls)).toEqual({ host: HOST, error: err });
     await client.close();
@@ -136,7 +135,7 @@ describe("verification reports from the clients", () => {
     const err = await client.reverify().catch((e: unknown) => e);
     expect(err).toBeInstanceOf(NetworkError);
     expect(verificationErrorIn(err)).toBeUndefined();
-    expect(client.lastVerification()).toEqual({ error: err });
+    expect(client.lastVerification()?.error).toBe(err);
     expect(lastOf(r.calls)).toEqual({ host: HOST, error: err });
     await client.close();
   });

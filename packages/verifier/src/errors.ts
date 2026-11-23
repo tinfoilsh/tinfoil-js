@@ -111,7 +111,8 @@ export class VerificationError extends VerifyError {
   }
 
   static override [Symbol.hasInstance](value: unknown): boolean {
-    return byPrototype(this, value) || (this === VerificationError && brandOf(value) === "VerificationError");
+    // A copy of the package from before reports carries the brand without a report, which this class promises.
+    return byPrototype(this, value) || (this === VerificationError && brandOf(value) === "VerificationError" && typeof (value as { report?: unknown }).report === "object");
   }
 }
 

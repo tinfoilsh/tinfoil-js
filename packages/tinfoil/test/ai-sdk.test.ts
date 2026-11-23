@@ -17,7 +17,7 @@ import type { RuntimeGlobals } from "../src/internal/platform.js";
 import { createTinfoilClient } from "../src/openai-client.js";
 import type { Fetch, Transport } from "../src/options.js";
 import { RouterHTTPClient } from "../src/router-client.js";
-import { KEY_SPKI_FP_SHA256_V1_FORMAT, KEY_X25519_HPKE_V1_FORMAT, UsageError, type VerificationReport, type VerifiedFacts, type Verifier } from "../../verifier/src/index.js";
+import { KEY_SPKI_FP_SHA256_V1_FORMAT, KEY_X25519_HPKE_V1_FORMAT, UsageError, type Verifier } from "../../verifier/src/index.js";
 import { startEhbpServer, type EhbpServer } from "./helpers/ehbp-server.js";
 import { recordingFetch } from "./helpers/network.js";
 import { paced, startTlsServer, TEST_CERT, TEST_PIN, type Seen, type TlsServer } from "./helpers/tls-server.js";

@@ -17,7 +17,7 @@ import { resetProcessUserCacheSecretForTests } from "../src/internal/cachesecret
 import { createTinfoilClient, OpenAIClient } from "../src/openai-client.js";
 import type { Fetch, RouterOptions, Transport } from "../src/options.js";
 import { createRouterHTTPClient, RouterHTTPClient, type RouterClientSeams } from "../src/router-client.js";
-import { KEY_SPKI_FP_SHA256_V1_FORMAT, KEY_X25519_HPKE_V1_FORMAT, UsageError, type VerificationReport, type VerifiedFacts, type Verifier } from "../../verifier/src/index.js";
+import { KEY_SPKI_FP_SHA256_V1_FORMAT, KEY_X25519_HPKE_V1_FORMAT, UsageError, type Verifier } from "../../verifier/src/index.js";
 import { startEhbpServer, type EhbpServer } from "./helpers/ehbp-server.js";
 import { recordingFetch } from "./helpers/network.js";
 import { startTlsServer, TEST_CERT, TEST_PIN, type TlsServer } from "./helpers/tls-server.js";

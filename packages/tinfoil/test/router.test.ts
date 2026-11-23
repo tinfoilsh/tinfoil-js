@@ -9,7 +9,7 @@ import { ConfigurationError } from "../src/errors.js";
 import { DEFAULT_ROUTER_URL, discoverRouter, FALLBACK_ROUTER_HOST, fetchRouters, MAX_ROUTER_BYTES, type DiscoveryConfig } from "../src/internal/router.js";
 import { tlsMode } from "../src/internal/transport/tls.js";
 import type { Fetch } from "../src/options.js";
-import { KEY_SPKI_FP_SHA256_V1_FORMAT, UsageError, type Pin, type VerificationReport, type VerifiedFacts, type Verifier } from "../../verifier/src/index.js";
+import { KEY_SPKI_FP_SHA256_V1_FORMAT, UsageError, type Pin, type Verifier } from "../../verifier/src/index.js";
 import { lastFacts, verifiedReport } from "./helpers/report.js";
 
 const PIN = "ab".repeat(32);

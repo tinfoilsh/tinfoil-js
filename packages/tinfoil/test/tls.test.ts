@@ -17,7 +17,7 @@ import { Enclave } from "../src/internal/enclave.js";
 import { withReplay } from "../src/internal/transport/replay.js";
 import { tlsMode } from "../src/internal/transport/tls.js";
 import { isKeyRejection, KeyedTransport, KeyRejectionError, PeerLacksKeyError, shapeOf, type BoundFetch } from "../src/internal/transport/transport.js";
-import { KEY_SPKI_FP_SHA256_V1_FORMAT, type VerificationReport, type VerifiedFacts, type Verifier } from "../../verifier/src/index.js";
+import { KEY_SPKI_FP_SHA256_V1_FORMAT, type VerifiedFacts, type Verifier } from "../../verifier/src/index.js";
 import { lastFacts, verifiedReport } from "./helpers/report.js";
 
 const cert = readFileSync(new URL("./fixtures/ws-test-cert.pem", import.meta.url));

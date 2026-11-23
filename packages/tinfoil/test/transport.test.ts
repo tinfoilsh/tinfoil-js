@@ -13,7 +13,7 @@ import { withReplay } from "../src/internal/transport/replay.js";
 import { openClientWebSocket } from "../src/internal/websocket.js";
 import { isKeyRejection, KeyedTransport, KeyRejectionError, PeerLacksKeyError, type Mode } from "../src/internal/transport/transport.js";
 import type { Fetch } from "../src/options.js";
-import { KEY_SPKI_FP_SHA256_V1_FORMAT, type VerificationReport, type VerifiedFacts, type Verifier } from "../../verifier/src/index.js";
+import { KEY_SPKI_FP_SHA256_V1_FORMAT, type VerificationReport, type Verifier } from "../../verifier/src/index.js";
 import { lastFacts, verifiedReport } from "./helpers/report.js";
 
 const HOST = "enclave.example";

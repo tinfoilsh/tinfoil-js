@@ -5,7 +5,7 @@
  * is observed chunk by chunk. The enclave is an EHBP peer behind a mocked
  * fetch, since a page can't start a server.
  */
-import { KEY_SPKI_FP_SHA256_V1_FORMAT, KEY_X25519_HPKE_V1_FORMAT, UsageError, type VerificationReport, type VerifiedFacts, type Verifier } from "@tinfoilsh/verifier";
+import { KEY_SPKI_FP_SHA256_V1_FORMAT, KEY_X25519_HPKE_V1_FORMAT, UsageError, type VerificationReport, type Verifier } from "@tinfoilsh/verifier";
 import { Identity, PROTOCOL } from "ehbp";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { createEnclaveHTTPClient, EnclaveHTTPClient, resolveTransport, type EnclaveClientSeams } from "../src/enclave-client.js";

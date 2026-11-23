@@ -381,16 +381,18 @@ export class Verifier {
    * already computes. A rejection is a {@link StepFailure}.
    */
   async #verify(docBytes: Uint8Array, nonce: Uint8Array, repo: string, project: string, now: Date, steps: ReportBuilder): Promise<VerifiedFacts> {
-    const doc = await at("envelope", async () => {
+    const { doc, measured } = await at("envelope", async () => {
+      let parsed: Document;
       try {
-        return await parseDocument(docBytes, nonce);
+        parsed = await parseDocument(docBytes, nonce);
       } catch (err) {
         if (err instanceof InvalidInputError) throw new UsageError(err.message, { cause: err });
         throw err;
       }
+      return { doc: parsed, measured: await measuredKeys(parsed.cryptoMaterialItems()) };
     });
     steps.passed("envelope");
-    steps.measured = await measuredKeys(doc.cryptoMaterialItems());
+    steps.measured = measured;
 
     const refs = await at("provenance", async () => {
       switch (doc.collateralFormat()) {

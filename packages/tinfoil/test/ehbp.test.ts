@@ -16,7 +16,7 @@ import { checkEHBP, ehbpMode } from "../src/internal/transport/ehbp.js";
 import { ENCLAVE_URL_HEADER, withEnclaveURL } from "../src/internal/transport/header.js";
 import { withReplay } from "../src/internal/transport/replay.js";
 import { isKeyRejection, KeyedTransport, KeyRejectionError, PeerLacksKeyError, shapeOf } from "../src/internal/transport/transport.js";
-import { KEY_X25519_HPKE_V1_FORMAT, type VerificationReport, type VerifiedFacts, type Verifier } from "../../verifier/src/index.js";
+import { KEY_X25519_HPKE_V1_FORMAT, type VerifiedFacts, type Verifier } from "../../verifier/src/index.js";
 import { paced, startEhbpServer, type EhbpServer, type Reply } from "./helpers/ehbp-server.js";
 import { verifiedReport } from "./helpers/report.js";
 

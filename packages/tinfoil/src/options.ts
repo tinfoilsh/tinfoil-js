@@ -143,9 +143,11 @@ export type VerificationAttempt = { readonly report: VerificationReport; readonl
 
 /**
  * Called once for every attempt to verify an enclave, whether it passed or
- * failed, once its outcome is decided: the first verification, a retry, a
- * re-verification after an expiry or a key rotation, an explicit
- * `reverify`, each router that discovery tries, and each gateway replica.
+ * failed: the first verification, a retry, a re-verification after an
+ * expiry or a key rotation, an explicit `reverify`, each router that
+ * discovery tries, and each gateway replica. It is called once the
+ * verification that made the attempt is over, so that an attempt that was
+ * retried is reported together with its retry.
  * `host` is the enclave that the attempt verified. Exactly one of `report`
  * and `error` is set, as {@link VerificationAttempt} describes, and they are
  * what the client's `lastVerification()` returns for that attempt. A
