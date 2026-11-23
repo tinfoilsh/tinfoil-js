@@ -25,6 +25,25 @@ export interface ConfigVerification {
   readonly registryID: string;
   /** When a certificate-signed approval's signature was made; undefined otherwise. */
   readonly signatureTime?: Date;
+  /**
+   * The container images whose build the config requires and the attestation
+   * proves. Undefined when the config requires none or its bytes are not in
+   * the attestation.
+   */
+  readonly containers?: readonly ContainerVerification[];
+}
+
+/** A container image built by the GitHub Actions workflow that its config requires. */
+export interface ContainerVerification {
+  /** The container's name in the config. */
+  readonly container: string;
+  /** Lowercase hex SHA-256 of the image. */
+  readonly digest: string;
+  readonly repository: string;
+  readonly workflow: string;
+  /** The ref the workflow ran from. */
+  readonly ref: string;
+  readonly commit: string;
 }
 
 /** A verified release artifact: the runtime or the platform endorsements. */
@@ -207,7 +226,12 @@ function copyConfig(c: ConfigVerification): ConfigVerification {
     ...c,
     ...(c.approvalTime === undefined ? {} : { approvalTime: copyDate(c.approvalTime) }),
     ...(c.signatureTime === undefined ? {} : { signatureTime: copyDate(c.signatureTime) }),
+    ...(c.containers === undefined ? {} : { containers: copyContainers(c.containers) }),
   };
+}
+
+function copyContainers(containers: readonly ContainerVerification[]): ContainerVerification[] {
+  return containers.map((c) => ({ ...c }));
 }
 
 function copyArtifact(a: ArtifactVerification): ArtifactVerification {
@@ -235,8 +259,13 @@ function measurementJSON(m: Measurement | Expected): MeasurementJSON {
 }
 
 function configJSON(c: ConfigVerification): ConfigVerificationJSON {
-  const { approvalTime, signatureTime, ...rest } = c;
-  return { ...rest, ...timeJSON("approvalTime", approvalTime), ...timeJSON("signatureTime", signatureTime) };
+  const { approvalTime, signatureTime, containers, ...rest } = c;
+  return {
+    ...rest,
+    ...timeJSON("approvalTime", approvalTime),
+    ...timeJSON("signatureTime", signatureTime),
+    ...(containers === undefined ? {} : { containers: copyContainers(containers) }),
+  };
 }
 
 function artifactJSON(a: ArtifactVerification): ArtifactVerificationJSON {

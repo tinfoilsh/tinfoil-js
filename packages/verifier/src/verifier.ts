@@ -34,6 +34,7 @@ import {
   type ArtifactKind,
   type ConfigPolicy,
 } from "./internal/endorsement/approval.js";
+import { authenticateContainer } from "./internal/endorsement/container.js";
 import { authenticateFreshness, MAX_FRESHNESS_AGE_MS } from "./internal/endorsement/freshness.js";
 import { ProvenanceClient } from "./internal/endorsement/provenance.js";
 import { parseReference, type AuthenticatedArtifact } from "./internal/endorsement/reference.js";
@@ -43,10 +44,11 @@ import { ARTIFACT_FORMAT, ARTIFACT_FORMAT_V2, parse as parseArtifact, type Artif
 import * as quote from "./internal/quote/quote.js";
 import { configRuntime } from "./internal/runtime/config.js";
 import { decodeManifest, parseManifest, type Manifest, type Measurements } from "./internal/runtime/manifest.js";
+import { configContainerProvenance } from "./internal/runtime/provenance.js";
 import * as semver from "./internal/semver.js";
 import { pinnedKeys, type PinnedKey } from "./internal/sigstore/keyed.js";
 import { cloneExpected, REGISTER_SIZE, type Expected } from "./measurement.js";
-import { verificationOf, type ArtifactVerification, type ConfigVerification, type Verification } from "./verification.js";
+import { verificationOf, type ArtifactVerification, type ConfigVerification, type ContainerVerification, type Verification } from "./verification.js";
 
 /**
  * Who vouches for the config that an enclave runs: one of {@link Registries},
@@ -529,8 +531,12 @@ export class Verifier {
       } catch (err) {
         throw new VerificationError(`authorizing config: ${message(err)}`, { layer: "provenance", cause: err });
       }
+      const containers = await resolveContainers(this.#prov, doc, config);
       const digest = toHex(await sha256(config));
-      return { expected: configRuntime(config), config: { source: "policy", name: "", digest, reference: "", signingKeyHint: "", registryID: "" } };
+      return {
+        expected: configRuntime(config),
+        config: { source: "policy", name: "", digest, reference: "", signingKeyHint: "", registryID: "", ...(containers.length === 0 ? {} : { containers }) },
+      };
     }
     if (material.bundle === undefined) throw new Error("unsigned config requires a config authorizer");
     // The document carries the bundle as its source text; parsing it again
@@ -564,6 +570,7 @@ export class Verifier {
       if (material.config === undefined) throw new Error("config endorsement without config bytes must pin a runtime");
       expected = configRuntime(material.config);
     }
+    const containers = await resolveContainers(this.#prov, doc, material.config);
     return {
       expected,
       config: {
@@ -575,6 +582,7 @@ export class Verifier {
         approvalTime: approved.approvalTime,
         registryID: approved.registryID,
         ...(approved.signatureTime === undefined ? {} : { signatureTime: approved.signatureTime }),
+        ...(containers.length === 0 ? {} : { containers }),
       },
     };
   }
@@ -671,6 +679,36 @@ export async function buildVerifier(config: ConfigTrust | undefined, policy: Pol
     if (err instanceof UsageError) throw err;
     throw new UsageError(message(err), { cause: err });
   }
+}
+
+/**
+ * @internal Authenticates the build of every container image for which the
+ * config requires provenance. `config` is the bytes bound to the approved
+ * digest; a document that omits them carries no requirement the verifier can
+ * read. The attested runtime attaches them for every config that declares
+ * provenance, which config validation ties to disclosure. Not exported from
+ * the package entry.
+ */
+export async function resolveContainers(prov: ProvenanceClient, doc: Document, config: Uint8Array | undefined): Promise<ContainerVerification[]> {
+  if (config === undefined || config.length === 0) return [];
+  const containers: ContainerVerification[] = [];
+  for (const requirement of configContainerProvenance(config)) {
+    const name = JSON.stringify(requirement.container);
+    let bundle;
+    try {
+      bundle = doc.containerProvenance(requirement.digest).bundle;
+    } catch (err) {
+      throw caused(`container ${name} requires provenance: ${message(err)}`, err);
+    }
+    let built;
+    try {
+      built = await authenticateContainer(prov, bundle, requirement);
+    } catch (err) {
+      throw caused(`container ${name}: ${message(err)}`, err);
+    }
+    containers.push({ container: requirement.container, digest: built.digest, repository: built.repository, workflow: built.workflow, ref: built.ref, commit: built.commit });
+  }
+  return containers;
 }
 
 /** An {@link ArtifactTrust}, validated and copied. */

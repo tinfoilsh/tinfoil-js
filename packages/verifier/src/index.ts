@@ -40,6 +40,7 @@ export {
   type ArtifactVerificationJSON,
   type ConfigVerification,
   type ConfigVerificationJSON,
+  type ContainerVerification,
   type MeasurementJSON,
   type ReferenceSource,
   type VerificationJSON,

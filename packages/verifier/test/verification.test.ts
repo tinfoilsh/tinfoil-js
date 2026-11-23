@@ -127,6 +127,28 @@ describe("Verification", () => {
     expect(none.hpkePublicKey).toBeUndefined();
   });
 
+  it("owns the containers it reports and leaves them out when the config requires none", () => {
+    const f = fields().fields;
+    const container = { container: "app", digest: "d", repository: "example/app", workflow: "release.yml", ref: "refs/tags/v1", commit: "0".repeat(40) };
+    const containers = [{ ...container }];
+    const v = verificationOf({ ...f, config: { ...f.config!, containers } });
+    containers[0]!.container = "changed";
+    containers.push({ ...container, container: "added" });
+    expect(v.config!.containers).toEqual([container]);
+    expect(Object.isFrozen(v.config!.containers)).toBe(true);
+    expect(Object.isFrozen(v.config!.containers![0])).toBe(true);
+
+    const json = v.toJSON();
+    expect(json.config!.containers).toEqual([container]);
+    expect(JSON.parse(JSON.stringify(v)).config.containers).toEqual([container]);
+    (json.config!.containers![0] as { container: string }).container = "changed";
+    expect(v.toJSON().config!.containers).toEqual([container]);
+
+    const none = verificationOf(f);
+    expect(none.config!.containers).toBeUndefined();
+    expect("containers" in none.toJSON().config!).toBe(false);
+  });
+
   it("leaves optional facts undefined when not established", () => {
     const f = fields().fields;
     const v = verificationOf({ ...f, config: undefined, runtime: undefined, freshnessExpiresAt: undefined });

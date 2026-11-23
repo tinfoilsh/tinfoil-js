@@ -1,21 +1,39 @@
 /**
  * Tests for the build a config can require of a container image: reading
- * the requirements from the config bytes (runtime/provenance.ts) and
- * authenticating a build attestation against one (endorsement/container.ts).
+ * the requirements from the config bytes (runtime/provenance.ts),
+ * authenticating a build attestation against one (endorsement/container.ts),
+ * and the verifier rejecting a document that lacks a required one.
  *
  * The recorded bundle under fixtures/sigstore is a published build
  * attestation, signed under the Sigstore public-good root, so it verifies
- * against the embedded trusted root without the network.
+ * against the embedded trusted root without the network. No test here has a
+ * quote that authenticates, so a document that passes the provenance layer
+ * is rejected next, at the quote layer.
  */
 import { readFileSync } from "node:fs";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
-import { IN_TOTO_STATEMENT_V1 } from "../src/internal/endorsement/approval.js";
+import { dangerousTestOnlyDecode, dangerousTestOnlyVerifier } from "../conformance/testing.js";
+import { CONFIG_ENDORSEMENT_V2_FORMAT, CONFIG_ID, CONFIG_V1_FORMAT, FORMAT_V3, NotFoundError, ROLE_REFERENCE_VALUES } from "../src/document/collateral/collateral.js";
+import { CONTAINER_PROVENANCE_V1_FORMAT } from "../src/document/collateral/container.js";
+import { NONCE_SIZE, SEV_SNP_REPORT_V1_FORMAT } from "../src/document/document.js";
+import { VerificationError } from "../src/errors.js";
+import { sha256, toHex } from "../src/internal/bytes.js";
+import { CONFIG_ENDORSEMENT_PREDICATE_TYPE_V2, IN_TOTO_STATEMENT_V1, REGISTRY_ID_PREFIX } from "../src/internal/endorsement/approval.js";
 import { authenticateContainer, authenticatedContainer, containerIdentity, refMatches } from "../src/internal/endorsement/container.js";
 import { ProvenanceClient } from "../src/internal/endorsement/provenance.js";
 import { SLSA_PROVENANCE_V1 } from "../src/internal/endorsement/runtime.js";
 import { strictParse, type JsonValue } from "../src/internal/json/index.js";
+import { ARTIFACT_FORMAT_V2 } from "../src/internal/policy/artifact.js";
 import { configContainerProvenance, type ContainerProvenance } from "../src/internal/runtime/provenance.js";
 import { GITHUB_OIDC_ISSUER, RUNNER_ENVIRONMENT_GITHUB_HOSTED, type SigningIdentity } from "../src/internal/sigstore/certificate.js";
+import { endorsementReference, timestampInput } from "../src/internal/sigstore/timestamp.js";
+import { SIGSTORE_TRUSTED_ROOT_JSON } from "../src/trust/sigstore-trusted-root.js";
+import type { ContainerVerification } from "../src/verification.js";
+import { resolveContainers, type ConfigTrust } from "../src/verifier.js";
+import { b64, buildDocument, type WireEntry } from "./helpers/builder.js";
+import { build, newLog, newSigner, rootJson, toJson } from "./helpers/keyed.js";
+import { newRegistry, registryCertificate } from "./helpers/registry.js";
+import { authorityJson, newTimestampAuthority, timestampResponse } from "./helpers/tsa.js";
 
 const enc = (s: string): Uint8Array => new TextEncoder().encode(s);
 
@@ -389,5 +407,161 @@ describe("container signing identities", () => {
     expect(refMatches(pattern, "refs/tags/" + run)).toBe(true);
     expect(refMatches(pattern, "refs/tags/" + run + "b")).toBe(false);
     expect(identity(pattern).test(prefix + "refs/tags/" + run + "b")).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------- verification
+
+describe("a config that requires container provenance", () => {
+  const nonce = new Uint8Array(NONCE_SIZE).fill(7);
+  const register = "cd".repeat(48);
+  const manifest = enc(
+    JSON.stringify({
+      version: "v1.2.3",
+      igvm: { format_version: 1, snp_launch: { measurement: register }, tdx_launch: { mrtd: register, rtmr0: "0".repeat(96), rtmr1: "0".repeat(96), rtmr2: "0".repeat(96), rtmr3: "0".repeat(96) } },
+    }),
+  );
+  const platform = enc(JSON.stringify({ format: ARTIFACT_FORMAT_V2, measurements: {}, machines: {}, policies: {} }));
+  const embeddedArtifacts = { artifacts: { kind: "embeddedArtifacts", runtime: manifest, platform } } as const;
+  const provenance = `    provenance:
+      github:
+        repository: ${RECORDED.repository}
+        repository_id: ${RECORDED.repositoryID}
+        workflow: ${RECORDED.workflow}
+        ref: refs/tags/build-v*
+`;
+  const container = (name: string): string => `  - name: ${name}\n    image: ghcr.io/tinfoilsh/measure-image-action@sha256:${RECORDED.digest}\n`;
+  const proof = (id: string, digest: string): WireEntry => ({
+    id,
+    role: ROLE_REFERENCE_VALUES,
+    format: CONTAINER_PROVENANCE_V1_FORMAT,
+    data: JSON.stringify({ digest, sigstore_bundle: JSON.parse(readFileSync(new URL("./fixtures/sigstore/container-provenance-bundle.json", import.meta.url), "utf8")) as unknown }),
+  });
+  /** The config that pins the embedded runtime and declares the given containers. */
+  const configOf = async (containers: string): Promise<Uint8Array> => enc(`cvm-version: v1.2.3@sha256:${toHex(await sha256(manifest))}\ncontainers:\n${containers}`);
+  const documentOf = async (collateral: WireEntry[]): Promise<Uint8Array> =>
+    (await buildDocument({ nonce, collateralFormat: FORMAT_V3, collateral }, () => ({ format: SEV_SNP_REPORT_V1_FORMAT, report: new Uint8Array(1184).fill(1) }))).bytes;
+  const proven = (name: string): ContainerVerification => ({
+    container: name,
+    digest: RECORDED.digest,
+    repository: RECORDED.repository,
+    workflow: RECORDED.workflow,
+    ref: RECORDED.ref,
+    commit: RECORDED.commit,
+  });
+
+  describe("authorized by the caller", () => {
+    const plain = async (config: Uint8Array): Promise<WireEntry> => ({ id: CONFIG_ID, role: ROLE_REFERENCE_VALUES, format: CONFIG_V1_FORMAT, data: JSON.stringify({ config_base64: b64(config) }) });
+    /** The rejection of a document that carries the config and the given proofs. */
+    const verify = async (containers: string, ...proofs: WireEntry[]): Promise<VerificationError> => {
+      const doc = await documentOf([await plain(await configOf(containers)), ...proofs]);
+      const verifier = await dangerousTestOnlyVerifier({}, { kind: "configAuthorizer", authorize: () => undefined }, embeddedArtifacts);
+      const err = await verifier.verifyV3At(doc, nonce, {}, new Date()).catch((e: unknown) => e);
+      expect(err).toBeInstanceOf(VerificationError);
+      return err as VerificationError;
+    };
+
+    it("proves every container that requires a build, and names the ref and commit it ran from", async () => {
+      const containers = container("first") + provenance + container("second") + provenance + container("unconstrained");
+      const config = await configOf(containers);
+      const doc = await dangerousTestOnlyDecode(await documentOf([await plain(config), proof("container", RECORDED.digest)]));
+      expect(await resolveContainers(await ProvenanceClient.default(), doc, config)).toEqual([proven("first"), proven("second")]);
+      expect((await verify(containers, proof("container", RECORDED.digest))).layer).toBe("quote");
+    });
+
+    it("checks nothing for a config that requires no build, or whose bytes the document omits", async () => {
+      const doc = await dangerousTestOnlyDecode(await documentOf([]));
+      const client = await ProvenanceClient.default();
+      expect(await resolveContainers(client, doc, await configOf(container("app")))).toEqual([]);
+      expect(await resolveContainers(client, doc, undefined)).toEqual([]);
+      expect((await verify(container("app"))).layer).toBe("quote");
+    });
+
+    it("rejects a document without the proof", async () => {
+      const err = await verify(container("app") + provenance);
+      expect(err.layer).toBe("provenance");
+      expect(err.message).toContain(`container "app" requires provenance: collateral entry not found`);
+      expect((err.cause as { cause?: unknown }).cause).toBeInstanceOf(NotFoundError);
+    });
+
+    it("rejects a document whose proof is for another image", async () => {
+      const err = await verify(container("app") + provenance, proof("container", "ab".repeat(32)));
+      expect(err.layer).toBe("provenance");
+      expect(err.message).toContain(`container "app" requires provenance: collateral entry not found`);
+    });
+
+    it("rejects a proof from another workflow", async () => {
+      const err = await verify(container("app") + provenance.replace(RECORDED.workflow, "release.yml"), proof("container", RECORDED.digest));
+      expect(err.layer).toBe("provenance");
+      expect(err.message).toContain(`container "app": verifying container provenance`);
+    });
+
+    it("rejects a requirement it cannot read", async () => {
+      const err = await verify(container("app") + provenance + "      gitlab: {}\n", proof("container", RECORDED.digest));
+      expect(err.layer).toBe("provenance");
+      expect(err.message).toContain(`containers[0].provenance has unknown field "gitlab"`);
+    });
+  });
+
+  describe("endorsed by a registry", () => {
+    const REGISTRY_ID = REGISTRY_ID_PREFIX + "9c4a7f21e0b836d56a13c8fe42d907ab";
+    const GEN_TIME = new Date("2025-06-15T11:00:00Z");
+    let roots: { sigstore: Uint8Array; registryRoots: string[] };
+    /** The collateral entry of a registry's approval of `config`, with or without the config bytes. */
+    let endorsement: (config: Uint8Array, withConfig: boolean) => Promise<WireEntry>;
+
+    beforeAll(async () => {
+      const tsa = await newTimestampAuthority();
+      const log = await newLog("ecdsa");
+      const registry = await newRegistry(GEN_TIME);
+      const signer = await newSigner();
+      const certificate = await registryCertificate(registry, signer.spki, { registryID: REGISTRY_ID, now: GEN_TIME });
+      // The approval is signed under a test log and timestamp authority, and
+      // the recorded proof under the public-good root, so the root has both.
+      const root = JSON.parse(SIGSTORE_TRUSTED_ROOT_JSON) as { tlogs: unknown[]; timestampAuthorities: unknown[] };
+      const test = rootJson([log], [authorityJson(tsa)]) as { tlogs: unknown[]; timestampAuthorities: unknown[] };
+      root.tlogs.push(...test.tlogs);
+      root.timestampAuthorities.push(...test.timestampAuthorities);
+      roots = { sigstore: enc(JSON.stringify(root)), registryRoots: [registry.root.pem] };
+      endorsement = async (config, withConfig) => {
+        const core = {
+          _type: IN_TOTO_STATEMENT_V1,
+          subject: [{ name: "/org/project/r1", digest: { sha256: toHex(await sha256(config)) } }],
+          predicateType: CONFIG_ENDORSEMENT_PREDICATE_TYPE_V2,
+          predicate: { scope: REGISTRY_ID, runtime: { repo: "tinfoilsh/cvmimage", tag: "v1.2.3", digest: toHex(await sha256(manifest)) } },
+        };
+        const inner = await timestampResponse(tsa, timestampInput("tinfoil-config-freshness/v2\0", toJson(core)), GEN_TIME);
+        const statement = { ...core, predicate: { ...core.predicate, freshness: { rfc3161Timestamp: b64(inner) } } };
+        const built = await build(signer, log, { statement, certificate, timestampsFor: async (sig) => [await timestampResponse(tsa, sig, GEN_TIME)] });
+        const data = {
+          endorsement_ref: await endorsementReference(built.payload),
+          ...(withConfig ? { config_base64: b64(config) } : {}),
+          sigstore_bundle: built.json,
+          issuer_certificate_der: b64(registry.rootDer),
+        };
+        return { id: CONFIG_ID, role: ROLE_REFERENCE_VALUES, format: CONFIG_ENDORSEMENT_V2_FORMAT, data: JSON.stringify(data) };
+      };
+    });
+
+    const verify = async (collateral: WireEntry[]): Promise<VerificationError> => {
+      const trust: ConfigTrust = { kind: "registries", ids: [REGISTRY_ID] };
+      const verifier = await dangerousTestOnlyVerifier(roots, trust, embeddedArtifacts);
+      const err = await verifier.verifyV3At(await documentOf(collateral), nonce, { project: "org/project@r1" }, new Date(GEN_TIME.getTime() + 60 * 60 * 1000)).catch((e: unknown) => e);
+      expect(err).toBeInstanceOf(VerificationError);
+      return err as VerificationError;
+    };
+
+    it("requires the proof once the endorsed config bytes are in the document", async () => {
+      const config = await configOf(container("app") + provenance);
+      const missing = await verify([await endorsement(config, true)]);
+      expect(missing.layer).toBe("provenance");
+      expect(missing.message).toContain(`container "app" requires provenance: collateral entry not found`);
+      expect((await verify([await endorsement(config, true), proof("container", RECORDED.digest)])).layer).toBe("quote");
+    });
+
+    it("checks nothing when the document omits the config bytes", async () => {
+      const config = await configOf(container("app") + provenance);
+      expect((await verify([await endorsement(config, false)])).layer).toBe("quote");
+    });
   });
 });

@@ -83,6 +83,7 @@ type TypeExports = [
   surface.Pin,
   surface.RuntimeReference,
   surface.ConfigVerification,
+  surface.ContainerVerification,
   surface.ArtifactVerification,
   surface.VerificationMetadata,
   surface.VerificationJSON,
