@@ -510,13 +510,24 @@ describe("container signing identities", () => {
     expect(disagreements).toEqual([]);
   });
 
-  // A backtracking match of this pattern would not finish.
-  it("matches a pattern of many wildcards against a long ref", () => {
-    const pattern = "refs/tags/" + "*a".repeat(120);
+  // A backtracking match of these patterns would not finish.
+  it("matches a pattern of many wildcards quickly, a near miss included", () => {
+    const pattern = "refs/tags/v" + "*a".repeat(122);
+    expect(pattern).toHaveLength(255);
     const run = "a".repeat(20_000);
-    expect(refMatches(pattern, "refs/tags/" + run)).toBe(true);
-    expect(refMatches(pattern, "refs/tags/" + run + "b")).toBe(false);
-    expect(identity(pattern).test(prefix + "refs/tags/" + run + "b")).toBe(false);
+    expect(refMatches(pattern, "refs/tags/v" + "a".repeat(122))).toBe(true);
+    expect(refMatches(pattern, "refs/tags/v" + "a".repeat(121))).toBe(false);
+    expect(refMatches(pattern, "refs/tags/v" + "a".repeat(121) + "b")).toBe(false);
+    expect(refMatches(pattern, "refs/tags/v" + run)).toBe(true);
+    expect(refMatches(pattern, "refs/tags/v" + run + "b")).toBe(false);
+    expect(identity(pattern).test(prefix + "refs/tags/v" + run + "b")).toBe(false);
+
+    const wildcards = "refs/tags/v" + "*".repeat(244);
+    expect(wildcards).toHaveLength(255);
+    expect(refMatches(wildcards, "refs/tags/v1.4.2")).toBe(true);
+    expect(refMatches(wildcards, "refs/tags/v" + run)).toBe(true);
+    expect(refMatches(wildcards, "refs/tags/v" + run + "/b")).toBe(false);
+    expect(identity(wildcards).test(prefix + "refs/tags/v" + run + "@b")).toBe(false);
   });
 });
 
