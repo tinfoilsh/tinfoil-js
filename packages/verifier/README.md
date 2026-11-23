@@ -24,13 +24,14 @@ const nonce = randomNonce();
 const response = await fetch(`https://inference.tinfoil.sh/.well-known/tinfoil-attestation?nonce=${toHex(nonce)}`);
 const document = new Uint8Array(await response.arrayBuffer());
 
-const verification = await verifier.verifyV3(document, nonce, { repo: "tinfoilsh/confidential-model-router", project: "tinfoilsh/confidential-model-router" });
+const report = await verifier.verifyV3(document, nonce, { repo: "tinfoilsh/confidential-model-router", project: "tinfoilsh/confidential-model-router" });
+const facts = report.verifiedFacts!; // set on every report that verifyV3 returns
 
-verification.codeDigest;         // the verified release
-verification.enclaveMeasurement; // the quote's authenticated registers
-verification.tlsPublicKeyFP;     // the endorsed TLS key (SPKI SHA-256), if any
-verification.hpkePublicKey;      // the endorsed HPKE key, if any
-verification.freshnessExpiresAt; // when a cached verification stops authorizing requests
+facts.codeDigest;         // the verified release
+facts.enclaveMeasurement; // the quote's authenticated registers
+facts.tlsPublicKeyFP;     // the endorsed TLS key (SPKI SHA-256), if any
+facts.hpkePublicKey;      // the endorsed HPKE key, if any
+facts.freshnessExpiresAt; // when a cached verification stops authorizing requests
 ```
 
 `verifyV3` samples the clock once and judges every time-bound check at that instant; `verifyV3At(document, nonce, pin, when)` uses `when` instead. `pin` is `{ repo }` for a GitHub repository (`owner/name[@tag][@sha256:digest]`), `{ project }` for a config registry project (`org/project[@revision][@sha256:digest]`), or both to accept either; neither is satisfied by the other's collateral. An empty pin is a `UsageError` unless the verifier configures its own config trust. `parseReference` validates a reference, and `checkPinVerifiability(pin)` rejects a pin the verifier could never accept, without a document.
@@ -48,11 +49,23 @@ verification.freshnessExpiresAt; // when a cached verification stops authorizing
 const verifier = await Verifier.create({ kind: "registries", ids: [PUBLIC_REGISTRY_ID, myRegistryID] }, { freshnessMaxAgeMs: 24 * 60 * 60 * 1000 });
 ```
 
-A `Verification` is a frozen object of `readonly` properties: `codeDigest`, `codeTag`, `configRepo`, `codeMeasurement` (the registers the release fixes), `enclaveMeasurement`, `cryptoMaterial` and `cryptoMaterialData(id, format)` for every endorsed key, `config`, `runtime` and `platform` for what a config-based verification accepted and where each reference came from, and `metadata` for the verifier's name and version and when it ran. Register bytes and `Date` values are shared, not copied, and must not be mutated. `JSON.stringify(verification)` (or `toJSON()`) gives the same facts as plain JSON, with registers as lowercase hex and times as ISO 8601 strings.
+### Verification reports
+
+`verifyV3` returns a `VerificationReport`: one step for each layer (`envelope`, `provenance`, `quote` and `policy`, in that order), each `passed`, `failed`, `skipped` or `not_run`, with a diagnostic `message` for a failed or skipped step; the facts that the steps established; and `metadata`, the verifier's name and version and the instant that the document was appraised at. Provenance is `skipped` only when the verifier embeds the config, the runtime and the platform, so that there is no endorsement to authenticate. A report authorizes nothing by itself: only the keys in its verified facts may be bound to.
+
+- **Accepted:** `verifyV3` resolves to the report, whose `verifiedFacts` are set and none of whose steps failed.
+- **Rejected:** `verifyV3` rejects with a `VerificationError` whose `report` has the step that failed, whose layer is the error's, and `partialFacts` instead of verified facts. `report.failedStep()` returns that step.
+- **Misused:** a `UsageError` carries no report, because it reports a mistake in the caller's code rather than a rejected document.
+
+`VerifiedFacts` is a frozen object of `readonly` properties: `codeDigest`, `codeTag`, `configRepo`, `codeMeasurement` (the registers the release fixes), `enclaveMeasurement`, `cryptoMaterial` and `cryptoMaterialData(id, format)` for every endorsed key, and `config`, `runtime` and `platform` for what a config-based verification accepted and where each reference came from.
+
+`PartialFacts` hold what the steps before a failure established, and each fact is set only once the step that establishes it passed. `expected`, set once provenance passed or was skipped, holds the accepted reference values: `configRepo`, `artifact`, `config` and `platform` as verified facts would report them, `codeMeasurement`, the registers that the release fixes in the layout of the platform that the document's CPU evidence names, and `measurement`, every register that the quote had to attest, set once the policy step resolved it. `measured`, set once the envelope passed, holds `cpu.measurement`, the registers that the hardware measured, set only once the quote authenticated, and `tlsPublicKeyFP` and `hpkePublicKeyFP`, the fingerprints of the keys that the document endorses. Only the policy step binds those keys to the enclave, so in a failed report they are the document's claim, and must be shown as unverified. A report holds the HPKE key only as a fingerprint, the lowercase-hex SHA-256 of its bytes that `hpkePublicKeyFP(key)` computes. A measurement mismatch shows `expected.measurement` next to `measured.cpu.measurement`, register by register.
+
+A report and everything in it are frozen, except register bytes and `Date` values, which can't be frozen and must not be mutated; `report.clone()` gives a copy that shares neither. Its data properties survive a structured clone, such as `postMessage`, and `JSON.stringify(report)` (or `toJSON()`) gives the same data as plain JSON, with registers as lowercase hex and times as ISO 8601 strings.
 
 ### Errors
 
-Every error is a `VerifyError`, except from the hex helpers: `fromHex` verifies nothing, so it throws a plain `Error` for anything but lowercase hex of even length, the form `toHex` writes. A `UsageError` means the verifier was built or called with invalid inputs, so retrying won't help. A `VerificationError` means the document must not be trusted; its `layer` names the check that failed: `envelope` (document shape and nonce binding), `provenance` (code, config and platform endorsements and their freshness), `quote` (the hardware quote) or `policy` (the measurements against the release). Those are the layers today; a later version may add one, so treat a `layer` you don't recognize as a rejection at a stage you have no name for. The verifier fails closed: an internal failure inside a layer (a bug, an exhausted resource) is reported as a `VerificationError` at that layer with the underlying error as `cause`, so an unfamiliar message at a layer may be the verifier itself failing rather than the document; inspect `cause` before treating it as a verdict on the document.
+Every error is a `VerifyError`, except from the hex helpers: `fromHex` verifies nothing, so it throws a plain `Error` for anything but lowercase hex of even length, the form `toHex` writes. A `UsageError` means the verifier was built or called with invalid inputs, so retrying won't help. A `VerificationError` means the document must not be trusted; its `report` shows what the verification established (see above), and its `layer` names the check that failed: `envelope` (document shape and nonce binding), `provenance` (code, config and platform endorsements and their freshness), `quote` (the hardware quote) or `policy` (the measurements against the release). Those are the layers today; a later version may add one, so treat a `layer` you don't recognize as a rejection at a stage you have no name for. The verifier fails closed: an internal failure inside a layer (a bug, an exhausted resource) is reported as a `VerificationError` at that layer with the underlying error as `cause`, so an unfamiliar message at a layer may be the verifier itself failing rather than the document; inspect `cause` before treating it as a verdict on the document.
 
 ### Pinning
 
