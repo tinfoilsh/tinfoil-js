@@ -299,7 +299,7 @@ describe("Verifier.create config trust and policy", () => {
     await expect(Verifier.create(undefined, { artifacts: { kind: "embeddedArtifacts", platform: artifact(ARTIFACT_FORMAT) } })).rejects.toThrow(/platform-endorsements\/v2/);
     await expect(Verifier.create(undefined, { artifacts: { kind: "embeddedArtifacts", runtime: utf8("{}") } })).rejects.toThrow(UsageError);
     await expect(Verifier.create(undefined, { artifacts: { kind: "embeddedArtifacts", runtime: "{}" as unknown as Uint8Array } })).rejects.toThrow(/must be a Uint8Array/);
-    await expect(Verifier.create({ kind: "embeddedConfig", bytes: utf8("name: app\n") })).rejects.toThrow(UsageError);
+    await expect(Verifier.create({ kind: "embeddedConfig", bytes: utf8(`{"name":"app"}`) })).rejects.toThrow(UsageError);
   });
 
   it("rejects an unknown kind, a value without one, or a missing member from untyped code as a usage error", async () => {
@@ -334,6 +334,20 @@ describe("Verifier.create config trust and policy", () => {
     expect(() => embedded.checkPinVerifiability({ project: "org/other@r1" })).toThrow(/embedded config does not match/);
     await expect(Verifier.create({ kind: "embeddedConfig", name: "bad name", bytes: config })).rejects.toThrow(UsageError);
     await expect(Verifier.create({ kind: "embeddedConfig", name: 7 as unknown as string, bytes: config })).rejects.toThrow(/name must be a string/);
+  });
+
+  it("refuses embedded config bytes that are not a JSON config, and names the two forms it takes", async () => {
+    const digest = "a".repeat(64);
+    for (const [bytes, reason] of [
+      [`name: app\ncvm-version: v1.2.3@sha256:${digest}\n`, /not a JSON config that states cvm-version/],
+      [`name: app\ncvm-version: 0.15.4@sha256:${digest}\n`, /not a JSON config that states cvm-version/],
+      [`{"cvm-version":"0.15.4@sha256:${digest}","name":"app"}`, /a JSON config pins cvm-version v0\.15\.5-rc\.1 or later/],
+    ] as const) {
+      const err = await Verifier.create({ kind: "embeddedConfig", bytes: utf8(bytes) }).catch((e: unknown) => e);
+      expect(err).toBeInstanceOf(UsageError);
+      expect((err as Error).message).toMatch(/must be a JSON config, or the config given by its digest and runtime pin as an embeddedConfigReference/);
+      expect((err as Error).message).toMatch(reason);
+    }
   });
 
   it("accepts an embedded config reference in place of the config bytes", async () => {

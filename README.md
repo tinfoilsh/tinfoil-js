@@ -64,7 +64,7 @@ const router = await RouterHTTPClient.create({ policy: { freshnessMaxAgeMs: 24 *
 | `{ kind: "projectPin", project, registryIDs? }` | v3 collateral for a config registry project `org/project[@revision][@sha256:digest]`, endorsed by the public registry, or by exactly the `registryIDs` given (list `PUBLIC_REGISTRY_ID` from `@tinfoilsh/verifier` to keep it); an empty list is a `ConfigurationError` |
 | `{ kind: "signedBy", keys, project? }` | v3 configs that your PEM-encoded P-256 `keys` sign, optionally for one `project` |
 | `{ kind: "authorizedBy", authorize }` | v3 configs that your `authorize` callback accepts |
-| `{ kind: "embeddedConfig", bytes, name? }` | v3 collateral for exactly these config bytes |
+| `{ kind: "embeddedConfig", bytes, name? }` | v3 collateral for exactly these config bytes, which must be a JSON config |
 | `{ kind: "eitherPin", repo, project }` | either of `repoPin` and `projectPin`, for the migration from v2 to v3 collateral |
 
 The router's trust is fixed to its repository, and the gateway client takes `modelPins` instead. Every HTTP client takes `policy`, the verifier's policy as plain data: `pinnedRegisters`, `freshnessMaxAgeMs` and `artifacts` (`{ kind: "endorsedArtifacts", freshnessKeys? }` or `{ kind: "embeddedArtifacts", runtime?, platform?, freshnessKeys? }`). The enclave and router clients take `transport`: `{ kind: "tls" }`, which pins each connection to the attested key, or `{ kind: "ehbp", proxyURL?, fetch? }`, which seals request and response bodies to the attested key so that they stay private through a proxy. The default depends on the platform:

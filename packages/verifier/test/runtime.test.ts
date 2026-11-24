@@ -8,8 +8,8 @@
  *
  * The trailing describes cover decode-level behaviour: unknown and duplicate
  * members, integer and string typing, null members and framing for the
- * manifest, document, mapping and scalar handling for the YAML config, and
- * the format that the pinned version requires of the config.
+ * manifest, the JSON object and member that the config's pin is read from,
+ * and the version and byte form that the config must have.
  */
 import { describe, expect, it } from "vitest";
 import { RUNTIME_REPO, type RuntimeReference } from "../src/document/collateral/runtime.js";
@@ -128,34 +128,35 @@ describe("parseManifest and configRuntime", () => {
   describe("reads the runtime pin from the config", () => {
     const digest = "ab".repeat(32);
     const accepted: [string, string][] = [
-      ["0.15.0", "v0.15.0"],
-      ["v0.15.0", "v0.15.0"],
-      ["0.15.0-rc.1", "v0.15.0-rc.1"],
-      ["0.15.0+gpu", "v0.15.0+gpu"],
-      ["v0.15.0+gpu", "v0.15.0+gpu"],
-      ["0.15.0-rc.1+gpu", "v0.15.0-rc.1+gpu"],
-      ["0.15.0+mini", "v0.15.0+mini"],
-      ["0.15.0+containers.initrd-1", "v0.15.0+containers.initrd-1"],
-      ["0.15.0+GPU", "v0.15.0+GPU"],
+      ["0.16.0", "v0.16.0"],
+      ["v0.16.0", "v0.16.0"],
+      ["0.16.0-rc.1", "v0.16.0-rc.1"],
+      ["0.16.0+gpu", "v0.16.0+gpu"],
+      ["v0.16.0+gpu", "v0.16.0+gpu"],
+      ["0.16.0-rc.1+gpu", "v0.16.0-rc.1+gpu"],
+      ["0.16.0+mini", "v0.16.0+mini"],
+      ["0.16.0+containers.initrd-1", "v0.16.0+containers.initrd-1"],
+      ["0.16.0+GPU", "v0.16.0+GPU"],
     ];
     it.each(accepted)("accepts %s as %s", (version, tag) => {
-      const config = enc(`cvm-version: ${version}@sha256:${digest}\ncontainers: []\n`);
+      const config = enc(`{"containers":[],"cvm-version":"${version}@sha256:${digest}"}`);
       expect(configRuntime(config)).toEqual({ repo: RUNTIME_REPO, tag, digest });
     });
 
-    const good = `cvm-version: 0.15.0@sha256:${digest}\n`;
+    const pin = `"cvm-version":"0.16.0@sha256:${digest}"`;
+    const good = `{${pin}}`;
     const rejected: [string, string][] = [
-      ["unpinned", "cvm-version: 0.15.0\n"],
-      ["duplicate", good + good],
-      ["two documents", good + "---\n" + good],
+      ["unpinned", `{"cvm-version":"0.16.0"}`],
+      ["duplicate", `{${pin},${pin}}`],
+      ["two values", good + good],
       ["bad digest", good.replaceAll(digest, digest.toUpperCase())],
-      ["path metadata", good.replaceAll("0.15.0", "0.15.0+mini/other")],
-      ["partial version", good.replaceAll("0.15.0", "0.15+gpu")],
-      ["empty metadata", good.replaceAll("0.15.0", "0.15.0+")],
-      ["double metadata", good.replaceAll("0.15.0", "0.15.0+gpu+gpu")],
+      ["path metadata", good.replaceAll("0.16.0", "0.16.0+mini/other")],
+      ["partial version", good.replaceAll("0.16.0", "0.16+gpu")],
+      ["empty metadata", good.replaceAll("0.16.0", "0.16.0+")],
+      ["double metadata", good.replaceAll("0.16.0", "0.16.0+gpu+gpu")],
       ["short digest", good.replaceAll(digest, digest.slice(0, -2))],
       ["extra digest", good.replaceAll(digest, `${digest}@sha256:${digest}`)],
-      ["missing version", "containers: []\n"],
+      ["missing version", `{"containers":[]}`],
     ];
     it.each(rejected)("%s", (_name, config) => {
       expect(() => configRuntime(enc(config))).toThrow();
@@ -294,94 +295,55 @@ describe("decodeManifest: decode semantics", () => {
 // ---------------------------------------------------------------- configRuntime decode semantics
 
 /**
- * configRuntime reads the top-level cvm-version key from the YAML config:
- * exactly one document, which must be a mapping; any scalar value reads as
- * its text; null reads as "".
+ * configRuntime reads the top-level cvm-version member of a JSON config: the
+ * bytes must strictly parse as one JSON object, and the member must be a
+ * string.
  */
 describe("configRuntime: decode semantics", () => {
   const digest = "ab".repeat(32);
-  const good = `cvm-version: 0.15.0@sha256:${digest}\n`;
-  const want: RuntimeReference = { repo: RUNTIME_REPO, tag: "v0.15.0", digest };
+  const pin = `"cvm-version":"0.16.0@sha256:${digest}"`;
+  const good = `{${pin}}`;
+  const want: RuntimeReference = { repo: RUNTIME_REPO, tag: "v0.16.0", digest };
+  const notJsonConfig = "parsing config runtime pin: not a JSON config that states cvm-version";
 
   it("baseline", () => {
     expect(configRuntime(enc(good))).toEqual(want);
   });
 
   describe("rejects", () => {
-    it("duplicate cvm-version keys", () => {
-      expect(() => configRuntime(enc(good + good))).toThrow(/^parsing config runtime pin: /);
+    it.each([
+      ["duplicate cvm-version members", `{${pin},${pin}}`],
+      // Duplicate members reject even when the member is not the one being read.
+      ["duplicate other members", `{"containers":[],"containers":[],${pin}}`],
+      ["two values", good + good],
+      ["an array root", `[${good}]`],
+      ["a string root", `"just a string"`],
+      ["an empty file", ""],
+      ["an object without cvm-version", `{"containers":[]}`],
+      // Only the top-level member is read.
+      ["a nested cvm-version", `{"a":${good}}`],
+      ["a null cvm-version", `{"cvm-version":null}`],
+      ["a number cvm-version", `{"cvm-version":1}`],
+      ["a boolean cvm-version", `{"cvm-version":true}`],
+      ["an array cvm-version", `{"cvm-version":["a"]}`],
+      ["an object cvm-version", `{"cvm-version":{"a":"b"}}`],
+      ["truncated JSON", good.slice(0, -1)],
+      ["a comment", "// c\n" + good],
+      ["single-quoted strings", good.replaceAll(`"`, "'")],
+      ["a byte-order mark", String.fromCodePoint(0xfeff) + good],
+    ])("%s", (_name, config) => {
+      expect(() => configRuntime(enc(config))).toThrow(notJsonConfig);
     });
-    // Duplicate keys reject even when the key is not one being read.
-    it("duplicate other keys", () => {
-      expect(() => configRuntime(enc("containers: []\ncontainers: []\n" + good))).toThrow(/^parsing config runtime pin: /);
+    it("invalid UTF-8", () => {
+      const config = new Uint8Array([...enc(`{"cvm-version":"`), 0xff, ...enc(`"}`)]);
+      expect(() => configRuntime(config)).toThrow(notJsonConfig);
     });
-    it("two documents", () => {
-      expect(() => configRuntime(enc(good + "---\n" + good))).toThrow("config must contain exactly one YAML document");
-    });
-    // An empty second document still counts as a second document.
-    it("two documents, the second empty", () => {
-      expect(() => configRuntime(enc(good + "---\n"))).toThrow("config must contain exactly one YAML document");
-    });
-    it("a sequence root", () => {
-      expect(() => configRuntime(enc("- " + good))).toThrow("parsing config runtime pin: config is not a mapping");
-    });
-    it("a scalar root", () => {
-      expect(() => configRuntime(enc("just a string\n"))).toThrow("parsing config runtime pin: config is not a mapping");
-    });
-    it("an empty file", () => {
-      expect(() => configRuntime(new Uint8Array(0))).toThrow("parsing config runtime pin: EOF");
-    });
-    // A comments-only file yields one empty document, whose missing cvm-version is rejected.
-    it("a comments-only file", () => {
-      expect(() => configRuntime(enc("# just a comment\n"))).toThrow();
-    });
-    // null reads as "", so the pin is missing.
-    it.each([["cvm-version:\n"], ["cvm-version: null\n"], ["cvm-version: ~\n"]])("%j as unpinned", (config) => {
-      expect(() => configRuntime(enc(config))).toThrow("cvm-version must pin a runtime manifest SHA-256 digest");
-    });
-    // Any scalar reads as its text, and that text carries no pin.
-    it.each([["cvm-version: 0.15\n"], ["cvm-version: 1\n"], ["cvm-version: true\n"]])("%j as the unpinned text", (config) => {
-      expect(() => configRuntime(enc(config))).toThrow("cvm-version must pin a runtime manifest SHA-256 digest");
-    });
-    it.each([["cvm-version: [a]\n"], ["cvm-version: {a: b}\n"]])("%j as a non-scalar", (config) => {
-      expect(() => configRuntime(enc(config))).toThrow("parsing config runtime pin: cvm-version must be a scalar");
+    it("an empty cvm-version as unpinned", () => {
+      expect(() => configRuntime(enc(`{"cvm-version":""}`))).toThrow("cvm-version must pin a runtime manifest SHA-256 digest");
     });
     // The text "15" becomes tag "v15", which is not a full semantic version.
     it("an int-like version", () => {
-      expect(() => configRuntime(enc(`cvm-version: 15@sha256:${digest}\n`))).toThrow("runtime tag must be a full semantic version");
-    });
-    // Only the top-level key is read.
-    it("a nested cvm-version", () => {
-      expect(() => configRuntime(enc(`a:\n  cvm-version: 0.15.0@sha256:${digest}\n`))).toThrow(
-        "cvm-version must pin a runtime manifest SHA-256 digest",
-      );
-    });
-    it("invalid YAML", () => {
-      expect(() => configRuntime(enc("cvm-version: [\n"))).toThrow(/^parsing config runtime pin: /);
-    });
-    it("a tab-indented line", () => {
-      expect(() => configRuntime(enc("\tcvm-version: x\n"))).toThrow(/^parsing config runtime pin: /);
-    });
-    it("invalid UTF-8", () => {
-      expect(() => configRuntime(new Uint8Array([...enc("cvm-version: "), 0xff, 0x0a]))).toThrow(/^parsing config runtime pin: /);
-    });
-  });
-
-  describe("accepts", () => {
-    it.each([
-      ["a double-quoted value", `cvm-version: "0.15.0@sha256:${digest}"\n`],
-      ["a single-quoted value", `cvm-version: '0.15.0@sha256:${digest}'\n`],
-      ["a folded block scalar", `cvm-version: >-\n  0.15.0@sha256:${digest}\n`],
-      ["an explicit document start", "---\n" + good],
-      ["an explicit document end", good + "...\n"],
-      ["document start and end", "---\n" + good + "...\n"],
-      ["a leading comment", "# c\n" + good],
-      ["a key with a trailing space", `cvm-version : 0.15.0@sha256:${digest}\n`],
-      ["CRLF line endings", good.replaceAll("\n", "\r\n")],
-      ["a byte-order mark", "\ufeff" + good],
-      ["an alias to an anchored scalar", `a: &x 0.15.0@sha256:${digest}\ncvm-version: *x\n`],
-    ])("%s", (_name, config) => {
-      expect(configRuntime(enc(config))).toEqual(want);
+      expect(() => configRuntime(enc(`{"cvm-version":"15@sha256:${digest}"}`))).toThrow("runtime tag must be a full semantic version");
     });
   });
 });
@@ -389,10 +351,11 @@ describe("configRuntime: decode semantics", () => {
 // ---------------------------------------------------------------- configRuntime config format
 
 /**
- * From JSON_CONFIG_MIN_VERSION a config is canonical JSON and YAML is
- * refused; earlier versions keep YAML.
+ * A config is canonical JSON that pins JSON_CONFIG_MIN_VERSION or a later
+ * version. YAML is refused for every version, and so is JSON that pins an
+ * earlier one.
  */
-describe("configRuntime: the format follows the pinned version", () => {
+describe("configRuntime: a config is JSON in its one byte form", () => {
   const digest = "ab".repeat(32);
   const json = (version: string): string => `{"containers":[],"cpus":2,"cvm-version":"${version}@sha256:${digest}","shim":{"upstream-port":8080}}`;
   const yaml = (version: string): string => `cvm-version: ${version}@sha256:${digest}\ncpus: 2\n`;
@@ -401,7 +364,8 @@ describe("configRuntime: the format follows the pinned version", () => {
     expect(canonical).toContain(old);
     return canonical.replace(old, replacement);
   };
-  const takesJson = `cvm-version ${JSON_CONFIG_MIN_VERSION} and later take a JSON config`;
+  const notJsonConfig = `parsing config runtime pin: not a JSON config that states cvm-version; the YAML configs of versions before ${JSON_CONFIG_MIN_VERSION} are not read`;
+  const pinsEarlier = `a JSON config pins cvm-version ${JSON_CONFIG_MIN_VERSION} or later`;
   const MAX_SAFE = "9007199254740991";
   const ABOVE_MAX_SAFE = "9007199254740992";
   // U+1F600 is above U+FB33 as a code point and in UTF-8, and below it in
@@ -415,10 +379,6 @@ describe("configRuntime: the format follows the pinned version", () => {
     ["JSON with build metadata", json("0.15.5-rc.1+gpu"), "v0.15.5-rc.1+gpu"],
     ["JSON for the release", json("0.15.5"), "v0.15.5"],
     ["JSON for a later version", json("0.16.0"), "v0.16.0"],
-    ["YAML before the JSON version", yaml("0.15.5-rc.0"), "v0.15.5-rc.0"],
-    ["YAML for an earlier release", yaml("0.15.4"), "v0.15.4"],
-    ["flow-style YAML before it", json("0.15.4"), "v0.15.4"],
-    ["flow-style YAML before it, not in the JSON form", json("0.15.5-rc.0").replace(`"cpus":2`, `"cpus": null`), "v0.15.5-rc.0"],
     ["the largest integer", replace(`"cpus":2`, `"cpus":${MAX_SAFE}`), "v0.15.5-rc.1"],
     ["the smallest integer", replace(`"cpus":2`, `"cpus":-${MAX_SAFE}`), "v0.15.5-rc.1"],
     ["member names in UTF-16 code unit order", replace("}}", `},${astral},${bmp}}`), "v0.15.5-rc.1"],
@@ -427,9 +387,15 @@ describe("configRuntime: the format follows the pinned version", () => {
   });
 
   it.each<[string, string, string | RegExp]>([
-    ["YAML at the first JSON version", yaml("0.15.5-rc.1"), takesJson],
-    ["YAML with build metadata", yaml("0.15.5-rc.1+gpu"), takesJson],
-    ["YAML for a later version", yaml("1.0.0"), takesJson],
+    ["YAML at the first JSON version", yaml("0.15.5-rc.1"), notJsonConfig],
+    ["YAML with build metadata", yaml("0.15.5-rc.1+gpu"), notJsonConfig],
+    ["YAML for a later version", yaml("1.0.0"), notJsonConfig],
+    ["YAML before the first JSON version", yaml("0.15.5-rc.0"), notJsonConfig],
+    ["YAML for an earlier release", yaml("0.15.4"), notJsonConfig],
+    ["flow-style YAML", `{cvm-version: 1.0.0@sha256:${digest}, cpus: 2}`, notJsonConfig],
+    ["JSON before the first JSON version", json("0.15.5-rc.0"), pinsEarlier],
+    ["JSON for an earlier release", json("0.15.4"), pinsEarlier],
+    ["JSON for an earlier release with build metadata", json("0.15.4+gpu"), pinsEarlier],
     ["whitespace", replace(`"cpus":2`, `"cpus": 2`), "canonical form"],
     ["trailing newline", canonical + "\n", "canonical form"],
     ["members out of order", replace(`"containers":[],"cpus":2,`, `"cpus":2,"containers":[],`), "canonical form"],

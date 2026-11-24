@@ -98,7 +98,8 @@ export interface ConfigAuthorizer {
  * registry endorsement; the digest and the runtime that the config pins are
  * taken from the bytes. `name`, an /org/project/revision identity, optionally
  * names them, and a `project` pin must then match it. The bytes must come
- * from trusted client configuration.
+ * from trusted client configuration and be a JSON config; a config in any
+ * other form, such as YAML, is given as an {@link EmbeddedConfigReference}.
  */
 export interface EmbeddedConfig {
   readonly kind: "embeddedConfig";
@@ -972,7 +973,16 @@ async function configReferenceOf(config: EmbeddedConfig | EmbeddedConfigReferenc
     if (name !== undefined && typeof name !== "string") throw new UsageError("embedded config name must be a string");
     // Copied once so the digest and the runtime pin come from the same bytes, whatever the caller does to its buffer meanwhile.
     const copy = bytes.slice();
-    return { name: name ?? "", digest: toHex(await sha256(copy)), runtime: usage(() => configRuntime(copy)) };
+    let runtime: RuntimeReference;
+    try {
+      runtime = configRuntime(copy);
+    } catch (err) {
+      throw new UsageError(
+        `embedded config bytes must be a JSON config, or the config given by its digest and runtime pin as an embeddedConfigReference: ${message(err)}`,
+        { cause: err },
+      );
+    }
+    return { name: name ?? "", digest: toHex(await sha256(copy)), runtime };
   }
   return usage(() => referenceCopyOf(config));
 }

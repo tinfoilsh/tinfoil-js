@@ -159,8 +159,8 @@ describe("the pin of a full-verify input", () => {
 });
 
 /**
- * The runtime stage reads the pin from the config a document carries: JSON
- * from the first JSON version on, YAML before it.
+ * The runtime stage reads the pin from the JSON config a document carries,
+ * and rejects a config in any other form or for an earlier version.
  */
 describe("the runtime stage", () => {
   const digest = "ab".repeat(32);
@@ -176,19 +176,18 @@ describe("the runtime stage", () => {
   const jsonConfig = `{"cvm-version":"0.15.5-rc.1@sha256:${digest}"}`;
   const yamlConfig = `cvm-version: 0.15.4@sha256:${digest}\n`;
 
-  it.each([
-    ["a JSON config", jsonConfig, "v0.15.5-rc.1"],
-    ["a YAML config", yamlConfig, "v0.15.4"],
-  ])("reads the pin of %s", async (_name, config, tag) => {
-    const { output, exitCode } = await run(Stage.ReadConfigRuntime, await carrying(config));
+  it("reads the pin of a JSON config", async () => {
+    const { output, exitCode } = await run(Stage.ReadConfigRuntime, await carrying(jsonConfig));
     expect(exitCode).toBe(ExitCode.Accepted);
-    expect(output).toEqual({ stage: Stage.ReadConfigRuntime, accepted: true, outputs: { runtime: { repo: "tinfoilsh/cvmimage", tag, digest } } });
+    expect(output).toEqual({ stage: Stage.ReadConfigRuntime, accepted: true, outputs: { runtime: { repo: "tinfoilsh/cvmimage", tag: "v0.15.5-rc.1", digest } } });
   });
 
   it.each([
+    ["a YAML config", yamlConfig],
     ["YAML for a JSON version", yamlConfig.replace("0.15.4", "0.15.5-rc.1")],
+    ["JSON for an earlier version", jsonConfig.replace("0.15.5-rc.1", "0.15.4")],
     ["JSON not in its one form", jsonConfig.replace(`":"`, `": "`)],
-    ["a config with no pin", "cpus: 2\n"],
+    ["a config with no pin", `{"cpus":2}`],
   ])("rejects %s", async (_name, config) => {
     const { output, exitCode } = await run(Stage.ReadConfigRuntime, await carrying(config));
     expect(exitCode).toBe(ExitCode.Rejected);
