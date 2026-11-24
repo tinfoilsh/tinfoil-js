@@ -39,6 +39,7 @@ const LAYER_OF: Record<string, Layer> = {
 };
 
 const PASSED = ["envelope", "provenance", "quote", "policy"].map((layer) => ({ layer, status: "passed", message: "" }));
+const PASSED_JSON = PASSED.map(({ layer, status }) => ({ layer, status }));
 
 const utf8 = (s: string): Uint8Array => new TextEncoder().encode(s);
 const hex = (s: string): Uint8Array => new Uint8Array(Buffer.from(s, "hex"));
@@ -148,22 +149,23 @@ describe.skipIf(withoutVectors)(vectorsTitle("the JSON form of a verification re
     const v = await c.verifier.verifyV3At(c.doc, c.nonce, { repo: c.repo }, c.at);
     const launch = "11".repeat(48);
     const verifiedFacts = {
-      codeDigest: "3b29117bcc96bb282879514cc03c32f3f7eb8a7bd031b829dd3864c591b87c50",
-      codeTag: "v1.0.0",
-      configRepo: "tinfoilsh/confidential-inference-proxy",
-      codeMeasurement: { platform: "sev-snp", launch },
-      enclaveMeasurement: { platform: "sev-snp", launch },
-      cryptoMaterial: [
+      config_repo: "tinfoilsh/confidential-inference-proxy",
+      code_digest: "3b29117bcc96bb282879514cc03c32f3f7eb8a7bd031b829dd3864c591b87c50",
+      code_tag: "v1.0.0",
+      code_measurement: { platform: "sev-snp", launch },
+      enclave_measurement: { platform: "sev-snp", launch },
+      crypto_material: [
         { id: "tls", format: KEY_SPKI_FP_SHA256_V1_FORMAT, data: "d1a3788930750184f2fe268a222b5c65bab974069573c4afbf656454f066b6e3" },
         { id: "hpke", format: KEY_X25519_HPKE_V1_FORMAT, data: "58c9b3756d738466ace1e27f83a7fe21b3356ec362694aef1506c5f35c766a01" },
       ],
-      freshnessExpiresAt: "2025-01-08T00:00:01.000Z",
+      freshness_expires_at: "2025-01-08T00:00:01Z",
     };
     expect(v.verifiedFacts!.toJSON()).toStrictEqual(verifiedFacts);
     const json = {
-      steps: PASSED,
-      verifiedFacts,
-      metadata: { verifier: { name: VERIFIER_NAME, version: VERIFIER_VERSION }, verifiedAt: "2025-01-01T00:00:01.000Z" },
+      schema_version: 1,
+      steps: PASSED_JSON,
+      verified_facts: verifiedFacts,
+      metadata: { verified_at: "2025-01-01T00:00:01Z", verifier: { name: VERIFIER_NAME, version: VERIFIER_VERSION } },
     };
     expect(v.toJSON()).toStrictEqual(json);
     expect(JSON.parse(JSON.stringify(v))).toStrictEqual(json);

@@ -10,6 +10,7 @@ import { fromHex, sha256, toHex } from "./internal/bytes.js";
 import { cloneExpected, cloneMeasurement, type Expected, type Measurement } from "./measurement.js";
 import {
   artifactJSON,
+  codeMeasurementJSON,
   configJSON,
   copyArtifact,
   copyConfig,
@@ -17,6 +18,8 @@ import {
   cryptoMaterialData,
   freezeDeep,
   measurementJSON,
+  rfc3339,
+  stringJSON,
   type ArtifactVerification,
   type ArtifactVerificationJSON,
   type ConfigVerification,
@@ -114,39 +117,61 @@ export interface PartialFacts {
   readonly measured?: MeasuredFacts;
 }
 
-/** The JSON form of a {@link MeasuredFacts}. */
-export interface MeasuredFactsJSON {
-  readonly cpu?: { readonly measurement: MeasurementJSON };
-  readonly tlsPublicKeyFP?: string;
-  readonly hpkePublicKeyFP?: string;
+/**
+ * The version of the report's JSON form, which {@link VerificationReportJSON}
+ * carries as `schema_version`. Adding a member keeps the version; removing
+ * or renaming one, or changing its type or its meaning, bumps it.
+ */
+export const REPORT_SCHEMA_VERSION = 1;
+
+/** A {@link Step} in the report's JSON form. */
+export interface StepJSON {
+  readonly layer: Layer;
+  readonly status: StepStatus;
+  /** Present only for a failed or a skipped step. */
+  readonly message?: string;
 }
 
-/** The JSON form of an {@link ExpectedFacts}. */
+/** The `measured` object of the report's JSON form. */
+export interface MeasuredFactsJSON {
+  readonly cpu_measurement?: MeasurementJSON;
+  /** Unverified: only what the document claims. */
+  readonly tls_public_key_fp?: string;
+  /** Unverified: only what the document claims. */
+  readonly hpke_public_key_fp?: string;
+}
+
+/** The `expected` object of the report's JSON form. */
 export interface ExpectedFactsJSON {
-  readonly configRepo: string;
+  readonly config_repo: string;
   readonly artifact: ArtifactVerificationJSON;
   readonly config?: ConfigVerificationJSON;
   readonly platform?: ArtifactVerificationJSON;
-  readonly codeMeasurement?: MeasurementJSON;
+  /** Left out when the release fixes no register on the platform that the document's CPU evidence names. */
+  readonly code_measurement?: MeasurementJSON;
   readonly measurement?: MeasurementJSON;
 }
 
-/** The JSON form of a {@link PartialFacts}. */
+/** The `partial_facts` object of the report's JSON form. */
 export interface PartialFactsJSON {
   readonly expected?: ExpectedFactsJSON;
   readonly measured?: MeasuredFactsJSON;
 }
 
 /**
- * The JSON form of a {@link VerificationReport}, as `toJSON()` returns it
- * and `JSON.stringify` serializes it: the same fields as the properties,
- * with registers as lowercase hex and times as ISO 8601 strings. Facts that
- * were not established are left out.
+ * A {@link VerificationReport} in the JSON form that every Tinfoil SDK
+ * exports, as `toJSON()` returns it and `JSON.stringify` writes it:
+ * snake_case members, registers, digests and key fingerprints as lowercase
+ * hex, and times as RFC 3339 strings in UTC. A fact that was not
+ * established is left out, and no member is `null` or `""`, but a fact that
+ * was established and holds nothing stays, as in `"measured": {}`. Exactly
+ * one of `verified_facts` and `partial_facts` is present.
  */
 export interface VerificationReportJSON {
-  readonly steps: readonly Step[];
-  readonly verifiedFacts?: VerifiedFactsJSON;
-  readonly partialFacts?: PartialFactsJSON;
+  readonly schema_version: typeof REPORT_SCHEMA_VERSION;
+  readonly steps: readonly StepJSON[];
+  readonly verified_facts?: VerifiedFactsJSON;
+  readonly partial_facts?: PartialFactsJSON;
   readonly metadata: VerificationMetadataJSON;
 }
 
@@ -177,8 +202,8 @@ let construct: (fields: ReportFields) => VerificationReport;
  * in the language and must not be mutated; {@link clone} gives a copy that
  * shares neither. Only the verifier creates a report: the constructor is
  * private. Its data properties survive a structured clone, such as
- * `postMessage`, as a plain object, and `toJSON()` gives a serializable copy
- * for logging or persisting.
+ * `postMessage`, as a plain object, and `toJSON()` gives the report in the
+ * JSON form that every Tinfoil SDK exports, for display and transport.
  */
 export class VerificationReport {
   /**
@@ -225,13 +250,27 @@ export class VerificationReport {
     });
   }
 
-  /** The report as plain JSON: registers as lowercase hex, times as ISO 8601 strings. */
+  /**
+   * The report in the JSON form that every Tinfoil SDK exports, so that
+   * `JSON.stringify(report)` writes it and a consumer reads the report of
+   * any SDK in the same way. {@link VerificationReportJSON} describes the
+   * form.
+   *
+   * The JSON is for display and transport, and it authorizes nothing: this
+   * package reads nothing back from it, and a holder of the JSON can't tell
+   * whether a verifier wrote it. Bind a channel only to the keys of the
+   * {@link VerifiedFacts} that a verification returned.
+   */
   toJSON(): VerificationReportJSON {
     return {
-      steps: this.steps.map((s) => ({ ...s })),
-      ...(this.verifiedFacts === undefined ? {} : { verifiedFacts: this.verifiedFacts.toJSON() }),
-      ...(this.partialFacts === undefined ? {} : { partialFacts: partialJSON(this.partialFacts) }),
-      metadata: { verifier: { ...this.metadata.verifier }, verifiedAt: this.metadata.verifiedAt.toISOString() },
+      schema_version: REPORT_SCHEMA_VERSION,
+      steps: this.steps.map((s) => ({ layer: s.layer, status: s.status, ...stringJSON("message", s.message) })),
+      ...(this.verifiedFacts === undefined ? {} : { verified_facts: this.verifiedFacts.toJSON() }),
+      ...(this.partialFacts === undefined ? {} : { partial_facts: partialJSON(this.partialFacts) }),
+      metadata: {
+        verified_at: rfc3339(this.metadata.verifiedAt),
+        ...(this.metadata.verifier.name === "" || this.metadata.verifier.version === "" ? {} : { verifier: { name: this.metadata.verifier.name, version: this.metadata.verifier.version } }),
+      },
     };
   }
 }
@@ -282,16 +321,17 @@ function copyMeasured(m: MeasuredFacts): MeasuredFacts {
 function partialJSON(p: PartialFacts): PartialFactsJSON {
   const e = p.expected;
   const m = p.measured;
+  const code = e?.codeMeasurement === undefined ? undefined : codeMeasurementJSON(e.codeMeasurement);
   return {
     ...(e === undefined
       ? {}
       : {
           expected: {
-            configRepo: e.configRepo,
+            config_repo: e.configRepo,
             artifact: artifactJSON(e.artifact),
             ...(e.config === undefined ? {} : { config: configJSON(e.config) }),
             ...(e.platform === undefined ? {} : { platform: artifactJSON(e.platform) }),
-            ...(e.codeMeasurement === undefined ? {} : { codeMeasurement: measurementJSON(e.codeMeasurement) }),
+            ...(code === undefined ? {} : { code_measurement: code }),
             ...(e.measurement === undefined ? {} : { measurement: measurementJSON(e.measurement) }),
           },
         }),
@@ -299,9 +339,9 @@ function partialJSON(p: PartialFacts): PartialFactsJSON {
       ? {}
       : {
           measured: {
-            ...(m.cpu === undefined ? {} : { cpu: { measurement: measurementJSON(m.cpu.measurement) } }),
-            ...(m.tlsPublicKeyFP === undefined ? {} : { tlsPublicKeyFP: m.tlsPublicKeyFP }),
-            ...(m.hpkePublicKeyFP === undefined ? {} : { hpkePublicKeyFP: m.hpkePublicKeyFP }),
+            ...(m.cpu === undefined ? {} : { cpu_measurement: measurementJSON(m.cpu.measurement) }),
+            ...stringJSON("tls_public_key_fp", m.tlsPublicKeyFP),
+            ...stringJSON("hpke_public_key_fp", m.hpkePublicKeyFP),
           },
         }),
   };

@@ -18,7 +18,13 @@ export function verifiedReport(facts: VerifiedFacts | object): VerificationRepor
     metadata,
     failedStep: () => undefined,
     clone: () => ({ ...report }),
-    toJSON: () => ({ steps, verifiedFacts: facts, metadata: { ...metadata, verifiedAt: metadata.verifiedAt.toISOString() } }),
+    // The report's JSON form, with the facts as they serialize themselves.
+    toJSON: () => ({
+      schema_version: 1,
+      steps: steps.map(({ layer, status }) => ({ layer, status })),
+      verified_facts: JSON.parse(JSON.stringify(facts)) as unknown,
+      metadata: { verified_at: metadata.verifiedAt.toISOString().replace(/\.000Z$/, "Z"), verifier: metadata.verifier },
+    }),
   };
   return report as unknown as VerificationReport;
 }
