@@ -10,12 +10,12 @@
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { join, relative } from "node:path";
 import { describe, expect, it } from "vitest";
-import { ExitCode, run, Stage, type Measurement } from "../conformance/adapter.js";
+import { capabilities, ExitCode, run, Stage, type Measurement, type Runtime } from "../conformance/adapter.js";
 import { decodeLiveRequest, isAuthority } from "../conformance/live.js";
 import { checkReport, failedStep, type Report, type ReportedOutput } from "../conformance/report.js";
-import { FORMAT_V2, FORMAT_V3 } from "../src/document/collateral/collateral.js";
+import { CONFIG_ID, CONFIG_V1_FORMAT, FORMAT_V2, FORMAT_V3, ROLE_REFERENCE_VALUES } from "../src/document/collateral/collateral.js";
 import { NONCE_SIZE, SEV_SNP_REPORT_V1_FORMAT } from "../src/document/document.js";
-import { buildDocument } from "./helpers/builder.js";
+import { b64, buildDocument, type WireEntry } from "./helpers/builder.js";
 
 interface Fixture {
   id: string;
@@ -29,6 +29,7 @@ interface Fixture {
     code_digest?: string;
     code_measurement?: Measurement;
     enclave_measurement?: Measurement;
+    runtime?: Runtime;
     /**
      * When declared, what a full-verify vector expects of the report: the
      * layer of the failed step, every step's status, and the partial facts.
@@ -75,6 +76,7 @@ describe.skipIf(files.length === 0)("v3 conformance fixtures", () => {
       if (e.code_digest) expect(o.code_digest).toBe(e.code_digest);
       if (e.code_measurement) expect(o.code_measurement).toEqual(e.code_measurement);
       if (e.enclave_measurement) expect(o.enclave_measurement).toEqual(e.enclave_measurement);
+      if (e.runtime) expect(o.runtime).toEqual(e.runtime);
     }
   });
 });
@@ -153,6 +155,60 @@ describe("the pin of a full-verify input", () => {
     expect(await code(FORMAT_V2, { repo: "org/project", project: "not a reference" })).toBe("MALFORMED_INPUT");
     const wrongType = await run(Stage.Verify, { ...(await input(FORMAT_V2, { repo: "org/project" })), project: 7 });
     expect(wrongType.exitCode).toBe(ExitCode.Malformed);
+  });
+});
+
+/**
+ * The runtime stage reads the pin from the config a document carries: JSON
+ * from the first JSON version on, YAML before it.
+ */
+describe("the runtime stage", () => {
+  const digest = "ab".repeat(32);
+  const input = async (collateral: WireEntry[]) => {
+    const { bytes } = await buildDocument({ nonce: new Uint8Array(NONCE_SIZE), collateralFormat: FORMAT_V3, collateral }, () => ({
+      format: SEV_SNP_REPORT_V1_FORMAT,
+      report: new TextEncoder().encode("unauthenticated quote"),
+    }));
+    return { schema_version: "1", document_b64: b64(bytes) };
+  };
+  const carrying = (config: string) =>
+    input([{ id: CONFIG_ID, role: ROLE_REFERENCE_VALUES, format: CONFIG_V1_FORMAT, data: JSON.stringify({ config_base64: b64(config) }) }]);
+  const jsonConfig = `{"cvm-version":"0.15.5-rc.1@sha256:${digest}"}`;
+  const yamlConfig = `cvm-version: 0.15.4@sha256:${digest}\n`;
+
+  it.each([
+    ["a JSON config", jsonConfig, "v0.15.5-rc.1"],
+    ["a YAML config", yamlConfig, "v0.15.4"],
+  ])("reads the pin of %s", async (_name, config, tag) => {
+    const { output, exitCode } = await run(Stage.ReadConfigRuntime, await carrying(config));
+    expect(exitCode).toBe(ExitCode.Accepted);
+    expect(output).toEqual({ stage: Stage.ReadConfigRuntime, accepted: true, outputs: { runtime: { repo: "tinfoilsh/cvmimage", tag, digest } } });
+  });
+
+  it.each([
+    ["YAML for a JSON version", yamlConfig.replace("0.15.4", "0.15.5-rc.1")],
+    ["JSON not in its one form", jsonConfig.replace(`":"`, `": "`)],
+    ["a config with no pin", "cpus: 2\n"],
+  ])("rejects %s", async (_name, config) => {
+    const { output, exitCode } = await run(Stage.ReadConfigRuntime, await carrying(config));
+    expect(exitCode).toBe(ExitCode.Rejected);
+    expect(output).toEqual({ stage: Stage.ReadConfigRuntime, accepted: false, rejection: { code: "PROVENANCE_REJECTED" } });
+  });
+
+  it("rejects a document that carries no config", async () => {
+    const { output, exitCode } = await run(Stage.ReadConfigRuntime, await input([]));
+    expect(exitCode).toBe(ExitCode.Rejected);
+    expect(output.rejection?.code).toBe("PROVENANCE_REJECTED");
+  });
+
+  it("reports a document that does not decode as malformed input", async () => {
+    const { output, exitCode } = await run(Stage.ReadConfigRuntime, { schema_version: "1", document_b64: b64("{}") });
+    expect(exitCode).toBe(ExitCode.Malformed);
+    expect(output.rejection?.code).toBe("MALFORMED_INPUT");
+  });
+
+  it("is advertised", () => {
+    expect((capabilities().v3 as { stages_supported: string[] }).stages_supported).toContain(Stage.ReadConfigRuntime);
   });
 });
 
