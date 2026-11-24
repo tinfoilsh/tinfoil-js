@@ -443,7 +443,7 @@ describe("EnclaveHTTPClient.close over TLS", () => {
     const client = await createEnclaveHTTPClient(own.host, { kind: "repoPin", repo: "tinfoilsh/repo" }, options, { documentFetch: documents().fetch, tls: { ca: TEST_CERT }, verifier: pinned });
     {
       await using scoped = client;
-      expect(scoped.lastVerification()).toBeDefined();
+      expect(scoped.lastVerificationAttempt()).toBeDefined();
     }
     await expect(client.ensureVerified()).rejects.toThrow(/client is closed/);
 

@@ -149,7 +149,7 @@ export type VerificationAttempt = { readonly report: VerificationReport; readonl
  * verification that made the attempt is over, so that an attempt that was
  * retried is reported together with its retry, in order.
  * `host` is the enclave that the attempt verified, and `attempt` is its
- * outcome, the same {@link VerificationAttempt} that `lastVerification()`
+ * outcome, the same {@link VerificationAttempt} that `lastVerificationAttempt()`
  * returned once the attempt was decided: `attempt.report` is set for a
  * verification that passed, and `attempt.error` for one that failed. The
  * type narrows on either, so that in `if (attempt.report) ...; else
@@ -160,13 +160,13 @@ export type VerificationAttempt = { readonly report: VerificationReport; readonl
  * A verification that concurrent requests share is one attempt. A
  * verification that passes after the client was closed is abandoned before
  * it is used, so it has no outcome: it isn't reported and doesn't change
- * `lastVerification()`. A caller whose signal aborts only stops
+ * `lastVerificationAttempt()`. A caller whose signal aborts only stops
  * waiting, and the attempt runs on to its outcome; but a factory whose
  * signal aborts closes the client that it was creating, so the same rule
  * applies to the attempt that it abandons.
  *
  * It is called without any of the client's state held, so it may call the
- * client, for example `lastVerification()`, which returns the most recent
+ * client, for example `lastVerificationAttempt()`, which returns the most recent
  * attempt: for an attempt that was retried, that is already its retry. It
  * returns nothing and can't change the attempt's outcome; a decision about
  * trust belongs in a {@link VerificationCheck}. A value that it throws
@@ -175,7 +175,7 @@ export type VerificationAttempt = { readonly report: VerificationReport; readonl
  * and rethrows it asynchronously, to the runtime's handler for uncaught
  * errors.
  */
-export type OnVerification = (host: string, attempt: VerificationAttempt) => void;
+export type OnVerificationAttempt = (host: string, attempt: VerificationAttempt) => void;
 
 /**
  * The options of one call on a client, such as `ensureVerified` or
@@ -316,8 +316,8 @@ export interface EnclaveOptions {
    */
   readonly policy?: Policy;
   readonly verificationCheck?: VerificationCheck;
-  /** Called with the outcome of each attempt to verify the enclave; see {@link OnVerification}. */
-  readonly onVerification?: OnVerification;
+  /** Called with the outcome of each attempt to verify the enclave; see {@link OnVerificationAttempt}. */
+  readonly onVerificationAttempt?: OnVerificationAttempt;
   /**
    * How the client obtains each attestation document; undefined fetches it
    * directly from the enclave. Use {@link attestationRelay} to fetch through
@@ -355,9 +355,9 @@ export interface RouterOptions {
   /**
    * Called with the outcome of each attempt to verify a router: each router
    * that discovery tries, the fallback, and the chosen router whenever it is
-   * verified again, each with its own host. See {@link OnVerification}.
+   * verified again, each with its own host. See {@link OnVerificationAttempt}.
    */
-  readonly onVerification?: OnVerification;
+  readonly onVerificationAttempt?: OnVerificationAttempt;
   /**
    * How the client obtains each attestation document, for every router that
    * discovery tries, the fallback and every later verification; undefined
@@ -418,15 +418,14 @@ export interface CatalogEntry {
 export type Catalog = ReadonlyMap<string, CatalogEntry>;
 
 /**
- * A gateway replica that the client has tried to verify, and its last
- * attempt: the report if it passed, or the error that the client reported
- * if it failed, as {@link VerificationAttempt} describes. A failure replaces
- * an earlier success, and a report may have expired since.
+ * A gateway replica that the client has tried to verify: the verification
+ * that its requests are bound to now, if any, and its last attempt at
+ * verification.
  *
  * @experimental The gateway route is new; this API may change without a major version.
  */
-export type ReplicaVerification = {
-  /** The replica that the attempt verified. */
+export interface ReplicaVerification {
+  /** The replica's host. */
   readonly host: string;
   /** The model names that requests through the replica named, sorted; they are not attested identities. */
   readonly models: readonly string[];
@@ -434,7 +433,21 @@ export type ReplicaVerification = {
   readonly reference: string;
   /** The pinned model that the replica serves. */
   readonly pinnedModel: string;
-} & VerificationAttempt;
+  /**
+   * The report of the replica's verification that requests are bound to now:
+   * set while that verification is fresh and has not been discarded, and
+   * undefined otherwise, as for an enclave client's `currentVerification()`.
+   */
+  readonly current: VerificationReport | undefined;
+  /**
+   * The replica's most recent attempt at verification, as
+   * {@link VerificationAttempt} describes. A failed attempt replaces an
+   * earlier success here, though `current` keeps that success while a
+   * failure of a category other than {@link AttestationError} leaves it
+   * valid.
+   */
+  readonly lastAttempt: VerificationAttempt;
+}
 
 /**
  * Configures a {@link GatewayHTTPClient}.
@@ -452,8 +465,8 @@ export interface GatewayOptions {
   readonly policy?: Policy;
   /** Called with each replica's verified facts. A rejected replica is skipped for the next replica of the model. */
   readonly verificationCheck?: VerificationCheck;
-  /** Called with the outcome of each attempt to verify a replica, with the replica's host; see {@link OnVerification}. */
-  readonly onVerification?: OnVerification;
+  /** Called with the outcome of each attempt to verify a replica, with the replica's host; see {@link OnVerificationAttempt}. */
+  readonly onVerificationAttempt?: OnVerificationAttempt;
   /** As for {@link RouterOptions.userCacheSecret}. */
   readonly userCacheSecret?: string;
   /** The gateway's base URL, made to end with `/`; undefined selects Tinfoil's gateway. A query string or fragment is a {@link ConfigurationError}. */

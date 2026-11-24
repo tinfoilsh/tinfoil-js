@@ -203,9 +203,14 @@ export class KeyedTransport {
     return (await this.#cache.verifyOnce(signal)).report.clone();
   }
 
+  /** A copy of the report of the verification that requests are bound to now, or undefined; see {@link VerifiedEnclave.currentVerification}. */
+  currentVerification(): VerificationReport | undefined {
+    return this.#cache.currentVerification();
+  }
+
   /** The outcome of the most recent attempt to verify the enclave, unchecked, or undefined before the first. */
-  lastVerification(): VerificationAttempt | undefined {
-    return this.#cache.lastVerification();
+  lastVerificationAttempt(): VerificationAttempt | undefined {
+    return this.#cache.lastVerificationAttempt();
   }
 
   /** The state a request is sent under, for layers that need the bound fetch itself. */
@@ -222,7 +227,7 @@ export class KeyedTransport {
    * Releases what the current binding and every retired one hold (the
    * mode's pooled connections, if any, requests in flight on them included)
    * and refuses further use: requests and verification calls reject as
-   * closed, while {@link lastVerification} still reports the last attempt.
+   * closed, while {@link lastVerificationAttempt} still reports the last attempt.
    * Closing again does nothing.
    */
   close(): void {

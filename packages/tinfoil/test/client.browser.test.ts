@@ -304,7 +304,7 @@ describe("the gateway in a browser", () => {
     expect(last.headers["x-tinfoil-model"]).toBe("test-model");
     const sent = JSON.parse(new TextDecoder().decode(last.body)) as Record<string, unknown>;
     expect(sent.cache_salt).toMatch(/^[A-Za-z0-9_-]{43}$/);
-    expect(ai.httpClient.lastVerification().map((r) => r.host)).toEqual(["replica.example"]);
+    expect(ai.httpClient.replicas().map((r) => r.host)).toEqual(["replica.example"]);
   });
 });
 

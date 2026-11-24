@@ -50,6 +50,6 @@ function factsJSON(facts: VerifiedFacts | object): unknown {
 }
 
 /** The verified facts of the last attempt of `client`, if it passed: what the removed `current` getter returned. */
-export function lastFacts(client: { lastVerification(): { readonly report?: VerificationReport } | undefined }): VerifiedFacts | undefined {
-  return client.lastVerification()?.report?.verifiedFacts;
+export function lastFacts(client: { lastVerificationAttempt(): { readonly report?: VerificationReport } | undefined }): VerifiedFacts | undefined {
+  return client.lastVerificationAttempt()?.report?.verifiedFacts;
 }

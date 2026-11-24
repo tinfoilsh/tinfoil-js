@@ -86,13 +86,14 @@ const ROUTER_CLIENT_MEMBERS: Members<surface.RouterHTTPClient> = {
   fetch: "property",
   baseURL: "property",
   enclave: "property",
-  lastVerification: "method",
+  currentVerification: "method",
+  lastVerificationAttempt: "method",
   ensureVerified: "method",
   reverify: "method",
   close: "method",
 };
 const ENCLAVE_CLIENT_MEMBERS: Members<surface.EnclaveHTTPClient> = { ...ROUTER_CLIENT_MEMBERS, trust: "getter" };
-const GATEWAY_CLIENT_MEMBERS: Members<surface.GatewayHTTPClient> = { fetch: "property", baseURL: "property", lastVerification: "method", models: "method", ensureVerified: "method", close: "method" };
+const GATEWAY_CLIENT_MEMBERS: Members<surface.GatewayHTTPClient> = { fetch: "property", baseURL: "property", replicas: "method", models: "method", ensureVerified: "method", reverify: "method", close: "method" };
 const UNVERIFIED_CLIENT_MEMBERS: Members<unsafeEntry.UnverifiedClient> = { fetch: "property", baseURL: "property", keyOrigin: "property" };
 /** What the OpenAI subclass adds to the OpenAI client. */
 const OPENAI_CLIENT_MEMBERS = { httpClient: "property", withOptions: "method" } as const satisfies Pick<Members<openaiEntry.OpenAIClient>, "httpClient" | "withOptions">;
@@ -108,7 +109,7 @@ type TypeExports = [
   surface.EHBP,
   surface.VerificationCheck,
   surface.VerificationAttempt,
-  surface.OnVerification,
+  surface.OnVerificationAttempt,
   surface.CallOptions,
   surface.EnclaveOptions,
   surface.RouterOptions,

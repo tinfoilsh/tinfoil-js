@@ -554,7 +554,7 @@ describe("GatewayTransport", () => {
     const reported: [string, boolean][] = [];
     const g = gateway();
     const t = transport({
-      onVerification: (host, attempt) => void reported.push([host, attempt.report !== undefined && attempt.error === undefined]),
+      onVerificationAttempt: (host, attempt) => void reported.push([host, attempt.report !== undefined && attempt.error === undefined]),
       policy: await GatewayPolicy.create(PINS, undefined, fixed(perHost())),
       gatewayFetch: g.fetch,
       documentFetch: async (input) => {
@@ -569,14 +569,16 @@ describe("GatewayTransport", () => {
     expect([...new Set(verified)]).toEqual(order);
     expect(g.seen).toEqual([{ seal: order[2], enclave: `https://${order[2]}`, model: MODEL, prefix: SPEC_PREFIX }]);
     // Every replica tried keeps its own last attempt: the two that failed their fetch, and the one sealed to.
-    const attempts = t.lastVerification();
+    const attempts = t.replicas();
     expect(attempts.map((r) => r.host)).toEqual([...order].sort());
     const passed = attempts.find((r) => r.host === order[2])!;
     expect(passed).toMatchObject({ host: order[2], models: [MODEL], reference: "tinfoilsh/test", pinnedModel: MODEL });
-    expect(passed.report!.verifiedFacts!.hpkePublicKey).toBe(keyOf(order[2]!));
+    expect(passed.lastAttempt.report!.verifiedFacts!.hpkePublicKey).toBe(keyOf(order[2]!));
+    expect(passed.current?.toJSON()).toEqual(passed.lastAttempt.report!.toJSON());
     for (const failed of attempts.filter((r) => r.host !== order[2])) {
-      expect(failed.report).toBeUndefined();
-      expect(failed.error).toBeInstanceOf(NetworkError);
+      expect(failed.lastAttempt.report).toBeUndefined();
+      expect(failed.lastAttempt.error).toBeInstanceOf(NetworkError);
+      expect(failed.current).toBeUndefined();
       expect(failed.models).toEqual([]);
     }
     // Each attempt is reported with its replica's host: a failed fetch and its retry for each failing replica, then the pass.
@@ -637,11 +639,130 @@ describe("GatewayTransport", () => {
     expect(pins).toEqual([{ repo: "tinfoilsh/test@v1", project: "tinfoilsh/test@v1" }]);
     await t.ensureVerified(MODEL);
     expect(pins).toHaveLength(1);
-    expect(t.lastVerification()[0]).toMatchObject({ host: order[1], reference: "tinfoilsh/test@v1", pinnedModel: MODEL, models: [] });
+    expect(t.replicas()[0]).toMatchObject({ host: order[1], reference: "tinfoilsh/test@v1", pinnedModel: MODEL, models: [] });
     await expect(t.ensureVerified("unlisted")).rejects.toBeInstanceOf(ConfigurationError);
     const aborted = new AbortController();
     aborted.abort(new Error("stop"));
     await expect(t.ensureVerified("other", aborted.signal)).rejects.toThrow(/stop/);
+  });
+
+  describe("reverify and the replicas' current verifications", () => {
+    /**
+     * A transport over two of the model's replicas, `first` and `second` in
+     * the order that ensureVerified tries them. Each attestation fetch serves
+     * `<host>#<n>`, whose report carries that tag as its code tag, unless
+     * `fail` says that the fetch fails ("network") or that the verifier
+     * rejects the document ("attestation").
+     */
+    async function reverifying(): Promise<{ t: GatewayTransport; first: string; second: string; fetches: Map<string, number>; fail: (host: string, n: number) => "network" | "attestation" | undefined; now: { ms: number } }> {
+      const hosts = HOSTS.slice(0, 2);
+      const [first, second] = (await rank(hosts, MODEL, undefined)) as [string, string];
+      const fetches = new Map<string, number>();
+      const state = { t: undefined as unknown as GatewayTransport, first, second, fetches, fail: (_host: string, _n: number): "network" | "attestation" | undefined => undefined, now: { ms: Date.now() } };
+      const tagged = {
+        checkPinVerifiability: () => {},
+        verifyV3At: async (doc: Uint8Array) => {
+          const text = new TextDecoder().decode(doc);
+          if (text.startsWith("reject:")) throw new Error(`the document of ${text.slice(7)} fails verification`);
+          const host = text.split("#")[0]!;
+          return verifiedReport({
+            cryptoMaterial: [
+              { id: "tls", format: KEY_SPKI_FP_SHA256_V1_FORMAT, data: "ab".repeat(32) },
+              { id: "hpke", format: KEY_X25519_HPKE_V1_FORMAT, data: keyOf(host) },
+            ],
+            tlsPublicKeyFP: "ab".repeat(32),
+            hpkePublicKey: keyOf(host),
+            codeTag: text,
+            freshnessExpiresAt: new Date(state.now.ms + 3_600_000),
+          });
+        },
+      } as unknown as Verifier;
+      state.t = transport({
+        policy: await GatewayPolicy.create(PINS, undefined, fixed(tagged)),
+        gatewayFetch: gateway().fetch,
+        catalog: () => catalogOf({ [MODEL]: { repo: "tinfoilsh/test", hosts } }),
+        clock: () => new Date(state.now.ms),
+        documentFetch: async (input) => {
+          const host = enclaveOf(input);
+          const n = (fetches.get(host) ?? 0) + 1;
+          fetches.set(host, n);
+          const failure = state.fail(host, n);
+          if (failure === "network") return new Response("down", { status: 503 });
+          return new Response(failure === "attestation" ? `reject:${host}` : `${host}#${n}`);
+        },
+      });
+      return state;
+    }
+
+    const tagOf = (r: VerificationReport | undefined): string | undefined => (r?.verifiedFacts as { codeTag?: string } | undefined)?.codeTag;
+
+    it("verifies the replica in use again, and no other", async () => {
+      const g = await reverifying();
+      expect(tagOf(await g.t.ensureVerified(MODEL))).toBe(`${g.first}#1`);
+      const reverified = await g.t.reverify(MODEL);
+      expect(tagOf(reverified)).toBe(`${g.first}#2`);
+      expect(g.fetches.get(g.second)).toBeUndefined();
+      const [entry] = g.t.replicas();
+      expect(g.t.replicas()).toHaveLength(1);
+      expect(entry!.host).toBe(g.first);
+      expect(tagOf(entry!.current)).toBe(`${g.first}#2`);
+      expect(tagOf(entry!.lastAttempt.report)).toBe(`${g.first}#2`);
+      expect(entry!.lastAttempt.error).toBeUndefined();
+      expect(tagOf(await g.t.ensureVerified(MODEL))).toBe(`${g.first}#2`);
+    });
+
+    it("returns a failure that keeps the replica's verification, which stays current", async () => {
+      const g = await reverifying();
+      await g.t.ensureVerified(MODEL);
+      g.fail = (host, n) => (host === g.first && n > 1 ? "network" : undefined);
+      await expect(g.t.reverify(MODEL)).rejects.toBeInstanceOf(NetworkError);
+      expect(g.fetches.get(g.second)).toBeUndefined();
+      const [entry] = g.t.replicas();
+      expect(tagOf(entry!.current)).toBe(`${g.first}#1`);
+      expect(entry!.lastAttempt.report).toBeUndefined();
+      expect(entry!.lastAttempt.error).toBeInstanceOf(NetworkError);
+      expect(tagOf(await g.t.ensureVerified(MODEL))).toBe(`${g.first}#1`);
+    });
+
+    it("moves on to the next replica when an attestation failure discards the verification", async () => {
+      const g = await reverifying();
+      await g.t.ensureVerified(MODEL);
+      g.fail = (host, n) => (host === g.first && n > 1 ? "attestation" : undefined);
+      const reverified = await g.t.reverify(MODEL);
+      expect(tagOf(reverified)).toBe(`${g.second}#1`);
+      const byHost = new Map(g.t.replicas().map((e) => [e.host, e]));
+      expect(byHost.get(g.first)!.current).toBeUndefined();
+      expect(byHost.get(g.first)!.lastAttempt.error).toBeInstanceOf(AttestationError);
+      expect(tagOf(byHost.get(g.second)!.current)).toBe(`${g.second}#1`);
+      expect(tagOf(byHost.get(g.second)!.lastAttempt.report)).toBe(`${g.second}#1`);
+      const fetches = g.fetches.get(g.first)!;
+      expect(tagOf(await g.t.ensureVerified(MODEL))).toBe(`${g.second}#1`);
+      expect(g.fetches.get(g.first)!).toBeGreaterThan(fetches);
+    });
+
+    it("returns the last failure when no replica passes or keeps a verification", async () => {
+      const g = await reverifying();
+      await g.t.ensureVerified(MODEL);
+      g.fail = (host, n) => (host === g.first ? (n > 1 ? "attestation" : undefined) : "network");
+      await expect(g.t.reverify(MODEL)).rejects.toBeInstanceOf(NetworkError);
+      expect(g.t.replicas().every((e) => e.current === undefined)).toBe(true);
+    });
+
+    it("refuses a model without a pin and verifies nothing", async () => {
+      const g = await reverifying();
+      await expect(g.t.reverify("unpinned")).rejects.toBeInstanceOf(ConfigurationError);
+      expect(g.fetches.size).toBe(0);
+      expect(g.t.replicas()).toEqual([]);
+    });
+
+    it("leaves a replica without a current verification once it expires", async () => {
+      const g = await reverifying();
+      const ensured = await g.t.ensureVerified(MODEL);
+      g.now.ms += 2 * 3_600_000;
+      const [entry] = g.t.replicas();
+      expect(entry!.current).toBeUndefined();
+      expect(tagOf(entry!.lastAttempt.report)).toBe(tagOf(ensured));
+    });
   });
 
   it("refuses a model that has no pin, for a request and for ensureVerified, without contacting a replica", async () => {
@@ -662,7 +783,7 @@ describe("GatewayTransport", () => {
     await expect(t.fetch("https://gateway.example/v1/chat/completions", { method: "POST", body: '{"model":"free"}', headers: { "content-type": "application/json" } })).rejects.toThrow(/model "free" is not pinned/);
     expect(documents).toEqual([]);
     expect(g.seen).toEqual([]);
-    expect(t.lastVerification()).toEqual([]);
+    expect(t.replicas()).toEqual([]);
   });
 
   it("refuses a model that a catalog refresh adds unless it is pinned, without contacting a replica", async () => {

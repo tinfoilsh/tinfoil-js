@@ -23,7 +23,7 @@ import {
   type VerifiedFacts,
 } from "@tinfoilsh/verifier";
 import { AttestationError, ConfigurationError, messageOf, NetworkError, stripCategory, TinfoilError, withMessage } from "../errors.js";
-import type { AttestationFetcher, Fetch, OnVerification, VerificationAttempt, VerificationCheck } from "../options.js";
+import type { AttestationFetcher, Fetch, OnVerificationAttempt, VerificationAttempt, VerificationCheck } from "../options.js";
 import { fetchDocument, fetchDocumentWith } from "./fetch.js";
 
 export const VERIFICATION_RETRIES = 1;
@@ -48,7 +48,7 @@ export interface EnclaveConfig {
   /** Called with each verification that passes the verifier; a throw rejects it without a retry. */
   readonly verificationCheck?: VerificationCheck;
   /** Called with the outcome of each attempt to verify the enclave, through {@link Enclave.notify}. */
-  readonly onVerification?: OnVerification;
+  readonly onVerificationAttempt?: OnVerificationAttempt;
   /** How each attestation document is obtained; undefined fetches it directly, or through `relay`. */
   readonly fetchAttestation?: AttestationFetcher;
   /** Seams for tests: the fetch used for documents, the clock, the nonce source and the retry delay. */
@@ -72,7 +72,7 @@ export class Enclave {
   readonly #pin: Required<Pin>;
   readonly #verifier: Verifier;
   readonly #check: VerificationCheck | undefined;
-  readonly #onVerification: OnVerification | undefined;
+  readonly #onVerificationAttempt: OnVerificationAttempt | undefined;
   readonly #fetch: Fetch;
   readonly #fetchAttestation: AttestationFetcher | undefined;
   readonly #clock: () => Date;
@@ -85,7 +85,7 @@ export class Enclave {
     this.#pin = Object.freeze({ repo: config.pin.repo ?? "", project: config.pin.project ?? "" });
     this.#verifier = verifier;
     this.#check = config.verificationCheck;
-    this.#onVerification = config.onVerification;
+    this.#onVerificationAttempt = config.onVerificationAttempt;
     this.#fetch = config.fetch ?? ((input, init) => fetch(input, init));
     this.#fetchAttestation = config.fetchAttestation;
     this.#clock = config.clock ?? (() => new Date());
@@ -136,15 +136,15 @@ export class Enclave {
 
   /**
    * Reports the outcome of an attempt to verify the enclave to the
-   * `onVerification` callback, if there is one. The caller passes a
+   * `onVerificationAttempt` callback, if there is one. The caller passes a
    * frozen attempt whose report no one else holds. A throw from the callback
    * doesn't change the outcome or reach the caller: it is rethrown
    * asynchronously, to the runtime's handler for uncaught errors.
    */
   notify(attempt: VerificationAttempt): void {
-    if (this.#onVerification === undefined) return;
+    if (this.#onVerificationAttempt === undefined) return;
     try {
-      this.#onVerification(this.#host, attempt);
+      this.#onVerificationAttempt(this.#host, attempt);
     } catch (err) {
       queueMicrotask(() => {
         throw err;

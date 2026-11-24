@@ -65,7 +65,7 @@ export async function createGatewayHTTPClient(options: GatewayOptions, seams: Ga
     catalog: options.catalog,
     policy,
     verificationCheck: options.verificationCheck,
-    onVerification: options.onVerification,
+    onVerificationAttempt: options.onVerificationAttempt,
     secret,
     catalogFetch: seams.catalogFetch,
     documentFetch: seams.documentFetch,
@@ -141,21 +141,45 @@ export class GatewayHTTPClient {
   }
 
   /**
-   * The last attempt to verify each replica that the client has tried to
-   * verify, failed replicas included, without network I/O, sorted by host:
-   * its `report` if it passed, or its `error` if it failed, as
-   * {@link ReplicaVerification} describes. A report is not checked again: it
-   * may have expired or been rejected since. A new array of copies on each
-   * call.
+   * Verifies again the replica that {@link ensureVerified} would return for
+   * `model`, even if its cached verification is still valid, and returns the
+   * new report. It tries the model's replicas in the order that
+   * `ensureVerified` tries them, verifying each again, and stops at the first
+   * that passes, or that fails but keeps a valid verification, which requests
+   * for `model` still use; it then rejects with that failure. Each failure
+   * follows the rule that {@link EnclaveHTTPClient.reverify} describes, for
+   * its replica: an {@link AttestationError} discards the replica's cached
+   * verification, so that `reverify` moves on to the next replica, as
+   * `ensureVerified` then does, and a failure of any other category keeps it
+   * while it is still valid. When no replica passes or keeps a valid
+   * verification, it rejects with the last failure. A model without a pin is
+   * a {@link ConfigurationError}, and nothing is verified.
    */
-  lastVerification(): ReplicaVerification[] {
-    return this.#transport.lastVerification();
+  reverify(model: string, options?: CallOptions): Promise<VerificationReport> {
+    return this.#transport.reverify(model, options?.signal);
   }
 
   /**
-   * Refuses further use: `fetch`, `models` and `ensureVerified` reject with
-   * a {@link ConfigurationError} afterwards, and no replica is verified
-   * again; `lastVerification` still reports the replicas' last attempts.
+   * One entry for each replica that the client has tried to verify, failed
+   * replicas included, without network I/O, sorted by host. An entry's
+   * `current` follows the rule of {@link EnclaveHTTPClient.currentVerification}
+   * for its replica: the report of the replica's verification while it is
+   * fresh and has not been discarded, and undefined otherwise. Its
+   * `lastAttempt` holds the replica's most recent attempt, as
+   * {@link EnclaveHTTPClient.lastVerificationAttempt} describes: a failed
+   * attempt replaces an earlier success there, though `current` keeps that
+   * success while the failure leaves it valid. A new array of copies on each
+   * call.
+   */
+  replicas(): ReplicaVerification[] {
+    return this.#transport.replicas();
+  }
+
+  /**
+   * Refuses further use: `fetch`, `models`, `ensureVerified` and `reverify`
+   * reject with a {@link ConfigurationError} afterwards, and no replica is
+   * verified again; `replicas` still reports the replicas' last attempts,
+   * with no current verification.
    * Requests are sealed and sent through the runtime's fetch, or the `fetch`
    * option, so the client holds no connections of its own to release; a sealed exchange already
    * under way completes, while a request still preparing, verifying or

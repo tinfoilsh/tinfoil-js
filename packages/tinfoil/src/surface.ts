@@ -27,7 +27,7 @@ export type {
   EHBP,
   VerificationCheck,
   VerificationAttempt,
-  OnVerification,
+  OnVerificationAttempt,
   CallOptions,
   EnclaveOptions,
   RouterOptions,

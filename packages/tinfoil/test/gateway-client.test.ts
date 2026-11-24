@@ -121,7 +121,7 @@ describe("GatewayHTTPClient.create", () => {
     expect(() => ((client as { baseURL: string }).baseURL = "https://evil.example/")).toThrow(TypeError);
     expect(client.baseURL).toBe(GATEWAY_URL);
     expect(await client.models()).toEqual(["other", "test-model"]);
-    expect(client.lastVerification()).toEqual([]);
+    expect(client.replicas()).toEqual([]);
     const supplied = await createGatewayHTTPClient({ modelPins: PINS, url: GATEWAY_URL, catalog: () => new Map() as Catalog }, { ...seams(), verifier: verifier(gateway.publicKeyHex) });
     expect(await supplied.models()).toEqual([]);
     const bare = await createGatewayHTTPClient({ modelPins: PINS, url: "https://gateway.example/v1" }, { ...seams(), verifier: verifier(gateway.publicKeyHex) });
@@ -171,10 +171,11 @@ describe("GatewayHTTPClient", () => {
     expect(last.headers["x-tinfoil-seal"]).toMatch(/^replica-[ab]\.example$/);
     expect(last.headers["x-tinfoil-model"]).toBe("test-model");
     expect(last.headers["x-tinfoil-cache-prefix"]).toMatch(/^[0-9a-f]{64}$/);
-    const current = client.lastVerification();
+    const current = client.replicas();
     expect(current).toHaveLength(1);
     expect(current[0]).toMatchObject({ reference: "tinfoilsh/test", pinnedModel: "test-model", models: ["test-model"] });
-    expect(current[0]!.report!.verifiedFacts!.hpkePublicKey).toBe(gateway.publicKeyHex);
+    expect(current[0]!.lastAttempt.report!.verifiedFacts!.hpkePublicKey).toBe(gateway.publicKeyHex);
+    expect(current[0]!.current?.toJSON()).toEqual(current[0]!.lastAttempt.report!.toJSON());
     expect((await client.ensureVerified("test-model")).verifiedFacts?.hpkePublicKey).toBe(gateway.publicKeyHex);
   });
 
@@ -195,7 +196,7 @@ describe("GatewayHTTPClient", () => {
     const fetched = own.calls.length;
     await c.close();
     await c.close();
-    expect(c.lastVerification()).toHaveLength(1);
+    expect(c.replicas()).toHaveLength(1);
     await expect(c.models()).rejects.toThrow(/client is closed/);
     await expect(c.ensureVerified("test-model")).rejects.toBeInstanceOf(ConfigurationError);
     await expect(c.fetch(`${GATEWAY_URL}chat/completions`, { method: "POST", body: '{"model":"test-model"}', headers: { "content-type": "application/json" } })).rejects.toThrow(/client is closed/);
@@ -214,7 +215,7 @@ describe("GatewayHTTPClient", () => {
     await expect(client.fetch(`${GATEWAY_URL}chat/completions`, { method: "POST", body: '{"model":"other"}', headers: { "content-type": "application/json" } })).rejects.toThrow(/model "other" is not pinned/);
     expect(s.calls).toHaveLength(before);
     expect(gateway.seen).toHaveLength(sealed);
-    expect(client.lastVerification().every((r) => r.pinnedModel === "test-model")).toBe(true);
+    expect(client.replicas().every((r) => r.pinnedModel === "test-model")).toBe(true);
     await expect(client.fetch(`${GATEWAY_URL}models`)).rejects.toThrow(/model "" is not pinned/);
     const swapped = await createGatewayHTTPClient(
       { url: GATEWAY_URL, modelPins: new Map([["other", { repo: "tinfoilsh/pinned-elsewhere" }]]) },
@@ -234,11 +235,13 @@ describe("GatewayHTTPClient", () => {
     expect(res.status).toBe(200);
     expect(checked).toHaveLength(2);
     // Both replicas were tried: the rejected one keeps its check's error, and the one sealed to its report.
-    const attempts = c.lastVerification();
+    const attempts = c.replicas();
     expect(attempts).toHaveLength(2);
-    const passed = attempts.filter((r) => r.report !== undefined);
+    const passed = attempts.filter((r) => r.lastAttempt.report !== undefined);
     expect(passed).toHaveLength(1);
-    expect(attempts.find((r) => r.error !== undefined)?.error?.message).toMatch(/not this replica/);
+    const rejected = attempts.find((r) => r.lastAttempt.error !== undefined);
+    expect(rejected?.lastAttempt.error?.message).toMatch(/not this replica/);
+    expect(rejected?.current).toBeUndefined();
     expect(gateway.seen[gateway.seen.length - 1]!.headers["x-tinfoil-seal"]).toBe(passed[0]!.host);
   });
 
@@ -253,11 +256,12 @@ describe("GatewayHTTPClient", () => {
     const c = await createGatewayHTTPClient({ modelPins: PINS, url: GATEWAY_URL, verificationCheck: (v) => void checked.push(v.hpkePublicKey!) }, { ...failing, verifier: verifier(gateway.publicKeyHex) });
     const res = await c.fetch(`${GATEWAY_URL}chat/completions`, { method: "POST", body: '{"model":"test-model"}', headers: { "content-type": "application/json", "x-raw": "1" } });
     expect(res.status).toBe(200);
-    expect(c.lastVerification().filter((r) => r.report !== undefined).map((r) => r.host)).toEqual(["replica-b.example"]);
+    expect(c.replicas().filter((r) => r.lastAttempt.report !== undefined).map((r) => r.host)).toEqual(["replica-b.example"]);
     // replica-a, if it was tried first, keeps the failure of its attestation fetch.
-    for (const failed of c.lastVerification().filter((r) => r.report === undefined)) {
+    for (const failed of c.replicas().filter((r) => r.lastAttempt.report === undefined)) {
       expect(failed.host).toBe("replica-a.example");
-      expect(failed.error).toBeInstanceOf(NetworkError);
+      expect(failed.lastAttempt.error).toBeInstanceOf(NetworkError);
+      expect(failed.current).toBeUndefined();
     }
     expect(checked).toEqual([gateway.publicKeyHex]);
     expect(() => new (GatewayHTTPClient as any)(Symbol("x"))).toThrow(ConfigurationError);
