@@ -182,6 +182,10 @@ export const OPENAI_WEBSOCKETS_REFUSED =
 export const OPENAI_WEBSOCKETS_REFUSED_IN_BROWSERS =
   "the openai package's WebSocket classes (such as OpenAIRealtimeWebSocket) can't be given a Tinfoil OpenAI client: they open their own WebSocket to the client's base URL, outside the attested transport, and a WebSocket can't be pinned to the attested key in a browser, which doesn't expose the server certificate to scripts";
 
+/** Why a client can't be created over an openai release whose internals it can't use to refuse the WebSocket classes. */
+export const UNSUPPORTED_OPENAI_RELEASE =
+  "this release of the openai package lacks the internal members (_buildWebSocketHeaders, _callApiKey, _hasApiKeyProvider and _options.apiKey) through which a Tinfoil OpenAI client refuses the package's WebSocket classes, so the client can't be created over it; install a release that tinfoil supports";
+
 function webSocketRefusal(): ConfigurationError {
   return new ConfigurationError(isServerRuntime() ? OPENAI_WEBSOCKETS_REFUSED : OPENAI_WEBSOCKETS_REFUSED_IN_BROWSERS);
 }
@@ -222,6 +226,12 @@ function ownAPIKey(client: OpenAI): ClientOptions["apiKey"] {
  * call of those methods makes.
  */
 function refuseOpenAIWebSockets(client: OpenAI): void {
+  // An openai release without these members would leave the classes unrefused, so it is refused instead.
+  const internals = client as unknown as Record<string, unknown>;
+  const options = internals._options as ClientOptions | undefined;
+  if (typeof internals._buildWebSocketHeaders !== "function" || typeof internals._callApiKey !== "function" || typeof internals._hasApiKeyProvider !== "function" || typeof options !== "object" || options === null || !Object.prototype.hasOwnProperty.call(options, "apiKey")) {
+    throw new ConfigurationError(UNSUPPORTED_OPENAI_RELEASE);
+  }
   const fixed = { writable: false, configurable: false };
   Object.defineProperty(client, "_buildWebSocketHeaders", {
     ...fixed,
@@ -245,7 +255,6 @@ function refuseOpenAIWebSockets(client: OpenAI): void {
       }
     },
   });
-  const options = (client as unknown as { _options: ClientOptions })._options;
   const apiKey = options.apiKey;
   Object.defineProperty(options, "apiKey", {
     configurable: false,

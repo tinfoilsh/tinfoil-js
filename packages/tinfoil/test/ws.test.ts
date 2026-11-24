@@ -30,7 +30,7 @@ import { PeerLacksKeyError } from "../src/internal/transport/transport.js";
 import { isCertificateError } from "../src/internal/transport/pin-errors.js";
 import { checkWebSocketCapability, webSocketURL } from "../src/internal/websocket.js";
 import { checkedWsOptions } from "../src/internal/ws-options.js";
-import { OPENAI_WEBSOCKETS_REFUSED, type OpenAIClient, type OpenAIClientOptions } from "../src/openai-client.js";
+import { OPENAI_WEBSOCKETS_REFUSED, OpenAIClient, UNSUPPORTED_OPENAI_RELEASE, type OpenAIClientOptions } from "../src/openai-client.js";
 import type { Fetch, PinnedWebSocket } from "../src/options.js";
 import { createRealtimeWebSocket } from "../src/realtime.js";
 import { createWebSocket, pinnedWebSocketOptions } from "../src/websocket.js";
@@ -527,6 +527,21 @@ describe("the openai package's WebSocket classes given a Tinfoil OpenAI client",
     expect(() => (options as { apiKey?: unknown }).apiKey).toThrow(ConfigurationError);
     await expect(refusal(() => new ResponsesWS(ai))).resolves.toBeInstanceOf(ConfigurationError);
     await expectNothingOpened();
+  });
+
+  it("refuses to create a client over an openai release that lacks the members through which it refuses the classes", async () => {
+    const http = (await tinfoilClient({ apiKey: "k" })).httpClient;
+    const prototype = OpenAI.prototype as unknown as Record<string, unknown>;
+    for (const member of ["_buildWebSocketHeaders", "_callApiKey", "_hasApiKeyProvider"]) {
+      const saved = prototype[member];
+      delete prototype[member];
+      try {
+        expect(() => new OpenAIClient(http, {}, { apiKey: "k" })).toThrow(UNSUPPORTED_OPENAI_RELEASE);
+      } finally {
+        prototype[member] = saved;
+      }
+    }
+    expect(() => new OpenAIClient(http, {}, { apiKey: "k" })).not.toThrow();
   });
 
   it("leaves the client's own credential handling in place", async () => {
