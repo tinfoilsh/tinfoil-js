@@ -252,7 +252,7 @@ describe("OpenAI clients in a browser", () => {
     const http = await createEnclaveHTTPClient(ENCLAVE, { kind: "repoPin", repo: "tinfoilsh/repo" }, {}, { ...seams(), verifier: verifier(peer.publicKeyHex) });
     const verified = peer.seen.length;
     for (const options of [{ apiKey: "k" }, { apiKey: "k", dangerouslyAllowBrowser: true }]) {
-      expect(() => new OpenAIClient(http, {}, options)).toThrow(/belongs on a server; in a browser, give a bearerToken/);
+      expect(() => new OpenAIClient(http, options)).toThrow(/belongs on a server; in a browser, give a bearerToken/);
     }
     expect(peer.seen.length).toBe(verified);
   });

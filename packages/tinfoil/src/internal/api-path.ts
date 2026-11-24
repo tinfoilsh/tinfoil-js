@@ -43,7 +43,7 @@ function decodeBytes(segment: string): string {
 }
 
 /**
- * Requires an RFC 3986 `path-absolute` of path characters and well-formed
+ * Requires a non-empty RFC 3986 `path-absolute` of path characters and well-formed
  * `%XX` escapes, and refuses a leading `//`, a query, a fragment, a "." or
  * ".." segment, percent-encoded or not, and an encoded slash or backslash,
  * so that it can only name a path under its root. Any other well-formed
@@ -51,6 +51,7 @@ function decodeBytes(segment: string): string {
  */
 export function validateAPIPath(apiPath: string): void {
   if (typeof apiPath !== "string") throw new ConfigurationError("invalid API path: it must be a string, such as /v1/");
+  if (apiPath === "") throw new ConfigurationError("invalid API path: it is empty; leave apiPath out for the default /v1/");
   const invalid = (why: string): ConfigurationError => new ConfigurationError(`invalid API path ${JSON.stringify(apiPath)}: ${why}`);
   if (!apiPath.startsWith("/") || apiPath.startsWith("//")) throw invalid("it must be an absolute path, such as /v1/");
   if (apiPath.includes("?") || apiPath.includes("#")) throw invalid("it must not carry a query or a fragment");
@@ -64,13 +65,13 @@ export function validateAPIPath(apiPath: string): void {
 }
 
 /**
- * `apiPath`, or {@link DEFAULT_API_PATH} when it is empty, joined under
+ * `apiPath`, or {@link DEFAULT_API_PATH} when it is undefined, joined under
  * `root`, a proxy URL, an origin or a gateway URL, whether or not `root`
- * ends with a slash.
+ * ends with a slash. An empty `apiPath` is a {@link ConfigurationError}.
  * The result ends with a slash, so that request paths join under it.
  */
-export function joinAPIPath(root: string, apiPath: string): string {
-  const path = apiPath === "" ? DEFAULT_API_PATH : apiPath;
+export function joinAPIPath(root: string, apiPath: string | undefined): string {
+  const path = apiPath ?? DEFAULT_API_PATH;
   validateAPIPath(path);
   const joined = (root.endsWith("/") ? root.slice(0, -1) : root) + path;
   return joined.endsWith("/") ? joined : `${joined}/`;
@@ -88,5 +89,5 @@ export function apiBaseURL(httpClient: unknown, apiPath: string | undefined): st
     const what = httpClient === null ? "null" : typeof httpClient === "object" ? (httpClient.constructor?.name ?? "an object") : typeof httpClient;
     throw new ConfigurationError(`the HTTP client must be an EnclaveHTTPClient, RouterHTTPClient or GatewayHTTPClient from its factory, not ${what}`);
   }
-  return joinAPIPath((httpClient as { readonly baseURL: string }).baseURL, apiPath ?? "");
+  return joinAPIPath((httpClient as { readonly baseURL: string }).baseURL, apiPath);
 }

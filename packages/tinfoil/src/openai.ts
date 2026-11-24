@@ -7,7 +7,7 @@
  * OpenAI library. Like `tinfoil/ai-sdk`, it has no `browser` condition: the
  * package's browser field substitutes the internal modules that differ.
  */
-export { OpenAIClient, createClient, type AttestedHTTPClient, type OpenAIOptions, type OpenAIClientOptions } from "./openai-client.js";
+export { OpenAIClient, createClient, type AttestedHTTPClient, type OpenAIClientOptions } from "./openai-client.js";
 export { createRealtimeWebSocket } from "./realtime.js";
 export type { RealtimeOptions } from "./options.js";
 

@@ -10,7 +10,9 @@
  * take `fetch` or `baseURL` (a clone ignores one passed from untyped code)
  * and keeps the attested transport. A base URL that the caller sets through
  * the OpenAI options, through `OPENAI_BASE_URL` in the environment, or
- * through `dataResidency` has no effect; `apiPath` chooses the API path. The
+ * through `dataResidency` has no effect; the `apiPath` option chooses the
+ * API path, and is taken out of the options before the rest reach the
+ * OpenAI client. The
  * OpenAI options that would choose another transport (`provider`,
  * `workloadIdentity`, `credential` and `x509Transport`) are refused, before
  * any network I/O and by `withOptions`. Per-request `fetchOptions` are
@@ -40,7 +42,7 @@ import OpenAI, { type ClientOptions } from "openai";
 import type { EnclaveHTTPClient } from "./enclave-client.js";
 import { ConfigurationError } from "./errors.js";
 import type { GatewayHTTPClient } from "./gateway-client.js";
-import { apiBaseURL } from "./internal/api-path.js";
+import { apiBaseURL, validateAPIPath } from "./internal/api-path.js";
 import { checkAPIKeyRuntime, registerCredential, type CredentialResolver } from "./internal/credential.js";
 import { asyncDispose } from "./internal/dispose.js";
 import type { RuntimeGlobals } from "./internal/platform.js";
@@ -54,19 +56,6 @@ import { createRouterHTTPClient, type RouterClientSeams, type RouterHTTPClient }
  * `null` or an object of the caller's own, is a {@link ConfigurationError}.
  */
 export type AttestedHTTPClient = EnclaveHTTPClient | RouterHTTPClient | GatewayHTTPClient;
-
-/** Configures an {@link OpenAIClient}: the part of where requests go that the caller may choose. */
-export interface OpenAIOptions {
-  /**
-   * The path of the API, joined under the HTTP client's base URL: the EHBP
-   * proxy or, when there is none, the enclave's origin, or the gateway's
-   * URL; undefined or "" selects `/v1/`. It must be an absolute path
-   * (starting with `/` but not `//`), without a query, a fragment, an
-   * encoded slash, or a "." or ".." segment, percent-encoded or not;
-   * anything else is a {@link ConfigurationError}.
-   */
-  readonly apiPath?: string;
-}
 
 /**
  * The OpenAI options that would route requests away from the attested
@@ -87,17 +76,29 @@ const FORBIDDEN_TRANSPORT_OPTIONS = ["provider", "workloadIdentity", "credential
 const IGNORED_BASE_URL_OPTIONS = ["baseURL", "dataResidency"] as const satisfies readonly (keyof ClientOptions)[];
 
 /**
- * The OpenAI client's own options that an {@link OpenAIClient} takes:
- * everything but the transport that it is bound to, the base URL that it
- * sets itself (`baseURL` and `dataResidency`, which have no effect when
- * untyped code passes one), and the options that would choose another
- * transport (`provider`, `workloadIdentity`, `credential` and
- * `x509Transport`), which are a {@link ConfigurationError}. An `apiKey` is
- * accepted only where the runtime is a server (Node or Bun); anywhere else,
+ * The options that an {@link OpenAIClient} takes: the OpenAI client's own
+ * options, with `bearerToken` and `apiPath` beside them. They are everything
+ * but the transport that the client is bound to, the base URL that it sets
+ * itself (`baseURL` and `dataResidency`, which have no effect when untyped
+ * code passes one), and the options that would choose another transport
+ * (`provider`, `workloadIdentity`, `credential` and `x509Transport`), which
+ * are a {@link ConfigurationError}. An `apiKey` is accepted only where the
+ * runtime is a server (Node or Bun); anywhere else,
  * `dangerouslyAllowBrowser` included, it is a {@link ConfigurationError}
  * naming `bearerToken` as the credential to give.
  */
 export type OpenAIClientOptions = Omit<ClientOptions, "fetch" | "baseURL" | "dataResidency" | "provider" | "workloadIdentity" | "credential" | "x509Transport"> & {
+  /**
+   * The path of the API, joined under the HTTP client's base URL: the EHBP
+   * proxy or, when there is none, the enclave's origin, or the gateway's
+   * URL. Leave it out for `/v1/`. It must be an absolute path (starting with
+   * `/` but not `//`) of RFC 3986 path characters, without a query, a
+   * fragment, an encoded slash or backslash, or a "." or ".." segment,
+   * percent-encoded or not; anything else, the empty string included, is a
+   * {@link ConfigurationError}. It configures the Tinfoil client and is not
+   * passed to the OpenAI client.
+   */
+  readonly apiPath?: string;
   /**
    * A credential a browser page may hold, such as a short-lived token from
    * the application's own sign-in: sent as the API key, and allows browser
@@ -123,13 +124,14 @@ function refuseTransportOptions(options: object): void {
 }
 
 /**
- * Checks the OpenAI options a factory is given before any network I/O: the
- * options that would choose another transport, and an `apiKey` outside a
- * server.
+ * Checks the options a factory is given before any network I/O: the
+ * options that would choose another transport, an `apiKey` outside a
+ * server, and the API path.
  */
 function checkOpenAIOptions(options: OpenAIClientOptions, globals: RuntimeGlobals | undefined): void {
   refuseTransportOptions(options);
   checkAPIKeyRuntime(options.apiKey, globals);
+  if (options.apiPath !== undefined) validateAPIPath(options.apiPath);
 }
 
 /**
@@ -143,19 +145,17 @@ function openAIClientOptions(options: OpenAIClientOptions): Omit<ClientOptions, 
   const { bearerToken, ...given } = options;
   // What is left of these options is unset; the OpenAI client takes most of
   // them as unset but refuses a null `credential`, so none of them reach it.
-  // The base URL options are dropped whatever their value, so they have no effect.
+  // The base URL options are dropped whatever their value, so they have no
+  // effect, and the API path configures this client, not the OpenAI client.
   const rest: Omit<ClientOptions, "fetch" | "baseURL"> = { ...given };
-  for (const key of [...FORBIDDEN_TRANSPORT_OPTIONS, ...IGNORED_BASE_URL_OPTIONS]) delete (rest as Record<string, unknown>)[key];
+  for (const key of [...FORBIDDEN_TRANSPORT_OPTIONS, ...IGNORED_BASE_URL_OPTIONS, "apiPath"]) delete (rest as Record<string, unknown>)[key];
   checkAPIKeyRuntime(rest.apiKey);
   if (bearerToken === undefined || bearerToken === "") return rest;
   return { ...rest, apiKey: bearerToken, dangerouslyAllowBrowser: true };
 }
 
-/** The OpenAI options that each client was created with, which its clones inherit. */
+/** The options that each client was created with, `apiPath` included, which its clones inherit. */
 const givenOptions = new WeakMap<OpenAI, OpenAIClientOptions>();
-
-/** The options that each client was created with, which its clones keep. */
-const givenAPIOptions = new WeakMap<OpenAI, OpenAIOptions>();
 
 /**
  * How a connection the client doesn't send through its request loop, such
@@ -218,7 +218,8 @@ function inherit(client: OpenAI, options: Partial<OpenAIClientOptions>): OpenAIC
  * enclave's HTTPS origin, or under a gateway client's URL. The
  * client sets it after the caller's OpenAI options, so a `baseURL` among
  * them, `OPENAI_BASE_URL` in the environment and `dataResidency` have no
- * effect; set `apiPath` to change the API path.
+ * effect; set `apiPath` among the options to change the API path:
+ * `new OpenAIClient(httpClient, { apiKey, apiPath: "/openai/v1/" })`.
  *
  * Errors: a call through the OpenAI API surface, such as
  * `chat.completions.create(...)`, goes through the OpenAI client's request
@@ -247,26 +248,29 @@ export class OpenAIClient<H extends AttestedHTTPClient = AttestedHTTPClient> ext
    * {@link GatewayHTTPClient} that its factory created; anything else is a
    * {@link ConfigurationError}, and so is an invalid `options.apiPath`.
    */
-  constructor(httpClient: H, options?: OpenAIOptions, openaiOptions?: OpenAIClientOptions) {
-    const apiOptions: OpenAIOptions = { ...options };
-    const baseURL = apiBaseURL(httpClient, apiOptions.apiPath);
-    const given = openaiOptions ?? {};
+  constructor(httpClient: H, options?: OpenAIClientOptions) {
+    // The API path was a separate argument before the OpenAI options; untyped code that still passes three is refused rather than losing the third.
+    if (arguments.length > 2) {
+      throw new ConfigurationError("OpenAIClient takes the HTTP client and one options object: pass apiPath among the OpenAI options, as in new OpenAIClient(httpClient, { apiKey, apiPath })");
+    }
+    const given = options ?? {};
+    const baseURL = apiBaseURL(httpClient, given.apiPath);
     const clientOptions = openAIClientOptions(given);
     // The transport and base URL come last, so that the caller's options can't replace them.
     super({ ...clientOptions, fetch: httpClient.fetch, baseURL });
     attest(this, httpClient, baseURL, given, clientOptions.apiKey);
-    givenAPIOptions.set(this, apiOptions);
   }
 
   /**
-   * A client with `options` applied over this one's OpenAI options, on the
-   * same attested transport and API path. `fetch` and `baseURL` aren't
-   * options here: the transport owns them, and one passed from untyped code
-   * is ignored. An option that would choose another transport, such as
-   * `provider`, is a {@link ConfigurationError}.
+   * A client with `options` applied over this one's options, on the same
+   * attested transport, and on the same API path unless `options` sets
+   * `apiPath`. `fetch` and `baseURL` aren't options here: the transport owns
+   * them, and one passed from untyped code is ignored. An option that would
+   * choose another transport, such as `provider`, is a
+   * {@link ConfigurationError}.
    */
   override withOptions(options: Partial<OpenAIClientOptions>): this {
-    return new OpenAIClient(this.httpClient, givenAPIOptions.get(this), inherit(this, options)) as this;
+    return new OpenAIClient(this.httpClient, inherit(this, options)) as this;
   }
 
   /** Closes `httpClient` at the end of an `await using` block; see its `close`. */
@@ -275,9 +279,9 @@ export class OpenAIClient<H extends AttestedHTTPClient = AttestedHTTPClient> ext
   }
 }
 
-/** @internal The API path an OpenAI client was created with; "" for the default. */
-export function apiPathOf(client: OpenAI): string {
-  return givenAPIOptions.get(client)?.apiPath ?? "";
+/** @internal The API path an OpenAI client was created with; undefined for the default. */
+export function apiPathOf(client: OpenAI): string | undefined {
+  return givenOptions.get(client)?.apiPath;
 }
 
 /**
@@ -289,7 +293,7 @@ export async function createTinfoilClient(openaiOptions: OpenAIClientOptions, se
   checkOpenAIOptions(openaiOptions, seams.globals);
   const httpClient = await createRouterHTTPClient(routerOptions, seams);
   try {
-    return new OpenAIClient(httpClient, undefined, openaiOptions);
+    return new OpenAIClient(httpClient, openaiOptions);
   } catch (err) {
     await httpClient.close();
     throw err;
@@ -300,7 +304,8 @@ export async function createTinfoilClient(openaiOptions: OpenAIClientOptions, se
  * An OpenAI client for Tinfoil's recommended route: a
  * {@link RouterHTTPClient} that `RouterHTTPClient.create` creates with the
  * default options, verified before it returns, and an {@link OpenAIClient}
- * over it with `options`.
+ * over it with `options`. The options, `apiPath` included, are checked
+ * before any network I/O.
  */
 export function createClient(options?: OpenAIClientOptions): Promise<OpenAIClient<RouterHTTPClient>> {
   return createTinfoilClient(options ?? {}, {});

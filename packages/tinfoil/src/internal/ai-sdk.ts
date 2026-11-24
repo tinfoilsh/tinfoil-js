@@ -33,8 +33,9 @@ export interface TinfoilProviderBaseOptions extends Pick<RouterOptions & Enclave
   readonly bearerToken?: string;
   /**
    * The path of the API on the enclave or router, joined under the EHBP
-   * proxy when one is set and under the enclave's origin otherwise; undefined
-   * selects `/v1/`. As for the OpenAI client's `apiPath`.
+   * proxy when one is set and under the enclave's origin otherwise; leave it
+   * out for `/v1/`. As for the OpenAI client's `apiPath`: an empty path is a
+   * {@link ConfigurationError}.
    */
   readonly apiPath?: string;
   /** Headers added to every request, after the credential. */
@@ -97,7 +98,7 @@ function credentialOf(options: TinfoilProviderOptions, globals: RuntimeGlobals |
 export async function createTinfoilProvider(options: TinfoilProviderOptions, seams: TinfoilProviderSeams): Promise<TinfoilProvider> {
   // The credential is checked first, so a provider without one fails before any network I/O.
   const credential = credentialOf(options, seams.globals);
-  if (options.apiPath !== undefined && options.apiPath !== "") validateAPIPath(options.apiPath);
+  if (options.apiPath !== undefined) validateAPIPath(options.apiPath);
   const clientOptions = {
     transport: options.transport,
     policy: options.policy,

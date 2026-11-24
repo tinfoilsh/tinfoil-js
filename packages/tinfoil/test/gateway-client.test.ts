@@ -311,7 +311,7 @@ describe("OpenAIClient<GatewayHTTPClient>", () => {
     expect(() => new OpenAIClient(Symbol("x") as never)).toThrow(ConfigurationError);
     expectWithOptionsRefusesTransportOptions(ai);
     // The API path joins under the gateway's URL, as under an EHBP proxy.
-    expect(new OpenAIClient(ai.httpClient, { apiPath: "/openai/v1" }, { apiKey: "k" }).baseURL).toBe(`${GATEWAY_URL}openai/v1/`);
+    expect(new OpenAIClient(ai.httpClient, { apiKey: "k", apiPath: "/openai/v1" }).baseURL).toBe(`${GATEWAY_URL}openai/v1/`);
   });
 });
 
@@ -330,7 +330,7 @@ describe("a gateway mounted under a path", () => {
       expect(attestation).toMatch(/^https:\/\/gateway\.example\/mount\/\.well-known\/tinfoil-attestation\?nonce=[0-9a-f]{64}&enclave=replica-[ab]\.example$/);
       expect(network.seen.map((r) => r.url)).toEqual(["https://gateway.example/mount/v1/chat/completions"]);
       expect(gateway.seen[gateway.seen.length - 1]!.path).toBe("/mount/v1/chat/completions");
-      expect(new OpenAIClient(ai.httpClient, { apiPath: "/openai/v1" }, { apiKey: "k" }).baseURL).toBe("https://gateway.example/mount/openai/v1/");
+      expect(new OpenAIClient(ai.httpClient, { apiKey: "k", apiPath: "/openai/v1" }).baseURL).toBe("https://gateway.example/mount/openai/v1/");
       await ai.httpClient.close();
     }
   });

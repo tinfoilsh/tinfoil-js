@@ -122,6 +122,7 @@ describe("createTinfoil's option checks", () => {
       [{ transport: { kind: "ehbp", proxyURL: "http://proxy.example/" }, apiKey: "k" }, /HTTP is allowed only for localhost/],
       [{ transport: { kind: "quic" } as unknown as Transport, apiKey: "k" }, /transport must have kind/],
       [{ apiKey: "k", apiPath: "v1/" }, /invalid API path/],
+      [{ apiKey: "k", apiPath: "" }, /invalid API path: it is empty/],
       [{ apiKey: "k", enclave: null } as unknown as TinfoilProviderOptions, /enclave must be an object/],
       [{ apiKey: "k", enclave: { host: "enclave.example", trust: { kind: "repoPin", repo: ROUTER_REPO } }, userCacheSecret: "s" } as unknown as TinfoilProviderOptions, /userCacheSecret is the router's option/],
       [{ apiKey: "k", enclave: { host: "enclave.example", trust: { kind: "projectPin", project: "org/project", registryIDs: [] } } }, /registryIDs must not be empty/],
