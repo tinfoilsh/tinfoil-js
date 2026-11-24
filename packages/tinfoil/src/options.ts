@@ -417,7 +417,7 @@ export type ReplicaVerification = {
   readonly models: readonly string[];
   /** The repository that the replica is verified against. */
   readonly reference: string;
-  /** The pinned model that the replica serves, or "" for an unpinned one. */
+  /** The pinned model that the replica serves. */
   readonly pinnedModel: string;
 } & VerificationAttempt;
 
@@ -427,12 +427,15 @@ export type ReplicaVerification = {
  * @experimental The gateway route is new; this API may change without a major version.
  */
 export interface GatewayOptions {
-  /** Pins models to repositories. With `pinnedModelsOnly`, only pinned models are served, which requires at least one pin. */
-  readonly modelPins?: ReadonlyMap<string, ModelPin>;
-  readonly pinnedModelsOnly?: boolean;
-  /** The policy for unpinned models, and for pinned models whose pin has none; undefined selects the defaults. */
+  /**
+   * Pins models to repositories. The client serves only the models that it
+   * has pins for, so at least one pin is required, and a request for any
+   * other model is a {@link ConfigurationError} that contacts no replica.
+   */
+  readonly modelPins: ReadonlyMap<string, ModelPin>;
+  /** The policy for pins that set none; undefined selects the defaults. It is checked even when every pin sets its own. */
   readonly policy?: Policy;
-  /** Called with each replica's verified facts, for pinned and unpinned models. A rejected replica is skipped for the next replica of the model. */
+  /** Called with each replica's verified facts. A rejected replica is skipped for the next replica of the model. */
   readonly verificationCheck?: VerificationCheck;
   /** Called with the outcome of each attempt to verify a replica, with the replica's host; see {@link OnVerification}. */
   readonly onVerification?: OnVerification;

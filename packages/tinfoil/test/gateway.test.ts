@@ -183,41 +183,60 @@ describe("GatewayPolicy", () => {
   const v = verifier("ab".repeat(32));
 
   it("checks the pins before any network I/O", async () => {
-    await expect(GatewayPolicy.create(undefined, true, undefined, fixed(v))).rejects.toThrow(/at least one model pin/);
-    await expect(GatewayPolicy.create(new Map([["m", { repo: "evil/m" }]]), false, undefined, fixed(v))).rejects.toThrow(/must belong to tinfoilsh\//);
-    await expect(GatewayPolicy.create(new Map([[" ", { repo: "tinfoilsh/m" }]]), false, undefined, fixed(v))).rejects.toThrow(/must belong to/);
-    await expect(GatewayPolicy.create(new Map([["m", { repo: "tinfoilsh/m@@" }]]), false, undefined, fixed(v))).rejects.toBeInstanceOf(ConfigurationError);
-    await expect(GatewayPolicy.create(new Map([["m", { repo: "tinfoilsh/m@v1" }]]), false, undefined, fixed(v))).resolves.toBeInstanceOf(GatewayPolicy);
+    await expect(GatewayPolicy.create(undefined, undefined, fixed(v))).rejects.toThrow(/at least one model pin/);
+    await expect(GatewayPolicy.create(new Map(), undefined, fixed(v))).rejects.toThrow(/at least one model pin/);
+    await expect(GatewayPolicy.create(new Map([["m", { repo: "evil/m" }]]), undefined, fixed(v))).rejects.toThrow(/must belong to tinfoilsh\//);
+    await expect(GatewayPolicy.create(new Map([[" ", { repo: "tinfoilsh/m" }]]), undefined, fixed(v))).rejects.toThrow(/must belong to/);
+    await expect(GatewayPolicy.create(new Map([["m", { repo: "tinfoilsh/m@@" }]]), undefined, fixed(v))).rejects.toBeInstanceOf(ConfigurationError);
+    await expect(GatewayPolicy.create(new Map([["m", { repo: "tinfoilsh/m@v1" }]]), undefined, fixed(v))).resolves.toBeInstanceOf(GatewayPolicy);
   });
 
-  it("resolves pinned models against their pin and unpinned ones against the catalog", async () => {
+  it("checks the gateway's policy even when every pin sets its own", async () => {
+    const invalid = { freshnessMaxAgeMs: -1 };
+    const build = async (p: Policy | undefined) => {
+      if (p === invalid) throw new Error("invalid freshness bound");
+      return v;
+    };
+    await expect(GatewayPolicy.create(new Map([["m", { repo: "tinfoilsh/m", policy: {} }]]), invalid, build)).rejects.toThrow(/gateway policy: invalid freshness bound/);
+  });
+
+  it("resolves only pinned models, against their pin, under the pin's policy or the gateway's", async () => {
     const pinned = verifier("cd".repeat(32));
+    const gateway = verifier("ef".repeat(32));
     const pinPolicy = { freshnessMaxAgeMs: 1 };
+    const gatewayPolicy = { freshnessMaxAgeMs: 2 };
     const built: (Policy | undefined)[] = [];
-    const policy = await GatewayPolicy.create(new Map([["pinned", { repo: "tinfoilsh/pinned@v1", policy: pinPolicy }]]), false, undefined, async (p) => {
-      built.push(p);
-      return p === pinPolicy ? pinned : v;
-    });
-    expect(built).toEqual([undefined, pinPolicy]);
+    const policy = await GatewayPolicy.create(
+      new Map([
+        ["pinned", { repo: "tinfoilsh/pinned@v1", policy: pinPolicy }],
+        ["inherits", { repo: "tinfoilsh/inherits" }],
+      ]),
+      gatewayPolicy,
+      async (p) => {
+        built.push(p);
+        return p === pinPolicy ? pinned : gateway;
+      },
+    );
+    expect(built).toEqual([gatewayPolicy, pinPolicy]);
     const catalog = catalogOf({
       pinned: { repo: "tinfoilsh/pinned", hosts: ["p.example"] },
+      inherits: { repo: "tinfoilsh/inherits", hosts: ["i.example"] },
       free: { repo: "tinfoilsh/free", hosts: ["f.example"] },
       swapped: { repo: "tinfoilsh/other", hosts: ["s.example"] },
     });
     expect(policy.resolve("pinned", catalog)).toEqual({ hosts: ["p.example"], replica: { ref: "tinfoilsh/pinned@v1", model: "pinned" } });
-    expect(policy.resolve("free", catalog)).toEqual({ hosts: ["f.example"], replica: { ref: "tinfoilsh/free", model: "" } });
+    expect(policy.resolve("inherits", catalog)).toEqual({ hosts: ["i.example"], replica: { ref: "tinfoilsh/inherits", model: "inherits" } });
+    expect(() => policy.resolve("free", catalog)).toThrow(ConfigurationError);
+    expect(() => policy.resolve("free", catalog)).toThrow(/is not pinned/);
     expect(() => policy.resolve("missing", catalog)).toThrow(ConfigurationError);
+    expect(policy.serves("pinned", catalog)).toBe(true);
+    expect(policy.serves("free", catalog)).toBe(false);
     expect(policy.verifierFor({ ref: "tinfoilsh/pinned@v1", model: "pinned" })).toBe(pinned);
-    expect(policy.verifierFor({ ref: "tinfoilsh/free", model: "" })).toBe(v);
+    expect(policy.verifierFor({ ref: "tinfoilsh/inherits", model: "inherits" })).toBe(gateway);
 
-    const other = await GatewayPolicy.create(new Map([["swapped", { repo: "tinfoilsh/swapped" }]]), false, undefined, fixed(v));
+    const other = await GatewayPolicy.create(new Map([["swapped", { repo: "tinfoilsh/swapped" }]]), undefined, fixed(v));
     expect(() => other.resolve("swapped", catalog)).toThrow(AttestationError);
     expect(() => other.resolve("swapped", catalog)).toThrow(/expected repository "tinfoilsh\/swapped", gateway offered "tinfoilsh\/other"/);
-
-    const only = await GatewayPolicy.create(new Map([["pinned", { repo: "tinfoilsh/pinned" }]]), true, undefined, fixed(v));
-    expect(() => only.resolve("free", catalog)).toThrow(/is not pinned/);
-    expect(only.serves("pinned", catalog)).toBe(true);
-    expect(only.serves("free", catalog)).toBe(false);
   });
 });
 
@@ -446,6 +465,8 @@ describe("GatewayTransport", () => {
   const peers = new Map<string, EhbpPeer>();
   const MODEL = "test-model";
   const HOSTS = ["a.example", "b.example", "c.example"];
+  /** Pins the model to the repository that the default catalog names. */
+  const PINS = new Map([[MODEL, { repo: "tinfoilsh/test" }]]);
   const keyOf = (host: string): string => peers.get(host)!.publicKeyHex;
   /** The verifier endorsing each host's own key; the mocked attestation fetch serves the host name as the document. */
   const perHost = (): Verifier => verifier((document) => keyOf(document));
@@ -494,7 +515,7 @@ describe("GatewayTransport", () => {
     let catalogReads = 0;
     const gw = gateway();
     const t = transport({
-      policy: await GatewayPolicy.create(undefined, false, undefined, fixed(perHost())),
+      policy: await GatewayPolicy.create(PINS, undefined, fixed(perHost())),
       gatewayFetch: gw.fetch,
       documentFetch: async () => {
         throw new Error("a request with a repeated member fetched an attestation");
@@ -514,7 +535,7 @@ describe("GatewayTransport", () => {
   it("refuses an upgrade before reading the catalog or touching a replica", async () => {
     let catalogReads = 0;
     const t = transport({
-      policy: await GatewayPolicy.create(undefined, false, undefined, fixed(perHost())),
+      policy: await GatewayPolicy.create(PINS, undefined, fixed(perHost())),
       gatewayFetch: gateway().fetch,
       catalog: () => {
         catalogReads++;
@@ -523,7 +544,7 @@ describe("GatewayTransport", () => {
     });
     await expect(t.fetch("https://gateway.example/v1/realtime", { headers: { upgrade: "websocket", [MODEL_HEADER]: MODEL } })).rejects.toThrow(/protocol upgrade/);
     expect(catalogReads).toBe(0);
-    await expect(t.fetch("https://gateway.example/v1/chat/completions", { method: "POST", body: '{"model":"unlisted"}', headers: { "content-type": "application/json" } })).rejects.toThrow(/no valid bare tinfoilsh\/ repository/);
+    await expect(t.fetch("https://gateway.example/v1/chat/completions", { method: "POST", body: `{"model":"${MODEL}"}`, headers: { "content-type": "application/json" } })).rejects.toThrow(/no valid bare tinfoilsh\/ repository/);
     expect(catalogReads).toBe(1);
   });
 
@@ -534,7 +555,7 @@ describe("GatewayTransport", () => {
     const g = gateway();
     const t = transport({
       onVerification: (host, report, error) => void reported.push([host, report !== undefined && error === undefined]),
-      policy: await GatewayPolicy.create(undefined, false, undefined, fixed(perHost())),
+      policy: await GatewayPolicy.create(PINS, undefined, fixed(perHost())),
       gatewayFetch: g.fetch,
       documentFetch: async (input) => {
         const host = enclaveOf(input);
@@ -551,7 +572,7 @@ describe("GatewayTransport", () => {
     const attempts = t.lastVerification();
     expect(attempts.map((r) => r.host)).toEqual([...order].sort());
     const passed = attempts.find((r) => r.host === order[2])!;
-    expect(passed).toMatchObject({ host: order[2], models: [MODEL], reference: "tinfoilsh/test", pinnedModel: "" });
+    expect(passed).toMatchObject({ host: order[2], models: [MODEL], reference: "tinfoilsh/test", pinnedModel: MODEL });
     expect(passed.report!.verifiedFacts!.hpkePublicKey).toBe(keyOf(order[2]!));
     for (const failed of attempts.filter((r) => r.host !== order[2])) {
       expect(failed.report).toBeUndefined();
@@ -565,7 +586,7 @@ describe("GatewayTransport", () => {
   it("seals to the replica's own key, so a body sealed under another replica's key is rejected by the peer", async () => {
     // Every host is endorsed with a.example's key: only a.example can open what is sealed.
     const g = gateway();
-    const t = transport({ policy: await GatewayPolicy.create(undefined, false, undefined, fixed(verifier(keyOf("a.example")))), gatewayFetch: g.fetch, catalog: () => catalogOf({ [MODEL]: { repo: "tinfoilsh/test", hosts: ["b.example"] } }) });
+    const t = transport({ policy: await GatewayPolicy.create(PINS, undefined, fixed(verifier(keyOf("a.example")))), gatewayFetch: g.fetch, catalog: () => catalogOf({ [MODEL]: { repo: "tinfoilsh/test", hosts: ["b.example"] } }) });
     await expect(t.fetch("https://gateway.example/v1/chat/completions", { method: "POST", body: '{"model":"test-model"}', headers: { "content-type": "application/json" } })).rejects.toThrow();
     expect(g.seen.map((s) => s.enclave)).toEqual(["https://b.example", "https://b.example"]);
   });
@@ -574,7 +595,7 @@ describe("GatewayTransport", () => {
     const order = await rank(HOSTS, SPEC_PREFIX, undefined);
     let reroutes = 0;
     const g = gateway((seal) => (seal === order[0] && reroutes++ < 1 ? order[1] : undefined));
-    const t = transport({ policy: await GatewayPolicy.create(undefined, false, undefined, fixed(perHost())), gatewayFetch: g.fetch });
+    const t = transport({ policy: await GatewayPolicy.create(PINS, undefined, fixed(perHost())), gatewayFetch: g.fetch });
     const send = () => t.fetch("https://gateway.example/v1/chat/completions", { method: "POST", body: SPEC_BODY, headers: { "content-type": "application/json", authorization: "Bearer test-api-key" } });
     expect((await send()).status).toBe(200);
     expect(g.seen.map((s) => s.seal)).toEqual([order[0], order[1]]);
@@ -582,11 +603,11 @@ describe("GatewayTransport", () => {
     expect(g.seen.map((s) => s.seal)).toEqual([order[0], order[1], order[1]]);
 
     const bouncing = gateway((seal) => HOSTS.find((h) => h !== seal));
-    const forever = transport({ policy: await GatewayPolicy.create(undefined, false, undefined, fixed(perHost())), gatewayFetch: bouncing.fetch });
+    const forever = transport({ policy: await GatewayPolicy.create(PINS, undefined, fixed(perHost())), gatewayFetch: bouncing.fetch });
     await expect(forever.fetch("https://gateway.example/v1/chat/completions", { method: "POST", body: SPEC_BODY, headers: { "content-type": "application/json" } })).rejects.toThrow(/kept routing away/);
     expect(bouncing.seen).toHaveLength(MAX_SEAL_REDIRECTS + 1);
 
-    const unreplayable = transport({ policy: await GatewayPolicy.create(undefined, false, undefined, fixed(perHost())), gatewayFetch: bouncing.fetch });
+    const unreplayable = transport({ policy: await GatewayPolicy.create(PINS, undefined, fixed(perHost())), gatewayFetch: bouncing.fetch });
     const res = await unreplayable.fetch("https://gateway.example/v1/audio/transcriptions", { method: "POST", body: new Response("upload").body, duplex: "half", headers: { "content-type": "multipart/form-data; boundary=b", [MODEL_HEADER]: MODEL } } as RequestInit);
     expect(res.status).toBe(412);
   });
@@ -596,9 +617,13 @@ describe("GatewayTransport", () => {
     const attempts: string[] = [];
     const pins: Pin[] = [];
     const t = transport({
-      policy: await GatewayPolicy.create(new Map([[MODEL, { repo: "tinfoilsh/test@v1" }], ["unlisted", { repo: "tinfoilsh/unlisted" }]]), false, undefined, fixed(verifier((document) => keyOf(document), pins))),
+      policy: await GatewayPolicy.create(
+        new Map([[MODEL, { repo: "tinfoilsh/test@v1" }], ["other", { repo: "tinfoilsh/other" }], ["unlisted", { repo: "tinfoilsh/unlisted" }]]),
+        undefined,
+        fixed(verifier((document) => keyOf(document), pins)),
+      ),
       gatewayFetch: gateway().fetch,
-      catalog: () => catalogOf({ [MODEL]: { repo: "tinfoilsh/test", hosts: HOSTS }, other: { repo: "tinfoilsh/other", hosts: ["o.example"] } }),
+      catalog: () => catalogOf({ [MODEL]: { repo: "tinfoilsh/test", hosts: HOSTS }, other: { repo: "tinfoilsh/other", hosts: ["o.example"] }, free: { repo: "tinfoilsh/free", hosts: ["f.example"] } }),
       documentFetch: async (input) => {
         const host = enclaveOf(input);
         attempts.push(host);
@@ -619,8 +644,65 @@ describe("GatewayTransport", () => {
     await expect(t.ensureVerified("other", aborted.signal)).rejects.toThrow(/stop/);
   });
 
+  it("refuses a model that has no pin, for a request and for ensureVerified, without contacting a replica", async () => {
+    const documents: string[] = [];
+    const g = gateway();
+    const t = transport({
+      policy: await GatewayPolicy.create(PINS, undefined, fixed(perHost())),
+      gatewayFetch: g.fetch,
+      catalog: () => catalogOf({ [MODEL]: { repo: "tinfoilsh/test", hosts: HOSTS }, free: { repo: "tinfoilsh/free", hosts: HOSTS } }),
+      documentFetch: async (input) => {
+        documents.push(enclaveOf(input));
+        return new Response(enclaveOf(input));
+      },
+    });
+    expect(await t.models()).toEqual([MODEL]);
+    await expect(t.ensureVerified("free")).rejects.toThrow(ConfigurationError);
+    await expect(t.ensureVerified("free")).rejects.toThrow(/model "free" is not pinned/);
+    await expect(t.fetch("https://gateway.example/v1/chat/completions", { method: "POST", body: '{"model":"free"}', headers: { "content-type": "application/json" } })).rejects.toThrow(/model "free" is not pinned/);
+    expect(documents).toEqual([]);
+    expect(g.seen).toEqual([]);
+    expect(t.lastVerification()).toEqual([]);
+  });
+
+  it("refuses a model that a catalog refresh adds unless it is pinned, without contacting a replica", async () => {
+    let now = Date.parse("2026-11-04T00:00:00Z");
+    let served: Record<string, { repo: string; hosts: string[] }> = { [MODEL]: { repo: "tinfoilsh/test", hosts: HOSTS } };
+    let catalogFetches = 0;
+    const documents: string[] = [];
+    const g = gateway();
+    const t = transport({
+      policy: await GatewayPolicy.create(new Map([...PINS, ["later", { repo: "tinfoilsh/later" }]]), undefined, fixed(perHost())),
+      gatewayFetch: g.fetch,
+      catalog: undefined,
+      catalogFetch: async () => {
+        catalogFetches++;
+        return new Response(JSON.stringify(served), { headers: { "content-type": "application/json" } });
+      },
+      clock: () => new Date(now),
+      documentFetch: async (input) => {
+        documents.push(enclaveOf(input));
+        return new Response(enclaveOf(input));
+      },
+    });
+    expect(await t.models()).toEqual([MODEL]);
+    served = { ...served, later: { repo: "tinfoilsh/later", hosts: HOSTS }, added: { repo: "tinfoilsh/added", hosts: HOSTS } };
+    now += CATALOG_REFRESH_INTERVAL_MS;
+    // The first listing after the interval starts the refresh; a later one sees its result.
+    for (let i = 0; i < 50 && !(await t.models()).includes("later"); i++) await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(await t.models()).toEqual(["later", MODEL]);
+    // An unpinned model is refused before the catalog is read, so it starts no refresh either.
+    now += CATALOG_REFRESH_INTERVAL_MS;
+    const fetched = catalogFetches;
+    await expect(t.ensureVerified("added")).rejects.toThrow(/model "added" is not pinned/);
+    await expect(t.fetch("https://gateway.example/v1/chat/completions", { method: "POST", body: '{"model":"added"}', headers: { "content-type": "application/json" } })).rejects.toBeInstanceOf(ConfigurationError);
+    expect(catalogFetches).toBe(fetched);
+    expect(documents).toEqual([]);
+    expect(g.seen).toEqual([]);
+  });
+
   it("rejects a model listing still waiting on the catalog when the transport closes", async () => {
-    const t = transport({ policy: await GatewayPolicy.create(undefined, false, undefined, fixed(perHost())), gatewayFetch: gateway().fetch });
+    const t = transport({ policy: await GatewayPolicy.create(PINS, undefined, fixed(perHost())), gatewayFetch: gateway().fetch });
     const pending = t.models();
     t.close();
     await expect(pending).rejects.toThrow(/closed/);
@@ -633,7 +715,7 @@ describe("GatewayTransport", () => {
     const rotating = verifier(keyOf("only.example"));
     const flaky = { ...rotating, verifyV3At: (...args: unknown[]) => (verifier(verifications++ === 0 ? stale : keyOf("only.example")).verifyV3At as (...a: unknown[]) => Promise<VerificationReport>)(...args) } as Verifier;
     const g = gateway();
-    const t = transport({ policy: await GatewayPolicy.create(undefined, false, undefined, fixed(flaky)), gatewayFetch: g.fetch, catalog: () => catalogOf({ [MODEL]: { repo: "tinfoilsh/test", hosts: ["only.example"] } }) });
+    const t = transport({ policy: await GatewayPolicy.create(PINS, undefined, fixed(flaky)), gatewayFetch: g.fetch, catalog: () => catalogOf({ [MODEL]: { repo: "tinfoilsh/test", hosts: ["only.example"] } }) });
     const res = await t.fetch("https://gateway.example/v1/chat/completions", { method: "POST", body: '{"model":"test-model"}', headers: { "content-type": "application/json" } });
     expect(res.status).toBe(200);
     expect(verifications).toBe(2);
@@ -648,7 +730,7 @@ describe("GatewayTransport", () => {
       seen.push(input as Request);
       return g.fetch(input, init);
     };
-    const t = transport({ policy: await GatewayPolicy.create(undefined, false, undefined, fixed(perHost())), gatewayFetch: recording });
+    const t = transport({ policy: await GatewayPolicy.create(PINS, undefined, fixed(perHost())), gatewayFetch: recording });
     const request = new Request("https://gateway.example/v1/chat/completions", { method: "POST", body: '{"model":"test-model"}', headers: { "content-type": "application/json" }, credentials: "include", redirect: "manual", cache: "no-store", referrerPolicy: "no-referrer" });
     expect((await t.fetch(request)).status).toBe(200);
     const rebuilt = seen[0]!;
@@ -664,7 +746,7 @@ describe("GatewayTransport", () => {
       controller.abort(new Error("gave up mid-reroute"));
       return HOSTS.find((h) => h !== seal);
     });
-    const t = transport({ policy: await GatewayPolicy.create(undefined, false, undefined, fixed(perHost())), gatewayFetch: g.fetch });
+    const t = transport({ policy: await GatewayPolicy.create(PINS, undefined, fixed(perHost())), gatewayFetch: g.fetch });
     const pending = t.fetch("https://gateway.example/v1/chat/completions", { method: "POST", body: '{"model":"test-model"}', headers: { "content-type": "application/json" }, signal: controller.signal });
     await expect(pending).rejects.toThrow(/gave up mid-reroute/);
     await expect(pending).rejects.not.toBeInstanceOf(ConfigurationError);
@@ -672,7 +754,7 @@ describe("GatewayTransport", () => {
 
   it("honours a Request's own signal before verifying and while sending", async () => {
     const g = gateway();
-    const t = transport({ policy: await GatewayPolicy.create(undefined, false, undefined, fixed(perHost())), gatewayFetch: g.fetch });
+    const t = transport({ policy: await GatewayPolicy.create(PINS, undefined, fixed(perHost())), gatewayFetch: g.fetch });
     const aborted = new AbortController();
     aborted.abort(new Error("caller gave up"));
     const request = new Request("https://gateway.example/v1/chat/completions", { method: "POST", body: '{"model":"test-model"}', headers: { "content-type": "application/json" }, signal: aborted.signal });
@@ -686,7 +768,7 @@ describe("GatewayTransport", () => {
       init?.signal?.throwIfAborted();
       return slow.fetch(input, init);
     };
-    const u = transport({ policy: await GatewayPolicy.create(undefined, false, undefined, fixed(perHost())), gatewayFetch: observing });
+    const u = transport({ policy: await GatewayPolicy.create(PINS, undefined, fixed(perHost())), gatewayFetch: observing });
     const sent = new Request("https://gateway.example/v1/chat/completions", { method: "POST", body: '{"model":"test-model"}', headers: { "content-type": "application/json" }, signal: late.signal });
     await expect(u.fetch(sent)).rejects.toThrow(/too slow/);
   });

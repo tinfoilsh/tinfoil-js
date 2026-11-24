@@ -34,6 +34,6 @@ describe("v3 client surface under Bun", () => {
 
   it("checks client options before any network I/O", async () => {
     await expect(surface.EnclaveHTTPClient.create("", { kind: "repoPin", repo: "tinfoilsh/repo" })).rejects.toBeInstanceOf(surface.ConfigurationError);
-    await expect(surface.GatewayHTTPClient.create({ url: "http://gateway.example/v1/" })).rejects.toBeInstanceOf(surface.ConfigurationError);
+    await expect(surface.GatewayHTTPClient.create({ modelPins: new Map([["m", { repo: "tinfoilsh/m" }]]), url: "http://gateway.example/v1/" })).rejects.toBeInstanceOf(surface.ConfigurationError);
   });
 });

@@ -18,6 +18,8 @@ import { verifiedReport } from "./helpers/report.js";
 
 const GATEWAY_URL = "https://gateway.example/v1/";
 const CATALOG = { "test-model": { repo: "tinfoilsh/test", hosts: ["replica-a.example", "replica-b.example"] }, other: { repo: "tinfoilsh/other", hosts: ["o.example"] } };
+/** Pins both of the catalog's models to the repositories that it names. */
+const PINS = new Map([["test-model", { repo: "tinfoilsh/test" }], ["other", { repo: "tinfoilsh/other" }]]);
 let gateway: EhbpServer;
 
 function verifier(hpke: string): Verifier {
@@ -83,18 +85,24 @@ describe("GatewayHTTPClient.create", () => {
     const s = seams();
     const v = verifier(gateway.publicKeyHex);
     const cases: GatewayOptions[] = [
-      { url: "http://gateway.example/v1/" },
-      { url: "not a url" },
-      { url: "ftp://gateway.example/v1/" },
-      { url: "https://user:pw@gateway.example/v1/" },
-      { url: "https://gateway.example/v1/?key=1" },
-      { url: "https://gateway.example/v1/#frag" },
-      { pinnedModelsOnly: true },
+      { modelPins: PINS, url: "http://gateway.example/v1/" },
+      { modelPins: PINS, url: "not a url" },
+      { modelPins: PINS, url: "ftp://gateway.example/v1/" },
+      { modelPins: PINS, url: "https://user:pw@gateway.example/v1/" },
+      { modelPins: PINS, url: "https://gateway.example/v1/?key=1" },
+      { modelPins: PINS, url: "https://gateway.example/v1/#frag" },
       { modelPins: new Map([["m", { repo: "other/m" }]]) },
     ];
     for (const options of cases) {
       await expect(createGatewayHTTPClient(options, { ...s, verifier: v }), JSON.stringify(options.url)).rejects.toBeInstanceOf(ConfigurationError);
     }
+    // A gateway client serves only pinned models, so it can't be created without a pin.
+    for (const modelPins of [undefined, new Map()]) {
+      const options = { url: GATEWAY_URL, modelPins } as GatewayOptions;
+      await expect(createGatewayHTTPClient(options, { ...s, verifier: v })).rejects.toThrow(/requires at least one model pin/);
+      await expect(GatewayHTTPClient.create(options)).rejects.toBeInstanceOf(ConfigurationError);
+    }
+    await expect(GatewayHTTPClient.create(undefined as unknown as GatewayOptions)).rejects.toBeInstanceOf(ConfigurationError);
     expect(s.calls).toEqual([]);
     expect(DEFAULT_GATEWAY_URL).toBe("https://inference-gateway.tinfoil.sh/v1/");
   });
@@ -105,20 +113,20 @@ describe("GatewayHTTPClient.create", () => {
         throw new TypeError("fetch failed");
       },
     });
-    await expect(createGatewayHTTPClient({ url: GATEWAY_URL }, { ...unreachable, verifier: verifier(gateway.publicKeyHex) })).rejects.toBeInstanceOf(NetworkError);
+    await expect(createGatewayHTTPClient({ modelPins: PINS, url: GATEWAY_URL }, { ...unreachable, verifier: verifier(gateway.publicKeyHex) })).rejects.toBeInstanceOf(NetworkError);
     const s = seams();
-    const client = await createGatewayHTTPClient({ url: GATEWAY_URL }, { ...s, verifier: verifier(gateway.publicKeyHex) });
+    const client = await createGatewayHTTPClient({ modelPins: PINS, url: GATEWAY_URL }, { ...s, verifier: verifier(gateway.publicKeyHex) });
     expect(s.calls).toEqual(["https://gateway.example/catalog"]);
     expect(Object.keys(client)).toEqual(["fetch", "baseURL"]);
     expect(() => ((client as { baseURL: string }).baseURL = "https://evil.example/")).toThrow(TypeError);
     expect(client.baseURL).toBe(GATEWAY_URL);
     expect(await client.models()).toEqual(["other", "test-model"]);
     expect(client.lastVerification()).toEqual([]);
-    const supplied = await createGatewayHTTPClient({ url: GATEWAY_URL, catalog: () => new Map() as Catalog }, { ...seams(), verifier: verifier(gateway.publicKeyHex) });
+    const supplied = await createGatewayHTTPClient({ modelPins: PINS, url: GATEWAY_URL, catalog: () => new Map() as Catalog }, { ...seams(), verifier: verifier(gateway.publicKeyHex) });
     expect(await supplied.models()).toEqual([]);
-    const bare = await createGatewayHTTPClient({ url: "https://gateway.example/v1" }, { ...seams(), verifier: verifier(gateway.publicKeyHex) });
+    const bare = await createGatewayHTTPClient({ modelPins: PINS, url: "https://gateway.example/v1" }, { ...seams(), verifier: verifier(gateway.publicKeyHex) });
     expect(bare.baseURL).toBe(GATEWAY_URL);
-    const padded = await createGatewayHTTPClient({ url: "  https://gateway.example/v1  " }, { ...seams(), verifier: verifier(gateway.publicKeyHex) });
+    const padded = await createGatewayHTTPClient({ modelPins: PINS, url: "  https://gateway.example/v1  " }, { ...seams(), verifier: verifier(gateway.publicKeyHex) });
     expect(padded.baseURL).toBe(GATEWAY_URL);
     await expect(bare.fetch("https://other.example/v1/models")).rejects.toThrow(/client is bound/);
   });
@@ -132,7 +140,7 @@ describe("GatewayHTTPClient.create when no cache secret can be generated", () =>
         throw failure;
       },
     });
-    await expect(createGatewayHTTPClient({ url: GATEWAY_URL }, { ...s, verifier: verifier(gateway.publicKeyHex) })).rejects.toBe(failure);
+    await expect(createGatewayHTTPClient({ modelPins: PINS, url: GATEWAY_URL }, { ...s, verifier: verifier(gateway.publicKeyHex) })).rejects.toBe(failure);
     expect(s.calls).toEqual([]);
   });
 });
@@ -182,7 +190,7 @@ describe("GatewayHTTPClient", () => {
 
   it("closes: refuses further use, keeps the replicas' last verifications, and closes again without effect", async () => {
     const own = seams();
-    const c = await createGatewayHTTPClient({ url: GATEWAY_URL }, { ...own, verifier: verifier(gateway.publicKeyHex) });
+    const c = await createGatewayHTTPClient({ modelPins: PINS, url: GATEWAY_URL }, { ...own, verifier: verifier(gateway.publicKeyHex) });
     await c.ensureVerified("test-model");
     const fetched = own.calls.length;
     await c.close();
@@ -198,7 +206,16 @@ describe("GatewayHTTPClient", () => {
     await expect(client.fetch("https://other.example/v1/models")).rejects.toThrow(/client is bound/);
     await expect(client.fetch(`${GATEWAY_URL}realtime`, { headers: { upgrade: "websocket" } })).rejects.toThrow(/protocol upgrade/);
     await expect(client.fetch(`${GATEWAY_URL}chat/completions`, { method: "POST", body: '{"model":"unknown"}', headers: { "content-type": "application/json" } })).rejects.toBeInstanceOf(ConfigurationError);
-    await expect(client.fetch(`${GATEWAY_URL}models`)).rejects.toThrow(/model "" has no valid/);
+    // "other" is in the catalog, but this client has no pin for it.
+    expect(await client.models()).toEqual(["test-model"]);
+    const before = s.calls.length;
+    const sealed = gateway.seen.length;
+    await expect(client.ensureVerified("other")).rejects.toThrow(/model "other" is not pinned/);
+    await expect(client.fetch(`${GATEWAY_URL}chat/completions`, { method: "POST", body: '{"model":"other"}', headers: { "content-type": "application/json" } })).rejects.toThrow(/model "other" is not pinned/);
+    expect(s.calls).toHaveLength(before);
+    expect(gateway.seen).toHaveLength(sealed);
+    expect(client.lastVerification().every((r) => r.pinnedModel === "test-model")).toBe(true);
+    await expect(client.fetch(`${GATEWAY_URL}models`)).rejects.toThrow(/model "" is not pinned/);
     const swapped = await createGatewayHTTPClient(
       { url: GATEWAY_URL, modelPins: new Map([["other", { repo: "tinfoilsh/pinned-elsewhere" }]]) },
       { ...seams(), verifier: verifier(gateway.publicKeyHex) });
@@ -208,7 +225,7 @@ describe("GatewayHTTPClient", () => {
   it("falls over to the replica the caller's check accepts", async () => {
     const checked: string[] = [];
     const c = await createGatewayHTTPClient(
-      { url: GATEWAY_URL, verificationCheck: (v) => {
+      { modelPins: PINS, url: GATEWAY_URL, verificationCheck: (v) => {
           checked.push(v.hpkePublicKey!);
           if (checked.length === 1) throw new Error("not this replica");
         } },
@@ -233,7 +250,7 @@ describe("GatewayHTTPClient", () => {
         return enclave === "replica-a.example" ? new Response("no", { status: 503 }) : toLocal()(input, init);
       },
     });
-    const c = await createGatewayHTTPClient({ url: GATEWAY_URL, verificationCheck: (v) => void checked.push(v.hpkePublicKey!) }, { ...failing, verifier: verifier(gateway.publicKeyHex) });
+    const c = await createGatewayHTTPClient({ modelPins: PINS, url: GATEWAY_URL, verificationCheck: (v) => void checked.push(v.hpkePublicKey!) }, { ...failing, verifier: verifier(gateway.publicKeyHex) });
     const res = await c.fetch(`${GATEWAY_URL}chat/completions`, { method: "POST", body: '{"model":"test-model"}', headers: { "content-type": "application/json", "x-raw": "1" } });
     expect(res.status).toBe(200);
     expect(c.lastVerification().filter((r) => r.report !== undefined).map((r) => r.host)).toEqual(["replica-b.example"]);
@@ -251,7 +268,7 @@ describe("GatewayHTTPClient with a network fetch", () => {
   it("sends sealed requests through the fetch option, while the catalog and attestation documents keep their own fetches", async () => {
     const network = recordingFetch(toLocal());
     const s = seams({ ehbp: undefined });
-    const client = await createGatewayHTTPClient({ url: GATEWAY_URL, fetch: network.fetch }, { ...s, verifier: verifier(gateway.publicKeyHex) });
+    const client = await createGatewayHTTPClient({ modelPins: PINS, url: GATEWAY_URL, fetch: network.fetch }, { ...s, verifier: verifier(gateway.publicKeyHex) });
     expect(s.calls).toEqual(["https://gateway.example/catalog"]);
     expect(network.seen).toHaveLength(0);
 
@@ -270,7 +287,7 @@ describe("GatewayHTTPClient with a network fetch", () => {
 
 describe("OpenAIClient<GatewayHTTPClient>", () => {
   it("backs an OpenAI client on the gateway URL with the option's secret", async () => {
-    const ai = await openAIOver(createGatewayHTTPClient({ url: GATEWAY_URL, userCacheSecret: "option-secret" }, { ...seams({ resolveSecret: undefined }), verifier: verifier(gateway.publicKeyHex) }), { apiKey: "k" });
+    const ai = await openAIOver(createGatewayHTTPClient({ modelPins: PINS, url: GATEWAY_URL, userCacheSecret: "option-secret" }, { ...seams({ resolveSecret: undefined }), verifier: verifier(gateway.publicKeyHex) }), { apiKey: "k" });
     expect(ai).toBeInstanceOf(OpenAIClient);
     expect(ai.baseURL).toBe(GATEWAY_URL);
     expect(ai.httpClient).toBeInstanceOf(GatewayHTTPClient);
