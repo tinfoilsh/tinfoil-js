@@ -6,11 +6,11 @@
  * comparison.
  */
 import { SEV_SNP_REPORT_V1_FORMAT, TDX_QUOTE_V1_FORMAT, type CpuEndorsements, type CpuEvidence, type Document } from "../../document/document.js";
-import { cloneMeasurement, type Expected, type Measurement } from "../../measurement.js";
+import { cloneExpected, cloneMeasurement, type Expected, type Measurement } from "../../measurement.js";
 import { PLATFORM_SEV_SNP, PLATFORM_TDX, type Artifact, type Platform, type Policy } from "../policy/artifact.js";
 import { bytesEqual } from "../x509/certificate.js";
-import { resolveConfig, type ConfigReferenceValues } from "./config.js";
-import { resolveLegacy, type LegacyReferenceValues } from "./legacy.js";
+import { configCode, resolveConfig, type ConfigReferenceValues } from "./config.js";
+import { legacyCode, resolveLegacy, type LegacyReferenceValues } from "./legacy.js";
 import { applyPins, complete, resolvePolicy } from "./resolve.js";
 import { assembleSev, authenticateSev, validateSev, type SevExpectations, type SevQuote } from "./sev/authenticate.js";
 import { assembleTdx, authenticateTdx, validateTdx, type TdxExpectations, type TdxQuote } from "./tdx/authenticate.js";
@@ -65,12 +65,62 @@ export interface ResolvedValues {
 /** The fully resolved expected state, ready to validate. It captures the quote it was assembled for. */
 export interface AssembledPolicy {
   readonly codeMeasurement: Expected;
+  /**
+   * Every register that the quote must attest: the code measurement, the
+   * caller's pins and, for a code release on TDX, the platform registers
+   * that the platform endorsements resolve.
+   */
+  readonly expected: Measurement;
   readonly policyName: string;
   readonly platformMeasurementName: string;
   /** @internal */
   readonly quote: Authenticated;
   readonly sev?: SevExpectations;
   readonly tdx?: TdxExpectations;
+}
+
+/**
+ * The registers that `refs` fix on the platform that `evidenceFormat` names,
+ * or undefined if the format names no platform or `refs` fix nothing usable
+ * on it. It reads only `refs`, which provenance authenticated, so it is
+ * known before the quote is authenticated; the format, which the quote has
+ * not yet proven, only selects the platform.
+ */
+export function codeMeasurement(refs: ReferenceValues, evidenceFormat: string): Expected | undefined {
+  let platform: Platform;
+  switch (evidenceFormat) {
+    case SEV_SNP_REPORT_V1_FORMAT:
+      platform = PLATFORM_SEV_SNP;
+      break;
+    case TDX_QUOTE_V1_FORMAT:
+      platform = PLATFORM_TDX;
+      break;
+    default:
+      return undefined;
+  }
+  try {
+    return cloneExpected(refs.kind === "legacy" ? legacyCode(refs, platform) : configCode(refs, platform));
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * An assembly failure that came after every expected register was
+ * resolved. It carries them, so that a caller can report them next to the
+ * rejection, and its message and `cause` are those of the failure.
+ */
+export class ResolvedError extends Error {
+  /** Every register that the quote had to attest, as {@link AssembledPolicy.expected} describes. */
+  readonly expected: Measurement;
+  declare readonly cause?: unknown;
+
+  constructor(expected: Measurement, cause: unknown) {
+    super(cause instanceof Error ? cause.message : String(cause));
+    this.name = "ResolvedError";
+    this.expected = expected;
+    (this as { cause?: unknown }).cause = cause;
+  }
 }
 
 /**
@@ -155,12 +205,25 @@ function reportDataOf(doc: Document, q: Authenticated): Uint8Array {
   return reportData;
 }
 
-/** `assemble` against an explicit REPORT_DATA. */
+/**
+ * `assemble` against an explicit REPORT_DATA. A failure after every
+ * expected register was resolved is a {@link ResolvedError}.
+ */
 export async function assembleWith(refs: ReferenceValues, pins: Expected | undefined, reportData: Uint8Array, q: Authenticated): Promise<AssembledPolicy> {
   const resolved = refs.kind === "legacy" ? resolveLegacy(refs, q, pins) : resolveConfig(refs, q, pins);
   const expected = complete(resolved.expected);
+  try {
+    return assembleResolved(resolved, expected, reportData, q);
+  } catch (err) {
+    throw new ResolvedError(expected, err);
+  }
+}
+
+/** `assembleWith` once every expected register is resolved. */
+function assembleResolved(resolved: ResolvedValues, expected: Measurement, reportData: Uint8Array, q: Authenticated): AssembledPolicy {
   const assembled = {
     codeMeasurement: resolved.code,
+    expected,
     policyName: resolved.policyName,
     platformMeasurementName: resolved.platformMeasurementName,
     quote: q,

@@ -46,7 +46,8 @@ import { decodeManifest, parseManifest, type Manifest, type Measurements } from 
 import * as semver from "./internal/semver.js";
 import { pinnedKeys, type PinnedKey } from "./internal/sigstore/keyed.js";
 import { cloneExpected, REGISTER_SIZE, type Expected } from "./measurement.js";
-import { verificationOf, type ArtifactVerification, type ConfigVerification, type Verification } from "./verification.js";
+import { measuredKeys, ReportBuilder, type VerificationReport } from "./report.js";
+import { verifiedFactsOf, type ArtifactVerification, type ConfigVerification, type VerificationMetadata, type VerifiedFacts } from "./verification.js";
 
 /**
  * Who vouches for the config that an enclave runs: one of {@link Registries},
@@ -330,16 +331,26 @@ export class Verifier {
   /**
    * Appraises a nonce-bound v3 document against `pin` at the current time.
    * The document's collateral decides which part of `pin` applies.
+   *
+   * A document that it accepts resolves to a {@link VerificationReport}
+   * whose `verifiedFacts` hold what the document proved; the caller must
+   * bind its traffic to the keys in them and enforce their
+   * `freshnessExpiresAt`. A document that it rejects rejects with a
+   * {@link VerificationError} whose `report` shows the step that failed and
+   * what the steps before it established. A {@link UsageError} carries no
+   * report, because it reports a mistake in the caller's code rather than a
+   * rejected document.
    */
-  async verifyV3(docBytes: Uint8Array, nonce: Uint8Array, pin: Pin): Promise<Verification> {
+  async verifyV3(docBytes: Uint8Array, nonce: Uint8Array, pin: Pin): Promise<VerificationReport> {
     return this.verifyV3At(docBytes, nonce, pin, new Date());
   }
 
   /**
    * Like {@link verifyV3}, but `verificationTime` replaces the clock in every
-   * time-bound check (freshness, vendor certificate and CRL validity).
+   * time-bound check (freshness, vendor certificate and CRL validity), and
+   * the report's `metadata.verifiedAt` reports it.
    */
-  async verifyV3At(docBytes: Uint8Array, nonce: Uint8Array, pin: Pin, verificationTime: Date): Promise<Verification> {
+  async verifyV3At(docBytes: Uint8Array, nonce: Uint8Array, pin: Pin, verificationTime: Date): Promise<VerificationReport> {
     if (!(verificationTime instanceof Date) || !Number.isFinite(verificationTime.getTime())) {
       throw new UsageError("verification time must be a valid date");
     }
@@ -349,15 +360,40 @@ export class Verifier {
     if (repo !== "") usage(() => parseReference(repo));
     this.#referencePins(project);
     const now = new Date(verificationTime.getTime());
+    const metadata: VerificationMetadata = { verifier: { name: VERIFIER_NAME, version: VERIFIER_VERSION }, verifiedAt: now };
+    const steps = new ReportBuilder();
+    let verified: VerifiedFacts;
+    try {
+      verified = await this.#verify(docBytes, nonce, repo, project, now, steps);
+    } catch (err) {
+      // A usage error passes through without a report; a step's rejection
+      // becomes a VerificationError at its layer that carries the report.
+      if (!(err instanceof StepFailure)) throw err;
+      // The step names its layer, so its message is the failing check's own, without the error's prefix.
+      const report = steps.failed(err.layer, err.message, metadata);
+      throw new VerificationError(err.message, { layer: err.layer, report, cause: err.cause });
+    }
+    return steps.passedAll(verified, metadata);
+  }
 
-    const doc = await at("envelope", async () => {
+  /**
+   * The verification itself: it records in `steps` each step that passes,
+   * and the facts that the step establishes, from the values that the step
+   * already computes. A rejection is a {@link StepFailure}.
+   */
+  async #verify(docBytes: Uint8Array, nonce: Uint8Array, repo: string, project: string, now: Date, steps: ReportBuilder): Promise<VerifiedFacts> {
+    const { doc, measured } = await at("envelope", async () => {
+      let parsed: Document;
       try {
-        return await parseDocument(docBytes, nonce);
+        parsed = await parseDocument(docBytes, nonce);
       } catch (err) {
         if (err instanceof InvalidInputError) throw new UsageError(err.message, { cause: err });
         throw err;
       }
+      return { doc: parsed, measured: await measuredKeys(parsed.cryptoMaterialItems()) };
     });
+    steps.passed("envelope");
+    steps.measured = measured;
 
     const refs = await at("provenance", async () => {
       switch (doc.collateralFormat()) {
@@ -376,14 +412,42 @@ export class Verifier {
       }
     });
 
+    if (embedded(refs)) {
+      steps.set("provenance", "skipped", "the verifier embeds every reference value, so there is no endorsement to authenticate");
+    } else {
+      steps.passed("provenance");
+    }
+    steps.expected = {
+      configRepo: refs.artifact.repo,
+      artifact: refs.artifact,
+      ...(refs.config === undefined ? {} : { config: refs.config }),
+      ...(refs.platform === undefined ? {} : { platform: refs.platform }),
+    };
+    const code = quote.codeMeasurement(refs.quote, doc.cpuEvidence().format);
+    if (code !== undefined) steps.expected.codeMeasurement = code;
+
     const authenticated = await at("quote", () =>
       quote.authenticate(doc.cpuEvidence(), doc.cpuEndorsements(), now, { dangerousTestOnlyRoots: this.#roots }),
     );
+    steps.passed("quote");
+    steps.measured.cpu = { measurement: authenticated.measurement };
 
-    const assembled = await at("policy", () => quote.assemble(doc, refs.quote, this.#policy.pinnedRegisters, authenticated));
+    const expected = steps.expected;
+    const assembled = await at("policy", async () => {
+      try {
+        return await quote.assemble(doc, refs.quote, this.#policy.pinnedRegisters, authenticated);
+      } catch (err) {
+        // The registers were resolved before the failure, so the report shows them.
+        if (!(err instanceof quote.ResolvedError)) throw err;
+        expected.measurement = err.expected;
+        throw err.cause;
+      }
+    });
+    expected.measurement = assembled.expected;
     await at("policy", () => quote.validate(assembled));
+    steps.passed("policy");
 
-    return verificationOf({
+    return verifiedFactsOf({
       configRepo: refs.artifact.repo,
       codeDigest: refs.artifact.digest,
       codeTag: refs.artifact.tag,
@@ -394,7 +458,6 @@ export class Verifier {
       runtime: refs.config === undefined ? undefined : refs.artifact,
       platform: refs.platform,
       freshnessExpiresAt: new Date(Math.min(refs.freshnessExpiresAt?.getTime() ?? Infinity, authenticated.expiresAt.getTime())),
-      metadata: { verifier: { name: VERIFIER_NAME, version: VERIFIER_VERSION }, verifiedAt: now },
     });
   }
 
@@ -527,7 +590,7 @@ export class Verifier {
       try {
         await authorizer({ ...material, config: config.slice(), ...(material.issuer === undefined ? {} : { issuer: material.issuer.slice() }) });
       } catch (err) {
-        throw new VerificationError(`authorizing config: ${message(err)}`, { layer: "provenance", cause: err });
+        throw new StepFailure("provenance", `authorizing config: ${message(err)}`, err);
       }
       const digest = toHex(await sha256(config));
       return { expected: configRuntime(config), config: { source: "policy", name: "", digest, reference: "", signingKeyHint: "", registryID: "" } };
@@ -800,6 +863,22 @@ function registryIDsOf(registryIDs: readonly string[]): readonly string[] {
 }
 
 /**
+ * A step's rejection of the document at `layer`, which `verifyV3At` reports
+ * as a {@link VerificationError} with the same message and cause once the
+ * report is complete.
+ */
+class StepFailure extends Error {
+  readonly layer: Layer;
+  declare readonly cause?: unknown;
+
+  constructor(layer: Layer, message: string, cause: unknown) {
+    super(message);
+    this.layer = layer;
+    (this as { cause?: unknown }).cause = cause;
+  }
+}
+
+/**
  * Runs one pipeline step; an error that is not already classified is
  * attributed to `layer`. That includes the verifier's own failures inside
  * the step, so the pipeline fails closed: a document is rejected rather
@@ -809,9 +888,18 @@ async function at<T>(layer: Layer, step: () => Promise<T>): Promise<T> {
   try {
     return await step();
   } catch (err) {
-    if (err instanceof VerifyError) throw err;
-    throw new VerificationError(message(err), { layer, cause: err });
+    if (err instanceof VerifyError || err instanceof StepFailure) throw err;
+    throw new StepFailure(layer, message(err), err);
   }
+}
+
+/**
+ * Whether the caller embedded every reference value in the verifier, so
+ * that provenance authenticated nothing: the config, the runtime and the
+ * platform.
+ */
+function embedded(refs: References): boolean {
+  return refs.config?.source === "embedded" && refs.artifact.source === "embedded" && refs.platform?.source === "embedded";
 }
 
 /** Runs a caller-input check; its failure is a UsageError. */

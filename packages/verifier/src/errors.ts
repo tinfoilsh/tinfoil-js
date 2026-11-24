@@ -1,3 +1,5 @@
+import type { VerificationReport } from "./report.js";
+
 /** The verification layers today, in the order a document passes through them. */
 export type KnownLayer =
   /** The document can't be parsed, isn't bound to the nonce, or contradicts itself. */
@@ -82,26 +84,34 @@ export class UsageError extends VerifyError {
 }
 
 /**
- * A document that must not be trusted, and the layer that rejected it. The
- * verifier fails closed: a failure inside a layer that is not itself a
- * VerifyError, such as a bug or an exhausted resource, is reported as a
- * rejection at that layer with the underlying error as `cause`. An
- * unfamiliar message at a layer may therefore be the verifier failing
- * rather than the document, and `cause` says which. The message reads
- * `verification error: <layer>: <message>`; the layer is given in the
- * options, with the cause.
+ * A document that must not be trusted, the layer that rejected it, and the
+ * report of the rejected verification. The verifier fails closed: a failure
+ * inside a layer that is not itself a VerifyError, such as a bug or an
+ * exhausted resource, is reported as a rejection at that layer with the
+ * underlying error as `cause`. An unfamiliar message at a layer may
+ * therefore be the verifier failing rather than the document, and `cause`
+ * says which. The message reads `verification error: <layer>: <message>`;
+ * the layer, the report and the cause are given in the options.
  */
 export class VerificationError extends VerifyError {
   readonly layer: Layer;
+  /**
+   * The report of the rejected verification: the step that failed, whose
+   * layer is this error's, and the partial facts that the steps before it
+   * established. It never holds verified facts.
+   */
+  readonly report: VerificationReport;
 
-  constructor(message: string, options: { layer: Layer; cause?: unknown }) {
+  constructor(message: string, options: { layer: Layer; report: VerificationReport; cause?: unknown }) {
     super(`verification error: ${options.layer}: ${message}`, options);
     this.name = "VerificationError";
     this.layer = options.layer;
+    this.report = options.report;
     stamp(this, "VerificationError");
   }
 
   static override [Symbol.hasInstance](value: unknown): boolean {
-    return byPrototype(this, value) || (this === VerificationError && brandOf(value) === "VerificationError");
+    // A copy of the package from before reports carries the brand without a report, which this class promises.
+    return byPrototype(this, value) || (this === VerificationError && brandOf(value) === "VerificationError" && typeof (value as { report?: unknown }).report === "object");
   }
 }

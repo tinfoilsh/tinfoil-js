@@ -16,19 +16,20 @@ import { checkEHBP, ehbpMode } from "../src/internal/transport/ehbp.js";
 import { ENCLAVE_URL_HEADER, withEnclaveURL } from "../src/internal/transport/header.js";
 import { withReplay } from "../src/internal/transport/replay.js";
 import { isKeyRejection, KeyedTransport, KeyRejectionError, PeerLacksKeyError, shapeOf } from "../src/internal/transport/transport.js";
-import { KEY_X25519_HPKE_V1_FORMAT, type Verification, type Verifier } from "../../verifier/src/index.js";
+import { KEY_X25519_HPKE_V1_FORMAT, type VerifiedFacts, type Verifier } from "../../verifier/src/index.js";
 import { paced, startEhbpServer, type EhbpServer, type Reply } from "./helpers/ehbp-server.js";
+import { verifiedReport } from "./helpers/report.js";
 
 let server: EhbpServer;
 let sseEnded = false;
 
-function verification(hpke: string | undefined): Verification {
+function verification(hpke: string | undefined): VerifiedFacts {
   return {
     cryptoMaterial: (hpke === undefined ? [] : [{ id: "hpke", format: KEY_X25519_HPKE_V1_FORMAT, data: hpke }]),
     tlsPublicKeyFP: "ab".repeat(32),
     hpkePublicKey: hpke,
     freshnessExpiresAt: new Date(Date.now() + 60_000),
-  } as unknown as Verification;
+  } as unknown as VerifiedFacts;
 }
 
 beforeAll(async () => {
@@ -175,7 +176,7 @@ describe("ehbpMode", () => {
     expect(server.seen.length).toBe(before);
 
     let verified = 0;
-    const verifier = { checkPinVerifiability: () => {}, verifyV3At: async () => verification(verified++ === 0 ? other : server.publicKeyHex) } as unknown as Verifier;
+    const verifier = { checkPinVerifiability: () => {}, verifyV3At: async () => verifiedReport(verification(verified++ === 0 ? other : server.publicKeyHex)) } as unknown as Verifier;
     const enclave = await Enclave.create({ host: "127.0.0.1", pin: {}, verifier, fetch: async () => new Response(new Uint8Array([1])), sleep: async () => {} });
     const transport = new KeyedTransport(enclave, mode);
     const rejected = await transport.fetch(`${server.origin}/echo`, { method: "POST", body: "y" }).catch((e: unknown) => e);

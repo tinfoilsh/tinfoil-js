@@ -6,7 +6,7 @@
  *
  * @experimental The gateway route is new; this API may change without a major version.
  */
-import type { Verification } from "@tinfoilsh/verifier";
+import type { VerificationReport } from "@tinfoilsh/verifier";
 import { ehbpOptionsFor, type EnclaveClientSeams } from "./enclave-client.js";
 import { ConfigurationError } from "./errors.js";
 import { resolveUserCacheSecret } from "./internal/cachesecret.js";
@@ -66,6 +66,7 @@ export async function createGatewayHTTPClient(options: GatewayOptions, seams: Ga
     catalog: options.catalog,
     policy,
     verificationCheck: options.verificationCheck,
+    onVerification: options.onVerification,
     secret,
     catalogFetch: seams.catalogFetch,
     documentFetch: seams.documentFetch,
@@ -132,20 +133,27 @@ export class GatewayHTTPClient {
     return this.#transport.models(options?.signal);
   }
 
-  /** A verification valid now of a replica serving `model`, verifying replicas only if needed. */
-  ensureVerified(model: string, options?: CallOptions): Promise<Verification> {
+  /** The report of a verification valid now of a replica serving `model`, verifying replicas only if needed. */
+  ensureVerified(model: string, options?: CallOptions): Promise<VerificationReport> {
     return this.#transport.ensureVerified(model, options?.signal);
   }
 
-  /** The last successful verification of each replica used so far, unchecked: they may have expired or been rejected. A new array on each read. */
-  get current(): ReplicaVerification[] {
-    return this.#transport.verifications();
+  /**
+   * The last attempt to verify each replica that the client has tried to
+   * verify, failed replicas included, without network I/O, sorted by host:
+   * its `report` if it passed, or its `error` if it failed, as
+   * {@link ReplicaVerification} describes. A report is not checked again: it
+   * may have expired or been rejected since. A new array of copies on each
+   * call.
+   */
+  lastVerification(): ReplicaVerification[] {
+    return this.#transport.lastVerification();
   }
 
   /**
    * Refuses further use: `fetch`, `models` and `ensureVerified` reject with
    * a {@link ConfigurationError} afterwards, and no replica is verified
-   * again; `current` still reports the replicas' last verifications.
+   * again; `lastVerification` still reports the replicas' last attempts.
    * Requests are sealed and sent through the runtime's fetch, or the `fetch`
    * option, so the client holds no connections of its own to release; a sealed exchange already
    * under way completes, while a request still preparing, verifying or

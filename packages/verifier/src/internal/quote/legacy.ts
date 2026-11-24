@@ -1,6 +1,6 @@
 /** Reference values for a code release: the platform policy and the registers the release fixes. */
 import { parseRegister, type Expected, type ExpectedSevSnp, type ExpectedTdx, type Register } from "../../measurement.js";
-import { PLATFORM_SEV_SNP, PLATFORM_TDX, resolvePlatformMeasurement, type Artifact } from "../policy/artifact.js";
+import { PLATFORM_SEV_SNP, PLATFORM_TDX, resolvePlatformMeasurement, type Artifact, type Platform } from "../policy/artifact.js";
 import { decodeHex } from "../policy/artifact.js";
 import type { Shape } from "../policy/shape.js";
 import type { Authenticated, ResolvedValues } from "./quote.js";
@@ -15,6 +15,18 @@ export interface LegacyReferenceValues {
   readonly shape?: Shape;
 }
 
+/** The registers that the release fixes on `platform`. */
+export function legacyCode(r: LegacyReferenceValues, platform: Platform): Expected {
+  switch (platform) {
+    case PLATFORM_SEV_SNP:
+      return r.sevSnp;
+    case PLATFORM_TDX:
+      return r.tdx;
+    default:
+      throw new Error(`unsupported platform ${JSON.stringify(platform)}`);
+  }
+}
+
 /**
  * The release's registers, then pins. SEV-SNP: HOST_DATA comes from the
  * policy. TDX: MRTD and RTMR0 come from the platform measurement whose shape
@@ -23,17 +35,7 @@ export interface LegacyReferenceValues {
  */
 export function resolveLegacy(r: LegacyReferenceValues, q: Authenticated, pins: Expected | undefined): ResolvedValues {
   const { policy, policyName } = resolvePolicy(r.endorsements, q);
-  let code: Expected;
-  switch (q.platform) {
-    case PLATFORM_SEV_SNP:
-      code = r.sevSnp;
-      break;
-    case PLATFORM_TDX:
-      code = r.tdx;
-      break;
-    default:
-      throw new Error(`unsupported platform ${JSON.stringify(q.platform)}`);
-  }
+  const code = legacyCode(r, q.platform);
   const expected = applyPins(code, q.platform, pins);
   let hostData: Uint8Array = new Uint8Array(32);
   let configId = new Uint8Array(48);

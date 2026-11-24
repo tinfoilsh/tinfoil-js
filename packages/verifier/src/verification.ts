@@ -45,7 +45,7 @@ export interface VerificationMetadata {
 }
 
 /** @internal The facts the verifier proved; only the verifier builds one. */
-export interface VerificationFields {
+export interface VerifiedFactsFields {
   readonly codeDigest: string;
   readonly codeTag: string;
   readonly configRepo: string;
@@ -56,7 +56,6 @@ export interface VerificationFields {
   readonly runtime?: ArtifactVerification;
   readonly platform?: ArtifactVerification;
   readonly freshnessExpiresAt?: Date;
-  readonly metadata: VerificationMetadata;
 }
 
 /** A measurement or expectation with each set register as lowercase hex. */
@@ -71,12 +70,12 @@ export type ConfigVerificationJSON = Omit<ConfigVerification, "approvalTime" | "
 export type ArtifactVerificationJSON = Omit<ArtifactVerification, "approvalTime"> & { readonly approvalTime?: string };
 
 /**
- * The JSON form of a `Verification`, as `toJSON()` returns it and
+ * The JSON form of a `VerifiedFacts`, as `toJSON()` returns it and
  * `JSON.stringify` serializes it: the same fields as the properties, with
  * registers as lowercase hex and times as ISO 8601 strings. Facts that were
  * not established are left out.
  */
-export interface VerificationJSON {
+export interface VerifiedFactsJSON {
   readonly codeDigest: string;
   readonly codeTag: string;
   readonly configRepo: string;
@@ -87,20 +86,28 @@ export interface VerificationJSON {
   readonly runtime?: ArtifactVerificationJSON;
   readonly platform?: ArtifactVerificationJSON;
   readonly freshnessExpiresAt?: string;
-  readonly metadata: { readonly verifier: VerificationMetadata["verifier"]; readonly verifiedAt: string };
+}
+
+/** The JSON form of a `VerificationMetadata`, with its time as an ISO 8601 string. */
+export interface VerificationMetadataJSON {
+  readonly verifier: VerificationMetadata["verifier"];
+  readonly verifiedAt: string;
 }
 
 /** Only this module holds the token the constructor requires, so untyped code that calls it is refused. */
-const BUILT_HERE: unique symbol = Symbol("Verification");
+const BUILT_HERE: unique symbol = Symbol("VerifiedFacts");
 
 /** Calls the private constructor; the class assigns it, as the only place the constructor can be called. */
-let construct: (fields: VerificationFields) => Verification;
+let construct: (fields: VerifiedFactsFields) => VerifiedFacts;
 
 /**
- * The facts proven by verifying an attestation document. Only the verifier
- * creates one: the constructor is private, so type-checked code cannot
- * construct a verification, and a call from untyped code is refused at
- * runtime by a token only this module holds. Every fact is a `readonly` property
+ * The facts proven by verifying an attestation document, including the
+ * channel keys that a caller binds its traffic to: the `verifiedFacts` of
+ * the {@link VerificationReport} of a document that the verifier accepted.
+ * They are the only source of channel keys. Only the verifier creates them:
+ * the constructor is private, so type-checked code cannot construct them,
+ * and a call from untyped code is refused at runtime by a token that only
+ * this module holds. Every fact is a `readonly` property
  * whose value is fixed at construction: the instance and every nested
  * object and array are frozen, so a property always yields the same
  * reference and nothing on it can be reassigned. Register bytes
@@ -108,7 +115,7 @@ let construct: (fields: VerificationFields) => Verification;
  * are shared as stored and must not be mutated. `toJSON()` gives a plain,
  * serializable copy for logging or persisting.
  */
-export class Verification {
+export class VerifiedFacts {
   /** Digest of the verified code or runtime artifact. */
   readonly codeDigest: string;
   /** Release tag of the verified code or runtime artifact. */
@@ -129,11 +136,9 @@ export class Verification {
   readonly platform?: ArtifactVerification;
   /** Earliest approval/freshness timestamp plus the maximum age, capped by CPU collateral validity. */
   readonly freshnessExpiresAt?: Date;
-  /** The verifier's name and version, and when it ran. */
-  readonly metadata: VerificationMetadata;
 
-  private constructor(token: typeof BUILT_HERE, fields: VerificationFields) {
-    if (token !== BUILT_HERE) throw new UsageError("a Verification comes from a verifier: verify a document to get one");
+  private constructor(token: typeof BUILT_HERE, fields: VerifiedFactsFields) {
+    if (token !== BUILT_HERE) throw new UsageError("verified facts come from a verifier: verify a document to get them");
     this.codeDigest = fields.codeDigest;
     this.codeTag = fields.codeTag;
     this.configRepo = fields.configRepo;
@@ -144,12 +149,11 @@ export class Verification {
     this.runtime = fields.runtime && freezeDeep(copyArtifact(fields.runtime));
     this.platform = fields.platform && freezeDeep(copyArtifact(fields.platform));
     this.freshnessExpiresAt = copyDate(fields.freshnessExpiresAt);
-    this.metadata = freezeDeep({ verifier: { ...fields.metadata.verifier }, verifiedAt: new Date(fields.metadata.verifiedAt.getTime()) });
     Object.freeze(this);
   }
 
   static {
-    construct = (fields) => new Verification(BUILT_HERE, fields);
+    construct = (fields) => new VerifiedFacts(BUILT_HERE, fields);
   }
 
   /** The data of the endorsed item with the given id and format, or undefined. */
@@ -168,7 +172,7 @@ export class Verification {
   }
 
   /** The facts as plain JSON: registers as lowercase hex, times as ISO 8601 strings. */
-  toJSON(): VerificationJSON {
+  toJSON(): VerifiedFactsJSON {
     return {
       codeDigest: this.codeDigest,
       codeTag: this.codeTag,
@@ -180,14 +184,19 @@ export class Verification {
       ...(this.runtime === undefined ? {} : { runtime: artifactJSON(this.runtime) }),
       ...(this.platform === undefined ? {} : { platform: artifactJSON(this.platform) }),
       ...timeJSON("freshnessExpiresAt", this.freshnessExpiresAt),
-      metadata: { verifier: { ...this.metadata.verifier }, verifiedAt: this.metadata.verifiedAt.toISOString() },
     };
   }
 }
 
-/** @internal The verification of the facts the verifier proved; the verifier is its only caller. */
-export function verificationOf(fields: VerificationFields): Verification {
+/** @internal The facts that the verifier proved, as a {@link VerifiedFacts}; the verifier is its only caller. */
+export function verifiedFactsOf(fields: VerifiedFactsFields): VerifiedFacts {
   return construct(fields);
+}
+
+/** @internal A copy of `v` that shares no register bytes or dates with it. */
+export function copyVerifiedFacts(v: VerifiedFacts): VerifiedFacts {
+  // The constructor copies every field that it is given.
+  return construct(v);
 }
 
 /** The data of the first item with the given id and format, or undefined. */
@@ -195,14 +204,15 @@ export function cryptoMaterialData(items: readonly CryptoMaterialItem[], id: str
   return items.find((i) => i.id === id && i.format === format)?.data;
 }
 
-/** Freezes a plain object or array and everything reachable through it; byte views and dates are left as they are. */
-function freezeDeep<T>(value: T): T {
+/** @internal Freezes a plain object or array and everything reachable through it; byte views and dates are left as they are. */
+export function freezeDeep<T>(value: T): T {
   if (value === null || typeof value !== "object" || ArrayBuffer.isView(value) || value instanceof Date) return value;
   for (const nested of Object.values(value)) freezeDeep(nested);
   return Object.freeze(value);
 }
 
-function copyConfig(c: ConfigVerification): ConfigVerification {
+/** @internal */
+export function copyConfig(c: ConfigVerification): ConfigVerification {
   return {
     ...c,
     ...(c.approvalTime === undefined ? {} : { approvalTime: copyDate(c.approvalTime) }),
@@ -210,15 +220,18 @@ function copyConfig(c: ConfigVerification): ConfigVerification {
   };
 }
 
-function copyArtifact(a: ArtifactVerification): ArtifactVerification {
+/** @internal */
+export function copyArtifact(a: ArtifactVerification): ArtifactVerification {
   return { ...a, ...(a.approvalTime === undefined ? {} : { approvalTime: copyDate(a.approvalTime) }) };
 }
 
-function copyDate(d: Date | undefined): Date | undefined {
+/** @internal */
+export function copyDate(d: Date | undefined): Date | undefined {
   return d === undefined ? undefined : new Date(d.getTime());
 }
 
-function measurementJSON(m: Measurement | Expected): MeasurementJSON {
+/** @internal */
+export function measurementJSON(m: Measurement | Expected): MeasurementJSON {
   switch (m.platform) {
     case "sev-snp":
       return { platform: "sev-snp", ...hexJSON("launch", m.launch) };
@@ -234,12 +247,14 @@ function measurementJSON(m: Measurement | Expected): MeasurementJSON {
   }
 }
 
-function configJSON(c: ConfigVerification): ConfigVerificationJSON {
+/** @internal */
+export function configJSON(c: ConfigVerification): ConfigVerificationJSON {
   const { approvalTime, signatureTime, ...rest } = c;
   return { ...rest, ...timeJSON("approvalTime", approvalTime), ...timeJSON("signatureTime", signatureTime) };
 }
 
-function artifactJSON(a: ArtifactVerification): ArtifactVerificationJSON {
+/** @internal */
+export function artifactJSON(a: ArtifactVerification): ArtifactVerificationJSON {
   const { approvalTime, ...rest } = a;
   return { ...rest, ...timeJSON("approvalTime", approvalTime) };
 }
@@ -250,6 +265,7 @@ function hexJSON<K extends string>(key: K, r: Register | undefined): { readonly 
 }
 
 /** `{ [key]: iso }` for a set time, `{}` for an unset one. */
-function timeJSON<K extends string>(key: K, d: Date | undefined): { readonly [P in K]?: string } {
+/** @internal */
+export function timeJSON<K extends string>(key: K, d: Date | undefined): { readonly [P in K]?: string } {
   return d === undefined ? {} : ({ [key]: d.toISOString() } as { [P in K]?: string });
 }

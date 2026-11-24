@@ -5,7 +5,8 @@
  *
  * The full-verify stage is one `Verifier.verifyV3At` call, so fixtures
  * appraise exactly the code production runs; the layer on its
- * VerificationError names the rejection. The block stages isolate one layer
+ * VerificationError names the rejection, and the output carries the
+ * verifier's report. The block stages isolate one layer
  * by calling the internal document, endorsement and quote modules directly.
  *
  * Test roots and the appraisal clock are per-call arguments; the adapter
@@ -24,6 +25,7 @@ import { parseBundleBytes } from "../src/internal/sigstore/bundle.js";
 import { pinnedKeys, verifyKeyedBundle } from "../src/internal/sigstore/keyed.js";
 import { verifyTimestamp } from "../src/internal/sigstore/timestamp.js";
 import { embeddedTrustedRoot, parseTrustedRoot, type TrustedRoot } from "../src/internal/sigstore/trusted-root.js";
+import { reportOf, type Report } from "./report.js";
 import { dangerousTestOnlyDecode, dangerousTestOnlyVerifier, type DangerousTestOnlyRoots } from "./testing.js";
 
 export const SCHEMA_VERSION = "1";
@@ -97,6 +99,12 @@ export interface Output {
   accepted: boolean;
   outputs?: AcceptOutputs;
   rejection?: { code: RejectionCode };
+  /**
+   * The verifier's report, for the full-verify stage only. A malformed
+   * input has none, and neither does the adapter's own rejection of an
+   * accepted document that endorses no channel keys.
+   */
+  report?: Report;
 }
 
 export interface Result {
@@ -115,6 +123,7 @@ export function capabilities(): Record<string, unknown> {
       freshness_enforced: true,
       live_verify: true,
       channel_binding: "tls-spki",
+      verification_report: true,
     },
   };
 }
@@ -278,7 +287,7 @@ async function verifyTimestampStage(in_: Input, roots: DangerousTestOnlyRoots, a
   });
 }
 
-/** Runs the whole flow through the verifier; the error's layer names the rejection. */
+/** Runs the whole flow through the verifier; the error's layer names the rejection, and the output carries the report. */
 async function verifyFull(
   doc: Uint8Array,
   nonce: Uint8Array,
@@ -287,18 +296,21 @@ async function verifyFull(
   appraisal: Date,
 ): Promise<Result> {
   const stage = Stage.Verify;
-  let verified;
+  let report;
   try {
     // A fixture that injects no anchors runs the production entry exactly;
     // injected anchors go through the test-only seam of the same verifier.
     const injected = roots.amd !== undefined || roots.intel !== undefined || roots.sigstore !== undefined;
     const verifier = injected ? await dangerousTestOnlyVerifier(roots) : await Verifier.create();
-    verified = await verifier.verifyV3At(doc, nonce, pin, appraisal);
+    report = await verifier.verifyV3At(doc, nonce, pin, appraisal);
   } catch (err) {
     const mapped = rejectionCode(err);
     if (mapped === undefined) return { output: { stage, accepted: false }, exitCode: ExitCode.Internal };
-    return { output: { stage, accepted: false, rejection: { code: mapped.code } }, exitCode: mapped.exitCode };
+    const rejected = err instanceof VerificationError ? { report: reportOf(err.report, measurementOf, expectedOf) } : {};
+    return { output: { stage, accepted: false, rejection: { code: mapped.code }, ...rejected }, exitCode: mapped.exitCode };
   }
+  const verified = report.verifiedFacts;
+  if (verified === undefined) return { output: { stage, accepted: false }, exitCode: ExitCode.Internal };
   // A document that verifies but endorses no usable channel keys is useless
   // to every real client, so the full stage requires both.
   const tlsFP = verified.tlsPublicKeyFP;
@@ -306,13 +318,14 @@ async function verifyFull(
   if (tlsFP === undefined || hpke === undefined) {
     return reject(stage, "ENVELOPE_REJECTED");
   }
-  return accept(stage, {
+  const accepted = accept(stage, {
     code_digest: verified.codeDigest,
     code_measurement: expectedOf(verified.codeMeasurement),
     enclave_measurement: measurementOf(verified.enclaveMeasurement),
     tls_public_key_fp: tlsFP,
     hpke_public_key: hpke,
   });
+  return { ...accepted, output: { ...accepted.output, report: reportOf(report, measurementOf, expectedOf) } };
 }
 
 /** Maps a verifier error to its wire code, or undefined if it is not a classified error. */

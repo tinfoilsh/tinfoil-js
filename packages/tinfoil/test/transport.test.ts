@@ -13,7 +13,8 @@ import { withReplay } from "../src/internal/transport/replay.js";
 import { openClientWebSocket } from "../src/internal/websocket.js";
 import { isKeyRejection, KeyedTransport, KeyRejectionError, PeerLacksKeyError, type Mode } from "../src/internal/transport/transport.js";
 import type { Fetch } from "../src/options.js";
-import { KEY_SPKI_FP_SHA256_V1_FORMAT, type Verification, type Verifier } from "../../verifier/src/index.js";
+import { KEY_SPKI_FP_SHA256_V1_FORMAT, type VerificationReport, type Verifier } from "../../verifier/src/index.js";
+import { lastFacts, verifiedReport } from "./helpers/report.js";
 
 const HOST = "enclave.example";
 
@@ -183,13 +184,13 @@ describe("KeyedTransport", () => {
       checkPinVerifiability: () => {},
       verifyV3At: async () => {
         const key = keys();
-        return {
+        return verifiedReport({
           cryptoMaterial: [{ id: "tls", format: KEY_SPKI_FP_SHA256_V1_FORMAT, data: key }],
           cryptoMaterialData: (id: string) => (id === "tls" ? key : undefined),
           tlsPublicKeyFP: key,
           hpkePublicKey: undefined,
           freshnessExpiresAt: new Date(expiresAt.getTime()),
-        } as unknown as Verification;
+        });
       },
     } as unknown as Verifier;
   }
@@ -232,13 +233,13 @@ describe("KeyedTransport", () => {
       () => "k1",
       () => "k1",
     );
-    expect(t.current()).toBeUndefined();
+    expect(t.lastVerification()).toBeUndefined();
     expect(t.mode()).toBe("tls");
     await expect(t.fetch(`http://${HOST}/`)).rejects.toThrow(ConfigurationError);
-    expect(t.current()).toBeUndefined();
+    expect(t.lastVerification()).toBeUndefined();
     expect(await (await t.fetch(`https://${HOST}/v1/models`)).text()).toBe("k1");
-    expect(t.current()?.tlsPublicKeyFP).toBe("k1");
-    expect((await t.ensureVerified()).tlsPublicKeyFP).toBe("k1");
+    expect(lastFacts(t)?.tlsPublicKeyFP).toBe("k1");
+    expect((await t.ensureVerified()).verifiedFacts?.tlsPublicKeyFP).toBe("k1");
   });
 
   it("takes a Request input's own signal for the verification, and none when the init says null", async () => {
@@ -277,7 +278,7 @@ describe("KeyedTransport", () => {
     expect(await (await replayed(`https://${HOST}/v1/chat`)).text()).toBe("k2");
     expect(verified).toBe(2);
     expect(closed).toEqual(["k1"]);
-    expect((await t.reverify()).tlsPublicKeyFP).toBe("k2");
+    expect((await t.reverify()).verifiedFacts?.tlsPublicKeyFP).toBe("k2");
     expect(closed).toEqual(["k1", "k2"]);
   });
 
@@ -354,7 +355,7 @@ describe("KeyedTransport", () => {
     t.close();
     t.close();
     expect(closed).toEqual(["k1"]);
-    expect(t.current()?.tlsPublicKeyFP).toBe("k1");
+    expect(lastFacts(t)?.tlsPublicKeyFP).toBe("k1");
     for (const call of [t.fetch(`https://${HOST}/v1/models`), t.ensureVerified(), t.reverify(), t.verifyOnce(), t.state()]) {
       await expect(call).rejects.toBeInstanceOf(ConfigurationError);
       await expect(call).rejects.toThrow(/client is closed/);
@@ -363,7 +364,7 @@ describe("KeyedTransport", () => {
     await expect(t.fetch(`http://${HOST}/`)).rejects.toThrow(/needs https/);
   });
 
-  it("releases the binding of a verification that was in flight when it closed, and reports the close to its callers", async () => {
+  it("releases the binding of a verification that was in flight when it closed, and reports the close to its callers only", async () => {
     const closed: string[] = [];
     let release!: () => void;
     const gate = new Promise<void>((resolve) => (release = resolve));
@@ -378,14 +379,18 @@ describe("KeyedTransport", () => {
       },
       clock: () => now,
       sleep: async () => {},
+      onVerification: (host) => void reported.push(host),
     });
+    const reported: string[] = [];
     const t = new KeyedTransport(enclave, fakeMode(() => "k1", closed), () => now);
     const waiting = t.ensureVerified();
     t.close();
     release();
     await expect(waiting).rejects.toThrow(/client is closed/);
     expect(closed).toEqual(["k1"]);
-    expect(t.current()).toBeUndefined();
+    // The close abandoned the attempt before its outcome was decided, so it has none.
+    expect(t.lastVerification()).toBeUndefined();
+    expect(reported).toEqual([]);
   });
 
   describe("after a failed re-verification", () => {
@@ -410,7 +415,7 @@ describe("KeyedTransport", () => {
           checkPinVerifiability: () => {},
           verifyV3At: async (...args: unknown[]) => {
             if (fail.next === "attestation") throw new Error("nonce mismatch");
-            return (keyedVerifier(() => `k${++verified}`, new Date(now.getTime() + 60_000)).verifyV3At as (...a: unknown[]) => Promise<Verification>)(...args);
+            return (keyedVerifier(() => `k${++verified}`, new Date(now.getTime() + 60_000)).verifyV3At as (...a: unknown[]) => Promise<VerificationReport>)(...args);
           },
         } as unknown as Verifier,
         fetch: async () => {
@@ -450,8 +455,8 @@ describe("KeyedTransport", () => {
       await expect(t.reverify()).rejects.toThrow(AttestationError);
       // The binding's idle connections are released at once, not when a newer verification replaces it.
       expect(released).toEqual(["retired k1"]);
-      // The last verification is still reported, but no request goes out under it.
-      expect(t.current()?.tlsPublicKeyFP).toBe("k1");
+      // The last attempt is the failure, not the earlier success, and no request goes out under that success.
+      expect(t.lastVerification()?.error).toBeInstanceOf(AttestationError);
       await expect(t.fetch(`https://${HOST}/v1/chat`)).rejects.toThrow(AttestationError);
       await expect(t.ensureVerified()).rejects.toThrow(AttestationError);
       expect(sent).toEqual(["k1"]);
@@ -493,7 +498,8 @@ describe("KeyedTransport", () => {
       await started;
       controller.abort(reason);
       await expect(aborted).rejects.toBe(reason);
-      expect(t.current()?.tlsPublicKeyFP).toBe("k1");
+      // The abandoned verification has no outcome yet, so the last attempt is still the earlier network failure.
+      expect(t.lastVerification()?.error).toBeInstanceOf(NetworkError);
       // Another call joins the verification still under way and sees its failure.
       const joined = t.reverify();
       open();

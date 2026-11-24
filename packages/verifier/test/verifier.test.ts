@@ -38,6 +38,8 @@ const LAYER_OF: Record<string, Layer> = {
   POLICY_REJECTED: "policy",
 };
 
+const PASSED = ["envelope", "provenance", "quote", "policy"].map((layer) => ({ layer, status: "passed", message: "" }));
+
 const utf8 = (s: string): Uint8Array => new TextEncoder().encode(s);
 const hex = (s: string): Uint8Array => new Uint8Array(Buffer.from(s, "hex"));
 
@@ -73,7 +75,7 @@ describe.skipIf(withoutVectors)(vectorsTitle("verifyV3At on the full-verify vect
           return;
         }
         const outcome = await run.then(
-          (v) => ({ verified: v }),
+          (r) => ({ verified: r.verifiedFacts! }),
           (e: unknown) => ({ err: e }),
         );
         if ("verified" in outcome) {
@@ -85,10 +87,23 @@ describe.skipIf(withoutVectors)(vectorsTitle("verifyV3At on the full-verify vect
           return;
         }
         expect(outcome.err).toBeInstanceOf(VerificationError);
-        expect((outcome.err as VerificationError).layer).toBe(LAYER_OF[expected.code ?? ""]);
+        const rejected = outcome.err as VerificationError;
+        expect(rejected.layer).toBe(LAYER_OF[expected.code ?? ""]);
+        // The report fails the error's layer, with the error's message, and holds partial facts only.
+        expect(rejected.report.failedStep()).toEqual({ layer: rejected.layer, status: "failed", message: rejected.message.slice(`verification error: ${rejected.layer}: `.length) });
+        // A failure that the verifier attributed to the layer keeps the failing check's message as the step's.
+        if (rejected.cause instanceof Error) expect(rejected.report.failedStep()?.message).toBe(rejected.cause.message);
+        expect(rejected.report.steps.map((s) => s.layer)).toEqual(["envelope", "provenance", "quote", "policy"]);
+        expect(rejected.report.verifiedFacts).toBeUndefined();
+        expect(rejected.report.partialFacts).toBeDefined();
+        expect(rejected.report.metadata.verifiedAt).toEqual(c.at);
         return;
       }
-      const v = await run;
+      const report = await run;
+      expect(report.steps).toEqual(PASSED);
+      expect(report.partialFacts).toBeUndefined();
+      expect(report.failedStep()).toBeUndefined();
+      const v = report.verifiedFacts!;
       if (expected.tls_public_key_fp) expect(v.tlsPublicKeyFP).toBe(expected.tls_public_key_fp);
       if (expected.hpke_public_key) expect(v.hpkePublicKey).toBe(expected.hpke_public_key);
       if (expected.code_digest) expect(v.codeDigest).toBe(expected.code_digest);
@@ -101,8 +116,8 @@ describe.skipIf(withoutVectors)(vectorsTitle("verifyV3At on the full-verify vect
       expect(v.config).toBeUndefined();
       expect(v.runtime).toBeUndefined();
       expect(v.platform).toBeUndefined();
-      expect(v.metadata.verifiedAt).toEqual(c.at);
-      expect(v.metadata.verifier.name).toBe("@tinfoilsh/verifier");
+      expect(report.metadata.verifiedAt).toEqual(c.at);
+      expect(report.metadata.verifier.name).toBe("@tinfoilsh/verifier");
       const expires = v.freshnessExpiresAt;
       expect(expires).toBeDefined();
       expect(expires!.getTime()).toBeGreaterThanOrEqual(c.at.getTime());
@@ -120,19 +135,19 @@ describe.skipIf(withoutVectors)(vectorsTitle("hardware expiration"), () => {
     const fixture = loadFixture(path);
     const c = await caseOf(fixture);
     const verifier = await dangerousTestOnlyVerifier(rootsOf(fixture), undefined, { freshnessMaxAgeMs: extendedApprovalAgeMs });
-    const verified = await verifier.verifyV3At(c.doc, c.nonce, { repo: c.repo }, c.at);
+    const verified = (await verifier.verifyV3At(c.doc, c.nonce, { repo: c.repo }, c.at)).verifiedFacts!;
     expect(verified.freshnessExpiresAt).toEqual(new Date(deadline));
     const afterExpiry = new Date(new Date(deadline).getTime() + 1);
     await expect(verifier.verifyV3At(c.doc, c.nonce, { repo: c.repo }, afterExpiry)).rejects.toMatchObject({ layer: "quote" });
   });
 });
 
-describe.skipIf(withoutVectors)(vectorsTitle("the JSON form of a verification"), () => {
-  it("pins the shape of the golden vector's facts", async () => {
+describe.skipIf(withoutVectors)(vectorsTitle("the JSON form of a verification report"), () => {
+  it("pins the shape of the golden vector's report", async () => {
     const c = await caseOf(loadFixture("golden/golden-happy.json"));
     const v = await c.verifier.verifyV3At(c.doc, c.nonce, { repo: c.repo }, c.at);
     const launch = "11".repeat(48);
-    const json = {
+    const verifiedFacts = {
       codeDigest: "3b29117bcc96bb282879514cc03c32f3f7eb8a7bd031b829dd3864c591b87c50",
       codeTag: "v1.0.0",
       configRepo: "tinfoilsh/confidential-inference-proxy",
@@ -143,6 +158,11 @@ describe.skipIf(withoutVectors)(vectorsTitle("the JSON form of a verification"),
         { id: "hpke", format: KEY_X25519_HPKE_V1_FORMAT, data: "58c9b3756d738466ace1e27f83a7fe21b3356ec362694aef1506c5f35c766a01" },
       ],
       freshnessExpiresAt: "2025-01-08T00:00:01.000Z",
+    };
+    expect(v.verifiedFacts!.toJSON()).toStrictEqual(verifiedFacts);
+    const json = {
+      steps: PASSED,
+      verifiedFacts,
       metadata: { verifier: { name: VERIFIER_NAME, version: VERIFIER_VERSION }, verifiedAt: "2025-01-01T00:00:01.000Z" },
     };
     expect(v.toJSON()).toStrictEqual(json);
@@ -209,7 +229,7 @@ describe.skipIf(withoutVectors)(vectorsTitle("verifyV3At caller mistakes"), () =
   });
 
   it("applies pinned registers: a matching pin passes, a conflicting or foreign one rejects at the policy layer", async () => {
-    const v = await c.verifier.verifyV3At(c.doc, c.nonce, { repo: c.repo }, c.at);
+    const v = (await c.verifier.verifyV3At(c.doc, c.nonce, { repo: c.repo }, c.at)).verifiedFacts!;
     const launch = v.enclaveMeasurement;
     if (launch.platform !== "sev-snp") throw new Error("golden-happy is an SEV-SNP document");
     const matching = await dangerousTestOnlyVerifier(rootsOf(c.fixture), undefined, { pinnedRegisters: { platform: "sev-snp", launch: launch.launch } });

@@ -9,7 +9,8 @@ import { ConfigurationError } from "../src/errors.js";
 import { DEFAULT_ROUTER_URL, discoverRouter, FALLBACK_ROUTER_HOST, fetchRouters, MAX_ROUTER_BYTES, type DiscoveryConfig } from "../src/internal/router.js";
 import { tlsMode } from "../src/internal/transport/tls.js";
 import type { Fetch } from "../src/options.js";
-import { KEY_SPKI_FP_SHA256_V1_FORMAT, UsageError, type Pin, type Verification, type Verifier } from "../../verifier/src/index.js";
+import { KEY_SPKI_FP_SHA256_V1_FORMAT, UsageError, type Pin, type Verifier } from "../../verifier/src/index.js";
+import { lastFacts, verifiedReport } from "./helpers/report.js";
 
 const PIN = "ab".repeat(32);
 
@@ -22,13 +23,13 @@ function verifier(pins: Pin[] = []): Verifier {
     verifyV3At: async (_doc: Uint8Array, _nonce: Uint8Array, pin: Pin) => {
       pins.push(pin);
       const material = [{ id: "tls", format: KEY_SPKI_FP_SHA256_V1_FORMAT, data: PIN }];
-      return {
+      return verifiedReport({
         cryptoMaterial: material.map((m) => ({ ...m })),
         tlsPublicKeyFP: PIN,
         hpkePublicKey: undefined,
         codeDigest: "11".repeat(32),
         freshnessExpiresAt: new Date(Date.now() + 60_000),
-      } as unknown as Verification;
+      });
     },
   } as unknown as Verifier;
 }
@@ -72,7 +73,7 @@ describe("discoverRouter", () => {
     expect(list.calls).toEqual([DEFAULT_ROUTER_URL]);
     expect(transport.enclave().host()).toBe("r2.example");
     expect(transport.enclave().pin()).toEqual({ repo: "tinfoilsh/confidential-model-router", project: "tinfoilsh/confidential-model-router" });
-    expect(transport.current()?.tlsPublicKeyFP).toBe(PIN);
+    expect(lastFacts(transport)?.tlsPublicKeyFP).toBe(PIN);
     expect(docs.hosts.filter((h) => h !== "r1.example")).toEqual(["r2.example"]);
     expect(docs.hosts[0]).toBe("r1.example");
     expect(pins).toEqual([{ repo: "tinfoilsh/confidential-model-router", project: "tinfoilsh/confidential-model-router" }]);
@@ -105,7 +106,7 @@ describe("discoverRouter", () => {
     const docs = documents(["r1.example", "r2.example"]);
     const transport = await discoverRouter(config({ routersFetch: routerList(["r1.example", "r2.example"]).fetch, documentFetch: docs.fetch }));
     expect(transport.enclave().host()).toBe(FALLBACK_ROUTER_HOST);
-    expect(transport.current()).toBeUndefined();
+    expect(transport.lastVerification()).toBeUndefined();
     expect(docs.hosts).not.toContain(FALLBACK_ROUTER_HOST);
   });
 

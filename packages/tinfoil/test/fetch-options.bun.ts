@@ -13,7 +13,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { tlsMode } from "../src/internal/transport/tls.js";
 import { PeerLacksKeyError } from "../src/internal/transport/transport.js";
-import type { Verification } from "@tinfoilsh/verifier";
+import type { VerifiedFacts } from "@tinfoilsh/verifier";
 
 const cert = readFileSync(new URL("./fixtures/ws-test-cert.pem", import.meta.url), "utf8");
 const key = readFileSync(new URL("./fixtures/ws-test-key.pem", import.meta.url), "utf8");
@@ -22,13 +22,13 @@ const WRONG_PIN = "ab".repeat(32);
 const SECRET = "sk-fetch-options-secret";
 const TIMEOUT_MS = 5_000;
 
-function verification(fp: string): Verification {
+function verification(fp: string): VerifiedFacts {
   return {
     cryptoMaterial: [{ id: "tls", format: "https://tinfoil.sh/key/spki-fp-sha256/v1", data: fp }],
     tlsPublicKeyFP: fp,
     hpkePublicKey: undefined,
     freshnessExpiresAt: new Date(Date.now() + 60_000),
-  } as unknown as Verification;
+  } as unknown as VerifiedFacts;
 }
 
 /** The request init as openai builds it, with the caller's `fetchOptions` spread in. */

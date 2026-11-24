@@ -9,11 +9,12 @@ import { AttestationError, ConfigurationError, NetworkError } from "../src/error
 import { createGatewayHTTPClient, DEFAULT_GATEWAY_URL, fetchCatalog, GatewayHTTPClient, type GatewayClientSeams } from "../src/gateway-client.js";
 import { OpenAIClient } from "../src/openai-client.js";
 import type { Catalog, Fetch, GatewayOptions } from "../src/options.js";
-import { KEY_SPKI_FP_SHA256_V1_FORMAT, KEY_X25519_HPKE_V1_FORMAT, UsageError, type Verification, type Verifier } from "../../verifier/src/index.js";
+import { KEY_SPKI_FP_SHA256_V1_FORMAT, KEY_X25519_HPKE_V1_FORMAT, UsageError, type Verifier } from "../../verifier/src/index.js";
 import { startEhbpServer, type EhbpServer } from "./helpers/ehbp-server.js";
 import { recordingFetch } from "./helpers/network.js";
 import { expectWithOptionsRefusesTransportOptions } from "./helpers/transport-options.js";
 import { openAIOver } from "./helpers/openai.js";
+import { verifiedReport } from "./helpers/report.js";
 
 const GATEWAY_URL = "https://gateway.example/v1/";
 const CATALOG = { "test-model": { repo: "tinfoilsh/test", hosts: ["replica-a.example", "replica-b.example"] }, other: { repo: "tinfoilsh/other", hosts: ["o.example"] } };
@@ -29,13 +30,13 @@ function verifier(hpke: string): Verifier {
         { id: "tls", format: KEY_SPKI_FP_SHA256_V1_FORMAT, data: "ab".repeat(32) },
         { id: "hpke", format: KEY_X25519_HPKE_V1_FORMAT, data: hpke },
       ];
-      return {
+      return verifiedReport({
         cryptoMaterial: material.map((m) => ({ ...m })),
         tlsPublicKeyFP: "ab".repeat(32),
         hpkePublicKey: hpke,
         codeDigest: "11".repeat(32),
         freshnessExpiresAt: new Date(Date.now() + 60_000),
-      } as unknown as Verification;
+      });
     },
   } as unknown as Verifier;
 }
@@ -112,7 +113,7 @@ describe("GatewayHTTPClient.create", () => {
     expect(() => ((client as { baseURL: string }).baseURL = "https://evil.example/")).toThrow(TypeError);
     expect(client.baseURL).toBe(GATEWAY_URL);
     expect(await client.models()).toEqual(["other", "test-model"]);
-    expect(client.current).toEqual([]);
+    expect(client.lastVerification()).toEqual([]);
     const supplied = await createGatewayHTTPClient({ url: GATEWAY_URL, catalog: () => new Map() as Catalog }, { ...seams(), verifier: verifier(gateway.publicKeyHex) });
     expect(await supplied.models()).toEqual([]);
     const bare = await createGatewayHTTPClient({ url: "https://gateway.example/v1" }, { ...seams(), verifier: verifier(gateway.publicKeyHex) });
@@ -162,11 +163,11 @@ describe("GatewayHTTPClient", () => {
     expect(last.headers["x-tinfoil-seal"]).toMatch(/^replica-[ab]\.example$/);
     expect(last.headers["x-tinfoil-model"]).toBe("test-model");
     expect(last.headers["x-tinfoil-cache-prefix"]).toMatch(/^[0-9a-f]{64}$/);
-    const current = client.current;
+    const current = client.lastVerification();
     expect(current).toHaveLength(1);
     expect(current[0]).toMatchObject({ reference: "tinfoilsh/test", pinnedModel: "test-model", models: ["test-model"] });
-    expect(current[0]!.verification.hpkePublicKey).toBe(gateway.publicKeyHex);
-    expect((await client.ensureVerified("test-model")).hpkePublicKey).toBe(gateway.publicKeyHex);
+    expect(current[0]!.report!.verifiedFacts!.hpkePublicKey).toBe(gateway.publicKeyHex);
+    expect((await client.ensureVerified("test-model")).verifiedFacts?.hpkePublicKey).toBe(gateway.publicKeyHex);
   });
 
   it("stops a call waiting when its signal aborts, rejecting with the signal's own reason", async () => {
@@ -186,7 +187,7 @@ describe("GatewayHTTPClient", () => {
     const fetched = own.calls.length;
     await c.close();
     await c.close();
-    expect(c.current).toHaveLength(1);
+    expect(c.lastVerification()).toHaveLength(1);
     await expect(c.models()).rejects.toThrow(/client is closed/);
     await expect(c.ensureVerified("test-model")).rejects.toBeInstanceOf(ConfigurationError);
     await expect(c.fetch(`${GATEWAY_URL}chat/completions`, { method: "POST", body: '{"model":"test-model"}', headers: { "content-type": "application/json" } })).rejects.toThrow(/client is closed/);
@@ -215,8 +216,13 @@ describe("GatewayHTTPClient", () => {
     const res = await c.fetch(`${GATEWAY_URL}chat/completions`, { method: "POST", body: '{"model":"test-model"}', headers: { "content-type": "application/json", "x-raw": "1" } });
     expect(res.status).toBe(200);
     expect(checked).toHaveLength(2);
-    expect(c.current.map((r) => r.host)).toHaveLength(1);
-    expect(gateway.seen[gateway.seen.length - 1]!.headers["x-tinfoil-seal"]).toBe(c.current[0]!.host);
+    // Both replicas were tried: the rejected one keeps its check's error, and the one sealed to its report.
+    const attempts = c.lastVerification();
+    expect(attempts).toHaveLength(2);
+    const passed = attempts.filter((r) => r.report !== undefined);
+    expect(passed).toHaveLength(1);
+    expect(attempts.find((r) => r.error !== undefined)?.error?.message).toMatch(/not this replica/);
+    expect(gateway.seen[gateway.seen.length - 1]!.headers["x-tinfoil-seal"]).toBe(passed[0]!.host);
   });
 
   it("falls over to a replica that verifies and runs the caller's check", async () => {
@@ -230,7 +236,12 @@ describe("GatewayHTTPClient", () => {
     const c = await createGatewayHTTPClient({ url: GATEWAY_URL, verificationCheck: (v) => void checked.push(v.hpkePublicKey!) }, { ...failing, verifier: verifier(gateway.publicKeyHex) });
     const res = await c.fetch(`${GATEWAY_URL}chat/completions`, { method: "POST", body: '{"model":"test-model"}', headers: { "content-type": "application/json", "x-raw": "1" } });
     expect(res.status).toBe(200);
-    expect(c.current.map((r) => r.host)).toEqual(["replica-b.example"]);
+    expect(c.lastVerification().filter((r) => r.report !== undefined).map((r) => r.host)).toEqual(["replica-b.example"]);
+    // replica-a, if it was tried first, keeps the failure of its attestation fetch.
+    for (const failed of c.lastVerification().filter((r) => r.report === undefined)) {
+      expect(failed.host).toBe("replica-a.example");
+      expect(failed.error).toBeInstanceOf(NetworkError);
+    }
     expect(checked).toEqual([gateway.publicKeyHex]);
     expect(() => new (GatewayHTTPClient as any)(Symbol("x"))).toThrow(ConfigurationError);
   });

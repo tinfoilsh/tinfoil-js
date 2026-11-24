@@ -4,7 +4,7 @@
  * when the verification expires or is rejected, and refuses requests to any
  * origin other than the one it is bound to.
  */
-import { Verifier, type ConfigTrust, type Policy, type Verification } from "@tinfoilsh/verifier";
+import { Verifier, type ConfigTrust, type Policy, type VerificationReport } from "@tinfoilsh/verifier";
 import { ConfigurationError, describeKind } from "./errors.js";
 import { withCacheSecret } from "./internal/cachesecret.js";
 import { registerRoute } from "./internal/api-path.js";
@@ -19,7 +19,7 @@ import { withReplay } from "./internal/transport/replay.js";
 import { tlsMode, type TLSOptions } from "./internal/transport/tls.js";
 import { isKeyRejection, KeyedTransport, type Mode, type TransportMode } from "./internal/transport/transport.js";
 import { registerWebSocketAccess } from "./internal/websocket.js";
-import type { CallOptions, EnclaveOptions, Fetch, Transport } from "./options.js";
+import type { CallOptions, EnclaveOptions, Fetch, Transport, VerificationAttempt } from "./options.js";
 import { cloneTrust, verifierInputs, type Trust } from "./trust.js";
 
 /**
@@ -146,6 +146,7 @@ export async function createEnclaveHTTPClient(host: string, trust: Trust, option
     pin,
     verifier,
     verificationCheck: options.verificationCheck,
+    onVerification: options.onVerification,
     fetchAttestation: options.fetchAttestation,
     fetch: seams.documentFetch,
     clock: seams.clock,
@@ -226,16 +227,28 @@ export class EnclaveHTTPClient {
     return cloneTrust(this.#trust);
   }
 
-  /** The last successful verification, unchecked: it may have expired or been rejected. */
-  get current(): Verification | undefined {
-    return this.#transport.current();
+  /**
+   * The outcome of the most recent attempt to verify the enclave, without
+   * network I/O, or undefined before the first: `{ report }` if it passed,
+   * or `{ error }` with the error that the client reported if it failed,
+   * from which the verifier's `VerificationError` and its report are
+   * reachable through `cause` when the verifier rejected the document. Every
+   * attempt counts: the first verification, its retry, a re-verification
+   * after an expiry or a key rotation, and `reverify`. A later failure
+   * replaces an earlier success. A report is not checked again: it may have
+   * expired or been rejected since, so use {@link ensureVerified} for one
+   * that admits requests now. Each call returns a new copy.
+   */
+  lastVerification(): VerificationAttempt | undefined {
+    return this.#transport.lastVerification();
   }
 
   /**
-   * A verification valid now, verifying first only if the cached one has
-   * expired or been rejected. Success means requests can be sent.
+   * The report of a verification valid now, verifying first only if the
+   * cached one has expired or been rejected. Success means requests can be
+   * sent; its verified facts are what they are sent under.
    */
-  ensureVerified(options?: CallOptions): Promise<Verification> {
+  ensureVerified(options?: CallOptions): Promise<VerificationReport> {
     return this.#transport.ensureVerified(options?.signal);
   }
 
@@ -251,7 +264,7 @@ export class EnclaveHTTPClient {
    * the call stops waiting, but the verification that it started still
    * finishes, and its outcome is handled in the same way.
    */
-  reverify(options?: CallOptions): Promise<Verification> {
+  reverify(options?: CallOptions): Promise<VerificationReport> {
     return this.#transport.reverify(options?.signal);
   }
 
@@ -262,8 +275,8 @@ export class EnclaveHTTPClient {
    * transport sends through the runtime's fetch, or its own `fetch`, and
    * holds no connections of its own, so a request in flight completes. No verification runs again. Afterwards `fetch`, `ensureVerified`,
    * `reverify` and the WebSocket functions reject with a
-   * {@link ConfigurationError}; `current` still reports the last
-   * verification. Closing again does nothing.
+   * {@link ConfigurationError}; `lastVerification` still reports the last
+   * attempt. Closing again does nothing.
    */
   async close(): Promise<void> {
     this.#transport.close();

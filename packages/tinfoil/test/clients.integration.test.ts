@@ -15,6 +15,7 @@ import { RouterHTTPClient } from "../src/router-client.js";
 import type { Transport } from "../src/options.js";
 import { completeChat, LIVE_HOST as HOST, LIVE_PIN as PIN, SHA256_HEX, streamChat } from "./helpers/live.js";
 import { openAIOver } from "./helpers/openai.js";
+import { lastFacts } from "./helpers/report.js";
 
 const RUN_INTEGRATION = process.env.RUN_TINFOIL_INTEGRATION === "true";
 const GATEWAY_HOST = "inference-gateway.tinfoil.sh";
@@ -26,7 +27,7 @@ describe.each<Transport["kind"]>(["tls", "ehbp"])("EnclaveHTTPClient against %s 
     async () => {
       await using http = await EnclaveHTTPClient.create(HOST, PIN, { transport: { kind: transportMode } });
       expect(http.enclave).toBe(HOST);
-      expect(http.current?.tlsPublicKeyFP).toMatch(SHA256_HEX);
+      expect(lastFacts(http)?.tlsPublicKeyFP).toMatch(SHA256_HEX);
 
       await using ai = await openAIOver(EnclaveHTTPClient.create(HOST, PIN, { transport: { kind: transportMode } }), { apiKey });
       expect(ai.baseURL).toBe(`https://${HOST}/v1/`);
@@ -43,7 +44,7 @@ describe.each<Transport["kind"]>(["tls", "ehbp"])("OpenAIClient<RouterHTTPClient
     async () => {
       await using ai = await openAIOver(RouterHTTPClient.create({ transport: { kind: transportMode } }), { apiKey });
       const router = ai.httpClient;
-      expect(router.current?.tlsPublicKeyFP).toMatch(SHA256_HEX);
+      expect(lastFacts(router)?.tlsPublicKeyFP).toMatch(SHA256_HEX);
       expect(ai.baseURL).toBe(`https://${router.enclave}/v1/`);
       await completeChat(ai);
     },
@@ -72,8 +73,8 @@ describe("GatewayHTTPClient on the live gateway", () => {
       const models = await http.models();
       expect(models).toEqual([...catalog.keys()].sort());
       const verification = await http.ensureVerified(models[0]!);
-      expect(verification.hpkePublicKey).toMatch(SHA256_HEX);
-      expect(http.current.map((r) => r.reference)).toEqual([catalog.get(models[0]!)!.repo]);
+      expect(verification.verifiedFacts?.hpkePublicKey).toMatch(SHA256_HEX);
+      expect(http.lastVerification().map((r) => r.reference)).toEqual([catalog.get(models[0]!)!.repo]);
     },
     180_000,
   );
@@ -83,7 +84,7 @@ describe("GatewayHTTPClient on the live gateway", () => {
     async () => {
       await using ai = await openAIOver(GatewayHTTPClient.create({}), { apiKey });
       await completeChat(ai, (await ai.httpClient.models())[0]!);
-      expect(ai.httpClient.current.length).toBeGreaterThan(0);
+      expect(ai.httpClient.lastVerification().length).toBeGreaterThan(0);
     },
     180_000,
   );

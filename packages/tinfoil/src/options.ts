@@ -3,7 +3,8 @@
  * Every client checks its options before any network I/O, so a misconfigured
  * client fails at creation rather than on its first request.
  */
-import type { Policy, Verification } from "@tinfoilsh/verifier";
+import type { Policy, VerificationReport, VerifiedFacts } from "@tinfoilsh/verifier";
+import type { TinfoilError } from "./errors.js";
 
 export type { ArtifactTrust, EmbeddedArtifacts, EndorsedArtifacts, Policy } from "@tinfoilsh/verifier";
 import type { ClientOptions as WsClientOptions } from "ws";
@@ -114,13 +115,61 @@ export type AttestationFetcher = (host: string, nonce: Uint8Array, options: { re
 export type RouterListFetcher = (options: { readonly signal: AbortSignal }) => Promise<readonly string[]>;
 
 /**
- * Called with each verification that passes the verifier, before the client
- * uses the enclave's keys: when the client is created and whenever it
- * verifies again. Throw to reject the enclave; verification then fails with
+ * Called with the verified facts of each verification that passes the
+ * verifier, before the client uses the enclave's keys: when the client is
+ * created and whenever it verifies again. It never sees a failed
+ * verification. Throw to reject the enclave; verification then fails with
  * an {@link AttestationError} wrapping the thrown value and isn't retried.
  * Requests wait while it runs, so keep it fast; it may run concurrently.
  */
-export type VerificationCheck = (verification: Verification) => void | Promise<void>;
+export type VerificationCheck = (facts: VerifiedFacts) => void | Promise<void>;
+
+/**
+ * The outcome of one attempt to verify an enclave: the report of a
+ * verification that passed, or the error that the client reported for an
+ * attempt that failed. Exactly one of `report` and `error` is set, so
+ * `if (attempt.error)` tells them apart.
+ *
+ * The error is the categorised error that the client threw or would have
+ * thrown, such as a {@link NetworkError} for a failed attestation fetch,
+ * which has no report. When the verifier rejected the document, the error
+ * is an {@link AttestationError} whose `cause` chain holds the verifier's
+ * `VerificationError` from `@tinfoilsh/verifier`, and that error's `report`
+ * shows the step that failed and the partial facts. A report is for
+ * showing or logging what happened; only the client decides whether it
+ * admits requests.
+ */
+export type VerificationAttempt = { readonly report: VerificationReport; readonly error?: undefined } | { readonly report?: undefined; readonly error: TinfoilError };
+
+/**
+ * Called once for every attempt to verify an enclave, whether it passed or
+ * failed: the first verification, a retry, a re-verification after an
+ * expiry or a key rotation, an explicit `reverify`, each router that
+ * discovery tries, and each gateway replica. It is called once the
+ * verification that made the attempt is over, so that an attempt that was
+ * retried is reported together with its retry, in order.
+ * `host` is the enclave that the attempt verified. Exactly one of `report`
+ * and `error` is set, as {@link VerificationAttempt} describes: the outcome
+ * of this attempt, which `lastVerification()` returned once the attempt was
+ * decided. A verification that concurrent requests share is one attempt.
+ * A verification that passes after the client was closed is abandoned
+ * before it is used, so it has no outcome: it isn't reported and doesn't
+ * change `lastVerification()`. A caller whose signal aborts only stops
+ * waiting, and the attempt runs on to its outcome; but a factory whose
+ * signal aborts closes the client that it was creating, so the same rule
+ * applies to the attempt that it abandons.
+ *
+ * It is called without any of the client's state held, so it may call the
+ * client, for example `lastVerification()`, which returns the most recent
+ * attempt: for an attempt that was retried, that is already its retry. It
+ * returns nothing and can't change the attempt's outcome; a decision about
+ * trust belongs in a {@link VerificationCheck}. A value that it throws
+ * doesn't change the attempt's outcome or reach any caller waiting for the
+ * attempt, and later attempts are still reported: the client catches it
+ * and rethrows it asynchronously, to the runtime's handler for uncaught
+ * errors.
+ */
+export type OnVerification = (host: string, report: VerificationReport | undefined, error: TinfoilError | undefined) => void;
 
 /**
  * The options of one call on a client, such as `ensureVerified` or
@@ -252,6 +301,8 @@ export interface EnclaveOptions {
    */
   readonly policy?: Policy;
   readonly verificationCheck?: VerificationCheck;
+  /** Called with the outcome of each attempt to verify the enclave; see {@link OnVerification}. */
+  readonly onVerification?: OnVerification;
   /**
    * How the client obtains each attestation document; undefined fetches it
    * directly from the enclave. Use {@link attestationRelay} to fetch through
@@ -286,6 +337,12 @@ export interface RouterOptions {
    * otherwise it fails verification as for an enclave client.
    */
   readonly verificationCheck?: VerificationCheck;
+  /**
+   * Called with the outcome of each attempt to verify a router: each router
+   * that discovery tries, the fallback, and the chosen router whenever it is
+   * verified again, each with its own host. See {@link OnVerification}.
+   */
+  readonly onVerification?: OnVerification;
   /**
    * How the client obtains each attestation document, for every router that
    * discovery tries, the fallback and every later verification; undefined
@@ -346,17 +403,23 @@ export interface CatalogEntry {
 export type Catalog = ReadonlyMap<string, CatalogEntry>;
 
 /**
- * A gateway replica's last successful verification.
+ * A gateway replica that the client has tried to verify, and its last
+ * attempt: the report if it passed, or the error that the client reported
+ * if it failed, as {@link VerificationAttempt} describes. A failure replaces
+ * an earlier success, and a report may have expired since.
  *
  * @experimental The gateway route is new; this API may change without a major version.
  */
-export interface ReplicaVerification {
+export type ReplicaVerification = {
+  /** The replica that the attempt verified. */
   readonly host: string;
+  /** The model names that requests through the replica named, sorted; they are not attested identities. */
   readonly models: readonly string[];
+  /** The repository that the replica is verified against. */
   readonly reference: string;
+  /** The pinned model that the replica serves, or "" for an unpinned one. */
   readonly pinnedModel: string;
-  readonly verification: Verification;
-}
+} & VerificationAttempt;
 
 /**
  * Configures a {@link GatewayHTTPClient}.
@@ -369,8 +432,10 @@ export interface GatewayOptions {
   readonly pinnedModelsOnly?: boolean;
   /** The policy for unpinned models, and for pinned models whose pin has none; undefined selects the defaults. */
   readonly policy?: Policy;
-  /** Called with each replica's verification, for pinned and unpinned models. A rejected replica is skipped for the next replica of the model. */
+  /** Called with each replica's verified facts, for pinned and unpinned models. A rejected replica is skipped for the next replica of the model. */
   readonly verificationCheck?: VerificationCheck;
+  /** Called with the outcome of each attempt to verify a replica, with the replica's host; see {@link OnVerification}. */
+  readonly onVerification?: OnVerification;
   /** As for {@link RouterOptions.userCacheSecret}. */
   readonly userCacheSecret?: string;
   /** The gateway's base URL, made to end with `/`; undefined selects Tinfoil's gateway. A query string or fragment is a {@link ConfigurationError}. */

@@ -10,6 +10,7 @@ import { describe, expect, it } from "vitest";
 import { RouterHTTPClient } from "../src/index.browser.js";
 import { createClient, OpenAIClient } from "../src/openai.js";
 import { completeChat, SHA256_HEX, streamChat } from "./helpers/live.js";
+import { lastFacts } from "./helpers/report.js";
 
 const RUN_INTEGRATION = process.env.RUN_TINFOIL_INTEGRATION === "true";
 const bearerToken = process.env.TINFOIL_API_KEY ?? "";
@@ -20,7 +21,7 @@ describe("the browser build on the live router", () => {
     expect(ai).toBeInstanceOf(OpenAIClient);
     const router = ai.httpClient;
     expect(router).toBeInstanceOf(RouterHTTPClient);
-    expect(router.current?.hpkePublicKey).toMatch(SHA256_HEX);
+    expect(lastFacts(router)?.hpkePublicKey).toMatch(SHA256_HEX);
     expect(ai.baseURL).toBe(`https://${router.enclave}/v1/`);
 
     const completed = await completeChat(ai);

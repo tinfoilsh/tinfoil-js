@@ -8,9 +8,9 @@
  * verification the request was sent under and is reported through
  * {@link isKeyRejection}; replaying the request is up to the layer above.
  */
-import type { Verification } from "@tinfoilsh/verifier";
+import type { VerificationReport, VerifiedFacts } from "@tinfoilsh/verifier";
 import { AttestationError, stripCategory } from "../../errors.js";
-import type { Fetch } from "../../options.js";
+import type { Fetch, VerificationAttempt } from "../../options.js";
 
 /** The transport a {@link Mode} implements, as the `kind` of the `Transport` option names it. */
 export type TransportMode = "tls" | "ehbp";
@@ -104,7 +104,7 @@ export interface Mode {
    * those keys, detected before the application processes the request, are
    * {@link PeerLacksKeyError}s.
    */
-  bind(v: Verification): BoundFetch | Promise<BoundFetch>;
+  bind(v: VerifiedFacts): BoundFetch | Promise<BoundFetch>;
 }
 
 /**
@@ -188,24 +188,24 @@ export class KeyedTransport {
     return this.#cache.enclave();
   }
 
-  /** A verification valid now, verifying first only if needed; success means requests can be sent. */
-  async ensureVerified(signal?: AbortSignal): Promise<Verification> {
-    return (await this.#cache.ensureVerified(signal)).verification;
+  /** The report of a verification valid now, verifying first only if needed; success means requests can be sent. */
+  async ensureVerified(signal?: AbortSignal): Promise<VerificationReport> {
+    return (await this.#cache.ensureVerified(signal)).report.clone();
   }
 
-  /** Verifies again even if the current verification is still valid. */
-  async reverify(signal?: AbortSignal): Promise<Verification> {
-    return (await this.#cache.reverify(signal)).verification;
+  /** Verifies again even if the current verification is still valid, and returns the new report. */
+  async reverify(signal?: AbortSignal): Promise<VerificationReport> {
+    return (await this.#cache.reverify(signal)).report.clone();
   }
 
   /** Verifies like {@link reverify} but without the retry. */
-  async verifyOnce(signal?: AbortSignal): Promise<Verification> {
-    return (await this.#cache.verifyOnce(signal)).verification;
+  async verifyOnce(signal?: AbortSignal): Promise<VerificationReport> {
+    return (await this.#cache.verifyOnce(signal)).report.clone();
   }
 
-  /** The last successful verification, unchecked. */
-  current(): Verification | undefined {
-    return this.#cache.current();
+  /** The outcome of the most recent attempt to verify the enclave, unchecked, or undefined before the first. */
+  lastVerification(): VerificationAttempt | undefined {
+    return this.#cache.lastVerification();
   }
 
   /** The state a request is sent under, for layers that need the bound fetch itself. */
@@ -222,7 +222,7 @@ export class KeyedTransport {
    * Releases what the current binding and every retired one hold (the
    * mode's pooled connections, if any, requests in flight on them included)
    * and refuses further use: requests and verification calls reject as
-   * closed, while {@link current} still reports the last verification.
+   * closed, while {@link lastVerification} still reports the last attempt.
    * Closing again does nothing.
    */
   close(): void {

@@ -9,9 +9,11 @@
 import { AttestationError, ConfigurationError, NetworkError } from "../src/errors.js";
 import { Enclave, fromVerify, RejectedError, VERIFICATION_RETRY_DELAY_MS, type EnclaveConfig } from "../src/internal/enclave.js";
 import { VerifiedEnclave } from "../src/internal/verified.js";
+import { verifiedReport } from "./helpers/report.js";
 import type { Fetch } from "../src/options.js";
 import { dangerousTestOnlyVerifier } from "../../verifier/conformance/testing.js";
-import { KEY_SPKI_FP_SHA256_V1_FORMAT, KEY_X25519_HPKE_V1_FORMAT, UsageError, VerificationError, type Verification, type Verifier } from "../../verifier/src/index.js";
+import { KEY_SPKI_FP_SHA256_V1_FORMAT, KEY_X25519_HPKE_V1_FORMAT, UsageError, VerificationError, type VerifiedFacts, type Verifier } from "../../verifier/src/index.js";
+import { ReportBuilder } from "../../verifier/src/report.js";
 import { conformanceAvailable, inputBytes, loadFixture, vectorsTitle, type ConformanceFixture } from "../../verifier/test/helpers/conformance.js";
 import { clockOf, rootsOf } from "../../verifier/test/helpers/verify.js";
 import { beforeAll, describe, expect, it, vi } from "vitest";
@@ -21,6 +23,9 @@ const HOST = "enclave.example";
 
 const hex = (s: string): Uint8Array => new Uint8Array(Buffer.from(s, "hex"));
 const noBinding = (): undefined => undefined;
+
+/** The report of a verification that the quote step rejected. */
+const rejectedAtQuote = () => new ReportBuilder().failed("quote", "bad report", { verifier: { name: "", version: "" }, verifiedAt: new Date(0) });
 
 /** A vector served from a mocked fetch: the document, the nonce it is bound to, the clock, and the verifier under its roots. */
 interface Served {
@@ -78,10 +83,10 @@ function stubVerifier(material: { id: string; format: string; data: string }[], 
     tlsPublicKeyFP: material.find((m) => m.id === "tls" && m.format === KEY_SPKI_FP_SHA256_V1_FORMAT)?.data,
     hpkePublicKey: material.find((m) => m.id === "hpke" && m.format === KEY_X25519_HPKE_V1_FORMAT)?.data,
     freshnessExpiresAt: new Date(expiresAt.getTime()),
-  } as unknown as Verification;
+  } as unknown as VerifiedFacts;
   return {
     checkPinVerifiability: () => {},
-    verifyV3At: async () => verification,
+    verifyV3At: async () => verifiedReport(verification),
   } as unknown as Verifier;
 }
 
@@ -90,9 +95,13 @@ describe("fromVerify", () => {
     const usage = fromVerify(new UsageError("bad pin"));
     expect(usage).toBeInstanceOf(ConfigurationError);
     expect(usage.cause).toBeInstanceOf(UsageError);
-    const rejected = fromVerify(new VerificationError("bad report", { layer: "quote" }));
+    const verification = new VerificationError("bad report", { layer: "quote", report: rejectedAtQuote() });
+    const rejected = fromVerify(verification);
     expect(rejected).toBeInstanceOf(AttestationError);
     expect(rejected.message).toBe("attestation error: verification error: quote: bad report");
+    // The rejection's report stays reachable through the cause.
+    expect(rejected.cause).toBe(verification);
+    expect((rejected.cause as VerificationError).report.failedStep()?.layer).toBe("quote");
     expect(fromVerify(new NetworkError("down"))).toBeInstanceOf(NetworkError);
   });
 
@@ -105,11 +114,11 @@ describe("fromVerify", () => {
     expect(usage).toBeInstanceOf(ConfigurationError);
     expect(usage.message).toBe("configuration error: usage error: bad pin");
     expect(usage.cause).toBeInstanceOf(other.UsageError);
-    expect(fromVerify(new other.VerificationError("bad report", { layer: "quote" }))).toBeInstanceOf(AttestationError);
+    expect(fromVerify(new other.VerificationError("bad report", { layer: "quote", report: rejectedAtQuote() }))).toBeInstanceOf(AttestationError);
     // A copy old enough to carry no brand is recognized by the error's name.
     const unbranded = Object.assign(new Error("usage error: bad pin"), { name: "UsageError" });
     expect(fromVerify(unbranded)).toBeInstanceOf(ConfigurationError);
-    expect(fromVerify(Object.assign(new Error("verification error: quote: bad report"), { name: "VerificationError" }))).toBeInstanceOf(AttestationError);
+    expect(fromVerify(Object.assign(new Error("bad report"), { name: "VerificationError" }))).toBeInstanceOf(AttestationError);
   });
 });
 
@@ -134,7 +143,7 @@ describe.skipIf(!conformanceAvailable())(vectorsTitle("Enclave"), () => {
   it("verifies the document it fetches with the nonce and reports the endorsed facts", async () => {
     const { fetch, urls } = serving([() => new Response(golden.document)]);
     const enclave = await Enclave.create(config({ fetch }));
-    const v = await enclave.verify();
+    const v = (await enclave.verify()).verifiedFacts;
     expect(urls).toEqual([`https://${HOST}/.well-known/tinfoil-attestation?nonce=${golden.fixture.input.nonce_hex}`]);
     expect(v.codeDigest).toBe(golden.expected.codeDigest);
     expect(v.tlsPublicKeyFP).toBe(golden.expected.tls);
@@ -187,7 +196,7 @@ describe.skipIf(!conformanceAvailable())(vectorsTitle("Enclave"), () => {
     const later = new Date(golden.at.getTime() + 60_000);
     const tlsOnly = stubVerifier([{ id: "tls", format: KEY_SPKI_FP_SHA256_V1_FORMAT, data: "ab".repeat(32) }], later);
     const { fetch } = serving([() => new Response(golden.document)]);
-    const v = await (await Enclave.create(config({ fetch, verifier: tlsOnly }))).verifyOnce();
+    const v = (await (await Enclave.create(config({ fetch, verifier: tlsOnly }))).verifyOnce()).verifiedFacts;
     expect(v.tlsPublicKeyFP).toBe("ab".repeat(32));
     expect(v.hpkePublicKey).toBeUndefined();
 
@@ -206,7 +215,7 @@ describe.skipIf(!conformanceAvailable())(vectorsTitle("Enclave"), () => {
   it("retries once after a network failure and reports the terminal failure with the first", async () => {
     noSleep.slept.length = 0;
     const recovered = serving([() => new Response("busy", { status: 503, statusText: "Service Unavailable" }), () => new Response(golden.document)]);
-    const v = await (await Enclave.create(config({ fetch: recovered.fetch }))).verify();
+    const v = (await (await Enclave.create(config({ fetch: recovered.fetch }))).verify()).verifiedFacts;
     expect(v.tlsPublicKeyFP).toBe(golden.expected.tls);
     expect(recovered.urls).toHaveLength(2);
     expect(noSleep.slept).toEqual([VERIFICATION_RETRY_DELAY_MS]);
@@ -284,7 +293,7 @@ describe.skipIf(!conformanceAvailable())(vectorsTitle("Enclave"), () => {
     it("verifies on first use, serves the cached verification while fresh, and refreshes once it expires", async () => {
       let now = golden.at;
       const { fetch, urls } = serving([() => new Response(golden.document)]);
-      const bound: Verification[] = [];
+      const bound: VerifiedFacts[] = [];
       const cache = new VerifiedEnclave(
         await Enclave.create(config({ fetch, clock: () => now })),
         (v) => {
@@ -293,14 +302,14 @@ describe.skipIf(!conformanceAvailable())(vectorsTitle("Enclave"), () => {
         },
         () => now,
       );
-      expect(cache.current()).toBeUndefined();
+      expect(cache.lastVerification()).toBeUndefined();
       expect(urls).toHaveLength(0);
 
       const first = await cache.ensureVerified();
-      expect(first.verification.tlsPublicKeyFP).toBe(golden.expected.tls);
+      expect(first.report.verifiedFacts.tlsPublicKeyFP).toBe(golden.expected.tls);
       expect(first.bound).toBe(1);
-      expect(bound[0]).toBe(first.verification);
-      expect(cache.current()).toBe(first.verification);
+      expect(bound[0]).toBe(first.report.verifiedFacts);
+      expect(cache.lastVerification()?.report?.toJSON()).toEqual(first.report.toJSON());
       expect(await cache.ensureVerified()).toBe(first);
       expect(urls).toHaveLength(1);
 
@@ -309,12 +318,13 @@ describe.skipIf(!conformanceAvailable())(vectorsTitle("Enclave"), () => {
       expect(urls).toHaveLength(2);
 
       // Past the window the cache verifies again; at this clock the policy
-      // rejects the stale witnesses, so the refresh fails and the stale
-      // verification stays current but is never served as valid.
-      now = new Date(again.verification.freshnessExpiresAt!.getTime() + 1);
-      await expect(cache.ensureVerified()).rejects.toBeInstanceOf(AttestationError);
+      // rejects the stale witnesses, so the refresh fails, and the last
+      // attempt is that failure rather than the earlier success.
+      now = new Date(again.report.verifiedFacts.freshnessExpiresAt!.getTime() + 1);
+      const failure = await cache.ensureVerified().catch((e: unknown) => e);
+      expect(failure).toBeInstanceOf(AttestationError);
       expect(urls).toHaveLength(4);
-      expect(cache.current()).toBe(again.verification);
+      expect(cache.lastVerification()).toEqual({ error: failure });
     });
 
     it("verifies again after a state is invalidated, and ignores invalidation of a replaced state", async () => {
@@ -354,7 +364,7 @@ describe.skipIf(!conformanceAvailable())(vectorsTitle("Enclave"), () => {
       controller.abort(new Error("impatient"));
       await expect(impatient).rejects.toThrow(/impatient/);
       release();
-      expect((await patient).verification.tlsPublicKeyFP).toBe(golden.expected.tls);
+      expect((await patient).report.verifiedFacts.tlsPublicKeyFP).toBe(golden.expected.tls);
       expect(urls).toHaveLength(1);
     });
 
@@ -367,8 +377,8 @@ describe.skipIf(!conformanceAvailable())(vectorsTitle("Enclave"), () => {
       budget.abort(new Error("budget spent"));
       await expect(probe).rejects.toThrow(/budget spent/);
       release();
-      expect((await request).verification.tlsPublicKeyFP).toBe(golden.expected.tls);
-      expect(cache.current()).toBeDefined();
+      expect((await request).report.verifiedFacts.tlsPublicKeyFP).toBe(golden.expected.tls);
+      expect(cache.lastVerification()?.report).toBeDefined();
       expect(urls).toHaveLength(1);
     });
   });
@@ -377,12 +387,12 @@ describe.skipIf(!conformanceAvailable())(vectorsTitle("Enclave"), () => {
 describe("Enclave against a live enclave", () => {
   it.skipIf(!RUN_INTEGRATION)("verifies inference.tinfoil.sh under the embedded roots", async () => {
     const enclave = await Enclave.create({ host: "inference.tinfoil.sh", pin: { repo: "tinfoilsh/confidential-model-router", project: "tinfoilsh/confidential-model-router" } });
-    const v = await enclave.verify();
+    const v = (await enclave.verify()).verifiedFacts;
     expect(v.tlsPublicKeyFP).toMatch(/^[0-9a-f]{64}$/);
     expect(v.hpkePublicKey).toMatch(/^[0-9a-f]{64}$/);
     expect(v.freshnessExpiresAt!.getTime()).toBeGreaterThan(Date.now());
     const cache = new VerifiedEnclave(enclave, noBinding);
     const state = await cache.ensureVerified();
-    expect(cache.current()).toBe(state.verification);
+    expect(cache.lastVerification()?.report?.verifiedFacts?.tlsPublicKeyFP).toBe(state.report.verifiedFacts.tlsPublicKeyFP);
   }, 120_000);
 });
