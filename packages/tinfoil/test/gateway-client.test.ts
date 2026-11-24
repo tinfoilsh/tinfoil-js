@@ -176,6 +176,7 @@ describe("GatewayHTTPClient", () => {
     expect(current[0]).toMatchObject({ reference: "tinfoilsh/test", pinnedModel: "test-model", models: ["test-model"] });
     expect(current[0]!.lastAttempt.report!.verifiedFacts!.hpkePublicKey).toBe(gateway.publicKeyHex);
     expect(current[0]!.current?.toJSON()).toEqual(current[0]!.lastAttempt.report!.toJSON());
+    expect(current[0]!.current?.toJSON().metadata.host).toBe(current[0]!.host);
     expect((await client.ensureVerified("test-model")).verifiedFacts?.hpkePublicKey).toBe(gateway.publicKeyHex);
   });
 

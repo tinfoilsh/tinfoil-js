@@ -13,10 +13,10 @@ import { describe, expect, it } from "vitest";
 import { run, Stage } from "../conformance/adapter.js";
 import { FORMAT_V3 } from "../src/document/collateral/collateral.js";
 import { KEY_SPKI_FP_SHA256_V1_FORMAT, KEY_X25519_HPKE_V1_FORMAT, NONCE_SIZE, SEV_SNP_REPORT_V1_FORMAT } from "../src/document/document.js";
-import { VerificationError } from "../src/errors.js";
+import { UsageError, VerificationError } from "../src/errors.js";
 import { sha256, toHex } from "../src/internal/bytes.js";
 import { ARTIFACT_FORMAT_V2 } from "../src/internal/policy/artifact.js";
-import { REPORT_SCHEMA_VERSION, ReportBuilder, type VerificationReport } from "../src/report.js";
+import { REPORT_SCHEMA_VERSION, ReportBuilder, type VerificationReport, type VerificationReportJSON } from "../src/report.js";
 import { verifiedFactsOf } from "../src/verification.js";
 import { Verifier } from "../src/verifier.js";
 import { VERIFIER_NAME, VERIFIER_VERSION } from "../src/version.js";
@@ -188,5 +188,59 @@ describe.skipIf(!conformanceAvailable())(vectorsTitle("the report's JSON form of
     const { output } = await run(fixture.stage, fixture.input);
     expect(output.accepted).toBe(fixture.expected.accepted);
     expectGolden(name, output.report);
+  });
+});
+
+describe("the report's host", () => {
+  const passedReport = (): VerificationReport => {
+    const b = new ReportBuilder();
+    for (const layer of ["envelope", "provenance", "quote", "policy"] as const) b.passed(layer);
+    const launch = new Uint8Array(48);
+    return b.passedAll(
+      verifiedFactsOf({
+        configRepo: "tinfoilsh/repo",
+        codeDigest: "0a".repeat(32),
+        codeTag: "v1",
+        codeMeasurement: { platform: "sev-snp", launch },
+        enclaveMeasurement: { platform: "sev-snp", launch },
+        cryptoMaterial: [{ id: "tls", format: KEY_SPKI_FP_SHA256_V1_FORMAT, data: "ab".repeat(32) }],
+      }),
+      { verifier: { name: VERIFIER_NAME, version: VERIFIER_VERSION }, verifiedAt: GOLDEN_AT },
+    );
+  };
+  const rejectedReport = (): VerificationReport => {
+    const b = new ReportBuilder();
+    b.passed("envelope");
+    return b.failed("provenance", "no release", { verifier: { name: VERIFIER_NAME, version: VERIFIER_VERSION }, verifiedAt: GOLDEN_AT });
+  };
+
+  it("is absent from the verifier's reports and from their JSON form", () => {
+    for (const report of [passedReport(), rejectedReport()]) {
+      expect(report.metadata.host).toBeUndefined();
+      expect(report.toJSON().metadata).not.toHaveProperty("host");
+    }
+  });
+
+  it("is set on a copy by withHost, written as metadata.host, and kept by clone, for an accepted and a rejected report", () => {
+    for (const report of [passedReport(), rejectedReport()]) {
+      const named = report.withHost("enclave.example:8443");
+      expect(named).not.toBe(report);
+      expect(Object.isFrozen(named)).toBe(true);
+      expect(Object.isFrozen(named.metadata)).toBe(true);
+      expect(named.metadata.host).toBe("enclave.example:8443");
+      expect(report.metadata.host).toBeUndefined();
+      const json = JSON.parse(JSON.stringify(named)) as VerificationReportJSON;
+      expect(json.schema_version).toBe(1);
+      expect(json.metadata).toStrictEqual({ verified_at: "2026-01-02T02:04:05Z", verifier: { name: VERIFIER_NAME, version: VERIFIER_VERSION }, host: "enclave.example:8443" });
+      // Everything but the host is the report's own.
+      expect({ ...named.toJSON(), metadata: undefined }).toStrictEqual({ ...report.toJSON(), metadata: undefined });
+      expect(named.clone().metadata.host).toBe("enclave.example:8443");
+      expect(named.withHost("").toJSON().metadata).not.toHaveProperty("host");
+      expect(named.withHost("").metadata).not.toHaveProperty("host");
+    }
+  });
+
+  it("refuses a host that isn't a string", () => {
+    expect(() => passedReport().withHost(7 as unknown as string)).toThrow(UsageError);
   });
 });

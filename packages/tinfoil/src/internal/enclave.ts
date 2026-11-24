@@ -17,6 +17,7 @@ import {
   KEY_X25519_HPKE_V1_FORMAT,
   randomNonce,
   UsageError,
+  VerificationError,
   Verifier,
   type Pin,
   type VerificationReport,
@@ -191,8 +192,11 @@ export class Enclave {
     try {
       report = await this.#verifier.verifyV3At(doc, nonce, this.#pin, this.#clock());
     } catch (err) {
-      throw fromVerify(err);
+      throw fromVerify(withReportHost(err, this.#host));
     }
+    // The verifier doesn't know which host the document came from, so every
+    // report that a client hands out is named here, a rejection's included.
+    report = report.withHost(this.#host);
     if (report.verifiedFacts === undefined) throw new AttestationError("verification passed without verified facts");
     validateTransportKeys(report.verifiedFacts);
     return report as VerifiedReport;
@@ -235,6 +239,23 @@ export function fromVerify(err: unknown): TinfoilError {
   if (err instanceof TinfoilError) return err;
   if (err instanceof UsageError || isUsageErrorByName(err)) return new ConfigurationError(messageOf(err), { cause: err });
   return new AttestationError(messageOf(err), { cause: err });
+}
+
+/**
+ * `err` with its report naming `host` when it is the verifier's rejection: a
+ * copy of the error whose report is a copy with the host, since both come
+ * from the verifier and the report is frozen. Anything else, and a rejection
+ * from a copy of the verifier package whose reports can't name a host, is
+ * returned as it is.
+ */
+function withReportHost(err: unknown, host: string): unknown {
+  if (!(err instanceof VerificationError) || typeof err.report?.withHost !== "function") return err;
+  // The constructor prefixes the layer again, so the copy takes the message without it.
+  const prefix = `verification error: ${err.layer}: `;
+  const message = err.message.startsWith(prefix) ? err.message.slice(prefix.length) : err.message;
+  const named = new VerificationError(message, { layer: err.layer, report: err.report.withHost(host), cause: err.cause });
+  if (err.stack !== undefined) named.stack = err.stack;
+  return named;
 }
 
 /** Whether `err` presents as the verifier's usage error without sharing its class. */

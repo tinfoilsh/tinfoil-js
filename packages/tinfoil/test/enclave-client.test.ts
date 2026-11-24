@@ -605,6 +605,8 @@ describe("EnclaveHTTPClient over EHBP", () => {
     const sealing = verifier(() => ({ tls: "ab".repeat(32), hpke: ehbp.publicKeyHex }));
     const bare = await createEnclaveHTTPClient("enclave.example", AUTHORIZED, options(ehbp.origin), { documentFetch: documents().fetch, verifier: sealing });
     expect(bare.baseURL).toBe(`${ehbp.origin}/`);
+    // The report names the enclave that the client verified, not the proxy that requests go through.
+    expect(bare.currentVerification()?.toJSON().metadata.host).toBe("enclave.example");
     expect((await (await bare.fetch(new URL("echo", bare.baseURL), { method: "POST", body: "under" })).json()).text).toBe("under");
     await expect(bare.fetch("https://other.example/echo")).rejects.toThrow(/client is bound to enclave/);
     const slashed = await createEnclaveHTTPClient("enclave.example", AUTHORIZED, options(`${ehbp.origin}/`), { documentFetch: documents().fetch, verifier: sealing });

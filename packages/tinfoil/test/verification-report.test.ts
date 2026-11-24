@@ -573,6 +573,57 @@ describe("the current verification", () => {
   });
 });
 
+describe("the report's host", () => {
+  const hostIn = (report: VerificationReport | undefined): unknown => (report === undefined ? undefined : (JSON.parse(JSON.stringify(report)) as { metadata: { host?: string } }).metadata.host);
+
+  it("names the enclave on every report that an enclave client hands out, a rejection's included", async () => {
+    const r = recorder();
+    const client = await createEnclaveHTTPClient(HOST, AUTHORIZED, { onVerificationAttempt: r.onVerificationAttempt }, seams(scripted(["pass", "pass", "reject"]), documents().fetch));
+    expect(hostIn(await client.ensureVerified())).toBe(HOST);
+    expect(hostIn(await client.reverify())).toBe(HOST);
+    expect(hostIn(client.currentVerification())).toBe(HOST);
+    expect(hostIn(client.lastVerificationAttempt()?.report)).toBe(HOST);
+    expect(r.calls.map((c) => hostIn(c.report))).toEqual([HOST, HOST]);
+    const err = await client.reverify().catch((e: unknown) => e);
+    const rejected = verificationErrorIn(err);
+    expect(rejected?.layer).toBe("policy");
+    expect(rejected?.message).toBe("verification error: policy: launch measurement mismatch");
+    expect(hostIn(rejected?.report)).toBe(HOST);
+    expect(rejected?.report.failedStep()?.layer).toBe("policy");
+    expect(hostIn(verificationErrorIn(client.lastVerificationAttempt()?.error)?.report)).toBe(HOST);
+    expect(hostIn(verificationErrorIn(lastOf(r.calls)?.error)?.report)).toBe(HOST);
+    await client.close();
+  });
+
+  it("names each router that discovery tries, and the chosen one", async () => {
+    const r = recorder();
+    const seen: string[] = [];
+    const verifier = {
+      checkPinVerifiability: () => {},
+      verifyV3At: async () => (lastOf(seen) === "bad.example" ? Promise.reject(rejection()) : passed()),
+    } as unknown as Verifier;
+    const documentFetch: Fetch = async (input) => {
+      seen.push(new URL(String(input)).host);
+      return new Response(new Uint8Array([1]));
+    };
+    const client = await createRouterHTTPClient(
+      { transport: { kind: "tls" }, onVerificationAttempt: r.onVerificationAttempt },
+      { verifier, documentFetch, routersFetch: async () => new Response(JSON.stringify(["bad.example", "good.example"])), shuffle: (items) => [...items], sleep: async () => {}, tls: { ca: TEST_CERT }, resolveSecret: () => "secret" },
+    );
+    expect(hostIn(verificationErrorIn(r.calls[0]!.error)?.report)).toBe("bad.example");
+    expect(hostIn(r.calls[1]!.report)).toBe("good.example");
+    expect(hostIn(client.currentVerification())).toBe("good.example");
+    expect(hostIn(client.lastVerificationAttempt()?.report)).toBe("good.example");
+    expect(hostIn(await client.ensureVerified())).toBe("good.example");
+    await client.close();
+  });
+
+  it("is not set by the verifier itself", async () => {
+    expect(hostIn(passed())).toBeUndefined();
+    expect(hostIn(rejection().report)).toBeUndefined();
+  });
+});
+
 describe("the onVerificationAttempt type", () => {
   it("passes one attempt, which narrows on its report or its error, and accepts the usual callback forms", () => {
     // Checked by the test typecheck: each declaration below must compile, except where a directive pins the error.

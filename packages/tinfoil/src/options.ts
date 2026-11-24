@@ -135,9 +135,10 @@ export type VerificationCheck = (facts: VerifiedFacts) => void | Promise<void>;
  * which has no report. When the verifier rejected the document, the error
  * is an {@link AttestationError} whose `cause` chain holds the verifier's
  * `VerificationError`, which `tinfoil` re-exports, and that error's
- * `report` shows the step that failed and the partial facts. A report is for
- * showing or logging what happened; only the client decides whether it
- * admits requests.
+ * `report` shows the step that failed and the partial facts. Every report
+ * names the host that the client contacted in `metadata.host`, which is not
+ * attested. A report is for showing or logging what happened; only the
+ * client decides whether it admits requests.
  */
 export type VerificationAttempt = { readonly report: VerificationReport; readonly error?: undefined } | { readonly report?: undefined; readonly error: TinfoilError };
 

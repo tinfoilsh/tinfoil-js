@@ -707,6 +707,8 @@ describe("GatewayTransport", () => {
       expect(entry!.host).toBe(g.first);
       expect(tagOf(entry!.current)).toBe(`${g.first}#2`);
       expect(tagOf(entry!.lastAttempt.report)).toBe(`${g.first}#2`);
+      // Every report names its replica.
+      for (const report of [reverified, entry!.current, entry!.lastAttempt.report]) expect(report?.toJSON().metadata.host).toBe(g.first);
       expect(entry!.lastAttempt.error).toBeUndefined();
       expect(tagOf(await g.t.ensureVerified(MODEL))).toBe(`${g.first}#2`);
     });
