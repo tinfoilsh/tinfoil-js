@@ -1,15 +1,14 @@
 /** Reads the runtime pin from a Tinfoil config. */
 import { RUNTIME_REPO, validateRuntimeReference, type RuntimeReference } from "../../document/collateral/runtime.js";
-import { strictParse, type JsonValue } from "../json/index.js";
+import { object, str } from "../json/decode.js";
+import { strictParse } from "../json/index.js";
 
 export const MAX_CONFIG_SIZE = 1 << 20;
 
-const CVM_VERSION_KEY = "cvm-version";
-
 /**
- * Reads the `cvm-version` of a JSON config (other members are ignored),
- * splits it on "@sha256:", normalizes the tag to "v…", and validates the
- * reference.
+ * Reads the JSON `cvm-version` (exactly one document; other keys are
+ * ignored, duplicate keys reject), splits it on "@sha256:", normalizes the
+ * tag to "v…", and validates the reference.
  */
 export function configRuntime(config: Uint8Array): RuntimeReference {
   const version = readCvmVersion(config);
@@ -25,21 +24,15 @@ export function configRuntime(config: Uint8Array): RuntimeReference {
 }
 
 /**
- * Reads the `cvm-version` value of the config: the bytes must be at most
- * {@link MAX_CONFIG_SIZE} and strictly parse as one JSON object, and the
- * value must be a string. Anything else rejects, including a YAML config.
+ * Reads the `cvm-version` value of the config: the stream must hold exactly
+ * one document, an object; the value must be a string; an absent or null
+ * value is "". Decode errors, including duplicate keys, reject.
  */
 function readCvmVersion(config: Uint8Array): string {
-  if (config.length > MAX_CONFIG_SIZE) throw new Error(`parsing config runtime pin: the config is larger than ${MAX_CONFIG_SIZE} bytes`);
-  let version: JsonValue | undefined;
+  if (config.length > MAX_CONFIG_SIZE) throw new Error(`parsing config runtime pin: config exceeds ${MAX_CONFIG_SIZE} bytes`);
   try {
-    const value = strictParse(config);
-    if (value instanceof Map) version = value.get(CVM_VERSION_KEY);
-  } catch {
-    // Bytes that are not JSON state no cvm-version.
+    return str(object(strictParse(config), "config"), "cvm-version");
+  } catch (err) {
+    throw new Error(`parsing config runtime pin: ${(err as Error).message}`);
   }
-  if (typeof version !== "string") {
-    throw new Error("parsing config runtime pin: not a JSON config that states cvm-version; YAML configs are not read");
-  }
-  return version;
 }

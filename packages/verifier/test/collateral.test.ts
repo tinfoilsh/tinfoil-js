@@ -343,7 +343,7 @@ describe("config collateral", () => {
   });
 
   describe("config endorsement", () => {
-    const config = `{"cvm-version":"1.0.0@sha256:${"ab".repeat(32)}"}`;
+    const config = `{"cvm-version":"1.0.0"}`;
     const reference = "sha256:" + "ab".repeat(32);
     const data = `{"endorsement_ref":${q(reference)},"config_base64":${q(b64(config))},"sigstore_bundle":{"mediaType":"test"}}`;
     const entry: WireEntry = { id: CONFIG_ID, role: ROLE_REFERENCE_VALUES, format: CONFIG_ENDORSEMENT_V1_FORMAT, data };

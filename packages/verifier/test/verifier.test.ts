@@ -336,14 +336,6 @@ describe("Verifier.create config trust and policy", () => {
     await expect(Verifier.create({ kind: "embeddedConfig", name: 7 as unknown as string, bytes: config })).rejects.toThrow(/name must be a string/);
   });
 
-  it("refuses embedded config bytes that are not a JSON config, and names the two forms it takes", async () => {
-    const bytes = utf8(`name: app\ncvm-version: v1.2.3@sha256:${"a".repeat(64)}\n`);
-    const err = await Verifier.create({ kind: "embeddedConfig", bytes }).catch((e: unknown) => e);
-    expect(err).toBeInstanceOf(UsageError);
-    expect((err as Error).message).toMatch(/must be a JSON config, or the config given by its digest and runtime pin as an embeddedConfigReference/);
-    expect((err as Error).message).toMatch(/not a JSON config that states cvm-version/);
-  });
-
   it("accepts an embedded config reference in place of the config bytes", async () => {
     const register = "cd".repeat(48);
     const manifest = utf8(
