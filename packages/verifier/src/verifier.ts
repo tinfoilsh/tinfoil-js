@@ -24,7 +24,6 @@ import {
   FreshnessVerifier,
   KIND_PLATFORM,
   KIND_RUNTIME,
-  MAX_CONFIG_SIZE,
   parseConfigName,
   PLATFORM_ARTIFACT_NAME,
   PUBLIC_REGISTRY_ID,
@@ -41,7 +40,7 @@ import { authenticateRuntime } from "./internal/endorsement/runtime.js";
 import { strictParse } from "./internal/json/index.js";
 import { ARTIFACT_FORMAT, ARTIFACT_FORMAT_V2, parse as parseArtifact, type Artifact } from "./internal/policy/artifact.js";
 import * as quote from "./internal/quote/quote.js";
-import { configRuntime } from "./internal/runtime/config.js";
+import { configRuntime, MAX_CONFIG_SIZE } from "./internal/runtime/config.js";
 import { decodeManifest, parseManifest, type Manifest, type Measurements } from "./internal/runtime/manifest.js";
 import * as semver from "./internal/semver.js";
 import { pinnedKeys, type PinnedKey } from "./internal/sigstore/keyed.js";

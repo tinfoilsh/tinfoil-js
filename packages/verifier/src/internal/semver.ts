@@ -5,9 +5,6 @@
  */
 
 interface Parsed {
-  major: string;
-  minor: string;
-  patch: string;
   /** ".0.0" or ".0" when MINOR or PATCH was omitted ("v1", "v1.2"). */
   short: string;
   prerelease: string;
@@ -32,43 +29,22 @@ export function build(v: string): string {
   return parse(v)?.build ?? "";
 }
 
-/**
- * Orders two versions by semantic version precedence: negative, zero or
- * positive as `v` is below, equal to or above `w`. Build metadata does not
- * count. An invalid version is below every valid one and equal to any other
- * invalid one.
- */
-export function compare(v: string, w: string): number {
-  const pv = parse(v);
-  const pw = parse(w);
-  if (pv === undefined || pw === undefined) return pv === pw ? 0 : pv === undefined ? -1 : 1;
-  return (
-    compareNum(pv.major, pw.major) ||
-    compareNum(pv.minor, pw.minor) ||
-    compareNum(pv.patch, pw.patch) ||
-    comparePrerelease(pv.prerelease, pw.prerelease)
-  );
-}
-
 // Every accepted character is ASCII, so indexing UTF-16 code units is byte
 // indexing.
 function parse(v: string): Parsed | undefined {
   if (v === "" || v[0] !== "v") return undefined;
   let r = parseNum(v.slice(1));
   if (r === undefined) return undefined;
-  const major = v.slice(1, v.length - r.length);
   v = r;
-  if (v === "") return { major, minor: "0", patch: "0", short: ".0.0", prerelease: "", build: "" };
+  if (v === "") return { short: ".0.0", prerelease: "", build: "" };
   if (v[0] !== ".") return undefined;
   r = parseNum(v.slice(1));
   if (r === undefined) return undefined;
-  const minor = v.slice(1, v.length - r.length);
   v = r;
-  if (v === "") return { major, minor, patch: "0", short: ".0", prerelease: "", build: "" };
+  if (v === "") return { short: ".0", prerelease: "", build: "" };
   if (v[0] !== ".") return undefined;
   r = parseNum(v.slice(1));
   if (r === undefined) return undefined;
-  const patch = v.slice(1, v.length - r.length);
   v = r;
   let prerelease = "";
   let build = "";
@@ -85,7 +61,7 @@ function parse(v: string): Parsed | undefined {
     v = v.slice(i);
   }
   if (v !== "") return undefined;
-  return { major, minor, patch, short: "", prerelease, build };
+  return { short: "", prerelease, build };
 }
 
 /** Consumes a decimal number without leading zeros; returns the rest. */
@@ -138,39 +114,4 @@ function isIdentChar(c: string): boolean {
 /** A numeric identifier with a leading zero. */
 function isBadNum(v: string): boolean {
   return /^0[0-9]+$/.test(v);
-}
-
-/** Orders two decimal numbers without leading zeros, of any length. */
-function compareNum(x: string, y: string): number {
-  if (x === y) return 0;
-  if (x.length !== y.length) return x.length < y.length ? -1 : 1;
-  return x < y ? -1 : 1;
-}
-
-/**
- * Orders two pre-release strings ("" or "-a.b.c"): a version without one is
- * above a version with one; identifiers compare left to right, numeric ones
- * by value and below alphanumeric ones, the others in ASCII order; a longer
- * list is above its own prefix.
- */
-function comparePrerelease(x: string, y: string): number {
-  if (x === y) return 0;
-  if (x === "") return 1;
-  if (y === "") return -1;
-  const xs = x.slice(1).split(".");
-  const ys = y.slice(1).split(".");
-  for (let i = 0; i < xs.length && i < ys.length; i++) {
-    const dx = xs[i]!;
-    const dy = ys[i]!;
-    if (dx === dy) continue;
-    const numX = isNum(dx);
-    if (numX !== isNum(dy)) return numX ? -1 : 1;
-    if (numX) return compareNum(dx, dy);
-    return dx < dy ? -1 : 1;
-  }
-  return xs.length < ys.length ? -1 : 1;
-}
-
-function isNum(v: string): boolean {
-  return /^[0-9]+$/.test(v);
 }

@@ -337,17 +337,11 @@ describe("Verifier.create config trust and policy", () => {
   });
 
   it("refuses embedded config bytes that are not a JSON config, and names the two forms it takes", async () => {
-    const digest = "a".repeat(64);
-    for (const [bytes, reason] of [
-      [`name: app\ncvm-version: v1.2.3@sha256:${digest}\n`, /not a JSON config that states cvm-version/],
-      [`name: app\ncvm-version: 0.15.4@sha256:${digest}\n`, /not a JSON config that states cvm-version/],
-      [`{"cvm-version":"0.15.4@sha256:${digest}","name":"app"}`, /a JSON config pins cvm-version v0\.15\.5-rc\.1 or later/],
-    ] as const) {
-      const err = await Verifier.create({ kind: "embeddedConfig", bytes: utf8(bytes) }).catch((e: unknown) => e);
-      expect(err).toBeInstanceOf(UsageError);
-      expect((err as Error).message).toMatch(/must be a JSON config, or the config given by its digest and runtime pin as an embeddedConfigReference/);
-      expect((err as Error).message).toMatch(reason);
-    }
+    const bytes = utf8(`name: app\ncvm-version: v1.2.3@sha256:${"a".repeat(64)}\n`);
+    const err = await Verifier.create({ kind: "embeddedConfig", bytes }).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(UsageError);
+    expect((err as Error).message).toMatch(/must be a JSON config, or the config given by its digest and runtime pin as an embeddedConfigReference/);
+    expect((err as Error).message).toMatch(/not a JSON config that states cvm-version/);
   });
 
   it("accepts an embedded config reference in place of the config bytes", async () => {

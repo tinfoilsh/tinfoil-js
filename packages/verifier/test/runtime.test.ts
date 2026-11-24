@@ -8,13 +8,12 @@
  *
  * The trailing describes cover decode-level behaviour: unknown and duplicate
  * members, integer and string typing, null members and framing for the
- * manifest, the JSON object and member that the config's pin is read from,
- * and the version and byte form that the config must have.
+ * manifest, and the JSON object and member that the config's pin is read from.
  */
 import { describe, expect, it } from "vitest";
 import { RUNTIME_REPO, type RuntimeReference } from "../src/document/collateral/runtime.js";
 import { sha256, toHex } from "../src/internal/bytes.js";
-import { configRuntime, JSON_CONFIG_MIN_VERSION } from "../src/internal/runtime/config.js";
+import { configRuntime, MAX_CONFIG_SIZE } from "../src/internal/runtime/config.js";
 import { decodeManifest, FORMAT_VERSION, MEASUREMENT_SIZE, parseManifest, type Manifest } from "../src/internal/runtime/manifest.js";
 
 const enc = (s: string): Uint8Array => new TextEncoder().encode(s);
@@ -128,32 +127,32 @@ describe("parseManifest and configRuntime", () => {
   describe("reads the runtime pin from the config", () => {
     const digest = "ab".repeat(32);
     const accepted: [string, string][] = [
-      ["0.16.0", "v0.16.0"],
-      ["v0.16.0", "v0.16.0"],
-      ["0.16.0-rc.1", "v0.16.0-rc.1"],
-      ["0.16.0+gpu", "v0.16.0+gpu"],
-      ["v0.16.0+gpu", "v0.16.0+gpu"],
-      ["0.16.0-rc.1+gpu", "v0.16.0-rc.1+gpu"],
-      ["0.16.0+mini", "v0.16.0+mini"],
-      ["0.16.0+containers.initrd-1", "v0.16.0+containers.initrd-1"],
-      ["0.16.0+GPU", "v0.16.0+GPU"],
+      ["0.15.0", "v0.15.0"],
+      ["v0.15.0", "v0.15.0"],
+      ["0.15.0-rc.1", "v0.15.0-rc.1"],
+      ["0.15.0+gpu", "v0.15.0+gpu"],
+      ["v0.15.0+gpu", "v0.15.0+gpu"],
+      ["0.15.0-rc.1+gpu", "v0.15.0-rc.1+gpu"],
+      ["0.15.0+mini", "v0.15.0+mini"],
+      ["0.15.0+containers.initrd-1", "v0.15.0+containers.initrd-1"],
+      ["0.15.0+GPU", "v0.15.0+GPU"],
     ];
     it.each(accepted)("accepts %s as %s", (version, tag) => {
       const config = enc(`{"containers":[],"cvm-version":"${version}@sha256:${digest}"}`);
       expect(configRuntime(config)).toEqual({ repo: RUNTIME_REPO, tag, digest });
     });
 
-    const pin = `"cvm-version":"0.16.0@sha256:${digest}"`;
+    const pin = `"cvm-version":"0.15.0@sha256:${digest}"`;
     const good = `{${pin}}`;
     const rejected: [string, string][] = [
-      ["unpinned", `{"cvm-version":"0.16.0"}`],
+      ["unpinned", `{"cvm-version":"0.15.0"}`],
       ["duplicate", `{${pin},${pin}}`],
       ["two values", good + good],
       ["bad digest", good.replaceAll(digest, digest.toUpperCase())],
-      ["path metadata", good.replaceAll("0.16.0", "0.16.0+mini/other")],
-      ["partial version", good.replaceAll("0.16.0", "0.16+gpu")],
-      ["empty metadata", good.replaceAll("0.16.0", "0.16.0+")],
-      ["double metadata", good.replaceAll("0.16.0", "0.16.0+gpu+gpu")],
+      ["path metadata", good.replaceAll("0.15.0", "0.15.0+mini/other")],
+      ["partial version", good.replaceAll("0.15.0", "0.15+gpu")],
+      ["empty metadata", good.replaceAll("0.15.0", "0.15.0+")],
+      ["double metadata", good.replaceAll("0.15.0", "0.15.0+gpu+gpu")],
       ["short digest", good.replaceAll(digest, digest.slice(0, -2))],
       ["extra digest", good.replaceAll(digest, `${digest}@sha256:${digest}`)],
       ["missing version", `{"containers":[]}`],
@@ -297,14 +296,16 @@ describe("decodeManifest: decode semantics", () => {
 /**
  * configRuntime reads the top-level cvm-version member of a JSON config: the
  * bytes must strictly parse as one JSON object, and the member must be a
- * string.
+ * string. Neither the version it pins nor the spelling of the JSON decides
+ * the outcome, and YAML rejects.
  */
 describe("configRuntime: decode semantics", () => {
   const digest = "ab".repeat(32);
-  const pin = `"cvm-version":"0.16.0@sha256:${digest}"`;
+  const pin = `"cvm-version":"0.15.0@sha256:${digest}"`;
   const good = `{${pin}}`;
-  const want: RuntimeReference = { repo: RUNTIME_REPO, tag: "v0.16.0", digest };
-  const notJsonConfig = "parsing config runtime pin: not a JSON config that states cvm-version";
+  const want: RuntimeReference = { repo: RUNTIME_REPO, tag: "v0.15.0", digest };
+  const yaml = (version: string): string => `cvm-version: ${version}@sha256:${digest}\ncpus: 2\n`;
+  const notJsonConfig = "parsing config runtime pin: not a JSON config that states cvm-version; YAML configs are not read";
 
   it("baseline", () => {
     expect(configRuntime(enc(good))).toEqual(want);
@@ -312,6 +313,9 @@ describe("configRuntime: decode semantics", () => {
 
   describe("rejects", () => {
     it.each([
+      ["YAML", yaml("0.15.0")],
+      ["YAML for a later version", yaml("0.15.5-rc.1")],
+      ["flow-style YAML", `{cvm-version: 0.15.0@sha256:${digest}, cpus: 2}`],
       ["duplicate cvm-version members", `{${pin},${pin}}`],
       // Duplicate members reject even when the member is not the one being read.
       ["duplicate other members", `{"containers":[],"containers":[],${pin}}`],
@@ -345,75 +349,26 @@ describe("configRuntime: decode semantics", () => {
     it("an int-like version", () => {
       expect(() => configRuntime(enc(`{"cvm-version":"15@sha256:${digest}"}`))).toThrow("runtime tag must be a full semantic version");
     });
-  });
-});
-
-// ---------------------------------------------------------------- configRuntime config format
-
-/**
- * A config is canonical JSON that pins JSON_CONFIG_MIN_VERSION or a later
- * version. YAML is refused for every version, and so is JSON that pins an
- * earlier one.
- */
-describe("configRuntime: a config is JSON in its one byte form", () => {
-  const digest = "ab".repeat(32);
-  const json = (version: string): string => `{"containers":[],"cpus":2,"cvm-version":"${version}@sha256:${digest}","shim":{"upstream-port":8080}}`;
-  const yaml = (version: string): string => `cvm-version: ${version}@sha256:${digest}\ncpus: 2\n`;
-  const canonical = json("0.15.5-rc.1");
-  const replace = (old: string, replacement: string): string => {
-    expect(canonical).toContain(old);
-    return canonical.replace(old, replacement);
-  };
-  const notJsonConfig = `parsing config runtime pin: not a JSON config that states cvm-version; the YAML configs of versions before ${JSON_CONFIG_MIN_VERSION} are not read`;
-  const pinsEarlier = `a JSON config pins cvm-version ${JSON_CONFIG_MIN_VERSION} or later`;
-  const MAX_SAFE = "9007199254740991";
-  const ABOVE_MAX_SAFE = "9007199254740992";
-  // U+1F600 is above U+FB33 as a code point and in UTF-8, and below it in
-  // the UTF-16 code units that canonical JSON sorts member names by.
-  const astral = `"${String.fromCodePoint(0x1f600)}":1`;
-  const bmp = `"${String.fromCodePoint(0xfb33)}":2`;
-
-  it.each([
-    ["JSON at the first JSON version", json("0.15.5-rc.1"), "v0.15.5-rc.1"],
-    ["JSON with a v prefix", json("v0.15.5-rc.1"), "v0.15.5-rc.1"],
-    ["JSON with build metadata", json("0.15.5-rc.1+gpu"), "v0.15.5-rc.1+gpu"],
-    ["JSON for the release", json("0.15.5"), "v0.15.5"],
-    ["JSON for a later version", json("0.16.0"), "v0.16.0"],
-    ["the largest integer", replace(`"cpus":2`, `"cpus":${MAX_SAFE}`), "v0.15.5-rc.1"],
-    ["the smallest integer", replace(`"cpus":2`, `"cpus":-${MAX_SAFE}`), "v0.15.5-rc.1"],
-    ["member names in UTF-16 code unit order", replace("}}", `},${astral},${bmp}}`), "v0.15.5-rc.1"],
-  ])("accepts %s", (_name, config, tag) => {
-    expect(configRuntime(enc(config))).toEqual({ repo: RUNTIME_REPO, tag, digest });
+    // The bytes are not JSON: parsing them would report that instead of the size.
+    it("a config over the size limit, without parsing it", () => {
+      const config = enc("x".repeat(MAX_CONFIG_SIZE + 1));
+      expect(() => configRuntime(config)).toThrow(`parsing config runtime pin: the config is larger than ${MAX_CONFIG_SIZE} bytes`);
+    });
   });
 
-  it.each<[string, string, string | RegExp]>([
-    ["YAML at the first JSON version", yaml("0.15.5-rc.1"), notJsonConfig],
-    ["YAML with build metadata", yaml("0.15.5-rc.1+gpu"), notJsonConfig],
-    ["YAML for a later version", yaml("1.0.0"), notJsonConfig],
-    ["YAML before the first JSON version", yaml("0.15.5-rc.0"), notJsonConfig],
-    ["YAML for an earlier release", yaml("0.15.4"), notJsonConfig],
-    ["flow-style YAML", `{cvm-version: 1.0.0@sha256:${digest}, cpus: 2}`, notJsonConfig],
-    ["JSON before the first JSON version", json("0.15.5-rc.0"), pinsEarlier],
-    ["JSON for an earlier release", json("0.15.4"), pinsEarlier],
-    ["JSON for an earlier release with build metadata", json("0.15.4+gpu"), pinsEarlier],
-    ["whitespace", replace(`"cpus":2`, `"cpus": 2`), "canonical form"],
-    ["trailing newline", canonical + "\n", "canonical form"],
-    ["members out of order", replace(`"containers":[],"cpus":2,`, `"cpus":2,"containers":[],`), "canonical form"],
-    ["escaped character", replace(`"cpus"`, `"${"\\"}u0063pus"`), "canonical form"],
-    ["member names in code point order", replace("}}", `},${bmp},${astral}}`), "canonical form"],
-    ["negative zero", replace(`"cpus":2`, `"cpus":-0`), "canonical form"],
-    ["null", replace(`"cpus":2`, `"cpus":null`), "null is not allowed"],
-    ["nested null", replace(`"containers":[]`, `"containers":[{"env":[null]}]`), "null is not allowed"],
-    ["fraction", replace(`"cpus":2`, `"cpus":2.5`), "not an integer"],
-    ["integral fraction", replace(`"cpus":2`, `"cpus":2.0`), "not an integer"],
-    ["exponent", replace(`"cpus":2`, `"cpus":2e0`), "not an integer"],
-    ["integer too large", replace(`"cpus":2`, `"cpus":${ABOVE_MAX_SAFE}`), "not an integer"],
-    ["integer too small", replace(`"cpus":2`, `"cpus":-${ABOVE_MAX_SAFE}`), "not an integer"],
-    ["nested fraction", replace(`"upstream-port":8080`, `"upstream-port":8080.5`), "not an integer"],
-    ["repeated member", replace(`"cpus":2,`, `"cpus":2,"cpus":2,`), /^parsing config runtime pin: /],
-    ["second value", canonical + canonical, /^parsing config runtime pin: /],
-    ["unpinned version", replace(`@sha256:${digest}`, ""), "must pin"],
-  ])("rejects %s", (_name, config, message) => {
-    expect(() => configRuntime(enc(config))).toThrow(message);
+  describe("accepts", () => {
+    it.each([
+      ["whitespace and a trailing newline", `{\n  "cpus": 2,\n  "cvm-version": "0.15.0@sha256:${digest}"\n}\n`],
+      ["members in any order", `{"shim":{"upstream-port":8080},${pin},"containers":[]}`],
+      ["null in another member", `{"cpus":null,${pin}}`],
+      ["a fraction in another member", `{"cpus":2.5,${pin}}`],
+      ["a config of the largest size", good.padEnd(MAX_CONFIG_SIZE)],
+    ])("%s", (_name, config) => {
+      expect(configRuntime(enc(config))).toEqual(want);
+    });
+    // Guests take a JSON config from 0.15.5-rc.1; the reader takes one for any version.
+    it.each([["0.15.4"], ["0.15.5-rc.1"]])("version %s", (version) => {
+      expect(configRuntime(enc(good.replace("0.15.0", version)))).toEqual({ ...want, tag: "v" + version });
+    });
   });
 });

@@ -18,7 +18,6 @@ import {
   isRuntimeArtifactName,
   KIND_PLATFORM,
   KIND_RUNTIME,
-  MAX_CONFIG_SIZE,
   parseArtifactFreshnessStatement,
   parseConfigName,
   parseConfigStatement,
@@ -37,6 +36,7 @@ import {
   type FreshnessPolicy,
 } from "../src/internal/endorsement/approval.js";
 import { DEFAULT_FUTURE_SKEW_MS, DEFAULT_MAX_AGE_MS } from "../src/internal/endorsement/time.js";
+import { MAX_CONFIG_SIZE } from "../src/internal/runtime/config.js";
 import { pinnedKeys, type PinnedKey } from "../src/internal/sigstore/keyed.js";
 import { endorsementReference, MAX_TIMESTAMP_SIZE, timestampInput, verifyTimestamp } from "../src/internal/sigstore/timestamp.js";
 import type { TrustedRoot } from "../src/internal/sigstore/trusted-root.js";
