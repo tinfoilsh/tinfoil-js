@@ -7,8 +7,8 @@
  */
 import type { OpenAIRealtimeWS } from "openai/realtime/ws";
 import { credentialOf } from "./internal/credential.js";
-import { allowedWsOptions } from "./internal/transport/ws.js";
 import { clientWsOptions, webSocketAccessOf } from "./internal/websocket.js";
+import { checkedWsOptions } from "./internal/ws-options.js";
 import type { EnclaveHTTPClient } from "./enclave-client.js";
 import { joinAPIPath } from "./internal/api-path.js";
 import { apiPathOf, type OpenAIClient } from "./openai-client.js";
@@ -29,12 +29,14 @@ export async function createRealtimeWebSocket(client: OpenAIClient<EnclaveHTTPCl
   const { transport, tls } = webSocketAccessOf(httpClient);
   // A client no factory made is refused before any verification I/O.
   const resolveCredential = credentialOf(client);
+  // So are settings that the pinned connection owns.
+  const wsOptions = checkedWsOptions(options.wsOptions, "createRealtimeWebSocket");
   const pinned = await clientWsOptions(transport, tls, options.signal);
   const { OpenAIRealtimeWS } = await import("openai/realtime/ws");
   // The session goes to the enclave itself, not to a proxy the HTTP client may send through, with the
   // credential resolved here, so the realtime client takes the endpoint and key as plain values.
   const endpoint = { apiKey: await resolveCredential(), baseURL: joinAPIPath(`https://${httpClient.enclave}/`, apiPathOf(client)) };
-  const session = new OpenAIRealtimeWS({ model: options.model, options: { ...allowedWsOptions(options.wsOptions), ...pinned.options } }, endpoint);
+  const session = new OpenAIRealtimeWS({ model: options.model, options: { ...wsOptions, ...pinned.options } }, endpoint);
   session.socket.on("error", pinned.onConnectionError);
   return session;
 }

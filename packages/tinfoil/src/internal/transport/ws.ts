@@ -11,7 +11,8 @@
  */
 import type * as WS from "ws";
 import { ConfigurationError } from "../../errors.js";
-import type { PinnedWebSocket, ReservedWsOption, WebSocketListenerOptions, WebSocketOptions } from "../../options.js";
+import type { PinnedWebSocket, WebSocketListenerOptions, WebSocketOptions } from "../../options.js";
+import { checkedWsOptions } from "../ws-options.js";
 import { bunOlderThan, isBun, MIN_BUN_FOR_PINNED_WEBSOCKETS, webSocketsUnavailableOnBun } from "../platform.js";
 import { identityCheck, type IdentityCheck } from "./pin.js";
 import type { TLSOptions } from "./tls.js";
@@ -19,40 +20,6 @@ import { PeerLacksKeyError } from "./transport.js";
 
 /** Which build this module belongs to; the browser build's bundling is checked against it. */
 export const WS_PLATFORM: "node" | "browser" = "node";
-
-/**
- * The `ws` settings that would change which peer is connected to, how its
- * certificate is checked, or the handshake's headers and subprotocol; a
- * caller's values are dropped. The record keeps the list and the
- * {@link ReservedWsOption} type in step: a key missing from either fails to
- * compile.
- */
-const RESERVED_WS_OPTIONS: readonly string[] = Object.keys({
-  agent: true,
-  createConnection: true,
-  followRedirects: true,
-  session: true,
-  socket: true,
-  servername: true,
-  pskCallback: true,
-  checkServerIdentity: true,
-  rejectUnauthorized: true,
-  ca: true,
-  headers: true,
-  origin: true,
-  finishRequest: true,
-  protocol: true,
-} satisfies Record<ReservedWsOption, true>);
-
-/**
- * `wsOptions` without the reserved settings. It takes any object, since a
- * caller without types can still pass a reserved key, which is dropped here.
- */
-export function allowedWsOptions(wsOptions: Readonly<Record<string, unknown>> | undefined): Record<string, unknown> {
-  const allowed: Record<string, unknown> = { ...wsOptions };
-  for (const key of RESERVED_WS_OPTIONS) delete allowed[key];
-  return allowed;
-}
 
 /** Called when the identity check rejects a peer, before the rejection reaches the runtime. */
 export type OnRejected = () => void;
@@ -103,8 +70,10 @@ export async function pinnedWsClientOptions(key: string, tls: TLSOptions, onReje
 /** Opens a WebSocket to `url` (wss) pinned to `key`, in the CONNECTING state. */
 export async function openPinnedWebSocket(url: URL, key: string, options: WebSocketOptions, tls: TLSOptions, onRejected?: OnRejected): Promise<PinnedWebSocket> {
   if (url.protocol !== "wss:") throw new ConfigurationError(`a pinned WebSocket requires a wss:// URL, got ${JSON.stringify(url.toString())}`);
+  // The client checks the settings before it verifies; the check is repeated here because the open can be used alone.
+  const wsOptions = checkedWsOptions(options.wsOptions, "createWebSocket");
   const protocols = options.protocols === undefined ? undefined : typeof options.protocols === "string" ? [options.protocols] : [...options.protocols];
-  return isBun() ? openOnBun(url, key, protocols, options, tls, onRejected) : openOnNode(url, key, protocols, options, tls, onRejected);
+  return isBun() ? openOnBun(url, key, protocols, options, tls, onRejected) : openOnNode(url, key, protocols, wsOptions, options, tls, onRejected);
 }
 
 /**
@@ -165,10 +134,10 @@ async function nodeWebSocket(): Promise<typeof WS.WebSocket> {
   return NodeWebSocket;
 }
 
-async function openOnNode(url: URL, key: string, protocols: string[] | undefined, options: WebSocketOptions, tls: TLSOptions, onRejected: OnRejected | undefined): Promise<PinnedWebSocket> {
+async function openOnNode(url: URL, key: string, protocols: string[] | undefined, wsOptions: Record<string, unknown>, options: WebSocketOptions, tls: TLSOptions, onRejected: OnRejected | undefined): Promise<PinnedWebSocket> {
   const [WebSocket, pinned] = await Promise.all([nodeWebSocket(), pinnedWsClientOptions(key, tls, onRejected)]);
   const socket = new WebSocket(url, protocols, {
-    ...allowedWsOptions(options.wsOptions),
+    ...wsOptions,
     headers: { ...options.headers },
     ...pinned,
   });

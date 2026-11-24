@@ -185,11 +185,12 @@ export interface CallOptions {
 }
 
 /**
- * The `ws` client settings a pinned connection owns, so a caller's values
- * for them are dropped: those that choose the peer, check its certificate,
- * or shape the handshake's headers (`headers` itself, `origin`, which is a
- * header, and `finishRequest`, which hands the caller the request) and
- * subprotocol.
+ * The `ws` client settings that a pinned connection owns, so that a caller
+ * that sets one gets a {@link ConfigurationError}: those that choose the
+ * peer, check its certificate, or shape the handshake's headers (`headers`
+ * itself, `origin` and `auth`, which become headers, and `finishRequest`,
+ * which hands the caller the request), and `protocol`, the request's URL
+ * scheme.
  */
 export type ReservedWsOption =
   | "agent"
@@ -202,12 +203,13 @@ export type ReservedWsOption =
   | "checkServerIdentity"
   | "rejectUnauthorized"
   | "ca"
+  | "auth"
   | "headers"
   | "origin"
   | "finishRequest"
   | "protocol";
 
-/** The `ws` client settings a caller may set: the library's own, less the {@link ReservedWsOption}s. */
+/** The `ws` client settings that a caller may set: the library's own, less the {@link ReservedWsOption}s. */
 export type WsOptions = Readonly<Omit<WsClientOptions, ReservedWsOption>>;
 
 /** Configures a WebSocket opened by {@link createWebSocket}. */
@@ -218,11 +220,14 @@ export interface WebSocketOptions {
   readonly headers?: Readonly<Record<string, string>>;
   /**
    * Settings for the `ws` client on Node, such as `perMessageDeflate` or
-   * `maxPayload`. Settings that would change which peer is connected to, how
-   * its certificate is checked, or the handshake's headers (`headers`,
-   * `origin` and `finishRequest`) and `protocol` are ignored; the
-   * handshake's headers come from the top-level `headers`.
-   * Bun's WebSocket takes no such settings, so they are ignored there.
+   * `maxPayload`. A setting that would change which peer is connected to,
+   * how its certificate is checked, or the handshake's headers (`headers`,
+   * `origin`, `auth` and `finishRequest`), or `protocol`, is a
+   * {@link ConfigurationError}, raised before anything is sent: the
+   * handshake's headers, `Origin` and `Authorization` included, come from the
+   * top-level `headers`, and its subprotocols from `protocols`. Bun's
+   * WebSocket takes no such settings, so any setting here is a
+   * {@link ConfigurationError} on Bun.
    */
   readonly wsOptions?: WsOptions;
   /** Aborts the verification the call performs before connecting. */
@@ -233,7 +238,11 @@ export interface WebSocketOptions {
 export interface RealtimeOptions {
   /** The realtime model to start a session with. */
   readonly model: string;
-  /** As {@link WebSocketOptions.wsOptions}. */
+  /**
+   * As {@link WebSocketOptions.wsOptions}, except that there is no
+   * top-level `headers` or `protocols`: the session authenticates with the
+   * client's credential, and takes no other headers.
+   */
   readonly wsOptions?: WsOptions;
   /** Aborts the verification the call performs before connecting. */
   readonly signal?: AbortSignal;

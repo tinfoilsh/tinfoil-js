@@ -15,10 +15,6 @@ export const WEBSOCKETS_UNAVAILABLE_IN_BROWSERS = "a verified WebSocket pins the
 
 export type OnRejected = () => void;
 
-export function allowedWsOptions(wsOptions: Readonly<Record<string, unknown>> | undefined): Record<string, unknown> {
-  return { ...wsOptions };
-}
-
 export function checkWsClientOptionsCapability(): void {
   throw new ConfigurationError(WEBSOCKETS_UNAVAILABLE_IN_BROWSERS);
 }

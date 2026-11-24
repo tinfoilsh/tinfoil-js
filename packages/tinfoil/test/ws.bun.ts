@@ -92,7 +92,18 @@ describe("createWebSocket under Bun", () => {
     expect(connections).toBe(before);
   });
 
-  it("refuses plaintext", async () => {
+  it("refuses ws client settings, which Bun's WebSocket doesn't take, before connecting", async () => {
+    const before = connections;
+    const c = await client(PIN);
+    await expect(createWebSocket(c, "/x", { wsOptions: { maxPayload: 7 } })).rejects.toThrow(/Bun's WebSocket takes no `ws` client settings/);
+    await expect(createWebSocket(c, "/x", { wsOptions: { headers: { Authorization: "Bearer k" } } as never })).rejects.toThrow(/wsOptions\.headers is reserved/);
+    expect(connections).toBe(before);
+    const socket = await createWebSocket(c, "/x", { wsOptions: {} });
+    await opened(socket);
+    socket.close();
+  });
+
+    it("refuses plaintext", async () => {
     await expect(createWebSocket(await client(PIN), `ws://${host}/x`)).rejects.toBeInstanceOf(ConfigurationError);
   });
 });

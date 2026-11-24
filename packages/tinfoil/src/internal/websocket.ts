@@ -12,6 +12,7 @@ import { AttestationError, ConfigurationError } from "../errors.js";
 import type { PinnedWebSocket, WebSocketOptions } from "../options.js";
 import { checkDenoPins, isServerRuntime, type RuntimeGlobals } from "./platform.js";
 import { normalizedOrigin } from "./transport/origin.js";
+import { checkedWsOptions } from "./ws-options.js";
 import { isCertificateError } from "./transport/pin-errors.js";
 import type { TLSOptions } from "./transport/tls.js";
 import type { KeyedTransport } from "./transport/transport.js";
@@ -70,6 +71,7 @@ export function webSocketURL(host: string, path: string): URL {
 export async function openClientWebSocket(transport: KeyedTransport, path: string, options: WebSocketOptions, tls: TLSOptions): Promise<PinnedWebSocket> {
   checkWebSocketCapability();
   const target = webSocketURL(transport.enclave().host(), path);
+  checkedWsOptions(options.wsOptions, "createWebSocket");
   const { checkPinnedWebSocketCapability, openPinnedWebSocket } = await import("./transport/ws.js");
   // A runtime that can't pin the connection is refused before any verification I/O.
   checkPinnedWebSocketCapability();

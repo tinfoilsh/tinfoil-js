@@ -20,8 +20,8 @@ import { createEnclaveHTTPClient, type EnclaveHTTPClient } from "../src/enclave-
 import { AttestationError, ConfigurationError } from "../src/errors.js";
 import { PeerLacksKeyError } from "../src/internal/transport/transport.js";
 import { isCertificateError } from "../src/internal/transport/pin-errors.js";
-import { allowedWsOptions } from "../src/internal/transport/ws.js";
 import { checkWebSocketCapability, webSocketURL } from "../src/internal/websocket.js";
+import { checkedWsOptions } from "../src/internal/ws-options.js";
 import type { OpenAIClient, OpenAIClientOptions } from "../src/openai-client.js";
 import type { Fetch, PinnedWebSocket } from "../src/options.js";
 import { createRealtimeWebSocket } from "../src/realtime.js";
@@ -133,12 +133,57 @@ describe("webSocketURL", () => {
     expect(() => checkWebSocketCapability({ self: {} } as never)).toThrow(/browsers don't expose/);
   });
 
-  it("drops the ws settings that would change the peer or its certificate check", () => {
-    expect(allowedWsOptions({ agent: 1, createConnection: 2, checkServerIdentity: 3, rejectUnauthorized: false, ca: "x", headers: {}, origin: "o", finishRequest: 4, perMessageDeflate: false, maxPayload: 7 })).toEqual({
-      perMessageDeflate: false,
-      maxPayload: 7,
-    });
-    expect(allowedWsOptions(undefined)).toEqual({});
+  it("refuses each ws setting that would change the peer or its certificate check, naming it", () => {
+    for (const key of ["agent", "createConnection", "followRedirects", "session", "socket", "servername", "pskCallback", "checkServerIdentity", "rejectUnauthorized", "ca"]) {
+      for (const caller of ["createWebSocket", "createRealtimeWebSocket"] as const) {
+        // A falsy value is still a setting: `rejectUnauthorized: false` would turn the check off.
+        expect(() => checkedWsOptions({ [key]: false }, caller)).toThrow(new RegExp(`wsOptions\\.${key} is reserved: the SDK sets it so that the connection is pinned`));
+      }
+    }
+  });
+
+  it("refuses the ws settings that shape the handshake, pointing createWebSocket at its own options", () => {
+    const refusal = (options: Record<string, unknown>, caller: "createWebSocket" | "createRealtimeWebSocket"): unknown => {
+      try {
+        checkedWsOptions(options, caller);
+      } catch (err) {
+        return err;
+      }
+      return undefined;
+    };
+    const headers = refusal({ headers: { Authorization: "Bearer k" } }, "createWebSocket");
+    expect(headers).toBeInstanceOf(ConfigurationError);
+    expect((headers as Error).message).toMatch(/wsOptions\.headers is reserved: pass the handshake's headers in the top-level `headers` option/);
+    expect((refusal({ origin: "https://app.example" }, "createWebSocket") as Error).message).toMatch(/wsOptions\.origin is reserved: set an `Origin` header in the top-level `headers` option/);
+    expect((refusal({ protocol: "realtime" }, "createWebSocket") as Error).message).toMatch(/wsOptions\.protocol is reserved: .*top-level `protocols` option/);
+    expect((refusal({ finishRequest: () => {} }, "createWebSocket") as Error).message).toMatch(/wsOptions\.finishRequest is reserved/);
+    expect((refusal({ auth: "user:pass" }, "createWebSocket") as Error).message).toMatch(/wsOptions\.auth is reserved: .*top-level `headers` option/);
+    expect((refusal({ auth: "user:pass" }, "createRealtimeWebSocket") as Error).message).toMatch(/wsOptions\.auth is reserved: .*client's credential/);
+    // The realtime session has no top-level headers or subprotocols to point at.
+    expect((refusal({ headers: {} }, "createRealtimeWebSocket") as Error).message).toMatch(/wsOptions\.headers is reserved: .*client's credential/);
+    expect((refusal({ origin: "o" }, "createRealtimeWebSocket") as Error).message).not.toMatch(/top-level/);
+    expect((refusal({ protocol: "p" }, "createRealtimeWebSocket") as Error).message).not.toMatch(/top-level/);
+  });
+
+  it("passes the other ws settings through, and ignores a reserved key that is undefined or inherited", () => {
+    expect(checkedWsOptions({ perMessageDeflate: false, maxPayload: 7, handshakeTimeout: 1000 }, "createWebSocket")).toEqual({ perMessageDeflate: false, maxPayload: 7, handshakeTimeout: 1000 });
+    expect(checkedWsOptions({ headers: undefined, maxPayload: 7 }, "createWebSocket")).toEqual({ headers: undefined, maxPayload: 7 });
+    expect(checkedWsOptions(Object.create({ headers: { Authorization: "x" } }) as Record<string, unknown>, "createWebSocket")).toEqual({});
+    expect(checkedWsOptions(undefined, "createWebSocket")).toEqual({});
+    expect(() => checkedWsOptions("headers" as never, "createWebSocket")).toThrow(ConfigurationError);
+    // A getter is read once: the value that is checked is the value that is passed on.
+    let reads = 0;
+    const shifty = Object.defineProperty({}, "headers", { enumerable: true, get: () => (reads++ === 0 ? undefined : { Authorization: "x" }) });
+    expect(checkedWsOptions(shifty, "createWebSocket")).toEqual({ headers: undefined });
+  });
+
+  it("refuses any ws setting for createWebSocket on Bun, whose WebSocket takes none", () => {
+    const bun = { process: { versions: { bun: "1.4.4" } } };
+    expect(() => checkedWsOptions({ maxPayload: 7 }, "createWebSocket", bun)).toThrow(/Bun's WebSocket takes no `ws` client settings/);
+    expect(() => checkedWsOptions({ maxPayload: 7 }, "createWebSocket", bun)).toThrow(ConfigurationError);
+    expect(checkedWsOptions({}, "createWebSocket", bun)).toEqual({});
+    expect(checkedWsOptions({ maxPayload: undefined }, "createWebSocket", bun)).toEqual({ maxPayload: undefined });
+    expect(checkedWsOptions(undefined, "createWebSocket", bun)).toEqual({});
   });
 
   it("recognises the pin's rejection and the runtime's certificate errors, and nothing else", () => {
@@ -233,6 +278,32 @@ describe("createWebSocket", () => {
     await expect(createWebSocket({} as EnclaveHTTPClient, "/x")).rejects.toThrow(/not created by its factory/);
     expect(connections.length).toBe(before);
     expect(docs.calls).toBe(1);
+  });
+
+  it("refuses a reserved ws setting before any I/O, so that a header in it isn't silently lost", async () => {
+    const docs = documents();
+    const c = await client(() => TEST_PIN, docs);
+    const before = connections.length;
+    // Untyped code can pass what the WsOptions type omits.
+    const wsOptions = { headers: { Authorization: "Bearer k" } } as never;
+    await expect(createWebSocket(c, "/x", { wsOptions })).rejects.toThrow(/wsOptions\.headers is reserved/);
+    await expect(createWebSocket(c, "/x", { wsOptions: { rejectUnauthorized: false } as never })).rejects.toBeInstanceOf(ConfigurationError);
+    expect(connections.length).toBe(before);
+    expect(docs.calls).toBe(1);
+  });
+
+  it("passes the allowed ws settings to the connection", async () => {
+    const c = await client(() => TEST_PIN);
+    const offered = await createWebSocket(c, "/x");
+    await opened(offered);
+    offered.close();
+    expect(connections[connections.length - 1]!.headers["sec-websocket-extensions"]).toBeDefined();
+    const socket = await createWebSocket(c, "/x", { headers: { Authorization: "Bearer k" }, wsOptions: { perMessageDeflate: false } });
+    await opened(socket);
+    const last = connections[connections.length - 1]!;
+    expect(last.headers["sec-websocket-extensions"]).toBeUndefined();
+    expect(last.headers.authorization).toBe("Bearer k");
+    socket.close();
   });
 
   it("works in either transport mode, always directly to the enclave", async () => {
@@ -392,6 +463,19 @@ describe("createRealtimeWebSocket", () => {
       await expect(createRealtimeWebSocket(bad, { model: "m" })).rejects.toBeInstanceOf(ConfigurationError);
       expect(connections.length).toBe(before);
     }
+  });
+
+  it("refuses a reserved ws setting before any I/O, and passes the allowed ones through", async () => {
+    const docs = documents();
+    const ai = await openAIClient({ apiKey: "k" }, () => TEST_PIN, docs);
+    const before = connections.length;
+    await expect(createRealtimeWebSocket(ai, { model: "m", wsOptions: { headers: { Authorization: "Bearer other" } } as never })).rejects.toThrow(/wsOptions\.headers is reserved/);
+    await expect(createRealtimeWebSocket(ai, { model: "m", wsOptions: { checkServerIdentity: () => undefined } as never })).rejects.toBeInstanceOf(ConfigurationError);
+    expect(connections.length).toBe(before);
+    expect(docs.calls).toBe(1);
+    const session = await createRealtimeWebSocket(ai, { model: "m", wsOptions: { perMessageDeflate: false } });
+    expect(await authorizationOf(session)).toBe("Bearer k");
+    expect(connections[connections.length - 1]!.headers["sec-websocket-extensions"]).toBeUndefined();
   });
 
   it("refuses a client no factory made, before any connection", async () => {
