@@ -137,8 +137,9 @@ export class Enclave {
   /**
    * Reports the outcome of an attempt to verify the enclave to the
    * `onVerification` callback, if there is one. The caller passes a report
-   * that no one else holds. A throw from the callback doesn't reach the
-   * caller: it is rethrown asynchronously, as an uncaught error.
+   * that no one else holds. A throw from the callback doesn't change the
+   * outcome or reach the caller: it is rethrown asynchronously, to the
+   * runtime's handler for uncaught errors.
    */
   notify(report: VerificationReport | undefined, error: TinfoilError | undefined): void {
     if (this.#onVerification === undefined) return;

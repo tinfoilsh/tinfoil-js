@@ -164,8 +164,10 @@ export type VerificationAttempt = { readonly report: VerificationReport; readonl
  * attempt: for an attempt that was retried, that is already its retry. It
  * returns nothing and can't change the attempt's outcome; a decision about
  * trust belongs in a {@link VerificationCheck}. A value that it throws
- * doesn't reach the client: it is rethrown asynchronously, as an uncaught
- * error.
+ * doesn't change the attempt's outcome or reach any caller waiting for the
+ * attempt, and later attempts are still reported: the client catches it
+ * and rethrows it asynchronously, to the runtime's handler for uncaught
+ * errors.
  */
 export type OnVerification = (host: string, report: VerificationReport | undefined, error: TinfoilError | undefined) => void;
 

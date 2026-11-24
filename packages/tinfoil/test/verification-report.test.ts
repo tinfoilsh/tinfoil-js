@@ -5,7 +5,7 @@
  * conformance cases of the client specification. The gateway's per-replica
  * case is in the gateway transport's tests.
  */
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { createEnclaveHTTPClient, type EnclaveClientSeams } from "../src/enclave-client.js";
 import { AttestationError, ConfigurationError, findTinfoilError, NetworkError, type TinfoilError } from "../src/errors.js";
 import { Enclave } from "../src/internal/enclave.js";
@@ -346,6 +346,65 @@ describe("verification reports from the clients", () => {
     expect(err).toBeInstanceOf(AttestationError);
     expect(client.lastVerification()?.error).toBe(err);
     expect(r.calls[r.calls.length - 1]).toEqual({ host: HOST, error: err });
+  });
+
+  describe("a callback that throws", () => {
+    afterEach(() => {
+      vi.unstubAllGlobals();
+    });
+
+    it("leaves the outcome unchanged for every waiting caller, and later attempts are still reported", async () => {
+      // The client rethrows the callback's error asynchronously, as an uncaught error; the test catches it there.
+      const rethrown: unknown[] = [];
+      const queue = globalThis.queueMicrotask.bind(globalThis);
+      vi.stubGlobal("queueMicrotask", (task: () => void) =>
+        queue(() => {
+          try {
+            task();
+          } catch (err) {
+            rethrown.push(err);
+          }
+        }),
+      );
+      const thrown: Error[] = [];
+      const hosts: string[] = [];
+      const onVerification: OnVerification = (host) => {
+        hosts.push(host);
+        const err = new Error(`callback bug ${hosts.length}`);
+        thrown.push(err);
+        throw err;
+      };
+      let gate: Promise<void> | undefined;
+      let release!: () => void;
+      const fetch: Fetch = async () => {
+        if (gate !== undefined) await gate;
+        return new Response(new Uint8Array([1]));
+      };
+      // The factory's own verification passes although the callback throws.
+      const client = await createEnclaveHTTPClient(HOST, AUTHORIZED, { onVerification }, seams(scripted(["pass", "pass", "reject"]), fetch));
+      expect(client.lastVerification()?.report).toBeDefined();
+
+      // Two callers waiting on the same verification both get its report.
+      gate = new Promise<void>((resolve) => (release = resolve));
+      const first = client.reverify();
+      const second = client.ensureVerified();
+      const third = client.reverify();
+      release();
+      const reports = await Promise.all([first, second, third]);
+      for (const report of reports) expect(report.toJSON()).toEqual(client.lastVerification()!.report!.toJSON());
+      expect(hosts).toHaveLength(2);
+
+      // A later attempt is still reported, and its failure reaches its callers unchanged.
+      const failures = await Promise.all([client.reverify().catch((e: unknown) => e), client.reverify().catch((e: unknown) => e)]);
+      expect(failures[0]).toBeInstanceOf(AttestationError);
+      expect(failures[1]).toBe(failures[0]);
+      expect(client.lastVerification()?.error).toBe(failures[0]);
+      // The rejection is retried once, so two more attempts are reported.
+      expect(hosts).toEqual([HOST, HOST, HOST, HOST]);
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(rethrown).toEqual(thrown);
+      await client.close();
+    });
   });
 
   it("records no attempt for a request that fails before verifying, and keeps reporting after a close", async () => {
