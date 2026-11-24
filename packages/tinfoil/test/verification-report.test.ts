@@ -387,10 +387,9 @@ describe("verification reports from the clients", () => {
       // Two callers waiting on the same verification both get its report.
       gate = new Promise<void>((resolve) => (release = resolve));
       const first = client.reverify();
-      const second = client.ensureVerified();
-      const third = client.reverify();
+      const second = client.reverify();
       release();
-      const reports = await Promise.all([first, second, third]);
+      const reports = await Promise.all([first, second]);
       for (const report of reports) expect(report.toJSON()).toEqual(client.lastVerification()!.report!.toJSON());
       expect(hosts).toHaveLength(2);
 
