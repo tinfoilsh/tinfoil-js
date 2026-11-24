@@ -81,7 +81,8 @@ function expectGolden(name: string, got: unknown): void {
   }
   expect(json.metadata).toStrictEqual({ verified_at: expect.stringMatching(RFC3339_UTC), verifier: { name: VERIFIER_NAME, version: VERIFIER_VERSION } });
   expect(Date.parse((json.metadata as { verified_at: string }).verified_at)).toBe(Date.parse((golden(name).report.metadata as { verified_at: string }).verified_at));
-  expect(JSON.stringify(json)).not.toMatch(/null|""/);
+  const values = (v: unknown): unknown[] => (v !== null && typeof v === "object" ? Object.values(v).flatMap(values) : [v]);
+  expect(values(json).filter((v) => v === null || v === "")).toEqual([]);
 }
 
 const utf8 = (s: string): Uint8Array => new TextEncoder().encode(s);

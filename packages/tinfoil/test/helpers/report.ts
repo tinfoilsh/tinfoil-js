@@ -22,11 +22,31 @@ export function verifiedReport(facts: VerifiedFacts | object): VerificationRepor
     toJSON: () => ({
       schema_version: 1,
       steps: steps.map(({ layer, status }) => ({ layer, status })),
-      verified_facts: JSON.parse(JSON.stringify(facts)) as unknown,
+      verified_facts: factsJSON(facts),
       metadata: { verified_at: metadata.verifiedAt.toISOString().replace(/\.000Z$/, "Z"), verifier: metadata.verifier },
     }),
   };
   return report as unknown as VerificationReport;
+}
+
+/** The facts' JSON form: a real `VerifiedFacts` writes its own, and plain test facts are mapped to snake_case without the lifted channel keys. */
+function factsJSON(facts: VerifiedFacts | object): unknown {
+  if (typeof (facts as { toJSON?: unknown }).toJSON === "function") return (facts as VerifiedFacts).toJSON();
+  const value = (v: unknown): unknown => {
+    if (v instanceof Uint8Array) return Array.from(v, (b) => b.toString(16).padStart(2, "0")).join("");
+    if (v instanceof Date) return v.toISOString().replace(/\.000Z$/, "Z");
+    if (Array.isArray(v)) return v.map(value);
+    if (v !== null && typeof v === "object") {
+      const out: Record<string, unknown> = {};
+      for (const [k, x] of Object.entries(v)) {
+        if (x === undefined || x === "" || k === "tlsPublicKeyFP" || k === "hpkePublicKey") continue;
+        out[k.replace(/ID$/, "Id").replace(/[A-Z]/g, (c) => `_${c.toLowerCase()}`)] = value(x);
+      }
+      return out;
+    }
+    return v;
+  };
+  return value(facts);
 }
 
 /** The verified facts of the last attempt of `client`, if it passed: what the removed `current` getter returned. */

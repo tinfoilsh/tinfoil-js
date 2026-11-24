@@ -1,5 +1,13 @@
 # Golden files for the report's JSON form
 
+These files are copied unchanged from tinfoil-go's `verify/testdata/report-json`
+(tinfoilsh/tinfoil-go#346), so the text below describes them as Go does. In
+this package, `test/report-json.test.ts` checks every case: the ones that name
+a vector when `TINFOIL_CONFORMANCE_FIXTURES` points at the suite's `vectors/v3`
+directory, and the others by building the same input as the Go test that the
+description names. To update them, regenerate them in a tinfoil-go checkout
+with the commands at the end, and copy them here.
+
 Each file is one case of the JSON form that `VerificationReport.MarshalJSON`
 writes:
 
