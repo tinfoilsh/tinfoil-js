@@ -1,7 +1,8 @@
 /**
  * The package root's public surface, shared by its Node and browser entries:
- * the attested HTTP clients, their options, errors and helpers, and the
- * pinned WebSockets. The OpenAI-compatible client lives in the
+ * the attested HTTP clients, their options, errors and helpers, the
+ * pinned WebSockets, and the verifier's report types and error that the
+ * clients return and throw. The OpenAI-compatible client lives in the
  * `tinfoil/openai` entry and the AI SDK provider in `tinfoil/ai-sdk`, so
  * that the root imports no API library; platform-specific behaviour lives
  * behind the same client names.
@@ -45,3 +46,46 @@ export { SDK_VERSION } from "./version.js";
 export { attestationRelay, routerListRelay, type RelayOptions } from "./fetchers.js";
 export { createWebSocket, pinnedWebSocketOptions } from "./websocket.js";
 export type { WebSocketOptions, PinnedWebSocket } from "./options.js";
+/**
+ * The verifier's report and the facts that it holds, which the clients
+ * return, and the `VerificationError` that a rejection carries in its
+ * `cause` chain. They are re-exported so that an app that names them
+ * imports the copy of `@tinfoilsh/verifier` that this package pins: a direct
+ * dependency on another version installs a second copy, whose
+ * `VerificationError` fails `instanceof` on the errors that a client throws
+ * and whose report types aren't the ones that a client returns.
+ */
+export { VerificationError, REPORT_SCHEMA_VERSION } from "@tinfoilsh/verifier";
+export type {
+  VerificationReport,
+  VerifiedFacts,
+  PartialFacts,
+  ExpectedFacts,
+  MeasuredFacts,
+  CPUEvidence,
+  Step,
+  StepStatus,
+  Layer,
+  VerificationMetadata,
+  ArtifactVerification,
+  ConfigVerification,
+  ReferenceSource,
+  CryptoMaterialItem,
+  Measurement,
+  SevSnpMeasurement,
+  TdxMeasurement,
+  Expected,
+  ExpectedSevSnp,
+  ExpectedTdx,
+  Register,
+  VerificationReportJSON,
+  VerifiedFactsJSON,
+  PartialFactsJSON,
+  ExpectedFactsJSON,
+  MeasuredFactsJSON,
+  StepJSON,
+  VerificationMetadataJSON,
+  ArtifactVerificationJSON,
+  ConfigVerificationJSON,
+  MeasurementJSON,
+} from "@tinfoilsh/verifier";

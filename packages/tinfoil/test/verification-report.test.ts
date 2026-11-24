@@ -7,6 +7,8 @@
  */
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createEnclaveHTTPClient, type EnclaveClientSeams } from "../src/enclave-client.js";
+import * as browser from "../src/index.browser.js";
+import * as tinfoil from "../src/index.js";
 import { AttestationError, ConfigurationError, findTinfoilError, NetworkError, type TinfoilError } from "../src/errors.js";
 import { Enclave } from "../src/internal/enclave.js";
 import { KeyedTransport, KeyRejectionError, PeerLacksKeyError, type Mode } from "../src/internal/transport/transport.js";
@@ -124,6 +126,21 @@ describe("verification reports from the clients", () => {
     expect(client.lastVerification()?.error).toBe(err);
     expect(client.lastVerification()?.report).toBeUndefined();
     expect(lastOf(r.calls)).toEqual({ host: HOST, error: err });
+    await client.close();
+  });
+
+  it("throws a VerificationError and returns reports of the classes that tinfoil exports", async () => {
+    const client = await createEnclaveHTTPClient(HOST, AUTHORIZED, {}, seams(scripted(["pass", "reject"]), documents().fetch));
+    // The report's type is the one that tinfoil exports: checked by the test typecheck.
+    const report: tinfoil.VerificationReport = await client.ensureVerified();
+    expect(report.toJSON().schema_version).toBe(tinfoil.REPORT_SCHEMA_VERSION);
+    const err = await client.reverify().catch((e: unknown) => e);
+    const cause = (err as Error).cause;
+    expect(cause).toBeInstanceOf(tinfoil.VerificationError);
+    expect(cause).toBeInstanceOf(browser.VerificationError);
+    if (!(cause instanceof tinfoil.VerificationError)) throw new Error("expected a VerificationError");
+    const failed: tinfoil.Step | undefined = cause.report.failedStep();
+    expect(failed?.layer).toBe("policy");
     await client.close();
   });
 

@@ -91,7 +91,7 @@ export class NetworkError extends TinfoilError {
 /**
  * Rejected evidence, policy, or channel binding: the enclave couldn't be
  * trusted. When verification itself rejected the document, `cause` is the
- * verifier's `VerificationError` (from `@tinfoilsh/verifier`), whose `layer`
+ * verifier's `VerificationError` (which `tinfoil` re-exports), whose `layer`
  * names the check that rejected it and whose `report` shows the step that
  * failed and what the steps before it established. A connection whose key
  * doesn't match the attested one, or a key the enclave no longer holds after

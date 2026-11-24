@@ -38,6 +38,9 @@ const EXPORTS = [
   "NetworkError",
   "AttestationError",
   "findTinfoilError",
+  // the verifier's error and report schema version, from the copy that this package pins
+  "VerificationError",
+  "REPORT_SCHEMA_VERSION",
   // session recovery
   "sessionRecoveryToken",
   "serializeSessionRecoveryToken",
@@ -129,6 +132,37 @@ type TypeExports = [
   surface.AuthorizedBy,
   surface.EmbeddedConfig,
   surface.EitherPin,
+  surface.VerificationReport,
+  surface.VerifiedFacts,
+  surface.PartialFacts,
+  surface.ExpectedFacts,
+  surface.MeasuredFacts,
+  surface.CPUEvidence,
+  surface.Step,
+  surface.StepStatus,
+  surface.Layer,
+  surface.VerificationMetadata,
+  surface.ArtifactVerification,
+  surface.ConfigVerification,
+  surface.ReferenceSource,
+  surface.CryptoMaterialItem,
+  surface.Measurement,
+  surface.SevSnpMeasurement,
+  surface.TdxMeasurement,
+  surface.Expected,
+  surface.ExpectedSevSnp,
+  surface.ExpectedTdx,
+  surface.Register,
+  surface.VerificationReportJSON,
+  surface.VerifiedFactsJSON,
+  surface.PartialFactsJSON,
+  surface.ExpectedFactsJSON,
+  surface.MeasuredFactsJSON,
+  surface.StepJSON,
+  surface.VerificationMetadataJSON,
+  surface.ArtifactVerificationJSON,
+  surface.ConfigVerificationJSON,
+  surface.MeasurementJSON,
   openaiEntry.RealtimeOptions,
   openaiEntry.OpenAIOptions,
   openaiEntry.OpenAIClientOptions,
@@ -346,6 +380,13 @@ describe("public surface", () => {
   it("opens WebSockets through functions that take a client, not through client methods", () => {
     for (const fn of [surface.createWebSocket, surface.pinnedWebSocketOptions, openaiEntry.createRealtimeWebSocket]) expect(typeof fn).toBe("function");
     expect(methodsOf(surface.EnclaveHTTPClient)).not.toContain("createWebSocket");
+  });
+
+  it("re-exports the verifier's error and report schema version from the verifier that the clients use", async () => {
+    const verifier = await import("@tinfoilsh/verifier");
+    expect(surface.VerificationError).toBe(verifier.VerificationError);
+    expect(browser.VerificationError).toBe(verifier.VerificationError);
+    expect(surface.REPORT_SCHEMA_VERSION).toBe(verifier.REPORT_SCHEMA_VERSION);
   });
 
   it("reports the package version", () => {

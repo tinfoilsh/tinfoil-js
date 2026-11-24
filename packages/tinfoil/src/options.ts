@@ -134,8 +134,8 @@ export type VerificationCheck = (facts: VerifiedFacts) => void | Promise<void>;
  * thrown, such as a {@link NetworkError} for a failed attestation fetch,
  * which has no report. When the verifier rejected the document, the error
  * is an {@link AttestationError} whose `cause` chain holds the verifier's
- * `VerificationError` from `@tinfoilsh/verifier`, and that error's `report`
- * shows the step that failed and the partial facts. A report is for
+ * `VerificationError`, which `tinfoil` re-exports, and that error's
+ * `report` shows the step that failed and the partial facts. A report is for
  * showing or logging what happened; only the client decides whether it
  * admits requests.
  */
