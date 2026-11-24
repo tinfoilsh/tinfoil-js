@@ -18,7 +18,6 @@ import { MULTI_PLATFORM_PREDICATE_TYPE, ProvenanceClient } from "../src/internal
 import { parseReference } from "../src/internal/endorsement/reference.js";
 import { ARTIFACT_FORMAT } from "../src/internal/policy/artifact.js";
 import * as quote from "../src/internal/quote/quote.js";
-import { configRuntime } from "../src/internal/runtime/config.js";
 import { registerHex, type Expected, type Measurement as V3Measurement, type Register } from "../src/measurement.js";
 import { Verifier, type Pin } from "../src/index.js";
 import { checkTime, newTimePolicy } from "../src/internal/endorsement/time.js";
@@ -50,7 +49,6 @@ export const Stage = {
   AuthenticateQuote: "v3-authenticate-quote",
   AuthenticateApproval: "v3-authenticate-approval",
   VerifyTimestamp: "v3-verify-timestamp",
-  ReadConfigRuntime: "v3-read-config-runtime",
 } as const;
 
 export type RejectionCode =
@@ -84,13 +82,6 @@ export interface Measurement {
   registers: string[];
 }
 
-/** The runtime pin that a config states, as plain JSON. */
-export interface Runtime {
-  repo: string;
-  tag: string;
-  digest: string;
-}
-
 export interface AcceptOutputs {
   code_digest?: string;
   code_measurement?: Measurement;
@@ -100,7 +91,6 @@ export interface AcceptOutputs {
   channel_binding?: string;
   signing_key_hint?: string;
   timestamp?: string;
-  runtime?: Runtime;
 }
 
 /** The stdout JSON (schemas/v3/output.schema.json). */
@@ -228,16 +218,6 @@ async function runStage(stage: string, raw: unknown): Promise<Result> {
           dangerousTestOnlyRoots: roots,
         });
         return accept(stage, { enclave_measurement: measurementOf(auth.measurement) });
-      });
-    }
-
-    case Stage.ReadConfigRuntime: {
-      const parsed = await decodeOrUndefined(doc);
-      if (parsed === undefined) return malformed(stage);
-      // The stage reads the config; it does not authenticate it.
-      return layer(stage, "PROVENANCE_REJECTED", async () => {
-        const runtime = configRuntime(parsed.configEndorsement().config ?? new Uint8Array());
-        return accept(stage, { runtime: { repo: runtime.repo, tag: runtime.tag, digest: runtime.digest } });
       });
     }
 
