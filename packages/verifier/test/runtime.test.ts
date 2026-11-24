@@ -145,7 +145,7 @@ describe("parseManifest and configRuntime", () => {
     const good = `{"cvm-version":"0.15.0@sha256:${digest}"}`;
     const rejected: [string, string][] = [
       ["unpinned", `{"cvm-version":"0.15.0"}`],
-      ["duplicate", good.replace("{", `{"cvm-version":"0.15.0",`)],
+      ["duplicate", `{"cvm-version":"0.15.0",${good.slice(1)}`],
       ["two documents", good + good],
       ["not JSON", `cvm-version: 0.15.0@sha256:${digest}\n`],
       ["bad digest", good.replaceAll(digest, digest.toUpperCase())],
@@ -309,11 +309,11 @@ describe("configRuntime: decode semantics", () => {
 
   describe("rejects", () => {
     it("duplicate cvm-version keys", () => {
-      expect(() => configRuntime(enc(good.replace("{", `{"cvm-version":"0.15.0",`)))).toThrow(/^parsing config runtime pin: /);
+      expect(() => configRuntime(enc(`{"cvm-version":"0.15.0",${good.slice(1)}`))).toThrow(/^parsing config runtime pin: /);
     });
     // Duplicate keys reject even when the key is not one being read.
     it("duplicate other keys", () => {
-      expect(() => configRuntime(enc(good.replace("{", `{"containers":[],"containers":[],`)))).toThrow(/^parsing config runtime pin: /);
+      expect(() => configRuntime(enc(`{"containers":[],"containers":[],${good.slice(1)}`))).toThrow(/^parsing config runtime pin: /);
     });
     it("two documents", () => {
       expect(() => configRuntime(enc(good + good))).toThrow(/^parsing config runtime pin: /);
