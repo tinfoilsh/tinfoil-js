@@ -188,8 +188,9 @@ export interface CallOptions {
  * The `ws` client settings that a pinned connection owns, so that a caller
  * that sets one gets a {@link ConfigurationError}: those that choose the
  * peer, check its certificate, or shape the handshake's headers (`headers`
- * itself, `origin`, which is a header, and `finishRequest`, which hands the
- * caller the request), and `protocol`, the request's URL scheme.
+ * itself, `origin` and `auth`, which become headers, and `finishRequest`,
+ * which hands the caller the request), and `protocol`, the request's URL
+ * scheme.
  */
 export type ReservedWsOption =
   | "agent"
@@ -202,6 +203,7 @@ export type ReservedWsOption =
   | "checkServerIdentity"
   | "rejectUnauthorized"
   | "ca"
+  | "auth"
   | "headers"
   | "origin"
   | "finishRequest"
@@ -220,9 +222,9 @@ export interface WebSocketOptions {
    * Settings for the `ws` client on Node, such as `perMessageDeflate` or
    * `maxPayload`. A setting that would change which peer is connected to,
    * how its certificate is checked, or the handshake's headers (`headers`,
-   * `origin` and `finishRequest`), or `protocol`, is a
+   * `origin`, `auth` and `finishRequest`), or `protocol`, is a
    * {@link ConfigurationError}, raised before anything is sent: the
-   * handshake's headers, an `Origin` header included, come from the
+   * handshake's headers, `Origin` and `Authorization` included, come from the
    * top-level `headers`, and its subprotocols from `protocols`. Bun's
    * WebSocket takes no such settings, so any setting here is a
    * {@link ConfigurationError} on Bun.

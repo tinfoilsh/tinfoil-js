@@ -157,6 +157,8 @@ describe("webSocketURL", () => {
     expect((refusal({ origin: "https://app.example" }, "createWebSocket") as Error).message).toMatch(/wsOptions\.origin is reserved: set an `Origin` header in the top-level `headers` option/);
     expect((refusal({ protocol: "realtime" }, "createWebSocket") as Error).message).toMatch(/wsOptions\.protocol is reserved: .*top-level `protocols` option/);
     expect((refusal({ finishRequest: () => {} }, "createWebSocket") as Error).message).toMatch(/wsOptions\.finishRequest is reserved/);
+    expect((refusal({ auth: "user:pass" }, "createWebSocket") as Error).message).toMatch(/wsOptions\.auth is reserved: .*top-level `headers` option/);
+    expect((refusal({ auth: "user:pass" }, "createRealtimeWebSocket") as Error).message).toMatch(/wsOptions\.auth is reserved: .*client's credential/);
     // The realtime session has no top-level headers or subprotocols to point at.
     expect((refusal({ headers: {} }, "createRealtimeWebSocket") as Error).message).toMatch(/wsOptions\.headers is reserved: .*client's credential/);
     expect((refusal({ origin: "o" }, "createRealtimeWebSocket") as Error).message).not.toMatch(/top-level/);
@@ -169,6 +171,10 @@ describe("webSocketURL", () => {
     expect(checkedWsOptions(Object.create({ headers: { Authorization: "x" } }) as Record<string, unknown>, "createWebSocket")).toEqual({});
     expect(checkedWsOptions(undefined, "createWebSocket")).toEqual({});
     expect(() => checkedWsOptions("headers" as never, "createWebSocket")).toThrow(ConfigurationError);
+    // A getter is read once: the value that is checked is the value that is passed on.
+    let reads = 0;
+    const shifty = Object.defineProperty({}, "headers", { enumerable: true, get: () => (reads++ === 0 ? undefined : { Authorization: "x" }) });
+    expect(checkedWsOptions(shifty, "createWebSocket")).toEqual({ headers: undefined });
   });
 
   it("refuses any ws setting for createWebSocket on Bun, whose WebSocket takes none", () => {

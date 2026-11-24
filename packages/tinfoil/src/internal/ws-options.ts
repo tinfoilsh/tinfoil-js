@@ -32,6 +32,10 @@ const RESERVED_WS_OPTIONS = {
   rejectUnauthorized: () => PINNED,
   ca: () => PINNED,
   finishRequest: () => "it would hand over the handshake request, whose headers the SDK sets",
+  auth: (caller) =>
+    caller === "createWebSocket"
+      ? "it becomes an `Authorization` header; pass that in the top-level `headers` option instead"
+      : "it becomes an `Authorization` header, and the session authenticates with the client's credential",
   headers: (caller) =>
     caller === "createWebSocket"
       ? "pass the handshake's headers in the top-level `headers` option instead"
@@ -51,7 +55,9 @@ export const WS_OPTIONS_REFUSED_ON_BUN = "Bun's WebSocket takes no `ws` client s
 /**
  * A copy of `wsOptions` for the `ws` client, after refusing, before any I/O,
  * a setting that a pinned connection owns: one of the reserved keys as an
- * own property whose value is not `undefined`. For `createWebSocket` on Bun,
+ * own property whose value is not `undefined`. The copy is taken first and
+ * checked itself, so that a getter can't answer the check with one value
+ * and the connection with another. For `createWebSocket` on Bun,
  * whose WebSocket takes none of these settings, any setting is refused
  * (`createRealtimeWebSocket` is refused on Bun altogether). The value is
  * typed loosely because code without types can pass anything.
@@ -63,12 +69,12 @@ export function checkedWsOptions(
 ): Record<string, unknown> {
   if (wsOptions === undefined || wsOptions === null) return {};
   if (typeof wsOptions !== "object") throw new ConfigurationError(`wsOptions must be an object, got ${typeof wsOptions}`);
-  const options = wsOptions as Readonly<Record<string, unknown>>;
+  const options: Record<string, unknown> = { ...(wsOptions as Readonly<Record<string, unknown>>) };
   for (const [key, why] of Object.entries(RESERVED_WS_OPTIONS)) {
-    if (Object.prototype.hasOwnProperty.call(options, key) && options[key] !== undefined) {
+    if (options[key] !== undefined) {
       throw new ConfigurationError(`wsOptions.${key} is reserved: ${why(caller)}`);
     }
   }
   if (caller === "createWebSocket" && isBun(globals) && Object.keys(options).some((key) => options[key] !== undefined)) throw new ConfigurationError(WS_OPTIONS_REFUSED_ON_BUN);
-  return { ...options };
+  return options;
 }
