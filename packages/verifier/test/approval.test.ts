@@ -18,7 +18,6 @@ import {
   isRuntimeArtifactName,
   KIND_PLATFORM,
   KIND_RUNTIME,
-  MAX_CONFIG_SIZE,
   parseArtifactFreshnessStatement,
   parseConfigName,
   parseConfigStatement,
@@ -37,6 +36,7 @@ import {
   type FreshnessPolicy,
 } from "../src/internal/endorsement/approval.js";
 import { DEFAULT_FUTURE_SKEW_MS, DEFAULT_MAX_AGE_MS } from "../src/internal/endorsement/time.js";
+import { MAX_CONFIG_SIZE } from "../src/internal/runtime/config.js";
 import { pinnedKeys, type PinnedKey } from "../src/internal/sigstore/keyed.js";
 import { endorsementReference, MAX_TIMESTAMP_SIZE, timestampInput, verifyTimestamp } from "../src/internal/sigstore/timestamp.js";
 import type { TrustedRoot } from "../src/internal/sigstore/trusted-root.js";
@@ -63,8 +63,8 @@ const ARTIFACT_DOMAIN = "tinfoil-artifact-freshness/v1\0";
 const NOW = new Date("2025-06-15T12:00:00Z");
 const GEN_TIME = new Date("2025-06-15T11:00:00Z");
 const RUNTIME_DIGEST = "a".repeat(64);
-const V2_CONFIG = utf8(`name: app\ncvm-version: v1.2.3@sha256:${RUNTIME_DIGEST}\n`);
-const V1_CONFIG = utf8("name: app\nreplicas: 2\n");
+const V2_CONFIG = utf8(`{"cvm-version":"v1.2.3@sha256:${RUNTIME_DIGEST}","name":"app"}`);
+const V1_CONFIG = utf8(`{"name":"app","replicas":2}`);
 
 let signer: Signer;
 let other: Signer;

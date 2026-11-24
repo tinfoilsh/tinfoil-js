@@ -163,7 +163,7 @@ describe("the report's JSON form, against the golden files", () => {
       }),
     );
     const platform = utf8(JSON.stringify({ format: ARTIFACT_FORMAT_V2, machines: {}, policies: {} }));
-    const config = utf8(`cvm-version: 0.15.0@sha256:${toHex(await sha256(runtime))}\n`);
+    const config = utf8(`{"cvm-version":"0.15.0@sha256:${toHex(await sha256(runtime))}"}`);
     const v = await Verifier.create({ kind: "embeddedConfig", name: "/org/project/v1", bytes: config }, { artifacts: { kind: "embeddedArtifacts", runtime, platform } });
     const nonce = new Uint8Array(NONCE_SIZE);
     const { bytes } = await buildDocument({ nonce, collateralFormat: FORMAT_V3 }, () => ({ format: SEV_SNP_REPORT_V1_FORMAT, report: utf8("unauthenticated quote") }));

@@ -12,7 +12,7 @@ import { sha256, toHex } from "../bytes.js";
 import { decodeBase64, decodeLowerHex } from "../canonical.js";
 import { map, object, str, struct } from "../json/decode.js";
 import { strictParse, type JsonObject, type JsonValue } from "../json/index.js";
-import { configRuntime } from "../runtime/config.js";
+import { configRuntime, MAX_CONFIG_SIZE } from "../runtime/config.js";
 import * as semver from "../semver.js";
 import { parseBundle } from "../sigstore/bundle.js";
 import { signedTimestamp, verifyCertifiedBundle } from "../sigstore/certified.js";
@@ -28,7 +28,6 @@ export const IN_TOTO_STATEMENT_V1 = "https://in-toto.io/Statement/v1";
 export const CONFIG_ENDORSEMENT_PREDICATE_TYPE = "https://tinfoil.sh/predicate/config-endorsement/v1";
 export const CONFIG_ENDORSEMENT_PREDICATE_TYPE_V2 = "https://tinfoil.sh/predicate/config-endorsement/v2";
 export const ARTIFACT_FRESHNESS_PREDICATE_TYPE = "https://tinfoil.sh/predicate/artifact-freshness/v1";
-export const MAX_CONFIG_SIZE = 1 << 20;
 
 export const KIND_PLATFORM = "platform";
 export const KIND_RUNTIME = "runtime";

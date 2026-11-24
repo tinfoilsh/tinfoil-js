@@ -192,7 +192,7 @@ describe("the report of a config-based verification", () => {
 
   /** A document with config collateral, channel keys and a quote that never authenticates. */
   async function document(): Promise<Uint8Array> {
-    const config = utf8(`name: app\ncvm-version: v1.2.3@sha256:${toHex(await sha256(manifest))}\n`);
+    const config = utf8(`{"cvm-version":"v1.2.3@sha256:${toHex(await sha256(manifest))}","name":"app"}`);
     const data = JSON.stringify({ endorsement_ref: `sha256:${"ab".repeat(32)}`, config_base64: Buffer.from(config).toString("base64"), sigstore_bundle: {} });
     const { bytes } = await buildDocument(
       {
