@@ -69,7 +69,7 @@ function scripted(outcomes: ("pass" | "reject" | VerificationReport)[]): Verifie
 /** Records every call of the `onVerification` option. */
 function recorder(): { calls: { host: string; report?: VerificationReport; error?: TinfoilError }[]; onVerification: OnVerification } {
   const calls: { host: string; report?: VerificationReport; error?: TinfoilError }[] = [];
-  return { calls, onVerification: (host, report, error) => void calls.push({ host, ...(report === undefined ? {} : { report }), ...(error === undefined ? {} : { error }) }) };
+  return { calls, onVerification: (host, attempt) => void calls.push({ host, ...attempt }) };
 }
 
 /** A document fetch that serves a placeholder document, or fails with 503 while `down` is set. */
@@ -264,11 +264,11 @@ describe("verification reports from the clients", () => {
     let client: Awaited<ReturnType<typeof createEnclaveHTTPClient>> | undefined;
     const calls: { given: VerificationAttempt; seen: VerificationAttempt | undefined }[] = [];
     const ensured: Promise<VerificationReport>[] = [];
-    const onVerification: OnVerification = (_host, report, error) => {
+    const onVerification: OnVerification = (_host, attempt) => {
       if (client === undefined) return;
-      calls.push({ given: report === undefined ? { error } : { report }, seen: client.lastVerification() });
+      calls.push({ given: attempt, seen: client.lastVerification() });
       // A call that would wait for a refresh in flight doesn't wait for the one that is reporting.
-      if (report !== undefined) ensured.push(client.ensureVerified());
+      if (attempt.report !== undefined) ensured.push(client.ensureVerified());
     };
     // The re-verification fails, and so does its retry; the next one passes.
     client = await createEnclaveHTTPClient(HOST, AUTHORIZED, { onVerification }, seams(scripted(["pass", "reject", "reject", "pass"]), documents().fetch));
@@ -291,8 +291,11 @@ describe("verification reports from the clients", () => {
   });
 
   it("keeps its state and later reports when a caller mutates a report it was given", async () => {
-    let given: VerificationReport | undefined;
-    const client = await createEnclaveHTTPClient(HOST, AUTHORIZED, { onVerification: (_h, report, _error) => void (given = report) }, seams(scripted(["pass"]), documents().fetch));
+    let givenAttempt: VerificationAttempt | undefined;
+    const client = await createEnclaveHTTPClient(HOST, AUTHORIZED, { onVerification: (_h, attempt) => void (givenAttempt = attempt) }, seams(scripted(["pass"]), documents().fetch));
+    // The attempt itself is frozen too, so that a callback can store it as it is.
+    expect(Object.isFrozen(givenAttempt)).toBe(true);
+    const given = givenAttempt?.report;
     const original = client.lastVerification()!.report!.toJSON();
     for (const report of [client.lastVerification()!.report!, await client.ensureVerified(), given!]) {
       expect(Object.isFrozen(report)).toBe(true);
@@ -385,7 +388,7 @@ describe("verification reports from the clients", () => {
       );
       const thrown: Error[] = [];
       const hosts: string[] = [];
-      const onVerification: OnVerification = (host, ..._) => {
+      const onVerification: OnVerification = (host) => {
         hosts.push(host);
         const err = new Error(`callback bug ${hosts.length}`);
         thrown.push(err);
@@ -434,45 +437,30 @@ describe("verification reports from the clients", () => {
 });
 
 describe("the onVerification type", () => {
-  it("narrows the outcome and accepts the usual callback forms", () => {
+  it("passes one attempt, which narrows on its report or its error, and accepts the usual callback forms", () => {
     // Checked by the test typecheck: each declaration below must compile, except where a directive pins the error.
-    // Checking one of `report` and `error` narrows the other.
-    const narrowsOnReport: OnVerification = (host, report, error) => {
-      if (report) void [host, report.steps];
-      else void error.category;
+    const narrowsOnReport: OnVerification = (host, attempt) => {
+      if (attempt.report) void [host, attempt.report.steps];
+      else void attempt.error.category;
     };
-    const narrowsOnError: OnVerification = (_host, report, error) => {
-      if (error !== undefined) void error.category;
-      else void report.verifiedFacts;
+    const narrowsOnError: OnVerification = (_host, attempt) => {
+      if (attempt.error !== undefined) void attempt.error.category;
+      else void attempt.report.verifiedFacts;
     };
-    // A callback that ignores its arguments.
+    const stored: VerificationAttempt[] = [];
+    const stores: OnVerification = (_host, attempt) => void stored.push(attempt);
+    const hostOnly: OnVerification = (host) => void host;
     const ignores: OnVerification = () => {};
-    // A callback that only uses `host` takes the rest of the tuple.
-    const hostOnly: OnVerification = (host, ..._) => void host;
-    // A callback with the explicit parameter types of the earlier, wider signature.
-    const wide: OnVerification = (host: string, report: VerificationReport | undefined, error: TinfoilError | undefined) => void [host, report, error];
-    // @ts-expect-error A callback that names fewer parameters than the tuple is compared with the whole tuple.
-    const fewer: OnVerification = (host) => void host;
-    // @ts-expect-error Without narrowing, `error` may be undefined.
-    const unnarrowed: OnVerification = (_host, _report, error) => void error.category;
+    // @ts-expect-error The callback takes the host and one attempt, not a report and an error.
+    const separate: OnVerification = (host, report, error) => void [host, report, error];
 
-    const report = passed();
-    const error = new AttestationError("rejected");
-    for (const onVerification of [narrowsOnReport, narrowsOnError, ignores, hostOnly, wide, fewer]) {
-      onVerification(HOST, report, undefined);
-      onVerification(HOST, undefined, error);
+    const passedAttempt: VerificationAttempt = { report: passed() };
+    const failedAttempt: VerificationAttempt = { error: new AttestationError("rejected") };
+    for (const onVerification of [narrowsOnReport, narrowsOnError, stores, hostOnly, ignores]) {
+      onVerification(HOST, passedAttempt);
+      onVerification(HOST, failedAttempt);
     }
-    unnarrowed(HOST, undefined, error);
-  });
-
-  it("refuses a call that sets both or neither of `report` and `error`", () => {
-    // Checked by the test typecheck: never called; the directives pin the errors.
-    const calls = (onVerification: OnVerification, report: VerificationReport, error: TinfoilError): void => {
-      // @ts-expect-error Exactly one of `report` and `error` is set.
-      onVerification(HOST, undefined, undefined);
-      // @ts-expect-error Exactly one of `report` and `error` is set.
-      onVerification(HOST, report, error);
-    };
-    expect(calls.length).toBe(3);
+    expect(stored).toEqual([passedAttempt, failedAttempt]);
+    void separate;
   });
 });

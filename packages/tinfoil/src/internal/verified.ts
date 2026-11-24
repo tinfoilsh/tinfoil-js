@@ -160,7 +160,7 @@ export class VerifiedEnclave<T = void> {
     return this.#refresh(verify, attempts).finally(() => {
       this.#refreshing = undefined;
       for (const attempt of attempts) {
-        this.#enclave.notify(attempt.report === undefined ? attempt : { report: attempt.report.clone() });
+        this.#enclave.notify(copyAttempt(attempt)!);
       }
     });
   }

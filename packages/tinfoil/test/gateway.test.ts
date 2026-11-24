@@ -554,7 +554,7 @@ describe("GatewayTransport", () => {
     const reported: [string, boolean][] = [];
     const g = gateway();
     const t = transport({
-      onVerification: (host, report, error) => void reported.push([host, report !== undefined && error === undefined]),
+      onVerification: (host, attempt) => void reported.push([host, attempt.report !== undefined && attempt.error === undefined]),
       policy: await GatewayPolicy.create(PINS, undefined, fixed(perHost())),
       gatewayFetch: g.fetch,
       documentFetch: async (input) => {
