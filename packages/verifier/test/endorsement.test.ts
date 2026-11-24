@@ -170,7 +170,11 @@ describe.skipIf(withoutVectors)(vectorsTitle("ProvenanceClient.authenticateCode"
     await expect(client.authenticateCode(ref.bundle, { repo, tag: "", digest: "" }, "wrong-tag-hint", ref.digest)).rejects.toThrow(/does not match tag/);
     await expect(client.authenticateCode(ref.bundle, { repo, tag: "other-tag", digest: "" }, ref.tag, ref.digest)).rejects.toThrow(/does not match tag/);
     await expect(client.authenticateCode(ref.bundle, { repo, tag: "", digest: "1".repeat(64) }, ref.tag, ref.digest)).rejects.toThrow(/verifying bundle/);
-    await expect(client.authenticateCode(ref.bundle, { repo: "tinfoilsh/other", tag: "", digest: "" }, ref.tag, ref.digest)).rejects.toThrow(/signing identity/);
+    // A repository that the pin names but that didn't sign the release is
+    // reported once under the bundle's context, not once per layer.
+    await expect(client.authenticateCode(ref.bundle, { repo: "tinfoilsh/other", tag: "", digest: "" }, ref.tag, ref.digest)).rejects.toThrow(
+      /^verifying bundle: signing identity .* does not match the expected workflow identity$/,
+    );
   });
 });
 
