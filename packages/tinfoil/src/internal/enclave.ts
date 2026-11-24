@@ -23,7 +23,7 @@ import {
   type VerifiedFacts,
 } from "@tinfoilsh/verifier";
 import { AttestationError, ConfigurationError, messageOf, NetworkError, stripCategory, TinfoilError, withMessage } from "../errors.js";
-import type { AttestationFetcher, Fetch, OnVerification, VerificationCheck } from "../options.js";
+import type { AttestationFetcher, Fetch, OnVerification, VerificationAttempt, VerificationCheck } from "../options.js";
 import { fetchDocument, fetchDocumentWith } from "./fetch.js";
 
 export const VERIFICATION_RETRIES = 1;
@@ -136,15 +136,16 @@ export class Enclave {
 
   /**
    * Reports the outcome of an attempt to verify the enclave to the
-   * `onVerification` callback, if there is one. The caller passes a report
-   * that no one else holds. A throw from the callback doesn't change the
-   * outcome or reach the caller: it is rethrown asynchronously, to the
-   * runtime's handler for uncaught errors.
+   * `onVerification` callback, if there is one. The caller passes an
+   * attempt whose report no one else holds. A throw from the callback
+   * doesn't change the outcome or reach the caller: it is rethrown
+   * asynchronously, to the runtime's handler for uncaught errors.
    */
-  notify(report: VerificationReport | undefined, error: TinfoilError | undefined): void {
+  notify(attempt: VerificationAttempt): void {
     if (this.#onVerification === undefined) return;
     try {
-      this.#onVerification(this.#host, report, error);
+      if (attempt.report !== undefined) this.#onVerification(this.#host, attempt.report, undefined);
+      else this.#onVerification(this.#host, undefined, attempt.error);
     } catch (err) {
       queueMicrotask(() => {
         throw err;

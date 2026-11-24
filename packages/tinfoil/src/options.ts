@@ -168,8 +168,17 @@ export type VerificationAttempt = { readonly report: VerificationReport; readonl
  * attempt, and later attempts are still reported: the client catches it
  * and rethrows it asynchronously, to the runtime's handler for uncaught
  * errors.
+ *
+ * The parameters are one union of tuples, so that a callback that names
+ * all three and checks one of them has the other narrowed: in
+ * `(host, report, error) => { if (report) ...; else error.category; }`,
+ * `error` is a `TinfoilError` in the `else` branch. A callback that takes
+ * no parameters, or that declares all three with their own types, also
+ * type-checks; one that names only `host`, or `host` and `report`, doesn't,
+ * since TypeScript compares it with the whole tuple, so it names all three
+ * or takes `(host, ..._)`.
  */
-export type OnVerification = (host: string, report: VerificationReport | undefined, error: TinfoilError | undefined) => void;
+export type OnVerification = (...attempt: [host: string, report: VerificationReport, error: undefined] | [host: string, report: undefined, error: TinfoilError]) => void;
 
 /**
  * The options of one call on a client, such as `ensureVerified` or

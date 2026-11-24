@@ -379,7 +379,7 @@ describe("KeyedTransport", () => {
       },
       clock: () => now,
       sleep: async () => {},
-      onVerification: (host) => void reported.push(host),
+      onVerification: (host, ..._) => void reported.push(host),
     });
     const reported: string[] = [];
     const t = new KeyedTransport(enclave, fakeMode(() => "k1", closed), () => now);

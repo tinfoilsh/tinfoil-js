@@ -249,7 +249,7 @@ describe("verification reports from the clients", () => {
     const ensured: Promise<VerificationReport>[] = [];
     const onVerification: OnVerification = (_host, report, error) => {
       if (client === undefined) return;
-      calls.push({ given: report === undefined ? { error: error! } : { report }, seen: client.lastVerification() });
+      calls.push({ given: report === undefined ? { error } : { report }, seen: client.lastVerification() });
       // A call that would wait for a refresh in flight doesn't wait for the one that is reporting.
       if (report !== undefined) ensured.push(client.ensureVerified());
     };
@@ -275,7 +275,7 @@ describe("verification reports from the clients", () => {
 
   it("keeps its state and later reports when a caller mutates a report it was given", async () => {
     let given: VerificationReport | undefined;
-    const client = await createEnclaveHTTPClient(HOST, AUTHORIZED, { onVerification: (_h, report) => void (given = report) }, seams(scripted(["pass"]), documents().fetch));
+    const client = await createEnclaveHTTPClient(HOST, AUTHORIZED, { onVerification: (_h, report, _error) => void (given = report) }, seams(scripted(["pass"]), documents().fetch));
     const original = client.lastVerification()!.report!.toJSON();
     for (const report of [client.lastVerification()!.report!, await client.ensureVerified(), given!]) {
       expect(Object.isFrozen(report)).toBe(true);
@@ -368,7 +368,7 @@ describe("verification reports from the clients", () => {
       );
       const thrown: Error[] = [];
       const hosts: string[] = [];
-      const onVerification: OnVerification = (host) => {
+      const onVerification: OnVerification = (host, ..._) => {
         hosts.push(host);
         const err = new Error(`callback bug ${hosts.length}`);
         thrown.push(err);
@@ -413,5 +413,49 @@ describe("verification reports from the clients", () => {
     expect(r.calls).toHaveLength(1);
     await client.close();
     expect(client.lastVerification()?.report).toBeDefined();
+  });
+});
+
+describe("the onVerification type", () => {
+  it("narrows the outcome and accepts the usual callback forms", () => {
+    // Checked by the test typecheck: each declaration below must compile, except where a directive pins the error.
+    // Checking one of `report` and `error` narrows the other.
+    const narrowsOnReport: OnVerification = (host, report, error) => {
+      if (report) void [host, report.steps];
+      else void error.category;
+    };
+    const narrowsOnError: OnVerification = (_host, report, error) => {
+      if (error !== undefined) void error.category;
+      else void report.verifiedFacts;
+    };
+    // A callback that ignores its arguments.
+    const ignores: OnVerification = () => {};
+    // A callback that only uses `host` takes the rest of the tuple.
+    const hostOnly: OnVerification = (host, ..._) => void host;
+    // A callback with the explicit parameter types of the earlier, wider signature.
+    const wide: OnVerification = (host: string, report: VerificationReport | undefined, error: TinfoilError | undefined) => void [host, report, error];
+    // @ts-expect-error A callback that names fewer parameters than the tuple is compared with the whole tuple.
+    const fewer: OnVerification = (host) => void host;
+    // @ts-expect-error Without narrowing, `error` may be undefined.
+    const unnarrowed: OnVerification = (_host, _report, error) => void error.category;
+
+    const report = passed();
+    const error = new AttestationError("rejected");
+    for (const onVerification of [narrowsOnReport, narrowsOnError, ignores, hostOnly, wide, fewer]) {
+      onVerification(HOST, report, undefined);
+      onVerification(HOST, undefined, error);
+    }
+    unnarrowed(HOST, undefined, error);
+  });
+
+  it("refuses a call that sets both or neither of `report` and `error`", () => {
+    // Checked by the test typecheck: never called; the directives pin the errors.
+    const calls = (onVerification: OnVerification, report: VerificationReport, error: TinfoilError): void => {
+      // @ts-expect-error Exactly one of `report` and `error` is set.
+      onVerification(HOST, undefined, undefined);
+      // @ts-expect-error Exactly one of `report` and `error` is set.
+      onVerification(HOST, report, error);
+    };
+    expect(calls.length).toBe(3);
   });
 });

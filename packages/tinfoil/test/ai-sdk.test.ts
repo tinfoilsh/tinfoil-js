@@ -184,7 +184,7 @@ describe("the provider over the discovered router", () => {
   beforeAll(async () => {
     s = seams([tls.host]);
     tinfoil = await createTinfoilProvider(
-      { transport: { kind: "tls" }, apiKey: "secret-key", headers: { "x-app": "demo" }, onVerification: (host) => void reported.push(host) },
+      { transport: { kind: "tls" }, apiKey: "secret-key", headers: { "x-app": "demo" }, onVerification: (host, ..._) => void reported.push(host) },
       { ...s, verifier: verifier({ tls: TEST_PIN }) },
     );
   });

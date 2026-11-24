@@ -191,7 +191,7 @@ try {
 
 ## Verification reports
 
-A router or enclave client's `ensureVerified()` returns the report of a verification that admits requests now, verifying first if needed, and `reverify()` verifies again and returns the new report: a `VerificationReport` from `@tinfoilsh/verifier`, whose `steps` show each layer's outcome (`passed`, or `skipped` for a layer that had nothing to check) and whose `verifiedFacts` hold what the enclave proved, such as `codeDigest`, `enclaveMeasurement` and `tlsPublicKeyFP`. `lastVerification()` returns the most recent attempt without network I/O: `{ report }` if it passed, or `{ error }` with the error that the client reported if it failed, so that a later failure replaces an earlier success. When the verifier rejected the document, that error is an `AttestationError` whose `cause` is the verifier's `VerificationError`, and its `report` shows the step that failed and the partial facts, such as the expected and measured registers side by side; a failed fetch is a `NetworkError` with no report. The `onVerification(host, report, error)` option is called once for every attempt, including the retry, a re-verification after an expiry or a key rotation, each router that discovery tries, and each gateway replica:
+A router or enclave client's `ensureVerified()` returns the report of a verification that admits requests now, verifying first if needed, and `reverify()` verifies again and returns the new report: a `VerificationReport` from `@tinfoilsh/verifier`, whose `steps` show each layer's outcome (`passed`, or `skipped` for a layer that had nothing to check) and whose `verifiedFacts` hold what the enclave proved, such as `codeDigest`, `enclaveMeasurement` and `tlsPublicKeyFP`. `lastVerification()` returns the most recent attempt without network I/O: `{ report }` if it passed, or `{ error }` with the error that the client reported if it failed, so that a later failure replaces an earlier success. When the verifier rejected the document, that error is an `AttestationError` whose `cause` is the verifier's `VerificationError`, and its `report` shows the step that failed and the partial facts, such as the expected and measured registers side by side; a failed fetch is a `NetworkError` with no report. The `onVerification(host, report, error)` option is called once for every attempt, including the retry, a re-verification after an expiry or a key rotation, each router that discovery tries, and each gateway replica. Exactly one of `report` and `error` is set, and the type says so: a callback that names all three parameters and checks one has the other narrowed. One that uses only `host` takes `(host, ..._)`, since TypeScript compares a callback that names fewer parameters with the whole tuple:
 
 ```typescript
 import { RouterHTTPClient } from "tinfoil";
@@ -200,7 +200,7 @@ import { VerificationError } from "@tinfoilsh/verifier";
 const client = await RouterHTTPClient.create({
   onVerification: (host, report, error) => {
     if (report !== undefined) console.log(host, report.steps);
-    else if (error?.cause instanceof VerificationError) console.log(host, error.cause.report.failedStep());
+    else if (error.cause instanceof VerificationError) console.log(host, error.cause.report.failedStep());
     else console.log(host, error);
   },
 });
