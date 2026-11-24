@@ -12,7 +12,7 @@ import { EnclaveHTTPClient } from "../src/enclave-client.js";
 import { fetchCatalog, GatewayHTTPClient } from "../src/gateway-client.js";
 import { createClient } from "../src/openai-client.js";
 import { RouterHTTPClient } from "../src/router-client.js";
-import type { Transport } from "../src/options.js";
+import type { Catalog, ModelPin, Transport } from "../src/options.js";
 import { completeChat, LIVE_HOST as HOST, LIVE_PIN as PIN, SHA256_HEX, streamChat } from "./helpers/live.js";
 import { openAIOver } from "./helpers/openai.js";
 import { lastFacts } from "./helpers/report.js";
@@ -63,13 +63,16 @@ describe("createClient on the live router", () => {
   );
 });
 
+/** Pins every model that `catalog` lists to the repository that it names. */
+const pinsOf = (catalog: Catalog): Map<string, ModelPin> => new Map([...catalog].map(([model, entry]) => [model, { repo: entry.repo }]));
+
 describe("GatewayHTTPClient on the live gateway", () => {
   it.skipIf(!RUN_INTEGRATION)(
     "reads the catalog and verifies a replica of a listed model through the gateway",
     async () => {
       const catalog = await fetchCatalog(GATEWAY_HOST);
       expect(catalog.size).toBeGreaterThan(0);
-      await using http = await GatewayHTTPClient.create();
+      await using http = await GatewayHTTPClient.create({ modelPins: pinsOf(catalog) });
       const models = await http.models();
       expect(models).toEqual([...catalog.keys()].sort());
       const verification = await http.ensureVerified(models[0]!);
@@ -82,7 +85,7 @@ describe("GatewayHTTPClient on the live gateway", () => {
   it.skipIf(!RUN_INTEGRATION || apiKey === "")(
     "completes a chat through the gateway",
     async () => {
-      await using ai = await openAIOver(GatewayHTTPClient.create({}), { apiKey });
+      await using ai = await openAIOver(GatewayHTTPClient.create({ modelPins: pinsOf(await fetchCatalog(GATEWAY_HOST)) }), { apiKey });
       await completeChat(ai, (await ai.httpClient.models())[0]!);
       expect(ai.httpClient.lastVerification().length).toBeGreaterThan(0);
     },

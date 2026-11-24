@@ -382,8 +382,10 @@ describe("public surface", () => {
   it("checks gateway client options before any network I/O", async () => {
     const fetches = countingFetch();
     const seams = { catalogFetch: fetches.fetch, documentFetch: fetches.fetch };
-    await expect(createGatewayHTTPClient({ url: "http://gateway.example/v1/" }, seams)).rejects.toBeInstanceOf(surface.ConfigurationError);
-    await expect(createGatewayHTTPClient({ pinnedModelsOnly: true }, seams)).rejects.toBeInstanceOf(surface.ConfigurationError);
+    await expect(createGatewayHTTPClient({ modelPins: new Map([["m", { repo: "tinfoilsh/m" }]]), url: "http://gateway.example/v1/" }, seams)).rejects.toBeInstanceOf(surface.ConfigurationError);
+    await expect(createGatewayHTTPClient({ modelPins: new Map() }, seams)).rejects.toBeInstanceOf(surface.ConfigurationError);
+    // @ts-expect-error A gateway client requires model pins.
+    await expect(createGatewayHTTPClient({}, seams)).rejects.toBeInstanceOf(surface.ConfigurationError);
     expect(fetches.calls).toBe(0);
   });
 

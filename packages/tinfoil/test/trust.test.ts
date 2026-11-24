@@ -104,7 +104,9 @@ describe("the policy and the trust are checked before any network I/O", () => {
       () => createEnclaveHTTPClient("enclave.example", { kind: "embeddedConfig", bytes: new Uint8Array() }, {}, { documentFetch: documents.fetch }),
       () => createEnclaveHTTPClient("enclave.example", { kind: "signedBy", keys: ["not a pem"], project: null as unknown as string }, {}, { documentFetch: documents.fetch }),
       () => createRouterHTTPClient({ policy: { freshnessMaxAgeMs: -1 } }, { routersFetch: documents.fetch, documentFetch: documents.fetch }),
-      () => createGatewayHTTPClient({ policy: { freshnessMaxAgeMs: -1 } }, { catalogFetch: documents.fetch, documentFetch: documents.fetch }),
+      () => createGatewayHTTPClient({ modelPins: new Map([["m", { repo: "tinfoilsh/m" }]]), policy: { freshnessMaxAgeMs: -1 } }, { catalogFetch: documents.fetch, documentFetch: documents.fetch }),
+      // The gateway's policy is checked even when every pin sets its own.
+      () => createGatewayHTTPClient({ modelPins: new Map([["m", { repo: "tinfoilsh/m", policy: {} }]]), policy: { freshnessMaxAgeMs: -1 } }, { catalogFetch: documents.fetch, documentFetch: documents.fetch }),
       () => createGatewayHTTPClient({ modelPins: new Map([["m", { repo: "tinfoilsh/m", policy: { freshnessMaxAgeMs: -1 } }]]) }, { catalogFetch: documents.fetch, documentFetch: documents.fetch }),
     ];
     for (const failure of failures) await expect(failure()).rejects.toBeInstanceOf(ConfigurationError);

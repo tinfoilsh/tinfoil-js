@@ -41,7 +41,7 @@ const completion = await client.chat.completions.create({
 Router and enclave clients are async factories that verify before returning, and they verify again by themselves when the verification expires or the enclave's key changes. Gateway clients are async factories too, but verify a model's replica before its first request. `createClient` takes the OpenAI client's own options (except `baseURL` and `fetch`, which the attested transport owns) plus `bearerToken`, and returns an `OpenAIClient` with the same API as `new OpenAI(...)`, over a `RouterHTTPClient` created with the default options. For anything about the route itself, create the HTTP client and then an `OpenAIClient` over it:
 
 ```typescript
-import { EnclaveHTTPClient, RouterHTTPClient } from "tinfoil";
+import { EnclaveHTTPClient, GatewayHTTPClient, RouterHTTPClient } from "tinfoil";
 import { OpenAIClient } from "tinfoil/openai";
 
 // One enclave, verified against a GitHub repository.
@@ -50,6 +50,11 @@ const client = new OpenAIClient(enclave, {}, { apiKey: "<YOUR_API_KEY>" });
 
 // The discovered router, with a verification policy of your own.
 const router = await RouterHTTPClient.create({ policy: { freshnessMaxAgeMs: 24 * 60 * 60 * 1000 } });
+
+// Tinfoil's gateway, which serves only the models that are pinned.
+const gateway = await GatewayHTTPClient.create({
+  modelPins: new Map([["deepseek-v4-1-flash", { repo: "tinfoilsh/confidential-deepseek-v4-1-flash" }]]),
+});
 ```
 
 `new OpenAIClient(httpClient, options?, openaiOptions?)` takes an `EnclaveHTTPClient`, `RouterHTTPClient` or `GatewayHTTPClient` and does no network I/O. It sets the OpenAI base URL itself, after your OpenAI options, so a `baseURL`, `OPENAI_BASE_URL` in the environment and `dataResidency` have no effect: the base URL is `options.apiPath` (`/v1/` by default) under the HTTP client's EHBP proxy or the enclave's origin, or the gateway's URL for a gateway client, which takes no `apiPath`. An HTTP client's `close()` releases its pooled connections and refuses further use, and both kinds of client support `await using` (an OpenAI client closes the HTTP client under it).
@@ -67,7 +72,7 @@ const router = await RouterHTTPClient.create({ policy: { freshnessMaxAgeMs: 24 *
 | `{ kind: "embeddedConfig", bytes, name? }` | v3 collateral for exactly these config bytes |
 | `{ kind: "eitherPin", repo, project }` | either of `repoPin` and `projectPin`, for the migration from v2 to v3 collateral |
 
-The router's trust is fixed to its repository, and the gateway client takes `modelPins` instead. Every HTTP client takes `policy`, the verifier's policy as plain data: `pinnedRegisters`, `freshnessMaxAgeMs` and `artifacts` (`{ kind: "endorsedArtifacts", freshnessKeys? }` or `{ kind: "embeddedArtifacts", runtime?, platform?, freshnessKeys? }`). The enclave and router clients take `transport`: `{ kind: "tls" }`, which pins each connection to the attested key, or `{ kind: "ehbp", proxyURL?, fetch? }`, which seals request and response bodies to the attested key so that they stay private through a proxy. The default depends on the platform:
+The router's trust is fixed to its repository, and the gateway client takes `modelPins` instead, which maps each model name to a `tinfoilsh/` repository and an optional `policy`. A gateway client serves only the models that it has pins for, so it requires at least one pin, and a request or `ensureVerified` for any other model, including one that a later catalog adds, fails with a `ConfigurationError` without contacting a replica. Every HTTP client takes `policy`, the verifier's policy as plain data: `pinnedRegisters`, `freshnessMaxAgeMs` and `artifacts` (`{ kind: "endorsedArtifacts", freshnessKeys? }` or `{ kind: "embeddedArtifacts", runtime?, platform?, freshnessKeys? }`). The enclave and router clients take `transport`: `{ kind: "tls" }`, which pins each connection to the attested key, or `{ kind: "ehbp", proxyURL?, fetch? }`, which seals request and response bodies to the attested key so that they stay private through a proxy. The default depends on the platform:
 
 | Platform | Default `transport` | `{ kind: "tls" }` |
 |---|---|---|
@@ -202,7 +207,7 @@ const client = await RouterHTTPClient.create({
 const last = client.lastVerification();
 ```
 
-A gateway client's `lastVerification()` returns one entry for each replica that it has tried to verify, with that replica's last attempt. A `verificationCheck` receives only the verified facts of a verification that passed.
+A gateway client's `lastVerification()` returns one entry for each replica that it has tried to verify, with that replica's last attempt. A gateway client's `policy` applies to the pins that set none; a pin's own `policy` replaces it entirely. A `verificationCheck` receives only the verified facts of a verification that passed.
 
 ## Documentation
 

@@ -42,6 +42,8 @@ Unchanged: the router client's `userCacheSecret` and the per-request `user_cache
 | `verifier: await Verifier.create({ configSigningKeys })` | `{ kind: "signedBy", keys, project? }` |
 | `verifier: await Verifier.create({ pinnedRegisters, freshnessMaxAgeMs, freshnessSigningKeys, embeddedReferences })` | `policy: { pinnedRegisters, freshnessMaxAgeMs, artifacts }`, on the enclave, router and gateway options; `ModelPin.verifier` becomes `ModelPin.policy` |
 | `client.pin` | `client.trust` on an enclave client, a copy of the trust argument; the router client has none |
+| `pinnedModelsOnly: true` on the gateway options | removed: a gateway client always serves only the models that `modelPins` names, so `modelPins` is required and needs at least one pin |
+| a gateway request for a model without a pin, whose replicas were verified against the repository that the catalog named | pin every model that you request, for example `modelPins: new Map([[model, { repo: "tinfoilsh/<name>" }]])`; a request for an unpinned model is now a `ConfigurationError`. The gateway's `policy` now applies only to the pins that set none |
 | `transportMode: "tls"` | `transport: { kind: "tls" }`, or unset on Node, Bun 1.4.0 or later and Deno 2.8.0 or later, where TLS is the default; it is refused where the platform can't pin the connection (browsers, older Bun and Deno) |
 | `transportMode: "ehbp"`, with a proxy `baseURL` and a `fetch` | `transport: { kind: "ehbp", proxyURL, fetch }`. A `baseURL` that was a path on the enclave's own origin is no longer supported, and a proxy on that origin is a `ConfigurationError` |
 | `TransportMode` | `Transport`, `TLS` and `EHBP` |
