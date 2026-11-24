@@ -134,8 +134,8 @@ export type VerificationCheck = (facts: VerifiedFacts) => void | Promise<void>;
  * thrown, such as a {@link NetworkError} for a failed attestation fetch,
  * which has no report. When the verifier rejected the document, the error
  * is an {@link AttestationError} whose `cause` chain holds the verifier's
- * `VerificationError` from `@tinfoilsh/verifier`, and that error's `report`
- * shows the step that failed and the partial facts. A report is for
+ * `VerificationError`, which `tinfoil` re-exports, and that error's
+ * `report` shows the step that failed and the partial facts. A report is for
  * showing or logging what happened; only the client decides whether it
  * admits requests.
  */
@@ -148,13 +148,19 @@ export type VerificationAttempt = { readonly report: VerificationReport; readonl
  * discovery tries, and each gateway replica. It is called once the
  * verification that made the attempt is over, so that an attempt that was
  * retried is reported together with its retry, in order.
- * `host` is the enclave that the attempt verified. Exactly one of `report`
- * and `error` is set, as {@link VerificationAttempt} describes: the outcome
- * of this attempt, which `lastVerification()` returned once the attempt was
- * decided. A verification that concurrent requests share is one attempt.
- * A verification that passes after the client was closed is abandoned
- * before it is used, so it has no outcome: it isn't reported and doesn't
- * change `lastVerification()`. A caller whose signal aborts only stops
+ * `host` is the enclave that the attempt verified, and `attempt` is its
+ * outcome, the same {@link VerificationAttempt} that `lastVerification()`
+ * returned once the attempt was decided: `attempt.report` is set for a
+ * verification that passed, and `attempt.error` for one that failed. The
+ * type narrows on either, so that in `if (attempt.report) ...; else
+ * attempt.error.category`, the error is a `TinfoilError`. The attempt is
+ * frozen and its report is a copy that no one else holds, so that a
+ * callback can store or forward the attempt as it is.
+ *
+ * A verification that concurrent requests share is one attempt. A
+ * verification that passes after the client was closed is abandoned before
+ * it is used, so it has no outcome: it isn't reported and doesn't change
+ * `lastVerification()`. A caller whose signal aborts only stops
  * waiting, and the attempt runs on to its outcome; but a factory whose
  * signal aborts closes the client that it was creating, so the same rule
  * applies to the attempt that it abandons.
@@ -169,7 +175,7 @@ export type VerificationAttempt = { readonly report: VerificationReport; readonl
  * and rethrows it asynchronously, to the runtime's handler for uncaught
  * errors.
  */
-export type OnVerification = (host: string, report: VerificationReport | undefined, error: TinfoilError | undefined) => void;
+export type OnVerification = (host: string, attempt: VerificationAttempt) => void;
 
 /**
  * The options of one call on a client, such as `ensureVerified` or
