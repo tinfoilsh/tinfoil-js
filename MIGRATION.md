@@ -55,6 +55,7 @@ Unchanged: the router client's `userCacheSecret` and the per-request `user_cache
 | an OpenAI client over a proxy `baseURL: "https://proxy.example/v1/"` | `proxyURL: "https://proxy.example/"`: the OpenAI client appends `/v1/`, or the `apiPath` option of `new OpenAIClient` |
 | `dataResidency` among the OpenAI options, refused | ignored, as are `baseURL` and `OPENAI_BASE_URL`: the client sets the base URL itself |
 | `createRealtimeWebSocket` from `tinfoil` | `createRealtimeWebSocket` from `tinfoil/openai` |
+| `wsOptions.headers` on `createWebSocket`, silently dropped (and likewise `origin`, `protocol`, `finishRequest` and the settings that choose the peer or check its certificate) | the top-level `headers` option (an `Origin` header goes there too) and `protocols` for subprotocols; a reserved key in `wsOptions` is now a `ConfigurationError`, as is any `wsOptions` on Bun, where they were ignored |
 | `userCacheSecret` on an enclave client, or on the AI SDK provider with `enclave` | removed: an enclave client never adds a `user_cache_secret`; set it in each request body |
 | `createTinfoil({ enclave: { host, repo, project }, transportMode, baseURL, fetch, verifier })` | `createTinfoil({ enclave: { host, trust }, transport, policy, apiPath? })` |
 | `Verifier.create({ ...options })`, `VerifierOptions`, `EmbeddedReferences`, `Verifier.callerAuthorizesConfig` | `Verifier.create(config?, policy?)`, as described under `@tinfoilsh/verifier` below; `callerAuthorizesConfig` is removed |
