@@ -209,6 +209,8 @@ const last = client.lastVerification();
 
 A gateway client's `lastVerification()` returns one entry for each replica that it has tried to verify, with that replica's last attempt. A gateway client's `policy` applies to the pins that set none; a pin's own `policy` replaces it entirely. A `verificationCheck` receives only the verified facts of a verification that passed.
 
+`JSON.stringify(report)` writes a report in the JSON form that every Tinfoil SDK exports, to show it or to pass it on, for example to a browser; the [verifier's README](packages/verifier/README.md#the-json-form) describes the form. The JSON authorizes nothing: nothing reads it back into a report, and a client never binds a channel to a key read from it.
+
 ## Documentation
 
 - [JavaScript SDK documentation](https://docs.tinfoil.sh/sdk/javascript-sdk), which describes the 1.x API until 2.0 is released; for 2.0, use this README and the migration guide below.

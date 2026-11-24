@@ -59,6 +59,7 @@ Unchanged: the router client's `userCacheSecret` and the per-request `user_cache
 | `userCacheSecret` on an enclave client, or on the AI SDK provider with `enclave` | removed: an enclave client never adds a `user_cache_secret`; set it in each request body |
 | `createTinfoil({ enclave: { host, repo, project }, transportMode, baseURL, fetch, verifier })` | `createTinfoil({ enclave: { host, trust }, transport, policy, apiPath? })` |
 | `Verifier.create({ ...options })`, `VerifierOptions`, `EmbeddedReferences`, `Verifier.callerAuthorizesConfig` | `Verifier.create(config?, policy?)`, as described under `@tinfoilsh/verifier` below; `callerAuthorizesConfig` is removed |
+| `report.toJSON()` and `verifiedFacts.toJSON()` with camelCase members, `measured.cpu.measurement`, every step's `message` and ISO 8601 times | the JSON form that every Tinfoil SDK exports: snake_case members (`verified_facts`, `partial_facts`, `config_repo`, `signing_key_hint`, `registry_id`, …), `schema_version: 1`, `measured.cpu_measurement`, a `message` only for a failed or skipped step, no `""` members, no code measurement when the release fixes no register, and RFC 3339 times in UTC. The report's own properties are unchanged, and the `*JSON` types describe the new form |
 
 ## `@tinfoilsh/verifier`
 

@@ -116,31 +116,45 @@ describe("VerificationReport", () => {
     expect((passed().verifiedFacts!.enclaveMeasurement as SevSnpMeasurement).launch).toEqual(reg(1));
   });
 
-  it("serializes to plain JSON with hex registers and ISO times", () => {
+  it("serializes to the report's JSON form", () => {
     const json = failed().toJSON();
     expect(json).toStrictEqual({
+      schema_version: 1,
       steps: [
-        { layer: "envelope", status: "passed", message: "" },
-        { layer: "provenance", status: "passed", message: "" },
-        { layer: "quote", status: "passed", message: "" },
+        { layer: "envelope", status: "passed" },
+        { layer: "provenance", status: "passed" },
+        { layer: "quote", status: "passed" },
         { layer: "policy", status: "failed", message: "RTMR1 mismatch" },
       ],
-      partialFacts: {
+      partial_facts: {
         expected: {
-          configRepo: "org/repo",
-          artifact: { source: "endorsement", repo: "org/repo", tag: "v1", digest: "d", name: "n", commit: "c", approvalTime: "2026-01-01T00:00:00.000Z" },
-          codeMeasurement: { platform: "tdx", rtmr1: "09".repeat(48) },
+          config_repo: "org/repo",
+          artifact: { source: "endorsement", repo: "org/repo", tag: "v1", digest: "d", name: "n", commit: "c", approval_time: "2026-01-01T00:00:00Z" },
+          code_measurement: { platform: "tdx", rtmr1: "09".repeat(48) },
           measurement: { platform: "tdx", mrtd: "01".repeat(48), rtmr0: "02".repeat(48), rtmr1: "09".repeat(48), rtmr2: "04".repeat(48), rtmr3: "05".repeat(48) },
         },
         measured: {
-          cpu: { measurement: { platform: "tdx", mrtd: "01".repeat(48), rtmr0: "02".repeat(48), rtmr1: "03".repeat(48), rtmr2: "04".repeat(48), rtmr3: "05".repeat(48) } },
-          tlsPublicKeyFP: "fp",
+          cpu_measurement: { platform: "tdx", mrtd: "01".repeat(48), rtmr0: "02".repeat(48), rtmr1: "03".repeat(48), rtmr2: "04".repeat(48), rtmr3: "05".repeat(48) },
+          tls_public_key_fp: "fp",
         },
       },
-      metadata: { verifier: { name: "n", version: "v" }, verifiedAt: "2026-01-02T03:04:05.000Z" },
+      metadata: { verified_at: "2026-01-02T03:04:05Z", verifier: { name: "n", version: "v" } },
     });
     expect(JSON.parse(JSON.stringify(failed()))).toStrictEqual(json);
-    expect(passed().toJSON().verifiedFacts).toStrictEqual(passed().verifiedFacts!.toJSON());
+    expect(passed().toJSON().verified_facts).toStrictEqual(passed().verifiedFacts!.toJSON());
+    expect(passed().toJSON()).not.toHaveProperty("partial_facts");
+  });
+
+  it("keeps an established but empty fact, and leaves out a skipped step's empty reason and a code measurement without registers", () => {
+    const b = new ReportBuilder();
+    b.passed("envelope");
+    b.set("provenance", "skipped", "");
+    b.measured = {};
+    b.expected = { configRepo: "org/repo", artifact: { source: "embedded", repo: "", tag: "", digest: "d", name: "", commit: "" }, codeMeasurement: { platform: "tdx" } };
+    const json = b.failed("quote", "bad quote", METADATA).toJSON();
+    expect(json.partial_facts).toStrictEqual({ expected: { config_repo: "org/repo", artifact: { source: "embedded", digest: "d" } }, measured: {} });
+    expect(json.steps[1]).toStrictEqual({ layer: "provenance", status: "skipped" });
+    expect(new ReportBuilder().failed("envelope", "bad", METADATA).toJSON().partial_facts).toStrictEqual({});
   });
 
   it("survives a structured clone, as postMessage sends it", () => {

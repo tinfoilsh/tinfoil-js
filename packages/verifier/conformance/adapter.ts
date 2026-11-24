@@ -25,7 +25,7 @@ import { parseBundleBytes } from "../src/internal/sigstore/bundle.js";
 import { pinnedKeys, verifyKeyedBundle } from "../src/internal/sigstore/keyed.js";
 import { verifyTimestamp } from "../src/internal/sigstore/timestamp.js";
 import { embeddedTrustedRoot, parseTrustedRoot, type TrustedRoot } from "../src/internal/sigstore/trusted-root.js";
-import { reportOf, type Report } from "./report.js";
+import type { Report } from "./report.js";
 import { dangerousTestOnlyDecode, dangerousTestOnlyVerifier, type DangerousTestOnlyRoots } from "./testing.js";
 
 export const SCHEMA_VERSION = "1";
@@ -100,9 +100,10 @@ export interface Output {
   outputs?: AcceptOutputs;
   rejection?: { code: RejectionCode };
   /**
-   * The verifier's report, for the full-verify stage only. A malformed
-   * input has none, and neither does the adapter's own rejection of an
-   * accepted document that endorses no channel keys.
+   * The verifier's report, for the full-verify stage only, in the JSON form
+   * that every Tinfoil SDK exports. A malformed input has none, and neither
+   * does the adapter's own rejection of an accepted document that endorses
+   * no channel keys.
    */
   report?: Report;
 }
@@ -306,7 +307,7 @@ async function verifyFull(
   } catch (err) {
     const mapped = rejectionCode(err);
     if (mapped === undefined) return { output: { stage, accepted: false }, exitCode: ExitCode.Internal };
-    const rejected = err instanceof VerificationError ? { report: reportOf(err.report, measurementOf, expectedOf) } : {};
+    const rejected = err instanceof VerificationError ? { report: err.report.toJSON() } : {};
     return { output: { stage, accepted: false, rejection: { code: mapped.code }, ...rejected }, exitCode: mapped.exitCode };
   }
   const verified = report.verifiedFacts;
@@ -325,7 +326,7 @@ async function verifyFull(
     tls_public_key_fp: tlsFP,
     hpke_public_key: hpke,
   });
-  return { ...accepted, output: { ...accepted.output, report: reportOf(report, measurementOf, expectedOf) } };
+  return { ...accepted, output: { ...accepted.output, report: report.toJSON() } };
 }
 
 /** Maps a verifier error to its wire code, or undefined if it is not a classified error. */
