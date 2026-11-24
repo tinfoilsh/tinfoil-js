@@ -63,7 +63,7 @@ const ARTIFACT_DOMAIN = "tinfoil-artifact-freshness/v1\0";
 const NOW = new Date("2025-06-15T12:00:00Z");
 const GEN_TIME = new Date("2025-06-15T11:00:00Z");
 const RUNTIME_DIGEST = "a".repeat(64);
-const V2_CONFIG = utf8(`name: app\ncvm-version: v1.2.3@sha256:${RUNTIME_DIGEST}\n`);
+const V2_CONFIG = utf8(`{"cvm-version":"v1.2.3@sha256:${RUNTIME_DIGEST}","name":"app"}`);
 const V1_CONFIG = utf8("name: app\nreplicas: 2\n");
 
 let signer: Signer;

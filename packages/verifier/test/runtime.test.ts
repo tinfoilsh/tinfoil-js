@@ -8,12 +8,13 @@
  *
  * The trailing describes cover decode-level behaviour: unknown and duplicate
  * members, integer and string typing, null members and framing for the
- * manifest, and document, mapping and scalar handling for the YAML config.
+ * manifest, document, mapping and scalar handling for the YAML config, and
+ * the format that the pinned version requires of the config.
  */
 import { describe, expect, it } from "vitest";
 import { RUNTIME_REPO, type RuntimeReference } from "../src/document/collateral/runtime.js";
 import { sha256, toHex } from "../src/internal/bytes.js";
-import { configRuntime } from "../src/internal/runtime/config.js";
+import { configRuntime, JSON_CONFIG_MIN_VERSION } from "../src/internal/runtime/config.js";
 import { decodeManifest, FORMAT_VERSION, MEASUREMENT_SIZE, parseManifest, type Manifest } from "../src/internal/runtime/manifest.js";
 
 const enc = (s: string): Uint8Array => new TextEncoder().encode(s);
@@ -382,5 +383,71 @@ describe("configRuntime: decode semantics", () => {
     ])("%s", (_name, config) => {
       expect(configRuntime(enc(config))).toEqual(want);
     });
+  });
+});
+
+// ---------------------------------------------------------------- configRuntime config format
+
+/**
+ * From JSON_CONFIG_MIN_VERSION a config is canonical JSON and YAML is
+ * refused; earlier versions keep YAML.
+ */
+describe("configRuntime: the format follows the pinned version", () => {
+  const digest = "ab".repeat(32);
+  const json = (version: string): string => `{"containers":[],"cpus":2,"cvm-version":"${version}@sha256:${digest}","shim":{"upstream-port":8080}}`;
+  const yaml = (version: string): string => `cvm-version: ${version}@sha256:${digest}\ncpus: 2\n`;
+  const canonical = json("0.15.5-rc.1");
+  const replace = (old: string, replacement: string): string => {
+    expect(canonical).toContain(old);
+    return canonical.replace(old, replacement);
+  };
+  const takesJson = `cvm-version ${JSON_CONFIG_MIN_VERSION} and later take a JSON config`;
+  const MAX_SAFE = "9007199254740991";
+  const ABOVE_MAX_SAFE = "9007199254740992";
+  // U+1F600 is above U+FB33 as a code point and in UTF-8, and below it in
+  // the UTF-16 code units that canonical JSON sorts member names by.
+  const astral = `"${String.fromCodePoint(0x1f600)}":1`;
+  const bmp = `"${String.fromCodePoint(0xfb33)}":2`;
+
+  it.each([
+    ["JSON at the first JSON version", json("0.15.5-rc.1"), "v0.15.5-rc.1"],
+    ["JSON with a v prefix", json("v0.15.5-rc.1"), "v0.15.5-rc.1"],
+    ["JSON with build metadata", json("0.15.5-rc.1+gpu"), "v0.15.5-rc.1+gpu"],
+    ["JSON for the release", json("0.15.5"), "v0.15.5"],
+    ["JSON for a later version", json("0.16.0"), "v0.16.0"],
+    ["YAML before the JSON version", yaml("0.15.5-rc.0"), "v0.15.5-rc.0"],
+    ["YAML for an earlier release", yaml("0.15.4"), "v0.15.4"],
+    ["flow-style YAML before it", json("0.15.4"), "v0.15.4"],
+    ["flow-style YAML before it, not in the JSON form", json("0.15.5-rc.0").replace(`"cpus":2`, `"cpus": null`), "v0.15.5-rc.0"],
+    ["the largest integer", replace(`"cpus":2`, `"cpus":${MAX_SAFE}`), "v0.15.5-rc.1"],
+    ["the smallest integer", replace(`"cpus":2`, `"cpus":-${MAX_SAFE}`), "v0.15.5-rc.1"],
+    ["member names in UTF-16 code unit order", replace("}}", `},${astral},${bmp}}`), "v0.15.5-rc.1"],
+  ])("accepts %s", (_name, config, tag) => {
+    expect(configRuntime(enc(config))).toEqual({ repo: RUNTIME_REPO, tag, digest });
+  });
+
+  it.each<[string, string, string | RegExp]>([
+    ["YAML at the first JSON version", yaml("0.15.5-rc.1"), takesJson],
+    ["YAML with build metadata", yaml("0.15.5-rc.1+gpu"), takesJson],
+    ["YAML for a later version", yaml("1.0.0"), takesJson],
+    ["whitespace", replace(`"cpus":2`, `"cpus": 2`), "canonical form"],
+    ["trailing newline", canonical + "\n", "canonical form"],
+    ["members out of order", replace(`"containers":[],"cpus":2,`, `"cpus":2,"containers":[],`), "canonical form"],
+    ["escaped character", replace(`"cpus"`, `"${"\\"}u0063pus"`), "canonical form"],
+    ["member names in code point order", replace("}}", `},${bmp},${astral}}`), "canonical form"],
+    ["negative zero", replace(`"cpus":2`, `"cpus":-0`), "canonical form"],
+    ["null", replace(`"cpus":2`, `"cpus":null`), "null is not allowed"],
+    ["nested null", replace(`"containers":[]`, `"containers":[{"env":[null]}]`), "null is not allowed"],
+    ["fraction", replace(`"cpus":2`, `"cpus":2.5`), "not an integer"],
+    ["integral fraction", replace(`"cpus":2`, `"cpus":2.0`), "not an integer"],
+    ["exponent", replace(`"cpus":2`, `"cpus":2e0`), "not an integer"],
+    ["integer too large", replace(`"cpus":2`, `"cpus":${ABOVE_MAX_SAFE}`), "not an integer"],
+    ["integer too small", replace(`"cpus":2`, `"cpus":-${ABOVE_MAX_SAFE}`), "not an integer"],
+    ["nested fraction", replace(`"upstream-port":8080`, `"upstream-port":8080.5`), "not an integer"],
+    ["repeated member", replace(`"cpus":2,`, `"cpus":2,"cpus":2,`), /^parsing config runtime pin: /],
+    ["second value", canonical + canonical, /^parsing config runtime pin: /],
+    ["unpinned version", replace(`@sha256:${digest}`, ""), "must pin"],
+  ])("rejects %s", (_name, config, message) => {
+    expect(() => configRuntime(enc(config))).toThrow(message);
   });
 });

@@ -327,7 +327,7 @@ describe("Verifier.create config trust and policy", () => {
   it("accepts an embedded v2 platform artifact and derives the config reference from embedded config bytes", async () => {
     const platform = await Verifier.create(undefined, { artifacts: { kind: "embeddedArtifacts", platform: artifact(ARTIFACT_FORMAT_V2) } });
     expect(() => platform.checkPinVerifiability({ project: "org/project@r1" })).not.toThrow();
-    const config = utf8(`name: app\ncvm-version: v1.2.3@sha256:${"a".repeat(64)}\n`);
+    const config = utf8(`{"cvm-version":"v1.2.3@sha256:${"a".repeat(64)}","name":"app"}`);
     const embedded = await Verifier.create({ kind: "embeddedConfig", name: "/org/project/r1", bytes: config });
     expect(() => embedded.checkPinVerifiability({})).not.toThrow();
     expect(() => embedded.checkPinVerifiability({ project: "org/project@r1" })).not.toThrow();
@@ -358,7 +358,7 @@ describe("Verifier.create config trust and policy", () => {
     const unnamed = await Verifier.create({ kind: "embeddedConfigReference", digest, runtime });
     expect(() => unnamed.checkPinVerifiability({ project: `org/project@sha256:${digest}` })).toThrow(/embedded config does not match/);
     expect(() => unnamed.checkPinVerifiability({})).not.toThrow();
-    const bytes = utf8(`cvm-version: v1.2.3@sha256:${runtime.digest}\n`);
+    const bytes = utf8(`{"cvm-version":"v1.2.3@sha256:${runtime.digest}"}`);
     await expect(Verifier.create({ kind: "embeddedConfig", bytes: "config" as unknown as Uint8Array })).rejects.toThrow(/must be a Uint8Array/);
     // The reference is validated like one derived from config bytes, and the embedded manifest must be the one it pins.
     for (const bad of [
@@ -481,7 +481,7 @@ describe("the document's collateral selects the part of the pin that applies", (
 });
 
 describe("checkPinVerifiability", () => {
-  const config = utf8(`name: app\ncvm-version: v1.2.3@sha256:${"a".repeat(64)}\n`);
+  const config = utf8(`{"cvm-version":"v1.2.3@sha256:${"a".repeat(64)}","name":"app"}`);
   const embedded: ConfigTrust = { kind: "embeddedConfig", name: "/org/project/v1", bytes: config };
   const authorizer: ConfigTrust = { kind: "configAuthorizer", authorize: () => undefined };
   const registries: ConfigTrust = { kind: "registries", ids: [PUBLIC_REGISTRY_ID] };
@@ -550,7 +550,7 @@ describe("config registry IDs beyond the public registry", () => {
     const signer = await newSigner();
     const certificate = await registryCertificate(registry, signer.spki, { registryID: PRIVATE_REGISTRY_ID, now: GEN_TIME });
     const runtimeDigest = toHex(await sha256(manifest));
-    const config = utf8(`name: app\ncvm-version: v1.2.3@sha256:${runtimeDigest}\n`);
+    const config = utf8(`{"cvm-version":"v1.2.3@sha256:${runtimeDigest}","name":"app"}`);
     const core = {
       _type: IN_TOTO_STATEMENT_V1,
       subject: [{ name: "/org/project/r1", digest: { sha256: toHex(await sha256(config)) } }],
@@ -606,7 +606,7 @@ describe("config authorizer", () => {
       }),
     );
     const platform = utf8(JSON.stringify({ format: ARTIFACT_FORMAT_V2, measurements: {}, machines: {}, policies: {} }));
-    const config = utf8(`name: app\ncvm-version: v1.2.3@sha256:${toHex(await sha256(manifest))}\n`);
+    const config = utf8(`{"cvm-version":"v1.2.3@sha256:${toHex(await sha256(manifest))}","name":"app"}`);
     const bundleText = `{ "mediaType" : "t\\u00e9st\\/é😀" ,\n "n" : [ 18446744073709551616 , 1.0 , {} ], "s" : "}{" }`;
     const data = `{"endorsement_ref":"sha256:${"ab".repeat(32)}","config_base64":${JSON.stringify(b64(config))},"sigstore_bundle":${bundleText}}`;
     const nonce = new Uint8Array(NONCE_SIZE).fill(7);
