@@ -108,10 +108,10 @@ export async function verifyCertificateBundle(
       libraryRoot.excluded === 0
         ? ""
         : ` (${libraryRoot.excluded} certificate authority certificate(s) not used: extended key usage does not allow code signing)`;
-    throw new Error(`verifying bundle: ${message(err)}${note}`);
+    throw new Error(`${message(err)}${note}`);
   }
   const identity = policy.identity;
-  if (identity === undefined) throw new Error("verifying bundle: the signing certificate was not checked");
+  if (identity === undefined) throw new Error("the signing certificate was not checked");
 
   // The signature must be anchored by a verified time. The library requires
   // one but does not say which entry supplied it, and it ignores entries from
@@ -123,10 +123,10 @@ export async function verifyCertificateBundle(
   try {
     verifiedLogTime = await promisedLogTime(root, bundle.tlogEntries);
   } catch (err) {
-    throw new Error(`verifying bundle: ${message(err)}`);
+    throw new Error(`log entry: ${message(err)}`);
   }
   if (verifiedLogTime === undefined && bundle.rfc3161Timestamps.length === 0) {
-    throw new Error("verifying bundle: no verified observer timestamp (no inclusion promise on the first log entry and no RFC 3161 timestamp)");
+    throw new Error("no verified observer timestamp (no inclusion promise on the first log entry and no RFC 3161 timestamp)");
   }
 
   enforceSubject(statementSubjects(bundle.dsse.payload), digestHex, subjectName ?? "");

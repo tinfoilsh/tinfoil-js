@@ -612,7 +612,7 @@ describe.skipIf(withoutVectors)(vectorsTitle("verifyCertificateBundle"), () => {
       );
       // The same substitution with code signing reaches the library, which rejects it for other reasons.
       const allowed = verifyCertificateBundle(await goldenRoot, await withLeaf(ekuExtension(OID_KP_CODE_SIGNING)), codeIdentity(golden.repo), goldenCode.data.digest!);
-      await rejects(allowed, /verifying bundle/);
+      await rejects(allowed, /signing certificate has no URI subject/);
       await expect(allowed).rejects.not.toThrow(/extended key usage/);
     });
 
@@ -649,12 +649,12 @@ describe.skipIf(withoutVectors)(vectorsTitle("verifyCertificateBundle"), () => {
     });
 
     it("rejects a chain whose intermediate's extended key usage does not allow code signing", async () => {
-      await rejects(verifyUnder(await reissuedRoot([ekuExtension(OID_KP_SERVER_AUTH)])), /verifying bundle: .*certificate chain.*1 certificate authority certificate\(s\) not used/);
+      await rejects(verifyUnder(await reissuedRoot([ekuExtension(OID_KP_SERVER_AUTH)])), /certificate chain.*1 certificate authority certificate\(s\) not used/);
     });
 
     it("rejects a chain whose root's extended key usage does not allow code signing", async () => {
       // The root takes its intermediate with it, so both are left out.
-      await rejects(verifyUnder(await reissuedRoot([], [ekuExtension(OID_KP_SERVER_AUTH)])), /verifying bundle: .*2 certificate authority certificate\(s\) not used/);
+      await rejects(verifyUnder(await reissuedRoot([], [ekuExtension(OID_KP_SERVER_AUTH)])), /2 certificate authority certificate\(s\) not used/);
     });
   });
 
@@ -682,7 +682,7 @@ describe.skipIf(withoutVectors)(vectorsTitle("verifyCertificateBundle"), () => {
         w.verificationMaterial.tlogEntries = [unknown, first];
       }),
     );
-    await rejects(verifyCertificateBundle(await goldenRoot, bundle, codeIdentity(golden.repo), goldenCode.data.digest!), /verifying bundle: .*does not list/);
+    await rejects(verifyCertificateBundle(await goldenRoot, bundle, codeIdentity(golden.repo), goldenCode.data.digest!), /log entry: .*does not list/);
   });
 
   it("rejects a payload altered after signing", async () => {
@@ -693,7 +693,7 @@ describe.skipIf(withoutVectors)(vectorsTitle("verifyCertificateBundle"), () => {
         w.dsseEnvelope.payload = Buffer.from(JSON.stringify(statement)).toString("base64");
       }),
     );
-    await rejects(verifyCertificateBundle(await goldenRoot, bundle, codeIdentity(golden.repo), goldenCode.data.digest!), /verifying bundle/);
+    await rejects(verifyCertificateBundle(await goldenRoot, bundle, codeIdentity(golden.repo), goldenCode.data.digest!), /DSSE payload hash mismatch/);
   });
 
   it("verifies a production code bundle against the embedded root", async () => {
@@ -723,7 +723,7 @@ describe.skipIf(withoutVectors)(vectorsTitle("verifyCertificateBundle"), () => {
   it("rejects a synthetic bundle under the embedded root", async () => {
     await rejects(
       verifyCertificateBundle(await embeddedTrustedRoot(), parseBundle(bundleOf(golden, "sigstore-code")), codeIdentity(golden.repo), goldenCode.data.digest!),
-      /verifying bundle/,
+      /Not enough verified transparency logs/,
     );
   });
 
@@ -736,16 +736,16 @@ describe.skipIf(withoutVectors)(vectorsTitle("verifyCertificateBundle"), () => {
     // p4-* are bundle-decoding rejections, covered above.
     const accepted = ["provenance-happy", "provenance-pos-wildcard-workflow", "provenance-pos-other-tag", "provenance-pos-multi-subject"];
     const rejected: [string, RegExp][] = [
-      ["p5", /verifying bundle: .*certificate chain/],
+      ["p5", /certificate chain/],
       ["p6", /loading trusted root: .*CT logs/],
-      ["p7", /verifying bundle: .*tlog ?entries/i],
-      ["p8", /verifying bundle: .*certificate validity/],
-      ["p9", /verifying bundle: .*DSSE signature/],
+      ["p7", /tlog ?entries/i],
+      ["p8", /certificate validity/],
+      ["p9", /DSSE signature/],
       ["p10", /subject\[0\] digest/],
       ["p11-san", /does not match the expected workflow identity/],
       ["p11-issuer", /is not GitHub Actions/],
       ["p11-runner", /is not GitHub-hosted/],
-      ["p12", /verifying bundle: .*Duplicate SCT/],
+      ["p12", /Duplicate SCT/],
       ["p14-ref", /does not match the expected workflow identity/],
       ["p14-path", /does not match the expected workflow identity/],
       ["p-no-subject", /statement has no subject/],

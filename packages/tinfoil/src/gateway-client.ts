@@ -55,7 +55,6 @@ export async function createGatewayHTTPClient(options: GatewayOptions, seams: Ga
   const baseURL = normalizeBaseURL(given);
   const policy = await GatewayPolicy.create(
     options.modelPins,
-    options.pinnedModelsOnly ?? false,
     options.policy,
     seams.verifier === undefined ? undefined : () => Promise.resolve(seams.verifier!),
   );
@@ -113,15 +112,18 @@ export class GatewayHTTPClient {
 
   /**
    * Checks the options before any network I/O, then fetches the catalog
-   * before returning. A model's replicas are verified on its first request,
-   * so `modelPins` may name models the catalog doesn't list. Without a
+   * before returning. The client serves only the models that `modelPins`
+   * names, so options without a pin are a {@link ConfigurationError}. A
+   * model's replicas are verified on its first request, so `modelPins` may
+   * name models that the catalog doesn't list. Without a
    * non-empty `userCacheSecret`, the client uses the secret that is generated
    * once for the current runtime; when it can't be generated, because
    * `crypto.getRandomValues` throws, the promise rejects with that error
    * unchanged, before any network I/O.
    */
-  static create(options?: GatewayOptions): Promise<GatewayHTTPClient> {
-    return createGatewayHTTPClient(options ?? {}, {});
+  static create(options: GatewayOptions): Promise<GatewayHTTPClient> {
+    // Untyped code may still pass nothing, which is refused as having no pins.
+    return createGatewayHTTPClient(options ?? ({} as GatewayOptions), {});
   }
 
   /**

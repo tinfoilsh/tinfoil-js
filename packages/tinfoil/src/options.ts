@@ -134,8 +134,8 @@ export type VerificationCheck = (facts: VerifiedFacts) => void | Promise<void>;
  * thrown, such as a {@link NetworkError} for a failed attestation fetch,
  * which has no report. When the verifier rejected the document, the error
  * is an {@link AttestationError} whose `cause` chain holds the verifier's
- * `VerificationError` from `@tinfoilsh/verifier`, and that error's `report`
- * shows the step that failed and the partial facts. A report is for
+ * `VerificationError`, which `tinfoil` re-exports, and that error's
+ * `report` shows the step that failed and the partial facts. A report is for
  * showing or logging what happened; only the client decides whether it
  * admits requests.
  */
@@ -148,13 +148,19 @@ export type VerificationAttempt = { readonly report: VerificationReport; readonl
  * discovery tries, and each gateway replica. It is called once the
  * verification that made the attempt is over, so that an attempt that was
  * retried is reported together with its retry, in order.
- * `host` is the enclave that the attempt verified. Exactly one of `report`
- * and `error` is set, as {@link VerificationAttempt} describes: the outcome
- * of this attempt, which `lastVerification()` returned once the attempt was
- * decided. A verification that concurrent requests share is one attempt.
- * A verification that passes after the client was closed is abandoned
- * before it is used, so it has no outcome: it isn't reported and doesn't
- * change `lastVerification()`. A caller whose signal aborts only stops
+ * `host` is the enclave that the attempt verified, and `attempt` is its
+ * outcome, the same {@link VerificationAttempt} that `lastVerification()`
+ * returned once the attempt was decided: `attempt.report` is set for a
+ * verification that passed, and `attempt.error` for one that failed. The
+ * type narrows on either, so that in `if (attempt.report) ...; else
+ * attempt.error.category`, the error is a `TinfoilError`. The attempt is
+ * frozen and its report is a copy that no one else holds, so that a
+ * callback can store or forward the attempt as it is.
+ *
+ * A verification that concurrent requests share is one attempt. A
+ * verification that passes after the client was closed is abandoned before
+ * it is used, so it has no outcome: it isn't reported and doesn't change
+ * `lastVerification()`. A caller whose signal aborts only stops
  * waiting, and the attempt runs on to its outcome; but a factory whose
  * signal aborts closes the client that it was creating, so the same rule
  * applies to the attempt that it abandons.
@@ -169,7 +175,7 @@ export type VerificationAttempt = { readonly report: VerificationReport; readonl
  * and rethrows it asynchronously, to the runtime's handler for uncaught
  * errors.
  */
-export type OnVerification = (host: string, report: VerificationReport | undefined, error: TinfoilError | undefined) => void;
+export type OnVerification = (host: string, attempt: VerificationAttempt) => void;
 
 /**
  * The options of one call on a client, such as `ensureVerified` or
@@ -185,11 +191,12 @@ export interface CallOptions {
 }
 
 /**
- * The `ws` client settings a pinned connection owns, so a caller's values
- * for them are dropped: those that choose the peer, check its certificate,
- * or shape the handshake's headers (`headers` itself, `origin`, which is a
- * header, and `finishRequest`, which hands the caller the request) and
- * subprotocol.
+ * The `ws` client settings that a pinned connection owns, so that a caller
+ * that sets one gets a {@link ConfigurationError}: those that choose the
+ * peer, check its certificate, or shape the handshake's headers (`headers`
+ * itself, `origin` and `auth`, which become headers, and `finishRequest`,
+ * which hands the caller the request), and `protocol`, the request's URL
+ * scheme.
  */
 export type ReservedWsOption =
   | "agent"
@@ -202,12 +209,13 @@ export type ReservedWsOption =
   | "checkServerIdentity"
   | "rejectUnauthorized"
   | "ca"
+  | "auth"
   | "headers"
   | "origin"
   | "finishRequest"
   | "protocol";
 
-/** The `ws` client settings a caller may set: the library's own, less the {@link ReservedWsOption}s. */
+/** The `ws` client settings that a caller may set: the library's own, less the {@link ReservedWsOption}s. */
 export type WsOptions = Readonly<Omit<WsClientOptions, ReservedWsOption>>;
 
 /** Configures a WebSocket opened by {@link createWebSocket}. */
@@ -218,11 +226,14 @@ export interface WebSocketOptions {
   readonly headers?: Readonly<Record<string, string>>;
   /**
    * Settings for the `ws` client on Node, such as `perMessageDeflate` or
-   * `maxPayload`. Settings that would change which peer is connected to, how
-   * its certificate is checked, or the handshake's headers (`headers`,
-   * `origin` and `finishRequest`) and `protocol` are ignored; the
-   * handshake's headers come from the top-level `headers`.
-   * Bun's WebSocket takes no such settings, so they are ignored there.
+   * `maxPayload`. A setting that would change which peer is connected to,
+   * how its certificate is checked, or the handshake's headers (`headers`,
+   * `origin`, `auth` and `finishRequest`), or `protocol`, is a
+   * {@link ConfigurationError}, raised before anything is sent: the
+   * handshake's headers, `Origin` and `Authorization` included, come from the
+   * top-level `headers`, and its subprotocols from `protocols`. Bun's
+   * WebSocket takes no such settings, so any setting here is a
+   * {@link ConfigurationError} on Bun.
    */
   readonly wsOptions?: WsOptions;
   /** Aborts the verification the call performs before connecting. */
@@ -233,7 +244,11 @@ export interface WebSocketOptions {
 export interface RealtimeOptions {
   /** The realtime model to start a session with. */
   readonly model: string;
-  /** As {@link WebSocketOptions.wsOptions}. */
+  /**
+   * As {@link WebSocketOptions.wsOptions}, except that there is no
+   * top-level `headers` or `protocols`: the session authenticates with the
+   * client's credential, and takes no other headers.
+   */
   readonly wsOptions?: WsOptions;
   /** Aborts the verification the call performs before connecting. */
   readonly signal?: AbortSignal;
@@ -417,7 +432,7 @@ export type ReplicaVerification = {
   readonly models: readonly string[];
   /** The repository that the replica is verified against. */
   readonly reference: string;
-  /** The pinned model that the replica serves, or "" for an unpinned one. */
+  /** The pinned model that the replica serves. */
   readonly pinnedModel: string;
 } & VerificationAttempt;
 
@@ -427,12 +442,15 @@ export type ReplicaVerification = {
  * @experimental The gateway route is new; this API may change without a major version.
  */
 export interface GatewayOptions {
-  /** Pins models to repositories. With `pinnedModelsOnly`, only pinned models are served, which requires at least one pin. */
-  readonly modelPins?: ReadonlyMap<string, ModelPin>;
-  readonly pinnedModelsOnly?: boolean;
-  /** The policy for unpinned models, and for pinned models whose pin has none; undefined selects the defaults. */
+  /**
+   * Pins models to repositories. The client serves only the models that it
+   * has pins for, so at least one pin is required, and a request for any
+   * other model is a {@link ConfigurationError} that contacts no replica.
+   */
+  readonly modelPins: ReadonlyMap<string, ModelPin>;
+  /** The policy for pins that set none; undefined selects the defaults. It is checked even when every pin sets its own. */
   readonly policy?: Policy;
-  /** Called with each replica's verified facts, for pinned and unpinned models. A rejected replica is skipped for the next replica of the model. */
+  /** Called with each replica's verified facts. A rejected replica is skipped for the next replica of the model. */
   readonly verificationCheck?: VerificationCheck;
   /** Called with the outcome of each attempt to verify a replica, with the replica's host; see {@link OnVerification}. */
   readonly onVerification?: OnVerification;

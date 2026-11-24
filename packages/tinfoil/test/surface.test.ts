@@ -38,6 +38,9 @@ const EXPORTS = [
   "NetworkError",
   "AttestationError",
   "findTinfoilError",
+  // the verifier's error and report schema version, from the copy that this package pins
+  "VerificationError",
+  "REPORT_SCHEMA_VERSION",
   // session recovery
   "sessionRecoveryToken",
   "serializeSessionRecoveryToken",
@@ -129,6 +132,37 @@ type TypeExports = [
   surface.AuthorizedBy,
   surface.EmbeddedConfig,
   surface.EitherPin,
+  surface.VerificationReport,
+  surface.VerifiedFacts,
+  surface.PartialFacts,
+  surface.ExpectedFacts,
+  surface.MeasuredFacts,
+  surface.CPUEvidence,
+  surface.Step,
+  surface.StepStatus,
+  surface.Layer,
+  surface.VerificationMetadata,
+  surface.ArtifactVerification,
+  surface.ConfigVerification,
+  surface.ReferenceSource,
+  surface.CryptoMaterialItem,
+  surface.Measurement,
+  surface.SevSnpMeasurement,
+  surface.TdxMeasurement,
+  surface.Expected,
+  surface.ExpectedSevSnp,
+  surface.ExpectedTdx,
+  surface.Register,
+  surface.VerificationReportJSON,
+  surface.VerifiedFactsJSON,
+  surface.PartialFactsJSON,
+  surface.ExpectedFactsJSON,
+  surface.MeasuredFactsJSON,
+  surface.StepJSON,
+  surface.VerificationMetadataJSON,
+  surface.ArtifactVerificationJSON,
+  surface.ConfigVerificationJSON,
+  surface.MeasurementJSON,
   openaiEntry.RealtimeOptions,
   openaiEntry.OpenAIOptions,
   openaiEntry.OpenAIClientOptions,
@@ -348,6 +382,13 @@ describe("public surface", () => {
     expect(methodsOf(surface.EnclaveHTTPClient)).not.toContain("createWebSocket");
   });
 
+  it("re-exports the verifier's error and report schema version from the verifier that the clients use", async () => {
+    const verifier = await import("@tinfoilsh/verifier");
+    expect(surface.VerificationError).toBe(verifier.VerificationError);
+    expect(browser.VerificationError).toBe(verifier.VerificationError);
+    expect(surface.REPORT_SCHEMA_VERSION).toBe(verifier.REPORT_SCHEMA_VERSION);
+  });
+
   it("reports the package version", () => {
     const pkg = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8")) as { version: string };
     expect(surface.SDK_VERSION).toBe(pkg.version);
@@ -382,8 +423,10 @@ describe("public surface", () => {
   it("checks gateway client options before any network I/O", async () => {
     const fetches = countingFetch();
     const seams = { catalogFetch: fetches.fetch, documentFetch: fetches.fetch };
-    await expect(createGatewayHTTPClient({ url: "http://gateway.example/v1/" }, seams)).rejects.toBeInstanceOf(surface.ConfigurationError);
-    await expect(createGatewayHTTPClient({ pinnedModelsOnly: true }, seams)).rejects.toBeInstanceOf(surface.ConfigurationError);
+    await expect(createGatewayHTTPClient({ modelPins: new Map([["m", { repo: "tinfoilsh/m" }]]), url: "http://gateway.example/v1/" }, seams)).rejects.toBeInstanceOf(surface.ConfigurationError);
+    await expect(createGatewayHTTPClient({ modelPins: new Map() }, seams)).rejects.toBeInstanceOf(surface.ConfigurationError);
+    // @ts-expect-error A gateway client requires model pins.
+    await expect(createGatewayHTTPClient({}, seams)).rejects.toBeInstanceOf(surface.ConfigurationError);
     expect(fetches.calls).toBe(0);
   });
 

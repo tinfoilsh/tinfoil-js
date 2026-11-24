@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { KEY_SPKI_FP_SHA256_V1_FORMAT, KEY_X25519_HPKE_V1_FORMAT } from "../src/document/document.js";
 import type { ExpectedTdx, SevSnpMeasurement } from "../src/measurement.js";
-import { copyVerifiedFacts, cryptoMaterialData, verifiedFactsOf, type VerifiedFacts, type VerifiedFactsFields } from "../src/verification.js";
+import { copyVerifiedFacts, cryptoMaterialData, verifiedFactsOf, type VerifiedFactsFields } from "../src/verification.js";
 
 const reg = (fill: number) => new Uint8Array(48).fill(fill);
 const AT = new Date("2026-01-02T03:04:05Z");
@@ -129,34 +129,49 @@ describe("VerifiedFacts", () => {
     expect(v.freshnessExpiresAt).toBeUndefined();
   });
 
-  it("serializes to plain JSON with hex registers and ISO times, leaving unset facts out", () => {
+  it("serializes to the verified_facts object of the report's JSON form, leaving unset facts and empty strings out", () => {
     const { v } = makeVerification();
-    const iso = "2026-01-02T03:04:05.000Z";
+    const time = "2026-01-02T03:04:05Z";
     const established = {
-      codeDigest: "d",
-      codeTag: "v1.0.0",
-      configRepo: "tinfoilsh/repo",
-      codeMeasurement: { platform: "tdx", rtmr1: "02".repeat(48) },
-      enclaveMeasurement: { platform: "sev-snp", launch: "01".repeat(48) },
-      cryptoMaterial: [
+      config_repo: "tinfoilsh/repo",
+      code_digest: "d",
+      code_tag: "v1.0.0",
+      code_measurement: { platform: "tdx", rtmr1: "02".repeat(48) },
+      enclave_measurement: { platform: "sev-snp", launch: "01".repeat(48) },
+      crypto_material: [
         { id: "tls", format: KEY_SPKI_FP_SHA256_V1_FORMAT, data: "fp" },
         { id: "hpke", format: KEY_X25519_HPKE_V1_FORMAT, data: "hpke" },
         { id: "tls", format: "https://example.invalid/other", data: "other" },
       ],
     };
+    // The config's registry ID is "", so it is left out.
     const json = {
       ...established,
-      config: { source: "endorsement", name: "/o/p/r1", digest: "c", reference: "sha256:c", signingKeyHint: "h", approvalTime: iso, registryID: "", signatureTime: iso },
-      runtime: { source: "endorsement", repo: "tinfoilsh/cvmimage", tag: "v1.2.3", digest: "r", name: "m", commit: "0".repeat(40), approvalTime: iso },
-      freshnessExpiresAt: iso,
+      config: { source: "endorsement", name: "/o/p/r1", digest: "c", reference: "sha256:c", signing_key_hint: "h", approval_time: time, signature_time: time },
+      runtime: { source: "endorsement", repo: "tinfoilsh/cvmimage", tag: "v1.2.3", digest: "r", name: "m", commit: "0".repeat(40), approval_time: time },
+      freshness_expires_at: time,
     };
     expect(v.toJSON()).toStrictEqual(json);
     expect(JSON.parse(JSON.stringify(v))).toStrictEqual(json);
-    expect(Object.keys(v.toJSON())).toEqual(Object.keys(v).filter((k) => v[k as keyof VerifiedFacts] !== undefined));
 
     const sparse = verifiedFactsOf({ ...fields().fields, config: undefined, runtime: undefined, freshnessExpiresAt: undefined });
     expect(sparse.toJSON()).toStrictEqual(established);
     expect(JSON.parse(JSON.stringify(sparse))).toStrictEqual(established);
+  });
+
+  it("leaves out a code measurement that fixes no register, and a tag that is empty", () => {
+    for (const codeMeasurement of [{ platform: "tdx" } as const, { platform: "sev-snp" } as const]) {
+      const json = verifiedFactsOf({ ...fields().fields, codeTag: "", codeMeasurement }).toJSON();
+      expect(json).not.toHaveProperty("code_measurement");
+      expect(json).not.toHaveProperty("code_tag");
+    }
+  });
+
+  it("writes the keys only in crypto_material, and times in UTC with their milliseconds", () => {
+    const at = new Date("2026-01-02T03:04:05.250+05:00");
+    const json = verifiedFactsOf({ ...fields().fields, freshnessExpiresAt: at }).toJSON();
+    expect(json.freshness_expires_at).toBe("2026-01-01T22:04:05.250Z");
+    expect(Object.keys(json).filter((k) => /public_key/.test(k))).toEqual([]);
   });
 
   it("copies into facts that share no register bytes or dates", () => {

@@ -41,7 +41,7 @@ const completion = await client.chat.completions.create({
 Router and enclave clients are async factories that verify before returning, and they verify again by themselves when the verification expires or the enclave's key changes. Gateway clients are async factories too, but verify a model's replica before its first request. `createClient` takes the OpenAI client's own options (except `baseURL` and `fetch`, which the attested transport owns) plus `bearerToken`, and returns an `OpenAIClient` with the same API as `new OpenAI(...)`, over a `RouterHTTPClient` created with the default options. For anything about the route itself, create the HTTP client and then an `OpenAIClient` over it:
 
 ```typescript
-import { EnclaveHTTPClient, RouterHTTPClient } from "tinfoil";
+import { EnclaveHTTPClient, GatewayHTTPClient, RouterHTTPClient } from "tinfoil";
 import { OpenAIClient } from "tinfoil/openai";
 
 // One enclave, verified against a GitHub repository.
@@ -50,6 +50,11 @@ const client = new OpenAIClient(enclave, {}, { apiKey: "<YOUR_API_KEY>" });
 
 // The discovered router, with a verification policy of your own.
 const router = await RouterHTTPClient.create({ policy: { freshnessMaxAgeMs: 24 * 60 * 60 * 1000 } });
+
+// Tinfoil's gateway, which serves only the models that are pinned.
+const gateway = await GatewayHTTPClient.create({
+  modelPins: new Map([["deepseek-v4-1-flash", { repo: "tinfoilsh/confidential-deepseek-v4-1-flash" }]]),
+});
 ```
 
 `new OpenAIClient(httpClient, options?, openaiOptions?)` takes an `EnclaveHTTPClient`, `RouterHTTPClient` or `GatewayHTTPClient` and does no network I/O. It sets the OpenAI base URL itself, after your OpenAI options, so a `baseURL`, `OPENAI_BASE_URL` in the environment and `dataResidency` have no effect: the base URL is `options.apiPath` (`/v1/` by default) under the HTTP client's EHBP proxy or the enclave's origin, or the gateway's URL for a gateway client, which takes no `apiPath`. An HTTP client's `close()` releases its pooled connections and refuses further use, and both kinds of client support `await using` (an OpenAI client closes the HTTP client under it).
@@ -67,7 +72,7 @@ const router = await RouterHTTPClient.create({ policy: { freshnessMaxAgeMs: 24 *
 | `{ kind: "embeddedConfig", bytes, name? }` | v3 collateral for exactly these config bytes, which must be a JSON config |
 | `{ kind: "eitherPin", repo, project }` | either of `repoPin` and `projectPin`, for the migration from v2 to v3 collateral |
 
-The router's trust is fixed to its repository, and the gateway client takes `modelPins` instead. Every HTTP client takes `policy`, the verifier's policy as plain data: `pinnedRegisters`, `freshnessMaxAgeMs` and `artifacts` (`{ kind: "endorsedArtifacts", freshnessKeys? }` or `{ kind: "embeddedArtifacts", runtime?, platform?, freshnessKeys? }`). The enclave and router clients take `transport`: `{ kind: "tls" }`, which pins each connection to the attested key, or `{ kind: "ehbp", proxyURL?, fetch? }`, which seals request and response bodies to the attested key so that they stay private through a proxy. The default depends on the platform:
+The router's trust is fixed to its repository, and the gateway client takes `modelPins` instead, which maps each model name to a `tinfoilsh/` repository and an optional `policy`. A gateway client serves only the models that it has pins for, so it requires at least one pin, and a request or `ensureVerified` for any other model, including one that a later catalog adds, fails with a `ConfigurationError` without contacting a replica. Every HTTP client takes `policy`, the verifier's policy as plain data: `pinnedRegisters`, `freshnessMaxAgeMs` and `artifacts` (`{ kind: "endorsedArtifacts", freshnessKeys? }` or `{ kind: "embeddedArtifacts", runtime?, platform?, freshnessKeys? }`). The enclave and router clients take `transport`: `{ kind: "tls" }`, which pins each connection to the attested key, or `{ kind: "ehbp", proxyURL?, fetch? }`, which seals request and response bodies to the attested key so that they stay private through a proxy. The default depends on the platform:
 
 | Platform | Default `transport` | `{ kind: "tls" }` |
 |---|---|---|
@@ -117,14 +122,14 @@ The relays aren't trusted with anything: the client verifies every document that
 
 Browsers use the EHBP transport, the default and the only one available there. The package's type declarations are shared with the Node build, so a browser project type-checks a few names that throw a `ConfigurationError` when called: `createWebSocket` and `pinnedWebSocketOptions` (a verified WebSocket pins the server certificate, which browsers don't expose to scripts), `createRealtimeWebSocket` (a realtime session runs over such a WebSocket), and `transport: { kind: "tls" }` (the TLS transport pins the server certificate too; EHBP seals request and response bodies to the enclave's key instead).
 
-Bun pins the TLS connection from Bun 1.4.0, the first release whose `fetch` checks the server certificate before it sends the request; on an older Bun the default transport is EHBP and `transport: { kind: "tls" }` is refused with a `ConfigurationError`. `createWebSocket` needs Bun 1.4.4 or later, the first release whose WebSocket runs the certificate check at all, and is refused on an older Bun before anything is sent. `pinnedWebSocketOptions` and `createRealtimeWebSocket` hand settings to the `ws` library, which Bun replaces with its own WebSocket, so they are available on Node only.
+Bun pins the TLS connection from Bun 1.4.0, the first release whose `fetch` checks the server certificate before it sends the request; on an older Bun the default transport is EHBP and `transport: { kind: "tls" }` is refused with a `ConfigurationError`. `createWebSocket` needs Bun 1.4.4 or later, the first release whose WebSocket runs the certificate check at all, and is refused on an older Bun before anything is sent. Bun's WebSocket takes none of the `ws` client's settings, so a non-empty `wsOptions` is a `ConfigurationError` there. `pinnedWebSocketOptions` and `createRealtimeWebSocket` hand settings to the `ws` library, which Bun replaces with its own WebSocket, so they are available on Node only.
 
 Deno pins the TLS connection from Deno 2.8.0, the first release whose Node compatibility layer runs the certificate check for both requests and WebSockets; on an older Deno the default transport is EHBP, and `transport: { kind: "tls" }` and `createWebSocket` are refused with a `ConfigurationError`.
 
 **WebSockets from the `openai` package aren't pinned.** The `openai` package's WebSocket classes (`ResponsesWS`, `LiveWS` and its sideband and forks, `OpenAIRealtimeWS`, `OpenAIRealtimeWebSocket` and `OpenAIRealtimeTranslationWS`) take an OpenAI client and open their own WebSocket. Given a Tinfoil client, they connect to its base URL with its API key or bearer token, but without the TLS pin, so the connection isn't bound to the verified enclave. With an enclave or router client:
 
 - For a realtime session, use `createRealtimeWebSocket` instead of `OpenAIRealtimeWS`. It always connects to the verified enclave, even when the client sends its requests through an EHBP proxy.
-- For a WebSocket that you drive yourself, `createWebSocket` opens a raw pinned WebSocket to a path on the verified enclave.
+- For a WebSocket that you drive yourself, `createWebSocket` opens a raw pinned WebSocket to a path on the verified enclave. Pass the handshake's headers, such as `Authorization` or `Origin`, in its `headers` option and its subprotocols in `protocols`. Its `wsOptions` (and those of `createRealtimeWebSocket`) take the `ws` client's other settings, such as `perMessageDeflate` or `maxPayload`; a setting that the pinned connection owns (`headers`, `origin`, `auth`, `protocol`, `finishRequest`, and those that choose the peer or check its certificate, such as `agent` or `ca`) is a `ConfigurationError` that names it, raised before anything is sent.
 - `ResponsesWS`, `LiveWS` and its sideband and forks, and `OpenAIRealtimeTranslationWS` have no Tinfoil replacement. On Node, pass them the pinned settings, for example `new ResponsesWS(client, await pinnedWebSocketOptions(client.httpClient))`. That pins the connection only when the HTTP client has no EHBP proxy, because the class connects to the client's base URL: then it connects to the enclave itself over `wss://`. Behind a proxy, the pinned handshake fails, because the proxy doesn't hold the enclave's key, and over an `http://` proxy there is no TLS to pin at all.
 
 `OpenAIRealtimeWebSocket` uses the runtime's built-in WebSocket and can't be pinned. The gateway client offers no pinned WebSocket, so don't give it to any of these classes.
@@ -167,7 +172,7 @@ The client verifies the enclave and seals each request body before calling it, a
 
 ## Errors
 
-The clients throw three error classes, each a `TinfoilError` with a `category`, and with the underlying failure as `cause` when there is one: `ConfigurationError` (invalid options, or a closed client), `NetworkError` (the enclave or its attestation couldn't be reached) and `AttestationError` (the enclave couldn't be trusted: when verification rejected the document, `cause` is the verifier's `VerificationError` whose `layer` names the rejecting check and whose `report` shows the step that failed and what the steps before it established; a key that doesn't match the attested one, or one the enclave no longer holds after rotation, is an `AttestationError` too). Switch on `category` (`"configuration"`, `"network"` or `"attestation"`), which is the stable discriminant; each error's `name` matches its class, for logs and stack traces. The factories, `ensureVerified()`, `reverify()` and an HTTP client's `fetch` throw them directly. A call through the OpenAI API surface, such as `client.chat.completions.create(...)`, goes through the OpenAI client's request loop, which catches whatever the attested `fetch` throws, retries the request `maxRetries` times (2 by default, with backoff; only a request whose body is a stream isn't retried) and then throws `APIConnectionError` with the client's error as its `cause`. So an enclave that fails to verify again on a request surfaces as an `APIConnectionError` whose `cause` is an `AttestationError`, after three verification attempts; pass `maxRetries: 0` to the client or the request to see the first failure. `findTinfoilError(err)` from `tinfoil` follows `cause` and returns the SDK error behind an OpenAI error, or undefined when there is none, as for an error from the API itself:
+The clients throw three error classes, each a `TinfoilError` with a `category`, and with the underlying failure as `cause` when there is one: `ConfigurationError` (invalid options, or a closed client), `NetworkError` (the enclave or its attestation couldn't be reached) and `AttestationError` (the enclave couldn't be trusted: when verification rejected the document, `cause` is the verifier's `VerificationError`, exported from `tinfoil`, whose `layer` names the rejecting check and whose `report` shows the step that failed and what the steps before it established; a key that doesn't match the attested one, or one the enclave no longer holds after rotation, is an `AttestationError` too). Switch on `category` (`"configuration"`, `"network"` or `"attestation"`), which is the stable discriminant; each error's `name` matches its class, for logs and stack traces. The factories, `ensureVerified()`, `reverify()` and an HTTP client's `fetch` throw them directly. A call through the OpenAI API surface, such as `client.chat.completions.create(...)`, goes through the OpenAI client's request loop, which catches whatever the attested `fetch` throws, retries the request `maxRetries` times (2 by default, with backoff; only a request whose body is a stream isn't retried) and then throws `APIConnectionError` with the client's error as its `cause`. So an enclave that fails to verify again on a request surfaces as an `APIConnectionError` whose `cause` is an `AttestationError`, after three verification attempts; pass `maxRetries: 0` to the client or the request to see the first failure. `findTinfoilError(err)` from `tinfoil` follows `cause` and returns the SDK error behind an OpenAI error, or undefined when there is none, as for an error from the API itself:
 
 ```typescript
 import { findTinfoilError } from "tinfoil";
@@ -186,23 +191,26 @@ try {
 
 ## Verification reports
 
-A router or enclave client's `ensureVerified()` returns the report of a verification that admits requests now, verifying first if needed, and `reverify()` verifies again and returns the new report: a `VerificationReport` from `@tinfoilsh/verifier`, whose `steps` show each layer's outcome (`passed`, or `skipped` for a layer that had nothing to check) and whose `verifiedFacts` hold what the enclave proved, such as `codeDigest`, `enclaveMeasurement` and `tlsPublicKeyFP`. `lastVerification()` returns the most recent attempt without network I/O: `{ report }` if it passed, or `{ error }` with the error that the client reported if it failed, so that a later failure replaces an earlier success. When the verifier rejected the document, that error is an `AttestationError` whose `cause` is the verifier's `VerificationError`, and its `report` shows the step that failed and the partial facts, such as the expected and measured registers side by side; a failed fetch is a `NetworkError` with no report. The `onVerification(host, report, error)` option is called once for every attempt, including the retry, a re-verification after an expiry or a key rotation, each router that discovery tries, and each gateway replica:
+A router or enclave client's `ensureVerified()` returns the report of a verification that admits requests now, verifying first if needed, and `reverify()` verifies again and returns the new report: a `VerificationReport`, whose `steps` show each layer's outcome (`passed`, or `skipped` for a layer that had nothing to check) and whose `verifiedFacts` hold what the enclave proved, such as `codeDigest`, `enclaveMeasurement` and `tlsPublicKeyFP`. `lastVerification()` returns the most recent attempt without network I/O: `{ report }` if it passed, or `{ error }` with the error that the client reported if it failed, so that a later failure replaces an earlier success. When the verifier rejected the document, that error is an `AttestationError` whose `cause` is the verifier's `VerificationError`, and its `report` shows the step that failed and the partial facts, such as the expected and measured registers side by side; a failed fetch is a `NetworkError` with no report. The `onVerification(host, attempt)` option is called once for every attempt, including the retry, a re-verification after an expiry or a key rotation, each router that discovery tries (though a probe that discovery abandons when its time budget or the caller's signal runs out, and that then passes, has no outcome and isn't reported), and each gateway replica. `attempt` is the same `{ report }` or `{ error }` that `lastVerification()` returns, so that checking one narrows the other, and a callback can store or forward the attempt as it is:
 
 ```typescript
-import { RouterHTTPClient } from "tinfoil";
-import { VerificationError } from "@tinfoilsh/verifier";
+import { RouterHTTPClient, VerificationError } from "tinfoil";
 
 const client = await RouterHTTPClient.create({
-  onVerification: (host, report, error) => {
-    if (report !== undefined) console.log(host, report.steps);
-    else if (error?.cause instanceof VerificationError) console.log(host, error.cause.report.failedStep());
-    else console.log(host, error);
+  onVerification: (host, attempt) => {
+    if (attempt.report !== undefined) console.log(host, attempt.report.steps);
+    else if (attempt.error.cause instanceof VerificationError) console.log(host, attempt.error.cause.report.failedStep());
+    else console.log(host, attempt.error);
   },
 });
 const last = client.lastVerification();
 ```
 
-A gateway client's `lastVerification()` returns one entry for each replica that it has tried to verify, with that replica's last attempt. A `verificationCheck` receives only the verified facts of a verification that passed.
+`tinfoil` exports the verifier's `VerificationError` and `REPORT_SCHEMA_VERSION`, and the types that a report holds: `VerificationReport`, `VerifiedFacts`, `PartialFacts`, `ExpectedFacts`, `MeasuredFacts`, `CPUEvidence`, `Step`, `StepStatus`, `Layer`, `VerificationMetadata`, the measurement and reference types that they name, and the JSON form's `VerificationReportJSON` and the `*JSON` types within it. Import them from `tinfoil` rather than from `@tinfoilsh/verifier`, so that an app needs no direct dependency on the verifier to show a verification. `tinfoil` pins an exact verifier version, and a direct dependency on any other version installs a second copy: `instanceof VerificationError` is then false for the errors that a client throws, and that copy's `VerificationReport` isn't the type that a client returns.
+
+A gateway client's `lastVerification()` returns one entry for each replica that it has tried to verify, with that replica's last attempt. A gateway client's `policy` applies to the pins that set none; a pin's own `policy` replaces it entirely. A `verificationCheck` receives only the verified facts of a verification that passed.
+
+`JSON.stringify(report)` writes a report in the JSON form that every Tinfoil SDK exports, to show it or to pass it on, for example to a browser; the [verifier's README](packages/verifier/README.md#the-json-form) describes the form. The JSON authorizes nothing: nothing reads it back into a report, and a client never binds a channel to a key read from it.
 
 ## Documentation
 

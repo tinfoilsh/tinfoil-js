@@ -98,6 +98,8 @@ export class GatewayTransport {
    */
   async ensureVerified(model: string, signal?: AbortSignal): Promise<VerificationReport> {
     if (this.#closed) throw closedError();
+    // An unpinned model is refused before the catalog is read, so it starts no fetch.
+    this.#config.policy.requirePin(model);
     const catalog = await this.#catalog(signal);
     const { hosts, replica } = this.#config.policy.resolve(model, catalog);
     let failure: unknown;
@@ -154,6 +156,7 @@ export class GatewayTransport {
     const original = init?.body !== undefined ? init.body : request?.body;
     const prepared = await prepare(shape, shape.headers, original, this.#config.secret, undefined, signal);
     const model = prepared.headers.get(MODEL_HEADER) ?? "";
+    this.#config.policy.requirePin(model);
     const catalog = await this.#catalog(signal);
     const { hosts, replica } = this.#config.policy.resolve(model, catalog);
     const prefix = prepared.headers.get(CACHE_PREFIX_HEADER) ?? "";
