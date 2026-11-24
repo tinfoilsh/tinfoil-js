@@ -25,7 +25,7 @@ import {
 } from "@tinfoilsh/verifier";
 import { AttestationError, ConfigurationError, messageOf, NetworkError, stripCategory, TinfoilError, withMessage } from "../errors.js";
 import type { AttestationFetcher, Fetch, OnVerificationAttempt, VerificationAttempt, VerificationCheck } from "../options.js";
-import { fetchDocument, fetchDocumentWith } from "./fetch.js";
+import { fetchDocument, fetchDocumentWith, fetchRelayedDocument } from "./fetch.js";
 
 export const VERIFICATION_RETRIES = 1;
 export const VERIFICATION_RETRY_DELAY_MS = 1_000;
@@ -40,8 +40,8 @@ export type VerifiedReport = VerificationReport & { readonly verifiedFacts: Veri
 export interface EnclaveConfig {
   /** The enclave, a host with an optional port. */
   readonly host: string;
-  /** When set, a host that fetches attestation from the enclave on the client's behalf. */
-  readonly relay?: string;
+  /** When set, the base URL, ending with `/`, of a relay that fetches attestation from the enclave on the client's behalf, such as the gateway's URL. */
+  readonly relayURL?: string;
   /** What the enclave is verified against. */
   readonly pin: Pin;
   /** The policy, which several enclaves can share; undefined selects the defaults. */
@@ -50,7 +50,7 @@ export interface EnclaveConfig {
   readonly verificationCheck?: VerificationCheck;
   /** Called with the outcome of each attempt to verify the enclave, through {@link Enclave.notify}. */
   readonly onVerificationAttempt?: OnVerificationAttempt;
-  /** How each attestation document is obtained; undefined fetches it directly, or through `relay`. */
+  /** How each attestation document is obtained; undefined fetches it directly, or through `relayURL`. */
   readonly fetchAttestation?: AttestationFetcher;
   /** Seams for tests: the fetch used for documents, the clock, the nonce source and the retry delay. */
   readonly fetch?: Fetch;
@@ -69,7 +69,7 @@ export class RejectedError extends AttestationError {
 
 export class Enclave {
   readonly #host: string;
-  readonly #relay: string | undefined;
+  readonly #relayURL: string | undefined;
   readonly #pin: Required<Pin>;
   readonly #verifier: Verifier;
   readonly #check: VerificationCheck | undefined;
@@ -82,7 +82,7 @@ export class Enclave {
 
   private constructor(config: EnclaveConfig, verifier: Verifier) {
     this.#host = config.host;
-    this.#relay = config.relay;
+    this.#relayURL = config.relayURL;
     this.#pin = Object.freeze({ repo: config.pin.repo ?? "", project: config.pin.project ?? "" });
     this.#verifier = verifier;
     this.#check = config.verificationCheck;
@@ -185,9 +185,11 @@ export class Enclave {
   async #fetchVerification(signal: AbortSignal | undefined): Promise<VerifiedReport> {
     const nonce = this.#nonce();
     const doc =
-      this.#fetchAttestation === undefined
-        ? await fetchDocument(this.#host, this.#relay, nonce, this.#fetch, signal)
-        : await fetchDocumentWith(this.#fetchAttestation, this.#host, nonce, signal);
+      this.#fetchAttestation !== undefined
+        ? await fetchDocumentWith(this.#fetchAttestation, this.#host, nonce, signal)
+        : this.#relayURL !== undefined
+          ? await fetchRelayedDocument(this.#relayURL, this.#host, nonce, this.#fetch, signal)
+          : await fetchDocument(this.#host, nonce, this.#fetch, signal);
     let report: VerificationReport;
     try {
       report = await this.#verifier.verifyV3At(doc, nonce, this.#pin, this.#clock());

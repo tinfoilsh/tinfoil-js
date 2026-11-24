@@ -293,10 +293,10 @@ describe("the gateway in a browser", () => {
     const peerFetch = fetchOf(peer);
     const gatewaySeams = { ...seams(), catalogFetch: peerFetch, documentFetch: peerFetch };
     const modelPins = new Map([["test-model", { repo: "tinfoilsh/test" }]]);
-    const http = await createGatewayHTTPClient({ modelPins, url: "https://gateway.example/v1/" }, { ...gatewaySeams, verifier: verifier(peer.publicKeyHex) });
+    const http = await createGatewayHTTPClient({ modelPins, url: "https://gateway.example/" }, { ...gatewaySeams, verifier: verifier(peer.publicKeyHex) });
     expect(http).toBeInstanceOf(GatewayHTTPClient);
     expect(await http.models()).toEqual(["test-model"]);
-    const ai = await openAIOver(createGatewayHTTPClient({ modelPins, url: "https://gateway.example/v1/" }, { ...gatewaySeams, verifier: verifier(peer.publicKeyHex) }), { bearerToken: "jwt" });
+    const ai = await openAIOver(createGatewayHTTPClient({ modelPins, url: "https://gateway.example/" }, { ...gatewaySeams, verifier: verifier(peer.publicKeyHex) }), { bearerToken: "jwt" });
     const reply = await ai.chat.completions.create({ model: "test-model", messages: [{ role: "user", content: "hi" }] });
     expect(reply.choices[0]!.message.content).toBe("sealed");
     const last = peer.seen[peer.seen.length - 1]!;

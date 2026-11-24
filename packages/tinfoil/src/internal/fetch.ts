@@ -15,21 +15,14 @@ export const MAX_ATTESTATION_BYTES = 32 << 20;
 const MAX_REDIRECTS = 10;
 
 /**
- * Where the attestation document of `host` is fetched with `nonce`: from the
- * host itself, or from `relay`, which forwards the request to the host, when
- * a relay is given. Both are a host with an optional port, not a URL.
+ * Where the attestation document of `host`, a host with an optional port, is
+ * fetched with `nonce`: from the host itself.
  */
-export function attestationURL(host: string, relay: string | undefined, nonce: Uint8Array): string {
+export function attestationURL(host: string, nonce: Uint8Array): string {
   if (host === "") throw new ConfigurationError("enclave host is required");
   if (nonce.length !== NONCE_SIZE) throw new ConfigurationError(`nonce must be ${NONCE_SIZE} bytes, got ${nonce.length}`);
-  for (const authority of [host, relay]) {
-    if (authority !== undefined && authority !== "" && !isAuthority(authority)) {
-      throw new ConfigurationError(`invalid host ${JSON.stringify(authority)}: want a host with an optional port`);
-    }
-  }
-  const hex = toHex(nonce);
-  if (relay === undefined || relay === "") return `https://${host}${ATTESTATION_ENDPOINT}?nonce=${hex}`;
-  return `https://${relay}${ATTESTATION_ENDPOINT}?nonce=${hex}&enclave=${encodeURIComponent(host)}`;
+  if (!isAuthority(host)) throw new ConfigurationError(`invalid host ${JSON.stringify(host)}: want a host with an optional port`);
+  return `https://${host}${ATTESTATION_ENDPOINT}?nonce=${toHex(nonce)}`;
 }
 
 /**
@@ -39,8 +32,8 @@ export function attestationURL(host: string, relay: string | undefined, nonce: U
  * else that fails is a {@link NetworkError}. `signal` ends the fetch early;
  * the timeout applies either way.
  */
-export async function fetchDocument(host: string, relay: string | undefined, nonce: Uint8Array, fetchImpl: Fetch = fetch, signal?: AbortSignal): Promise<Uint8Array> {
-  return fetchDocumentAt(attestationURL(host, relay, nonce), fetchImpl, signal);
+export async function fetchDocument(host: string, nonce: Uint8Array, fetchImpl: Fetch = fetch, signal?: AbortSignal): Promise<Uint8Array> {
+  return fetchDocumentAt(attestationURL(host, nonce), fetchImpl, signal);
 }
 
 /**
@@ -69,7 +62,7 @@ async function fetchDocumentAt(target: string, fetchImpl: Fetch, signal: AbortSi
  * everything else that fails is a {@link NetworkError}.
  */
 export async function fetchRelayedDocument(relayURL: string, host: string, nonce: Uint8Array, fetchImpl: Fetch, signal?: AbortSignal): Promise<Uint8Array> {
-  attestationURL(host, undefined, nonce);
+  attestationURL(host, nonce);
   const target = `${relayURL.replace(/\/$/, "")}${ATTESTATION_ENDPOINT}?nonce=${toHex(nonce)}&enclave=${encodeURIComponent(host)}`;
   return fetchDocumentAt(target, fetchImpl, signal);
 }

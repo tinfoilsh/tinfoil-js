@@ -3,7 +3,7 @@
  * {@link OpenAIClient}, takes any of the SDK's three HTTP clients, sends
  * through its attested `fetch`, and sets the OpenAI client's base URL
  * itself: the API path joined under the HTTP client's EHBP proxy or the
- * enclave's origin, or the gateway's URL as given. It applies the caller's
+ * enclave's origin, or under the gateway's URL. It applies the caller's
  * OpenAI options first, then sets `fetch` and `baseURL` so that the options
  * can't replace them, and keeps both fixed afterwards, with `httpClient`
  * beside them: the properties can't be assigned, and `withOptions` doesn't
@@ -58,13 +58,12 @@ export type AttestedHTTPClient = EnclaveHTTPClient | RouterHTTPClient | GatewayH
 /** Configures an {@link OpenAIClient}: the part of where requests go that the caller may choose. */
 export interface OpenAIOptions {
   /**
-   * The path of the API, joined under the HTTP client's EHBP proxy or, when
-   * there is none, under the enclave's origin; undefined or "" selects
-   * `/v1/`. It must be an absolute path (starting with `/` but not `//`),
-   * without a query, a fragment, an encoded slash, or a "." or ".." segment,
-   * percent-encoded or not; anything else is a {@link ConfigurationError}. A
-   * gateway client's URL already carries the API path, so an `apiPath` with
-   * one is a {@link ConfigurationError}.
+   * The path of the API, joined under the HTTP client's base URL: the EHBP
+   * proxy or, when there is none, the enclave's origin, or the gateway's
+   * URL; undefined or "" selects `/v1/`. It must be an absolute path
+   * (starting with `/` but not `//`), without a query, a fragment, an
+   * encoded slash, or a "." or ".." segment, percent-encoded or not;
+   * anything else is a {@link ConfigurationError}.
    */
   readonly apiPath?: string;
 }
@@ -215,8 +214,8 @@ function inherit(client: OpenAI, options: Partial<OpenAIClientOptions>): OpenAIC
  * itself. `H` is the type of the HTTP client, so `httpClient` keeps it.
  *
  * The base URL is `options.apiPath` (`/v1/` by default) joined under the
- * HTTP client's EHBP proxy, with or without a trailing slash, or under the
- * enclave's HTTPS origin; for a gateway client it is the gateway's URL. The
+ * HTTP client's EHBP proxy, with or without a trailing slash, under the
+ * enclave's HTTPS origin, or under a gateway client's URL. The
  * client sets it after the caller's OpenAI options, so a `baseURL` among
  * them, `OPENAI_BASE_URL` in the environment and `dataResidency` have no
  * effect; set `apiPath` to change the API path.

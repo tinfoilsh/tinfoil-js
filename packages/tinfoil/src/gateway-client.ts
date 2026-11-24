@@ -12,6 +12,7 @@ import { ConfigurationError } from "./errors.js";
 import { resolveUserCacheSecret } from "./internal/cachesecret.js";
 import { registerRoute } from "./internal/api-path.js";
 import { asyncDispose } from "./internal/dispose.js";
+import { isAuthority } from "./internal/fetch.js";
 import { fetchCatalogWith } from "./internal/gateway/catalog.js";
 import { GatewayPolicy } from "./internal/gateway/policy.js";
 import { GatewayTransport } from "./internal/gateway/transport.js";
@@ -20,11 +21,12 @@ import { withOriginRestriction } from "./internal/transport/origin.js";
 import type { CallOptions, Catalog, Fetch, GatewayOptions, ReplicaVerification } from "./options.js";
 
 /**
- * Tinfoil's gateway, used when no `url` option is given.
+ * Tinfoil's gateway, used when no `url` option is given: its origin, under
+ * which an `OpenAIClient` joins its API path.
  *
  * @experimental The gateway route is new; this API may change without a major version.
  */
-export const DEFAULT_GATEWAY_URL = "https://inference-gateway.tinfoil.sh/v1/";
+export const DEFAULT_GATEWAY_URL = "https://inference-gateway.tinfoil.sh/";
 
 /** @internal Seams for tests: the enclave client's, the catalog fetch, and the secret resolution. */
 export interface GatewayClientSeams extends Omit<EnclaveClientSeams, "tls"> {
@@ -61,7 +63,6 @@ export async function createGatewayHTTPClient(options: GatewayOptions, seams: Ga
   const secret = (seams.resolveSecret ?? resolveUserCacheSecret)(options.userCacheSecret);
   const transport = new GatewayTransport({
     baseURL,
-    relay: base.host,
     catalog: options.catalog,
     policy,
     verificationCheck: options.verificationCheck,
@@ -92,7 +93,14 @@ export async function createGatewayHTTPClient(options: GatewayOptions, seams: Ga
 export class GatewayHTTPClient {
   /** As {@link EnclaveHTTPClient.fetch}. */
   readonly fetch: Fetch;
-  /** The gateway's base URL, which requests are sent to. Always ends with `/`, so a relative path resolves against it with `new URL(path, client.baseURL)`. */
+  /**
+   * The gateway's URL, the `url` option or Tinfoil's gateway by default:
+   * its origin, or the URL that it is mounted under, never the API path.
+   * Requests are sent under it, and an `OpenAIClient` joins its API path
+   * under it, as under an enclave client's EHBP proxy. Always ends with `/`,
+   * so a relative path resolves against it with
+   * `new URL(path, client.baseURL)`.
+   */
   readonly baseURL: string;
   readonly #transport: GatewayTransport;
 
@@ -196,12 +204,14 @@ export class GatewayHTTPClient {
 }
 
 /**
- * Reads the catalog of the gateway at `host`, keeping only models with
+ * Reads the catalog of the gateway at the root of `host`, a host with an
+ * optional port, from `https://{host}/catalog`, keeping only models with
  * replicas of a bare `tinfoilsh/` repository, without a tag or digest. The
  * catalog is untrusted: replicas are verified when they are used.
  *
  * @experimental The gateway route is new; this API may change without a major version.
  */
-export function fetchCatalog(host: string, options?: CallOptions): Promise<Catalog> {
-  return fetchCatalogWith(host, (input, init) => fetch(input, init), options?.signal);
+export async function fetchCatalog(host: string, options?: CallOptions): Promise<Catalog> {
+  if (!isAuthority(host)) throw new ConfigurationError(`invalid gateway host ${JSON.stringify(host)}: want a host with an optional port`);
+  return fetchCatalogWith(`https://${host}/`, (input, init) => fetch(input, init), options?.signal);
 }

@@ -29,10 +29,12 @@ export const MAX_REROUTED = 1024;
 
 /** @experimental The gateway route is new; this API may change without a major version. */
 export interface GatewayTransportConfig {
-  /** Where requests are sent, and the gateway host that attestation is fetched through. */
+  /**
+   * The gateway's URL, ending with `/`: requests are sent under it, and the
+   * catalog and the attestation relay join under it.
+   */
   readonly baseURL: string;
-  readonly relay: string;
-  /** Read on every request; undefined fetches it from the relay on first use and refreshes it. */
+  /** Read on every request; undefined fetches it from the gateway on first use and refreshes it. */
   readonly catalog?: () => Catalog;
   readonly policy: GatewayPolicy;
   readonly verificationCheck?: VerificationCheck;
@@ -75,7 +77,7 @@ export class GatewayTransport {
       const read = config.catalog;
       this.#catalog = () => Promise.resolve(read());
     } else {
-      const cache = new CatalogCache((signal) => fetchCatalogWith(config.relay, config.catalogFetch ?? ((input, init) => fetch(input, init)), signal), config.clock);
+      const cache = new CatalogCache((signal) => fetchCatalogWith(config.baseURL, config.catalogFetch ?? ((input, init) => fetch(input, init)), signal), config.clock);
       this.#catalog = (signal) => cache.get(signal);
     }
     this.fetch = (input, init) => this.#send(input, init);
@@ -259,7 +261,8 @@ export class GatewayTransport {
     const c = this.#config;
     const enclave = await Enclave.create({
       host: r.host,
-      relay: c.relay,
+      // The gateway relays attestation under its own URL.
+      relayURL: c.baseURL,
       // Tinfoil owns model names in both namespaces.
       pin: { repo: r.ref, project: r.ref },
       verifier: c.policy.verifierFor(r),

@@ -7,28 +7,28 @@
  * @experimental The gateway route is new; this API may change without a major version.
  */
 import { parseReference } from "@tinfoilsh/verifier";
-import { ConfigurationError, messageOf, NetworkError, TinfoilError } from "../../errors.js";
+import { messageOf, NetworkError, TinfoilError } from "../../errors.js";
 import type { Catalog, CatalogEntry, Fetch } from "../../options.js";
 import { getFollowingRedirects, isAuthority, readBounded } from "../fetch.js";
 
-export const CATALOG_PATH = "/catalog";
+export const CATALOG_PATH = "catalog";
 export const CATALOG_FETCH_TIMEOUT_MS = 10_000;
 export const CATALOG_REFRESH_INTERVAL_MS = 10_000;
 export const MAX_CATALOG_BYTES = 2 << 20;
 export const TRUSTED_REPO_OWNER = "tinfoilsh/";
 
 /**
- * Reads the catalog of the gateway at `host` with `fetchImpl`, keeping only
- * models with replicas of a bare `tinfoilsh/` repository, without a tag or
- * digest. Anything but a 200 response, or a body over the size cap or not
+ * Reads the catalog of the gateway at `gatewayURL`, a validated base URL
+ * ending with `/` (its origin, or the URL that it is mounted under), from
+ * `catalog` joined under it, with `fetchImpl`, keeping only models with
+ * replicas of a bare `tinfoilsh/` repository, without a tag or digest. Anything but a 200 response, or a body over the size cap or not
  * a JSON object of entries, is a {@link NetworkError}; a call `signal`
  * aborts rejects with the signal's own reason.
  *
  * @experimental The gateway route is new; this API may change without a major version.
  */
-export async function fetchCatalogWith(host: string, fetchImpl: Fetch, signal?: AbortSignal): Promise<Catalog> {
-  if (!isAuthority(host)) throw new ConfigurationError(`invalid gateway host ${JSON.stringify(host)}: want a host with an optional port`);
-  const url = `https://${host}${CATALOG_PATH}`;
+export async function fetchCatalogWith(gatewayURL: string, fetchImpl: Fetch, signal?: AbortSignal): Promise<Catalog> {
+  const url = `${gatewayURL.endsWith("/") ? gatewayURL : `${gatewayURL}/`}${CATALOG_PATH}`;
   let response: Response;
   try {
     response = await getFollowingRedirects(url, fetchImpl, signal, CATALOG_FETCH_TIMEOUT_MS);

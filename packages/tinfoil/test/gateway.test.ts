@@ -90,18 +90,18 @@ describe("catalog", () => {
         calls.push(String(input));
         return new Response(body, { status, headers });
       };
-    const catalog = await fetchCatalogWith("gateway.example", serve(200, '{"m":{"repo":"tinfoilsh/m","hosts":["a.example"]}}'));
-    expect(calls).toEqual(["https://gateway.example/catalog"]);
-    await expect(fetchCatalogWith("gateway.example/path", serve(200, "{}"))).rejects.toBeInstanceOf(ConfigurationError);
-    await expect(fetchCatalogWith("", serve(200, "{}"))).rejects.toBeInstanceOf(ConfigurationError);
-    expect(calls).toHaveLength(1);
+    const catalog = await fetchCatalogWith("https://gateway.example/", serve(200, '{"m":{"repo":"tinfoilsh/m","hosts":["a.example"]}}'));
     expect([...catalog.keys()]).toEqual(["m"]);
-    await expect(fetchCatalogWith("gateway.example", serve(503, "down"))).rejects.toBeInstanceOf(NetworkError);
-    await expect(fetchCatalogWith("gateway.example", serve(201, "{}"))).rejects.toBeInstanceOf(NetworkError);
-    await expect(fetchCatalogWith("gateway.example", serve(302, "", { location: "http://gateway.example/catalog" }))).rejects.toBeInstanceOf(NetworkError);
-    await expect(fetchCatalogWith("gateway.example", serve(200, new Uint8Array(MAX_CATALOG_BYTES + 1).fill(0x20)))).rejects.toThrow(/exceeds/);
+    // A gateway mounted under a path serves its catalog under the mount, with or without a trailing slash.
+    await fetchCatalogWith("https://gateway.example/mount", serve(200, "{}"));
+    await fetchCatalogWith("https://gateway.example/mount/", serve(200, "{}"));
+    expect(calls).toEqual(["https://gateway.example/catalog", "https://gateway.example/mount/catalog", "https://gateway.example/mount/catalog"]);
+    await expect(fetchCatalogWith("https://gateway.example/", serve(503, "down"))).rejects.toBeInstanceOf(NetworkError);
+    await expect(fetchCatalogWith("https://gateway.example/", serve(201, "{}"))).rejects.toBeInstanceOf(NetworkError);
+    await expect(fetchCatalogWith("https://gateway.example/", serve(302, "", { location: "http://gateway.example/catalog" }))).rejects.toBeInstanceOf(NetworkError);
+    await expect(fetchCatalogWith("https://gateway.example/", serve(200, new Uint8Array(MAX_CATALOG_BYTES + 1).fill(0x20)))).rejects.toThrow(/exceeds/);
     await expect(
-      fetchCatalogWith("gateway.example", async () => {
+      fetchCatalogWith("https://gateway.example/", async () => {
         throw new TypeError("fetch failed");
       }),
     ).rejects.toBeInstanceOf(NetworkError);
@@ -494,8 +494,7 @@ describe("GatewayTransport", () => {
   function transport(overrides: Partial<GatewayTransportConfig> & { policy: GatewayPolicy; gatewayFetch: Fetch; documentFetch?: Fetch }): GatewayTransport {
     const { gatewayFetch, ...rest } = overrides;
     return new GatewayTransport({
-      baseURL: "https://gateway.example/v1/",
-      relay: "gateway.example",
+      baseURL: "https://gateway.example/",
       catalog: () => catalogOf({ [MODEL]: { repo: "tinfoilsh/test", hosts: HOSTS } }),
       secret: "test-secret",
       documentFetch: documentsNamingHosts,

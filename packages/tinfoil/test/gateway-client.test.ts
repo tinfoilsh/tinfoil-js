@@ -16,7 +16,9 @@ import { expectWithOptionsRefusesTransportOptions } from "./helpers/transport-op
 import { openAIOver } from "./helpers/openai.js";
 import { verifiedReport } from "./helpers/report.js";
 
-const GATEWAY_URL = "https://gateway.example/v1/";
+const GATEWAY_URL = "https://gateway.example/";
+/** Where an OpenAI client over the gateway sends its requests: the default API path under the gateway's URL. */
+const API_URL = `${GATEWAY_URL}v1/`;
 const CATALOG = { "test-model": { repo: "tinfoilsh/test", hosts: ["replica-a.example", "replica-b.example"] }, other: { repo: "tinfoilsh/other", hosts: ["o.example"] } };
 /** Pins both of the catalog's models to the repositories that it names. */
 const PINS = new Map([["test-model", { repo: "tinfoilsh/test" }], ["other", { repo: "tinfoilsh/other" }]]);
@@ -67,9 +69,11 @@ function completion(content: string): unknown {
 
 beforeAll(async () => {
   gateway = await startEhbpServer((seen) => {
-    if (seen.path === "/catalog") return { headers: { "content-type": "application/json" }, body: JSON.stringify(CATALOG) };
-    if (seen.path.startsWith("/.well-known/tinfoil-attestation")) return { headers: { "content-type": "application/octet-stream" }, body: new Uint8Array([1]) };
-    if (seen.path === "/v1/chat/completions" && seen.headers["x-raw"] === undefined) {
+    // A gateway mounted under /mount serves the same endpoints under that path.
+    const path = seen.path.replace(/^\/mount(?=\/)/, "");
+    if (path === "/catalog") return { headers: { "content-type": "application/json" }, body: JSON.stringify(CATALOG) };
+    if (path.startsWith("/.well-known/tinfoil-attestation")) return { headers: { "content-type": "application/octet-stream" }, body: new Uint8Array([1]) };
+    if (path === "/v1/chat/completions" && seen.headers["x-raw"] === undefined) {
       return { headers: { "content-type": "application/json" }, body: JSON.stringify(completion(seen.sealed ? "sealed" : "plain")) };
     }
     return { headers: { "content-type": "text/plain" }, body: new TextDecoder().decode(seen.body) };
@@ -104,7 +108,7 @@ describe("GatewayHTTPClient.create", () => {
     }
     await expect(GatewayHTTPClient.create(undefined as unknown as GatewayOptions)).rejects.toBeInstanceOf(ConfigurationError);
     expect(s.calls).toEqual([]);
-    expect(DEFAULT_GATEWAY_URL).toBe("https://inference-gateway.tinfoil.sh/v1/");
+    expect(DEFAULT_GATEWAY_URL).toBe("https://inference-gateway.tinfoil.sh/");
   });
 
   it("fetches the catalog before returning and reports an unreachable gateway as a network error", async () => {
@@ -124,9 +128,9 @@ describe("GatewayHTTPClient.create", () => {
     expect(client.replicas()).toEqual([]);
     const supplied = await createGatewayHTTPClient({ modelPins: PINS, url: GATEWAY_URL, catalog: () => new Map() as Catalog }, { ...seams(), verifier: verifier(gateway.publicKeyHex) });
     expect(await supplied.models()).toEqual([]);
-    const bare = await createGatewayHTTPClient({ modelPins: PINS, url: "https://gateway.example/v1" }, { ...seams(), verifier: verifier(gateway.publicKeyHex) });
+    const bare = await createGatewayHTTPClient({ modelPins: PINS, url: "https://gateway.example" }, { ...seams(), verifier: verifier(gateway.publicKeyHex) });
     expect(bare.baseURL).toBe(GATEWAY_URL);
-    const padded = await createGatewayHTTPClient({ modelPins: PINS, url: "  https://gateway.example/v1  " }, { ...seams(), verifier: verifier(gateway.publicKeyHex) });
+    const padded = await createGatewayHTTPClient({ modelPins: PINS, url: "  https://gateway.example  " }, { ...seams(), verifier: verifier(gateway.publicKeyHex) });
     expect(padded.baseURL).toBe(GATEWAY_URL);
     await expect(bare.fetch("https://other.example/v1/models")).rejects.toThrow(/client is bound/);
   });
@@ -156,7 +160,7 @@ describe("GatewayHTTPClient", () => {
 
   it("verifies a replica through the gateway on first use and seals the request to it, with the cache scope applied", async () => {
     const body = '{"model":"test-model","messages":[{"role":"user","content":"hi"}],"seed":9223372036854775807}';
-    const res = await client.fetch(`${GATEWAY_URL}chat/completions`, { method: "POST", body, headers: { "content-type": "application/json", "x-raw": "1", authorization: "Bearer k" } });
+    const res = await client.fetch(`${API_URL}chat/completions`, { method: "POST", body, headers: { "content-type": "application/json", "x-raw": "1", authorization: "Bearer k" } });
     expect(res.status).toBe(200);
     const received = await res.text();
     expect(received.startsWith(body.slice(0, -1))).toBe(true);
@@ -200,24 +204,24 @@ describe("GatewayHTTPClient", () => {
     expect(c.replicas()).toHaveLength(1);
     await expect(c.models()).rejects.toThrow(/client is closed/);
     await expect(c.ensureVerified("test-model")).rejects.toBeInstanceOf(ConfigurationError);
-    await expect(c.fetch(`${GATEWAY_URL}chat/completions`, { method: "POST", body: '{"model":"test-model"}', headers: { "content-type": "application/json" } })).rejects.toThrow(/client is closed/);
+    await expect(c.fetch(`${API_URL}chat/completions`, { method: "POST", body: '{"model":"test-model"}', headers: { "content-type": "application/json" } })).rejects.toThrow(/client is closed/);
     expect(own.calls).toHaveLength(fetched);
   });
 
   it("refuses other origins, upgrades, and models the policy doesn't serve", async () => {
     await expect(client.fetch("https://other.example/v1/models")).rejects.toThrow(/client is bound/);
-    await expect(client.fetch(`${GATEWAY_URL}realtime`, { headers: { upgrade: "websocket" } })).rejects.toThrow(/protocol upgrade/);
-    await expect(client.fetch(`${GATEWAY_URL}chat/completions`, { method: "POST", body: '{"model":"unknown"}', headers: { "content-type": "application/json" } })).rejects.toBeInstanceOf(ConfigurationError);
+    await expect(client.fetch(`${API_URL}realtime`, { headers: { upgrade: "websocket" } })).rejects.toThrow(/protocol upgrade/);
+    await expect(client.fetch(`${API_URL}chat/completions`, { method: "POST", body: '{"model":"unknown"}', headers: { "content-type": "application/json" } })).rejects.toBeInstanceOf(ConfigurationError);
     // "other" is in the catalog, but this client has no pin for it.
     expect(await client.models()).toEqual(["test-model"]);
     const before = s.calls.length;
     const sealed = gateway.seen.length;
     await expect(client.ensureVerified("other")).rejects.toThrow(/model "other" is not pinned/);
-    await expect(client.fetch(`${GATEWAY_URL}chat/completions`, { method: "POST", body: '{"model":"other"}', headers: { "content-type": "application/json" } })).rejects.toThrow(/model "other" is not pinned/);
+    await expect(client.fetch(`${API_URL}chat/completions`, { method: "POST", body: '{"model":"other"}', headers: { "content-type": "application/json" } })).rejects.toThrow(/model "other" is not pinned/);
     expect(s.calls).toHaveLength(before);
     expect(gateway.seen).toHaveLength(sealed);
     expect(client.replicas().every((r) => r.pinnedModel === "test-model")).toBe(true);
-    await expect(client.fetch(`${GATEWAY_URL}models`)).rejects.toThrow(/model "" is not pinned/);
+    await expect(client.fetch(`${API_URL}models`)).rejects.toThrow(/model "" is not pinned/);
     const swapped = await createGatewayHTTPClient(
       { url: GATEWAY_URL, modelPins: new Map([["other", { repo: "tinfoilsh/pinned-elsewhere" }]]) },
       { ...seams(), verifier: verifier(gateway.publicKeyHex) });
@@ -232,7 +236,7 @@ describe("GatewayHTTPClient", () => {
           if (checked.length === 1) throw new Error("not this replica");
         } },
       { ...seams(), verifier: verifier(gateway.publicKeyHex) });
-    const res = await c.fetch(`${GATEWAY_URL}chat/completions`, { method: "POST", body: '{"model":"test-model"}', headers: { "content-type": "application/json", "x-raw": "1" } });
+    const res = await c.fetch(`${API_URL}chat/completions`, { method: "POST", body: '{"model":"test-model"}', headers: { "content-type": "application/json", "x-raw": "1" } });
     expect(res.status).toBe(200);
     expect(checked).toHaveLength(2);
     // Both replicas were tried: the rejected one keeps its check's error, and the one sealed to its report.
@@ -255,7 +259,7 @@ describe("GatewayHTTPClient", () => {
       },
     });
     const c = await createGatewayHTTPClient({ modelPins: PINS, url: GATEWAY_URL, verificationCheck: (v) => void checked.push(v.hpkePublicKey!) }, { ...failing, verifier: verifier(gateway.publicKeyHex) });
-    const res = await c.fetch(`${GATEWAY_URL}chat/completions`, { method: "POST", body: '{"model":"test-model"}', headers: { "content-type": "application/json", "x-raw": "1" } });
+    const res = await c.fetch(`${API_URL}chat/completions`, { method: "POST", body: '{"model":"test-model"}', headers: { "content-type": "application/json", "x-raw": "1" } });
     expect(res.status).toBe(200);
     expect(c.replicas().filter((r) => r.lastAttempt.report !== undefined).map((r) => r.host)).toEqual(["replica-b.example"]);
     // replica-a, if it was tried first, keeps the failure of its attestation fetch.
@@ -277,12 +281,12 @@ describe("GatewayHTTPClient with a network fetch", () => {
     expect(s.calls).toEqual(["https://gateway.example/catalog"]);
     expect(network.seen).toHaveLength(0);
 
-    const res = await client.fetch(`${GATEWAY_URL}chat/completions`, { method: "POST", body: '{"model":"test-model","messages":[{"role":"user","content":"hi"}]}', headers: { "content-type": "application/json", "x-raw": "1", authorization: "Bearer k" } });
+    const res = await client.fetch(`${API_URL}chat/completions`, { method: "POST", body: '{"model":"test-model","messages":[{"role":"user","content":"hi"}]}', headers: { "content-type": "application/json", "x-raw": "1", authorization: "Bearer k" } });
     expect(JSON.parse(await res.text())).toMatchObject({ model: "test-model", cache_salt: expect.stringMatching(/^[A-Za-z0-9_-]{43}$/) });
     expect(s.calls.filter((c) => c.includes("tinfoil-attestation"))).toHaveLength(1);
     expect(network.seen).toHaveLength(1);
     const sealed = network.seen[0]!;
-    expect(sealed.url).toBe(`${GATEWAY_URL}chat/completions`);
+    expect(sealed.url).toBe(`${API_URL}chat/completions`);
     expect(sealed.headers.get("x-tinfoil-model")).toBe("test-model");
     expect(sealed.headers.get("authorization")).toBe("Bearer k");
     expect(sealed.body).not.toContain("messages");
@@ -294,7 +298,7 @@ describe("OpenAIClient<GatewayHTTPClient>", () => {
   it("backs an OpenAI client on the gateway URL with the option's secret", async () => {
     const ai = await openAIOver(createGatewayHTTPClient({ modelPins: PINS, url: GATEWAY_URL, userCacheSecret: "option-secret" }, { ...seams({ resolveSecret: undefined }), verifier: verifier(gateway.publicKeyHex) }), { apiKey: "k" });
     expect(ai).toBeInstanceOf(OpenAIClient);
-    expect(ai.baseURL).toBe(GATEWAY_URL);
+    expect(ai.baseURL).toBe(API_URL);
     expect(ai.httpClient).toBeInstanceOf(GatewayHTTPClient);
     const reply = await ai.chat.completions.create({ model: "test-model", messages: [{ role: "user", content: "hi" }] });
     expect(reply.choices[0]!.message.content).toBe("sealed");
@@ -306,8 +310,48 @@ describe("OpenAIClient<GatewayHTTPClient>", () => {
     expect(sent.user_cache_secret).toBeUndefined();
     expect(() => new OpenAIClient(Symbol("x") as never)).toThrow(ConfigurationError);
     expectWithOptionsRefusesTransportOptions(ai);
-    // The gateway's URL already carries the API path, so an API path of the caller's own is refused.
-    expect(() => new OpenAIClient(ai.httpClient, { apiPath: "/v1/" }, { apiKey: "k" })).toThrow(/a gateway client's URL already carries the API path/);
-    expect(new OpenAIClient(ai.httpClient, { apiPath: "" }, { apiKey: "k" }).baseURL).toBe(GATEWAY_URL);
+    // The API path joins under the gateway's URL, as under an EHBP proxy.
+    expect(new OpenAIClient(ai.httpClient, { apiPath: "/openai/v1" }, { apiKey: "k" }).baseURL).toBe(`${GATEWAY_URL}openai/v1/`);
+  });
+});
+
+describe("a gateway mounted under a path", () => {
+  it("fetches the catalog, relays attestation and sends the OpenAI client's requests under the mount, with or without a trailing slash", async () => {
+    for (const url of ["https://gateway.example/mount", "https://gateway.example/mount/"]) {
+      const s = seams();
+      const network = recordingFetch(toLocal());
+      const ai = await openAIOver(createGatewayHTTPClient({ modelPins: PINS, url, fetch: network.fetch }, { ...s, ehbp: undefined, verifier: verifier(gateway.publicKeyHex) }), { apiKey: "k" });
+      expect(ai.httpClient.baseURL).toBe("https://gateway.example/mount/");
+      expect(ai.baseURL).toBe("https://gateway.example/mount/v1/");
+      const reply = await ai.chat.completions.create({ model: "test-model", messages: [{ role: "user", content: "hi" }] });
+      expect(reply.choices[0]!.message.content).toBe("sealed");
+      const attestation = s.calls.find((c) => c.includes("tinfoil-attestation"))!;
+      expect(s.calls[0]).toBe("https://gateway.example/mount/catalog");
+      expect(attestation).toMatch(/^https:\/\/gateway\.example\/mount\/\.well-known\/tinfoil-attestation\?nonce=[0-9a-f]{64}&enclave=replica-[ab]\.example$/);
+      expect(network.seen.map((r) => r.url)).toEqual(["https://gateway.example/mount/v1/chat/completions"]);
+      expect(gateway.seen[gateway.seen.length - 1]!.path).toBe("/mount/v1/chat/completions");
+      expect(new OpenAIClient(ai.httpClient, { apiPath: "/openai/v1" }, { apiKey: "k" }).baseURL).toBe("https://gateway.example/mount/openai/v1/");
+      await ai.httpClient.close();
+    }
+  });
+
+  it("reads the root catalog of a bare host with fetchCatalog", async () => {
+    const calls: string[] = [];
+    const original = globalThis.fetch;
+    const local = new URL(gateway.origin);
+    globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+      const url = new URL(String(input instanceof Request ? input.url : input));
+      calls.push(url.toString());
+      url.protocol = local.protocol;
+      url.host = local.host;
+      return original(url, init);
+    }) as typeof fetch;
+    try {
+      expect([...(await fetchCatalog("gateway.example")).keys()].sort()).toEqual(["other", "test-model"]);
+    } finally {
+      globalThis.fetch = original;
+    }
+    expect(calls).toEqual(["https://gateway.example/catalog"]);
+    await expect(fetchCatalog("gateway.example/mount")).rejects.toBeInstanceOf(ConfigurationError);
   });
 });

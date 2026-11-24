@@ -65,7 +65,8 @@ export function validateAPIPath(apiPath: string): void {
 
 /**
  * `apiPath`, or {@link DEFAULT_API_PATH} when it is empty, joined under
- * `root`, a proxy URL or an origin, whether or not `root` ends with a slash.
+ * `root`, a proxy URL, an origin or a gateway URL, whether or not `root`
+ * ends with a slash.
  * The result ends with a slash, so that request paths join under it.
  */
 export function joinAPIPath(root: string, apiPath: string): string {
@@ -77,10 +78,9 @@ export function joinAPIPath(root: string, apiPath: string): string {
 
 /**
  * The base URL of an OpenAI-compatible client over `httpClient`: the API
- * path joined under the EHBP proxy or the enclave's origin, or the gateway's
- * URL as given, which already carries the API path, so an API path with a
- * gateway client is a {@link ConfigurationError}. Anything other than a
- * client that one of the SDK's factories constructed is refused.
+ * path joined under the HTTP client's base URL, which is the EHBP proxy or
+ * the enclave's origin, or the gateway's URL. Anything other than a client
+ * that one of the SDK's factories constructed is refused.
  */
 export function apiBaseURL(httpClient: unknown, apiPath: string | undefined): string {
   const route = routeOf(httpClient);
@@ -88,12 +88,5 @@ export function apiBaseURL(httpClient: unknown, apiPath: string | undefined): st
     const what = httpClient === null ? "null" : typeof httpClient === "object" ? (httpClient.constructor?.name ?? "an object") : typeof httpClient;
     throw new ConfigurationError(`the HTTP client must be an EnclaveHTTPClient, RouterHTTPClient or GatewayHTTPClient from its factory, not ${what}`);
   }
-  const root = (httpClient as { readonly baseURL: string }).baseURL;
-  if (route === "gateway") {
-    if (apiPath !== undefined && apiPath !== "") {
-      throw new ConfigurationError("invalid API path: a gateway client's URL already carries the API path; set the gateway's url option instead");
-    }
-    return root.endsWith("/") ? root : `${root}/`;
-  }
-  return joinAPIPath(root, apiPath ?? "");
+  return joinAPIPath((httpClient as { readonly baseURL: string }).baseURL, apiPath ?? "");
 }

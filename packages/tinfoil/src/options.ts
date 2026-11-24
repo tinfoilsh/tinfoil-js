@@ -470,7 +470,17 @@ export interface GatewayOptions {
   readonly onVerificationAttempt?: OnVerificationAttempt;
   /** As for {@link RouterOptions.userCacheSecret}. */
   readonly userCacheSecret?: string;
-  /** The gateway's base URL, made to end with `/`; undefined selects Tinfoil's gateway. A query string or fragment is a {@link ConfigurationError}. */
+  /**
+   * The gateway's URL: its origin, or the URL that it is mounted under;
+   * undefined selects Tinfoil's gateway, `https://inference-gateway.tinfoil.sh/`.
+   * Its path, if any, is where the gateway is mounted, not the API path, as
+   * for an EHBP `proxyURL`: the catalog, the attestation relay and an
+   * `OpenAIClient`'s API path, `/v1/` by default, all join under it, whether
+   * or not it ends with `/`, so that `https://gateway.example/tinfoil` sends
+   * chat completions to `https://gateway.example/tinfoil/v1/chat/completions`.
+   * It must use HTTPS, and a query string or fragment is a
+   * {@link ConfigurationError}.
+   */
   readonly url?: string;
   /**
    * Read on every request and must return an immutable catalog. Undefined

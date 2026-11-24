@@ -154,10 +154,15 @@ describe.skipIf(!conformanceAvailable())(vectorsTitle("Enclave"), () => {
     expect(enclave.verifier()).toBe(golden.verifier);
   });
 
-  it("fetches through a relay when one is configured", async () => {
-    const { fetch, urls } = serving([() => new Response(golden.document)]);
-    await (await Enclave.create(config({ fetch, relay: "relay.example" }))).verify();
-    expect(urls[0]).toBe(`https://relay.example/.well-known/tinfoil-attestation?nonce=${golden.fixture.input.nonce_hex}&enclave=${HOST}`);
+  it("fetches through a relay when one is configured, under the relay's path", async () => {
+    for (const [relayURL, want] of [
+      ["https://relay.example/", "https://relay.example/.well-known/tinfoil-attestation"],
+      ["https://relay.example/mount/", "https://relay.example/mount/.well-known/tinfoil-attestation"],
+    ] as const) {
+      const { fetch, urls } = serving([() => new Response(golden.document)]);
+      await (await Enclave.create(config({ fetch, relayURL }))).verify();
+      expect(urls[0]).toBe(`${want}?nonce=${golden.fixture.input.nonce_hex}&enclave=${HOST}`);
+    }
   });
 
   it("rejects a document bound to another nonce as an attestation error, after one retry", async () => {
