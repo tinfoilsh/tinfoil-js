@@ -1,59 +1,14 @@
 /**
  * The verification report in the conformance wire contract, for the
- * full-verify stage: the outcome of each step and, on a rejection, the
- * facts that the steps before it established. Step messages are each SDK's
- * own error text, so the wire carries only the layer and the status.
+ * full-verify stage: the report in the JSON form that every Tinfoil SDK
+ * exports, as `VerificationReport.toJSON()` writes it. Its step messages
+ * and its metadata are each SDK's own, so a comparison across SDKs leaves
+ * them out.
  */
-import type { Measurement as V3Measurement } from "../src/measurement.js";
-import type { VerificationReport } from "../src/report.js";
-import type { Expected } from "../src/measurement.js";
+import type { VerificationReportJSON } from "../src/report.js";
 
-/** A measurement as the wire lays it out: its predicate type and its registers in platform order. */
-export interface WireMeasurement {
-  type: string;
-  registers: string[];
-}
-
-/** One step: a layer ("envelope", "provenance", "quote" or "policy") and a status ("passed", "failed", "skipped" or "not_run"). */
-export interface ReportStep {
-  layer: string;
-  status: string;
-}
-
-/**
- * The accepted reference values. `code_measurement` is for the platform
- * that the document's evidence names, and `measurement`, the full
- * expectation, is present only once the policy step resolved it.
- */
-export interface ReportExpectedFacts {
-  code_digest?: string;
-  code_measurement?: WireMeasurement;
-  measurement?: WireMeasurement;
-}
-
-/**
- * What the document and its hardware claim. `cpu_measurement` is present
- * only once the quote step passed. The key fingerprints are unverified in a
- * rejection; `hpke_public_key_fp` is the lowercase-hex SHA-256 of the HPKE
- * key's bytes.
- */
-export interface ReportMeasuredFacts {
-  cpu_measurement?: WireMeasurement;
-  tls_public_key_fp?: string;
-  hpke_public_key_fp?: string;
-}
-
-/** What a rejected verification established: `expected` is absent unless provenance passed or was skipped, and `measured` unless the envelope passed. */
-export interface ReportPartialFacts {
-  expected?: ReportExpectedFacts;
-  measured?: ReportMeasuredFacts;
-}
-
-/** A {@link VerificationReport} in the wire contract. */
-export interface Report {
-  steps: ReportStep[];
-  partial_facts?: ReportPartialFacts;
-}
+/** A {@link VerificationReportJSON} in the wire contract. */
+export type Report = VerificationReportJSON;
 
 /** The parts of an adapter output that {@link checkReport} reads. */
 export interface ReportedOutput {
@@ -61,33 +16,6 @@ export interface ReportedOutput {
   accepted: boolean;
   rejection?: { code: string };
   report?: Report;
-}
-
-/** Lays out `r` for the wire, with `measurementOf` and `expectedOf` laying out its registers. */
-export function reportOf(r: VerificationReport, measurementOf: (m: V3Measurement) => WireMeasurement, expectedOf: (e: Expected) => WireMeasurement): Report {
-  const out: Report = { steps: r.steps.map((s) => ({ layer: s.layer, status: s.status })) };
-  const p = r.partialFacts;
-  if (p !== undefined) {
-    const partial: ReportPartialFacts = {};
-    const e = p.expected;
-    if (e !== undefined) {
-      partial.expected = {
-        ...(e.artifact.digest === "" ? {} : { code_digest: e.artifact.digest }),
-        ...(e.codeMeasurement === undefined ? {} : { code_measurement: expectedOf(e.codeMeasurement) }),
-        ...(e.measurement === undefined ? {} : { measurement: measurementOf(e.measurement) }),
-      };
-    }
-    const m = p.measured;
-    if (m !== undefined) {
-      partial.measured = {
-        ...(m.cpu === undefined ? {} : { cpu_measurement: measurementOf(m.cpu.measurement) }),
-        ...(m.tlsPublicKeyFP === undefined ? {} : { tls_public_key_fp: m.tlsPublicKeyFP }),
-        ...(m.hpkePublicKeyFP === undefined ? {} : { hpke_public_key_fp: m.hpkePublicKeyFP }),
-      };
-    }
-    out.partial_facts = partial;
-  }
-  return out;
 }
 
 /** The layer of the step that failed, or undefined if none did. */
@@ -142,10 +70,12 @@ export function checkReport(out: ReportedOutput): string | undefined {
     const bad = r.steps.find((s) => s.status !== "passed" && s.status !== "skipped");
     if (bad !== undefined) return `an accepted report has step ${bad.layer} ${bad.status}`;
     if (r.partial_facts !== undefined) return "an accepted report has partial facts";
+    if (r.verified_facts === undefined) return "an accepted report has no verified facts";
     return undefined;
   }
   if (out.rejection === undefined || failedAt < 0) return "a rejection's report has no failed step";
   if (REJECTION_LAYERS[out.rejection.code] !== LAYERS[failedAt]) return `failed step ${LAYERS[failedAt]} does not match rejection code ${out.rejection.code}`;
+  if (r.verified_facts !== undefined) return "a rejection's report has verified facts";
   const p = r.partial_facts;
   if (p === undefined) return "a rejection's report has no partial facts";
   const ran = (layer: string): boolean => {
