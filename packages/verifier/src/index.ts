@@ -48,6 +48,7 @@ export {
 } from "./verification.js";
 export {
   hpkePublicKeyFP,
+  REPORT_SCHEMA_VERSION,
   VerificationReport,
   type CPUEvidence,
   type ExpectedFacts,
@@ -57,6 +58,7 @@ export {
   type PartialFacts,
   type PartialFactsJSON,
   type Step,
+  type StepJSON,
   type StepStatus,
   type VerificationReportJSON,
 } from "./report.js";

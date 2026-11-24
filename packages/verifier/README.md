@@ -61,7 +61,21 @@ const verifier = await Verifier.create({ kind: "registries", ids: [PUBLIC_REGIST
 
 `PartialFacts` hold what the steps before a failure established, and each fact is set only once the step that establishes it passed. `expected`, set once provenance passed or was skipped, holds the accepted reference values: `configRepo`, `artifact`, `config` and `platform` as verified facts would report them, `codeMeasurement`, the registers that the release fixes in the layout of the platform that the document's CPU evidence names, and `measurement`, every register that the quote had to attest, set once the policy step resolved it. `measured`, set once the envelope passed, holds `cpu.measurement`, the registers that the hardware measured, set only once the quote authenticated, and `tlsPublicKeyFP` and `hpkePublicKeyFP`, the fingerprints of the keys that the document endorses. Only the policy step binds those keys to the enclave, so in a failed report they are the document's claim, and must be shown as unverified. Partial facts hold the HPKE key only as a fingerprint, the lowercase-hex SHA-256 of its bytes that `hpkePublicKeyFP(key)` computes. A measurement mismatch shows `expected.measurement` next to `measured.cpu.measurement`, register by register.
 
-A report and everything in it are frozen, except register bytes and `Date` values, which can't be frozen and must not be mutated; `report.clone()` gives a copy that shares neither. Its data properties survive a structured clone, such as `postMessage`, and `JSON.stringify(report)` (or `toJSON()`) gives the same data as plain JSON, with registers as lowercase hex and times as ISO 8601 strings.
+A report and everything in it are frozen, except register bytes and `Date` values, which can't be frozen and must not be mutated; `report.clone()` gives a copy that shares neither. Its data properties survive a structured clone, such as `postMessage`.
+
+#### The JSON form
+
+`JSON.stringify(report)` (or `report.toJSON()`) writes the report in the JSON form that every Tinfoil SDK exports, so that a verification UI, a proxy that serves results to browsers or an app that relays them reads every SDK's report in the same way:
+
+```typescript
+const report = await verifier.verifyV3(doc, nonce, pin);
+const json = JSON.stringify(report);
+// {"schema_version":1,"steps":[{"layer":"envelope","status":"passed"},...],"verified_facts":{...},"metadata":{...}}
+```
+
+The form's members are snake_case, unlike the report's own properties: `schema_version` (`REPORT_SCHEMA_VERSION`, 1), `steps` (with a `message` only for a failed or skipped step), exactly one of `verified_facts` and `partial_facts`, and `metadata` (`verified_at` and the `verifier`'s `name` and `version`). A measurement names its platform and its registers, as in `{"platform": "tdx", "mrtd": "…", "rtmr0": "…", …}` or `{"platform": "sev-snp", "launch": "…"}`, and a code measurement leaves out the registers that the release leaves to the platform. The authenticated hardware measurement is `verified_facts.enclave_measurement` in an accepted report, and `partial_facts.measured.cpu_measurement` in a rejected one once the quote step passed. Hex is lowercase and times are RFC 3339 in UTC. A fact that was not established is left out, and no member is `null` or `""`, but a fact that was established and holds nothing stays, as in `"measured": {}`. The TLS and HPKE keys of verified facts appear only in `verified_facts.crypto_material`. `verifiedFacts.toJSON()` gives the `verified_facts` object on its own. `VerificationReportJSON` and the other `*JSON` types describe the form.
+
+The JSON is for display and transport, and it authorizes nothing. Nothing in this package reads it back into a report or into verified facts, and a holder of the JSON can't tell whether a verifier wrote it: anyone can write verified facts in JSON. Never bind a channel to a key that you read from it; verify the document yourself instead. A consumer of the form ignores members that it doesn't know, tolerates a layer or platform that it doesn't know, and refuses a `schema_version` that it doesn't know.
 
 ### Errors
 

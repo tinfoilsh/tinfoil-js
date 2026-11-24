@@ -58,40 +58,71 @@ export interface VerifiedFactsFields {
   readonly freshnessExpiresAt?: Date;
 }
 
-/** A measurement or expectation with each set register as lowercase hex. */
+/**
+ * A measurement in the report's JSON form: the platform, and each register
+ * that it holds as lowercase hex. A code measurement leaves out the
+ * registers that the release leaves to the platform.
+ */
 export type MeasurementJSON =
   | { readonly platform: "sev-snp"; readonly launch?: string }
   | { readonly platform: "tdx"; readonly mrtd?: string; readonly rtmr0?: string; readonly rtmr1?: string; readonly rtmr2?: string; readonly rtmr3?: string };
 
-/** A `ConfigVerification` with its times as ISO 8601 strings. */
-export type ConfigVerificationJSON = Omit<ConfigVerification, "approvalTime" | "signatureTime"> & { readonly approvalTime?: string; readonly signatureTime?: string };
-
-/** An `ArtifactVerification` with its time as an ISO 8601 string. */
-export type ArtifactVerificationJSON = Omit<ArtifactVerification, "approvalTime"> & { readonly approvalTime?: string };
+/**
+ * A {@link ConfigVerification} in the report's JSON form, with times as RFC
+ * 3339 strings in UTC. A member that the config doesn't have, such as the
+ * reference of a config that no endorsement supplied, is left out.
+ */
+export interface ConfigVerificationJSON {
+  readonly source: ReferenceSource;
+  readonly name?: string;
+  readonly digest: string;
+  readonly reference?: string;
+  readonly signing_key_hint?: string;
+  readonly approval_time?: string;
+  readonly registry_id?: string;
+  readonly signature_time?: string;
+}
 
 /**
- * The JSON form of a `VerifiedFacts`, as `toJSON()` returns it and
- * `JSON.stringify` serializes it: the same fields as the properties, with
- * registers as lowercase hex and times as ISO 8601 strings. Facts that were
- * not established are left out.
+ * An {@link ArtifactVerification} in the report's JSON form, with its time
+ * as an RFC 3339 string in UTC. A member that the artifact doesn't have,
+ * such as the name of an embedded artifact, is left out.
+ */
+export interface ArtifactVerificationJSON {
+  readonly source: ReferenceSource;
+  readonly repo?: string;
+  readonly tag?: string;
+  readonly digest: string;
+  readonly name?: string;
+  readonly commit?: string;
+  readonly approval_time?: string;
+}
+
+/**
+ * The `verified_facts` object of the report's JSON form, as
+ * {@link VerifiedFacts.toJSON} returns it. The channel keys appear only in
+ * `crypto_material`.
  */
 export interface VerifiedFactsJSON {
-  readonly codeDigest: string;
-  readonly codeTag: string;
-  readonly configRepo: string;
-  readonly codeMeasurement: MeasurementJSON;
-  readonly enclaveMeasurement: MeasurementJSON;
-  readonly cryptoMaterial: readonly CryptoMaterialItem[];
+  readonly config_repo: string;
+  readonly code_digest: string;
+  readonly code_tag?: string;
+  /** Left out when the release fixes no register on the enclave's platform. */
+  readonly code_measurement?: MeasurementJSON;
+  readonly enclave_measurement: MeasurementJSON;
   readonly config?: ConfigVerificationJSON;
   readonly runtime?: ArtifactVerificationJSON;
   readonly platform?: ArtifactVerificationJSON;
-  readonly freshnessExpiresAt?: string;
+  readonly crypto_material: readonly CryptoMaterialItem[];
+  readonly freshness_expires_at?: string;
 }
 
-/** The JSON form of a `VerificationMetadata`, with its time as an ISO 8601 string. */
+/** The `metadata` object of the report's JSON form. */
 export interface VerificationMetadataJSON {
-  readonly verifier: VerificationMetadata["verifier"];
-  readonly verifiedAt: string;
+  /** The appraisal instant, as an RFC 3339 string in UTC. */
+  readonly verified_at: string;
+  /** The name and version of the SDK that verified the document. */
+  readonly verifier?: { readonly name: string; readonly version: string };
 }
 
 /** Only this module holds the token the constructor requires, so untyped code that calls it is refused. */
@@ -112,8 +143,9 @@ let construct: (fields: VerifiedFactsFields) => VerifiedFacts;
  * object and array are frozen, so a property always yields the same
  * reference and nothing on it can be reassigned. Register bytes
  * (`Uint8Array`) and `Date` values have no frozen form in the language; they
- * are shared as stored and must not be mutated. `toJSON()` gives a plain,
- * serializable copy for logging or persisting.
+ * are shared as stored and must not be mutated. `toJSON()` gives the facts
+ * in the JSON form that every Tinfoil SDK exports, for display and
+ * transport; that JSON authorizes nothing.
  */
 export class VerifiedFacts {
   /** Digest of the verified code or runtime artifact. */
@@ -171,19 +203,32 @@ export class VerifiedFacts {
     return this.cryptoMaterialData(CRYPTO_MATERIAL_ID_HPKE, KEY_X25519_HPKE_V1_FORMAT);
   }
 
-  /** The facts as plain JSON: registers as lowercase hex, times as ISO 8601 strings. */
+  /**
+   * The facts as the `verified_facts` object of the report's JSON form, the
+   * form that every Tinfoil SDK exports, so that `JSON.stringify(facts)`
+   * writes it: snake_case members, registers and digests as lowercase hex,
+   * times as RFC 3339 strings in UTC, and facts that were not established
+   * left out. A code measurement holds only the registers that the release
+   * fixes, and is left out when it fixes none.
+   *
+   * The JSON is for display and transport, and it authorizes nothing: this
+   * package reads nothing back from it, and a holder of the JSON can't tell
+   * whether a verifier wrote it. Bind a channel only to the keys of facts
+   * that a verification returned.
+   */
   toJSON(): VerifiedFactsJSON {
+    const code = codeMeasurementJSON(this.codeMeasurement);
     return {
-      codeDigest: this.codeDigest,
-      codeTag: this.codeTag,
-      configRepo: this.configRepo,
-      codeMeasurement: measurementJSON(this.codeMeasurement),
-      enclaveMeasurement: measurementJSON(this.enclaveMeasurement),
-      cryptoMaterial: this.cryptoMaterial.map((i) => ({ ...i })),
+      config_repo: this.configRepo,
+      code_digest: this.codeDigest,
+      ...stringJSON("code_tag", this.codeTag),
+      ...(code === undefined ? {} : { code_measurement: code }),
+      enclave_measurement: measurementJSON(this.enclaveMeasurement),
       ...(this.config === undefined ? {} : { config: configJSON(this.config) }),
       ...(this.runtime === undefined ? {} : { runtime: artifactJSON(this.runtime) }),
       ...(this.platform === undefined ? {} : { platform: artifactJSON(this.platform) }),
-      ...timeJSON("freshnessExpiresAt", this.freshnessExpiresAt),
+      crypto_material: this.cryptoMaterial.map((i) => ({ id: i.id, format: i.format, data: i.data })),
+      ...timeJSON("freshness_expires_at", this.freshnessExpiresAt),
     };
   }
 }
@@ -230,7 +275,7 @@ export function copyDate(d: Date | undefined): Date | undefined {
   return d === undefined ? undefined : new Date(d.getTime());
 }
 
-/** @internal */
+/** @internal A measurement or expectation in the report's JSON form; an unset register is left out. */
 export function measurementJSON(m: Measurement | Expected): MeasurementJSON {
   switch (m.platform) {
     case "sev-snp":
@@ -247,16 +292,37 @@ export function measurementJSON(m: Measurement | Expected): MeasurementJSON {
   }
 }
 
+/** @internal A code measurement in the report's JSON form, or undefined when it holds no register, so that it is left out. */
+export function codeMeasurementJSON(e: Expected): MeasurementJSON | undefined {
+  const out = measurementJSON(e);
+  return Object.keys(out).length > 1 ? out : undefined;
+}
+
 /** @internal */
 export function configJSON(c: ConfigVerification): ConfigVerificationJSON {
-  const { approvalTime, signatureTime, ...rest } = c;
-  return { ...rest, ...timeJSON("approvalTime", approvalTime), ...timeJSON("signatureTime", signatureTime) };
+  return {
+    source: c.source,
+    ...stringJSON("name", c.name),
+    digest: c.digest,
+    ...stringJSON("reference", c.reference),
+    ...stringJSON("signing_key_hint", c.signingKeyHint),
+    ...timeJSON("approval_time", c.approvalTime),
+    ...stringJSON("registry_id", c.registryID),
+    ...timeJSON("signature_time", c.signatureTime),
+  };
 }
 
 /** @internal */
 export function artifactJSON(a: ArtifactVerification): ArtifactVerificationJSON {
-  const { approvalTime, ...rest } = a;
-  return { ...rest, ...timeJSON("approvalTime", approvalTime) };
+  return {
+    source: a.source,
+    ...stringJSON("repo", a.repo),
+    ...stringJSON("tag", a.tag),
+    digest: a.digest,
+    ...stringJSON("name", a.name),
+    ...stringJSON("commit", a.commit),
+    ...timeJSON("approval_time", a.approvalTime),
+  };
 }
 
 /** `{ [key]: hex }` for a set register, `{}` for an unset one. */
@@ -264,8 +330,17 @@ function hexJSON<K extends string>(key: K, r: Register | undefined): { readonly 
   return r === undefined ? {} : ({ [key]: registerHex(r) } as { [P in K]?: string });
 }
 
-/** `{ [key]: iso }` for a set time, `{}` for an unset one. */
-/** @internal */
+/** @internal `{ [key]: s }` for a non-empty string, `{}` for an empty or absent one, since the JSON form never holds "". */
+export function stringJSON<K extends string>(key: K, s: string | undefined): { readonly [P in K]?: string } {
+  return s === undefined || s === "" ? {} : ({ [key]: s } as { [P in K]?: string });
+}
+
+/** @internal An instant as an RFC 3339 string in UTC, without a fraction when it falls on a whole second. */
+export function rfc3339(d: Date): string {
+  return d.toISOString().replace(/\.000Z$/, "Z");
+}
+
+/** @internal `{ [key]: time }` for a set time, `{}` for an unset one. */
 export function timeJSON<K extends string>(key: K, d: Date | undefined): { readonly [P in K]?: string } {
-  return d === undefined ? {} : ({ [key]: d.toISOString() } as { [P in K]?: string });
+  return d === undefined ? {} : ({ [key]: rfc3339(d) } as { [P in K]?: string });
 }
