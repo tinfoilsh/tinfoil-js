@@ -668,13 +668,17 @@ describe("GatewayTransport", () => {
   it("refuses a model that a catalog refresh adds unless it is pinned, without contacting a replica", async () => {
     let now = Date.parse("2026-11-04T00:00:00Z");
     let served: Record<string, { repo: string; hosts: string[] }> = { [MODEL]: { repo: "tinfoilsh/test", hosts: HOSTS } };
+    let catalogFetches = 0;
     const documents: string[] = [];
     const g = gateway();
     const t = transport({
       policy: await GatewayPolicy.create(new Map([...PINS, ["later", { repo: "tinfoilsh/later" }]]), undefined, fixed(perHost())),
       gatewayFetch: g.fetch,
       catalog: undefined,
-      catalogFetch: async () => new Response(JSON.stringify(served), { headers: { "content-type": "application/json" } }),
+      catalogFetch: async () => {
+        catalogFetches++;
+        return new Response(JSON.stringify(served), { headers: { "content-type": "application/json" } });
+      },
       clock: () => new Date(now),
       documentFetch: async (input) => {
         documents.push(enclaveOf(input));
@@ -687,8 +691,12 @@ describe("GatewayTransport", () => {
     // The first listing after the interval starts the refresh; a later one sees its result.
     for (let i = 0; i < 50 && !(await t.models()).includes("later"); i++) await new Promise((resolve) => setTimeout(resolve, 0));
     expect(await t.models()).toEqual(["later", MODEL]);
+    // An unpinned model is refused before the catalog is read, so it starts no refresh either.
+    now += CATALOG_REFRESH_INTERVAL_MS;
+    const fetched = catalogFetches;
     await expect(t.ensureVerified("added")).rejects.toThrow(/model "added" is not pinned/);
     await expect(t.fetch("https://gateway.example/v1/chat/completions", { method: "POST", body: '{"model":"added"}', headers: { "content-type": "application/json" } })).rejects.toBeInstanceOf(ConfigurationError);
+    expect(catalogFetches).toBe(fetched);
     expect(documents).toEqual([]);
     expect(g.seen).toEqual([]);
   });

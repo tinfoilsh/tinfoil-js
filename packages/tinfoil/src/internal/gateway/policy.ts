@@ -75,14 +75,22 @@ export class GatewayPolicy {
   }
 
   /**
+   * Refuses a model that has no pin with a {@link ConfigurationError}. It
+   * needs no catalog, so a caller checks it before reading one.
+   */
+  requirePin(model: string): void {
+    if (!this.#pins.has(model)) throw new ConfigurationError(`model ${JSON.stringify(model)} is not pinned`);
+  }
+
+  /**
    * The replica hosts serving `model` and what they are verified against. A
    * model that has no pin, or that the catalog has no usable entry for, is
    * a {@link ConfigurationError}; a catalog that offers a pinned model from
    * another repository is an {@link AttestationError}.
    */
   resolve(model: string, catalog: Catalog): { hosts: readonly string[]; replica: Omit<Replica, "host"> } {
-    const pin = this.#pins.get(model);
-    if (pin === undefined) throw new ConfigurationError(`model ${JSON.stringify(model)} is not pinned`);
+    this.requirePin(model);
+    const pin = this.#pins.get(model)!;
     const entry = catalog.get(model);
     if (!trusted(entry)) {
       throw new ConfigurationError(`model ${JSON.stringify(model)} has no valid bare ${TRUSTED_REPO_OWNER} repository with replicas in the gateway catalog`);
