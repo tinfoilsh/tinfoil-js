@@ -658,11 +658,11 @@ export class Verifier {
     let config = this.#policy.embedded.configReference?.bytes;
     if (config === undefined) {
       try {
-        config = doc.configEndorsement().config ?? new Uint8Array();
+        config = doc.configEndorsement().config;
       } catch {
         return;
       }
-      if (toHex(await sha256(config)) !== digest) return;
+      if (config === undefined || config.length === 0 || toHex(await sha256(config)) !== digest) return;
     }
     await authenticateContainers(this.#prov, config, (imageDigest) => doc.containerProvenance(imageDigest));
   }
