@@ -14,6 +14,7 @@
  */
 import * as document from "../src/document/document.js";
 import { UsageError, VerificationError } from "../src/errors.js";
+import { authenticateContainers } from "../src/internal/endorsement/container.js";
 import { MULTI_PLATFORM_PREDICATE_TYPE, ProvenanceClient } from "../src/internal/endorsement/provenance.js";
 import { parseReference } from "../src/internal/endorsement/reference.js";
 import { ARTIFACT_FORMAT } from "../src/internal/policy/artifact.js";
@@ -49,6 +50,7 @@ export const Stage = {
   AuthenticateQuote: "v3-authenticate-quote",
   AuthenticateApproval: "v3-authenticate-approval",
   VerifyTimestamp: "v3-verify-timestamp",
+  AuthenticateContainers: "v3-authenticate-containers",
 } as const;
 
 export type RejectionCode =
@@ -219,6 +221,18 @@ async function runStage(stage: string, raw: unknown): Promise<Result> {
           dangerousTestOnlyRoots: roots,
         });
         return accept(stage, { enclave_measurement: measurementOf(auth.measurement) });
+      });
+    }
+
+    case Stage.AuthenticateContainers: {
+      const parsed = await decodeOrUndefined(doc);
+      if (parsed === undefined) return malformed(stage);
+      return layer(stage, "PROVENANCE_REJECTED", async () => {
+        // The stage takes the config as given: it authenticates the builds
+        // that the config requires, not the config.
+        const config = parsed.configEndorsement().config ?? new Uint8Array();
+        await authenticateContainers(prov, config, (digest) => parsed.containerProvenance(digest));
+        return accept(stage);
       });
     }
 

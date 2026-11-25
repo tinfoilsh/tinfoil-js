@@ -29,6 +29,7 @@ import {
   SUBJECT_CPU,
   type CollateralSet,
 } from "../src/document/collateral/collateral.js";
+import { CONTAINER_PROVENANCE_V1_FORMAT } from "../src/document/collateral/container.js";
 import {
   computeReportData,
   CRYPTO_MATERIAL_ID_HPKE,
@@ -600,6 +601,31 @@ describe("collateral accessors", () => {
     const witnessAgain = doc.freshness(FRESHNESS_ID_CODE);
     expect(witnessAgain.format).toBe(SIGSTORE_FRESHNESS_V1_FORMAT);
     expect((bundleMember(witnessAgain.bundle, "b") as { raw: string }).raw).toBe("2");
+  });
+
+  it("containerProvenance selects the build attestation by image digest", () => {
+    const first = "ab".repeat(32);
+    const second = "cd".repeat(32);
+    const entry = (id: string, data: string): WireEntry => ({ id, role: ROLE_REFERENCE_VALUES, format: CONTAINER_PROVENANCE_V1_FORMAT, data });
+    const doc = documentWithCollateral("", [
+      entry("one", `{"digest":"${first}","sigstore_bundle":{"a":[1]}}`),
+      entry("two", `{"digest":"${second}","sigstore_bundle":{"b":2}}`),
+      entry("again", `{"digest":"${first}","sigstore_bundle":{"c":3}}`),
+    ]);
+    // The first entry for a digest is the one used, and every call returns a copy.
+    (bundleMember(doc.containerProvenance(first), "a") as JsonValue[]).push("changed");
+    expect(doc.containerProvenance(first)).toEqual(strictParse(enc(`{"a":[1]}`)));
+    expect(doc.containerProvenance(second)).toEqual(strictParse(enc(`{"b":2}`)));
+    expect(() => doc.containerProvenance("ef".repeat(32))).toThrow(NotFoundError);
+
+    for (const [data, wantErr] of [
+      [`{"digest":"${first.toUpperCase()}","sigstore_bundle":{}}`, "container digest is not lowercase hex"],
+      [`{"digest":"sha256:${first}","sigstore_bundle":{}}`, "container digest is not lowercase hex"],
+      [`{"digest":"${first}"}`, "is missing sigstore_bundle"],
+      [`{"digest":"${first}","sigstore_bundle":{},"repo":"o/r"}`, `unknown object member name "repo"`],
+    ] as const) {
+      expect(() => decodeWire([entry("one", data)])).toThrow(wantErr);
+    }
   });
 });
 
