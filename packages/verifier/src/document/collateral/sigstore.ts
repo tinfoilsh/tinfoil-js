@@ -39,7 +39,7 @@ export function decodeFreshness(entry: Entry): Freshness {
 }
 
 /** Rejects a missing or null sigstore_bundle. Whether it verifies is for provenance to judge. */
-function requireBundle(entry: Entry, bundle: JsonValue | undefined): JsonValue {
+export function requireBundle(entry: Entry, bundle: JsonValue | undefined): JsonValue {
   if (bundle === undefined || bundle === null) {
     throw new Error(`${entry.format} collateral entry "${entry.id}" is missing sigstore_bundle`);
   }
