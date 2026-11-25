@@ -10,12 +10,14 @@
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { join, relative } from "node:path";
 import { describe, expect, it } from "vitest";
-import { ExitCode, run, Stage, type Measurement } from "../conformance/adapter.js";
+import { capabilities, ExitCode, run, Stage, type Measurement } from "../conformance/adapter.js";
 import { decodeLiveRequest, isAuthority } from "../conformance/live.js";
 import { checkReport, failedStep, type ReportedOutput } from "../conformance/report.js";
-import { FORMAT_V2, FORMAT_V3 } from "../src/document/collateral/collateral.js";
+import { CONFIG_ID, CONFIG_V1_FORMAT, FORMAT_V2, FORMAT_V3, ROLE_REFERENCE_VALUES } from "../src/document/collateral/collateral.js";
+import { CONTAINER_PROVENANCE_V1_FORMAT } from "../src/document/collateral/container.js";
 import { NONCE_SIZE, SEV_SNP_REPORT_V1_FORMAT } from "../src/document/document.js";
-import { buildDocument } from "./helpers/builder.js";
+import { b64, buildDocument, type WireEntry } from "./helpers/builder.js";
+import { newLog, rootJson } from "./helpers/keyed.js";
 
 interface Fixture {
   id: string;
@@ -158,6 +160,48 @@ describe("the pin of a full-verify input", () => {
     expect(await code(FORMAT_V2, { repo: "org/project", project: "not a reference" })).toBe("MALFORMED_INPUT");
     const wrongType = await run(Stage.Verify, { ...(await input(FORMAT_V2, { repo: "org/project" })), project: 7 });
     expect(wrongType.exitCode).toBe(ExitCode.Malformed);
+  });
+});
+
+describe("the container stage", () => {
+  // The recorded bundle is the published build attestation of the image with
+  // this digest. It verifies against the embedded production root and meets
+  // the recorded requirement.
+  const digest = "85306e3ab312a2d80466e901081e855cc53f21c4802c638f861e6ef31ba4f5d1";
+  const bundle = readFileSync(new URL("./fixtures/sigstore/container-provenance-bundle.json", import.meta.url), "utf8");
+  const requiring = (workflow: string): string =>
+    `,"provenance":{"github":{"repository":"tinfoilsh/measure-image-action","repository_id":"924941172","workflow":"${workflow}","ref":"refs/tags/build-v*"}}`;
+  const proof: WireEntry = { id: `container:sha256:${digest}`, role: ROLE_REFERENCE_VALUES, format: CONTAINER_PROVENANCE_V1_FORMAT, data: `{"digest":"${digest}","sigstore_bundle":${bundle}}` };
+  /** An entry that carries a config whose container runs the recorded image and has the given members besides. */
+  const config = (members: string): WireEntry => ({
+    id: CONFIG_ID,
+    role: ROLE_REFERENCE_VALUES,
+    format: CONFIG_V1_FORMAT,
+    data: JSON.stringify({ config_base64: b64(`{"containers":[{"image":"ghcr.io/tinfoilsh/measure-image-action@sha256:${digest}"${members}}]}`) }),
+  });
+  const input = async (...collateral: WireEntry[]) => {
+    const { bytes } = await buildDocument({ nonce: new Uint8Array(NONCE_SIZE), collateralFormat: FORMAT_V3, collateral }, () => ({ format: SEV_SNP_REPORT_V1_FORMAT, report: new Uint8Array(1) }));
+    return { schema_version: "1", document_b64: b64(bytes) };
+  };
+  const ACCEPTED = { exitCode: ExitCode.Accepted, output: { stage: Stage.AuthenticateContainers, accepted: true } };
+  const rejected = (code: string, exitCode: number) => ({ exitCode, output: { stage: Stage.AuthenticateContainers, accepted: false, rejection: { code } } });
+  const REJECTED = rejected("PROVENANCE_REJECTED", ExitCode.Rejected);
+
+  it.each<[string, () => Promise<object>, object]>([
+    ["proven", () => input(config(requiring("build.yml")), proof), ACCEPTED],
+    ["no requirement", () => input(config("")), ACCEPTED],
+    ["no entry", () => input(config(requiring("build.yml"))), REJECTED],
+    ["another workflow", () => input(config(requiring("release.yml")), proof), REJECTED],
+    ["unknown kind", () => input(config(`,"provenance":{"gitlab":{}}`), proof), REJECTED],
+    ["no config", () => input(proof), REJECTED],
+    ["another trusted root", async () => ({ ...(await input(config(requiring("build.yml")), proof)), sigstore_trusted_root_json_b64: b64(JSON.stringify(rootJson([await newLog("ecdsa")]))) }), REJECTED],
+    ["undecodable document", async () => ({ schema_version: "1", document_b64: b64("{}") }), rejected("MALFORMED_INPUT", ExitCode.Malformed)],
+  ])("%s", async (_name, stageInput, want) => {
+    expect(await run(Stage.AuthenticateContainers, await stageInput())).toEqual(want);
+  });
+
+  it("is listed among the supported stages", () => {
+    expect((capabilities().v3 as { stages_supported: string[] }).stages_supported).toContain(Stage.AuthenticateContainers);
   });
 });
 
