@@ -10,7 +10,7 @@ import { CONFIG_ID, CONFIG_V1_FORMAT, FORMAT_V3, ROLE_REFERENCE_VALUES } from ".
 import { CONTAINER_PROVENANCE_V1_FORMAT } from "../src/document/collateral/container.js";
 import { RUNTIME_REPO } from "../src/document/collateral/runtime.js";
 import { NONCE_SIZE, SEV_SNP_REPORT_V1_FORMAT } from "../src/document/document.js";
-import { UsageError, VerificationError, type Layer } from "../src/errors.js";
+import { VerificationError, type Layer } from "../src/errors.js";
 import { authenticateContainer, refMatches } from "../src/internal/endorsement/container.js";
 import { ProvenanceClient } from "../src/internal/endorsement/provenance.js";
 import { strictParse } from "../src/internal/json/index.js";
@@ -201,6 +201,7 @@ describe("a verifier whose config requires a container build", () => {
     ["authorized, unknown kind", authorizer, [configEntry(unreadable), proof], "provenance", "containers[0].provenance must hold only github"],
     ["embedded, proven", embedded, [proof], "quote", ""],
     ["embedded, no entry", embedded, [], "provenance", NO_ENTRY],
+    ["embedded, unknown kind", { kind: "embeddedConfig", bytes: unreadable }, [proof], "provenance", "containers[0].provenance must hold only github"],
     ["reference, document's bytes, proven", reference(requiring), [configEntry(requiring), proof], "quote", ""],
     ["reference, document's bytes, no entry", reference(requiring), [configEntry(requiring)], "provenance", NO_ENTRY],
     ["reference, document's bytes, not JSON", reference(notJSON), [configEntry(notJSON)], "provenance", "parsing config containers"],
@@ -213,9 +214,5 @@ describe("a verifier whose config requires a container build", () => {
     expect(err).toBeInstanceOf(VerificationError);
     expect((err as VerificationError).layer).toBe(layer);
     expect((err as VerificationError).message).toContain(wantErr);
-  });
-
-  it("is not built from an embedded config whose requirements it cannot read", async () => {
-    await expect(Verifier.create({ kind: "embeddedConfig", bytes: unreadable }, policy)).rejects.toThrow(UsageError);
   });
 });

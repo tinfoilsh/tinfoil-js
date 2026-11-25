@@ -43,7 +43,6 @@ import { ARTIFACT_FORMAT, ARTIFACT_FORMAT_V2, parse as parseArtifact, type Artif
 import * as quote from "./internal/quote/quote.js";
 import { configRuntime, MAX_CONFIG_SIZE } from "./internal/runtime/config.js";
 import { decodeManifest, parseManifest, type Manifest, type Measurements } from "./internal/runtime/manifest.js";
-import { configContainerProvenance } from "./internal/runtime/provenance.js";
 import * as semver from "./internal/semver.js";
 import { pinnedKeys, type PinnedKey } from "./internal/sigstore/keyed.js";
 import { cloneExpected, REGISTER_SIZE, type Expected } from "./measurement.js";
@@ -997,9 +996,7 @@ async function configReferenceOf(config: EmbeddedConfig | EmbeddedConfigReferenc
     if (name !== undefined && typeof name !== "string") throw new UsageError("embedded config name must be a string");
     // Copied once so the digest and the runtime pin come from the same bytes, whatever the caller does to its buffer meanwhile.
     const copy = bytes.slice();
-    const runtime = usage(() => configRuntime(copy));
-    usage(() => configContainerProvenance(copy));
-    return { name: name ?? "", digest: toHex(await sha256(copy)), runtime, bytes: copy };
+    return { name: name ?? "", digest: toHex(await sha256(copy)), runtime: usage(() => configRuntime(copy)), bytes: copy };
   }
   return usage(() => referenceCopyOf(config));
 }
