@@ -18,21 +18,21 @@
  * any network I/O and by `withOptions`. Per-request `fetchOptions` are
  * passed through to the attested `fetch` and can't bypass it.
  *
- * Two things send outside the attested client's protections: a separately
- * constructed OpenAI client, and the openai package's WebSocket classes
+ * A separately constructed OpenAI client sends outside the attested
+ * client's protections. So would the openai package's WebSocket classes
  * (`ResponsesWS`, `LiveWS` and its sideband and forks, `OpenAIRealtimeWS`,
- * `OpenAIRealtimeWebSocket` and `OpenAIRealtimeTranslationWS`). Given one of
- * these clients, those classes open their own WebSocket to its base URL with
- * its credential, without the TLS pin, and nothing here can stop them. With
- * an enclave or router client, `createRealtimeWebSocket` replaces
- * `OpenAIRealtimeWS`, and `createWebSocket` opens a raw pinned WebSocket; both
- * always connect to the verified enclave. The other `ws`-based classes need
- * the settings from `pinnedWebSocketOptions(client.httpClient)`, and they are
- * pinned only when the HTTP client has no EHBP proxy, so that they connect
- * to the enclave itself over `wss://`. Behind a proxy the pinned handshake
- * fails, and over an `http://` one there is no TLS to pin.
- * `OpenAIRealtimeWebSocket` can't be pinned, and the gateway client has no
- * pinned WebSocket, so don't give it to those classes at all.
+ * `OpenAIRealtimeWebSocket` and `OpenAIRealtimeTranslationWS`, stable and
+ * beta), which open their own WebSocket to the client's base URL with its
+ * credential, without the TLS pin, so these clients refuse them with a
+ * {@link ConfigurationError} before any connection is opened: see
+ * {@link refuseOpenAIWebSockets}. With an enclave or router client,
+ * `createRealtimeWebSocket` replaces `OpenAIRealtimeWS`, and
+ * `createWebSocket` opens a raw pinned WebSocket; both always connect to the
+ * verified enclave. On Node, the other `ws`-based classes can be given the
+ * settings from `pinnedWebSocketOptions(client.httpClient)` together with a
+ * plain OpenAI client whose base URL is the enclave itself, so that the
+ * connection that they open is pinned. In a browser, no WebSocket can be
+ * pinned, and the gateway client has no pinned WebSocket at all.
  *
  * The HTTP client owns the lifecycle: `httpClient.close()` releases it, and
  * an `await using` of the OpenAI client does the same, for its clones too,
@@ -45,7 +45,7 @@ import type { GatewayHTTPClient } from "./gateway-client.js";
 import { apiBaseURL, validateAPIPath } from "./internal/api-path.js";
 import { checkAPIKeyRuntime, registerCredential, type CredentialResolver } from "./internal/credential.js";
 import { asyncDispose } from "./internal/dispose.js";
-import type { RuntimeGlobals } from "./internal/platform.js";
+import { isServerRuntime, type RuntimeGlobals } from "./internal/platform.js";
 import type { RouterOptions } from "./options.js";
 import { createRouterHTTPClient, type RouterClientSeams, type RouterHTTPClient } from "./router-client.js";
 
@@ -173,13 +173,107 @@ function credentialResolver(client: OpenAI, apiKey: ClientOptions["apiKey"]): Cr
   };
 }
 
+/** Why a client refuses the openai package's WebSocket classes, on a server. */
+export const OPENAI_WEBSOCKETS_REFUSED =
+  "the openai package's WebSocket classes (such as ResponsesWS, LiveWS and OpenAIRealtimeWS) can't be given a Tinfoil OpenAI client: they open their own WebSocket to the client's base URL, outside the attested transport and without the TLS pin. Use createRealtimeWebSocket from tinfoil/openai for a realtime session or createWebSocket from tinfoil for a pinned WebSocket; on Node, such a class can instead be given a plain OpenAI client whose base URL is the enclave, together with the settings from pinnedWebSocketOptions(client.httpClient)";
+
+/** Why a client refuses the openai package's WebSocket classes, in a browser, where nothing can pin a WebSocket. */
+export const OPENAI_WEBSOCKETS_REFUSED_IN_BROWSERS =
+  "the openai package's WebSocket classes (such as OpenAIRealtimeWebSocket) can't be given a Tinfoil OpenAI client: they open their own WebSocket to the client's base URL, outside the attested transport, and a WebSocket can't be pinned to the attested key in a browser, which doesn't expose the server certificate to scripts";
+
+/** Why a client can't be created over an openai release whose internals it can't use to refuse the WebSocket classes. */
+export const UNSUPPORTED_OPENAI_RELEASE =
+  "this release of the openai package lacks the internal members (_buildWebSocketHeaders, _callApiKey, _hasApiKeyProvider and _options.apiKey) through which a Tinfoil OpenAI client refuses the package's WebSocket classes, so the client can't be created over it; install a release that tinfoil supports";
+
+function webSocketRefusal(): ConfigurationError {
+  return new ConfigurationError(isServerRuntime() ? OPENAI_WEBSOCKETS_REFUSED : OPENAI_WEBSOCKETS_REFUSED_IN_BROWSERS);
+}
+
+/** The clients whose next read of their `_options.apiKey` is their own request path's: see {@link refuseOpenAIWebSockets}. */
+const ownCredentialRead = new WeakSet<object>();
+
+/** The client's `_options.apiKey`, read as its own request path reads it. */
+function ownAPIKey(client: OpenAI): ClientOptions["apiKey"] {
+  ownCredentialRead.add(client);
+  try {
+    return (client as unknown as { _options: ClientOptions })._options.apiKey;
+  } finally {
+    ownCredentialRead.delete(client);
+  }
+}
+
+/**
+ * Makes `client` refuse the openai package's WebSocket classes with a
+ * {@link ConfigurationError}, before any connection is opened. The classes
+ * take the socket's settings themselves and never show them to the client,
+ * so the client can't tell a pinned connection from an unpinned one, and it
+ * refuses every one; a pinned connection is opened through Tinfoil's own
+ * WebSockets, or by a class that is given a plain OpenAI client.
+ *
+ * The classes reach the client through two of its internal members before
+ * they connect. Each class that the package generates from its API
+ * (`ResponsesWS`, `LiveWS` and its sideband and forks), and
+ * `OpenAIRealtimeTranslationWS`, calls `_buildWebSocketHeaders` for the
+ * headers of each handshake, its reconnections included, and nothing else
+ * calls it: here it throws. A class that the package generates later calls
+ * it as the others do, so it is refused too. The realtime classes
+ * (`OpenAIRealtimeWS` and `OpenAIRealtimeWebSocket`, stable and beta) call
+ * nothing on the client, but each of them reads `_options.apiKey` to learn
+ * whether the credential is a function, a read that the client's own
+ * requests make only through `_hasApiKeyProvider` and `_callApiKey`: the
+ * option becomes a getter that throws, except for the one read that each
+ * call of those methods makes.
+ */
+function refuseOpenAIWebSockets(client: OpenAI): void {
+  // An openai release without these members would leave the classes unrefused, so it is refused instead.
+  const internals = client as unknown as Record<string, unknown>;
+  const options = internals._options as ClientOptions | undefined;
+  if (typeof internals._buildWebSocketHeaders !== "function" || typeof internals._callApiKey !== "function" || typeof internals._hasApiKeyProvider !== "function" || typeof options !== "object" || options === null || !Object.prototype.hasOwnProperty.call(options, "apiKey")) {
+    throw new ConfigurationError(UNSUPPORTED_OPENAI_RELEASE);
+  }
+  const fixed = { writable: false, configurable: false };
+  Object.defineProperty(client, "_buildWebSocketHeaders", {
+    ...fixed,
+    enumerable: false,
+    value: (): never => {
+      throw webSocketRefusal();
+    },
+  });
+  // The client's own request path reads the option through these two methods, each of them once, synchronously.
+  const callApiKey = client._callApiKey;
+  Object.defineProperty(client, "_hasApiKeyProvider", { ...fixed, enumerable: false, value: (): boolean => typeof ownAPIKey(client) === "function" });
+  Object.defineProperty(client, "_callApiKey", {
+    ...fixed,
+    enumerable: false,
+    value: (capture?: (apiKey: string | null) => void): Promise<boolean> => {
+      ownCredentialRead.add(client);
+      try {
+        return callApiKey.call(client, capture);
+      } finally {
+        ownCredentialRead.delete(client);
+      }
+    },
+  });
+  const apiKey = options.apiKey;
+  Object.defineProperty(options, "apiKey", {
+    configurable: false,
+    enumerable: false,
+    get: () => {
+      if (ownCredentialRead.delete(client)) return apiKey;
+      throw webSocketRefusal();
+    },
+  });
+  Object.defineProperty(client, "_options", { ...fixed, enumerable: true, value: options });
+}
+
 /**
  * Fixes `fetch`, `baseURL` and `httpClient` on a constructed client, so none
- * can be reassigned, keeps the options it was given for its clones, and
- * records how it resolves its credential (`apiKey` as the options applied
- * it) for connections opened outside its request loop. The OpenAI
- * constructor sets `fetch` and `baseURL` as plain properties, so they are
- * redefined here rather than declared as fields.
+ * can be reassigned, keeps the options it was given for its clones, records
+ * how it resolves its credential (`apiKey` as the options applied it) for
+ * connections opened outside its request loop, and makes it refuse the
+ * openai package's WebSocket classes. The OpenAI constructor sets `fetch`
+ * and `baseURL` as plain properties, so they are redefined here rather than
+ * declared as fields.
  */
 function attest(client: OpenAI, httpClient: AttestedHTTPClient, baseURL: string, options: OpenAIClientOptions, apiKey: ClientOptions["apiKey"]): void {
   const fixed = { writable: false, configurable: false, enumerable: true };
@@ -188,6 +282,7 @@ function attest(client: OpenAI, httpClient: AttestedHTTPClient, baseURL: string,
   Object.defineProperty(client, "httpClient", { ...fixed, value: httpClient });
   givenOptions.set(client, { ...options });
   registerCredential(client, credentialResolver(client, apiKey));
+  refuseOpenAIWebSockets(client);
 }
 
 /**
@@ -231,6 +326,14 @@ function inherit(client: OpenAI, options: Partial<OpenAIClientOptions>): OpenAIC
  * `AttestationError`, after three verification attempts; `maxRetries: 0` on
  * the client or the request shows the first failure. `findTinfoilError` from
  * `tinfoil` returns the SDK error behind an OpenAI error, or undefined.
+ *
+ * WebSockets: the openai package's WebSocket classes, such as `ResponsesWS`
+ * and `OpenAIRealtimeWS`, throw a {@link ConfigurationError} when they are
+ * given this client, before they open anything, since the connection that
+ * they would open isn't pinned to the attested key. Use
+ * `createRealtimeWebSocket` or `createWebSocket` instead, or, on Node, give
+ * the class a plain OpenAI client for the enclave together with
+ * `pinnedWebSocketOptions(client.httpClient)`.
  */
 export class OpenAIClient<H extends AttestedHTTPClient = AttestedHTTPClient> extends OpenAI {
   /**

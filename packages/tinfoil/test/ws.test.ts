@@ -4,15 +4,23 @@
  * subprotocol, a mismatch fails in the handshake with no connection reaching
  * the server and makes the client verify again, plaintext and other hosts
  * are refused before any I/O, and the `ws` settings a library needs pin its
- * own connection the same way.
+ * own connection the same way. The openai package's own WebSocket classes
+ * are refused a Tinfoil OpenAI client before they open anything.
  */
 import { getEventListeners } from "node:events";
 import { createServer, type Server } from "node:https";
-import type { AddressInfo } from "node:net";
+import { createServer as createTCPServer, type AddressInfo, type Server as TCPServer } from "node:net";
 import { Identity } from "ehbp";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import OpenAI from "openai";
-import type { OpenAIRealtimeWS } from "openai/realtime/ws";
+import { OpenAIRealtimeWebSocket as BetaOpenAIRealtimeWebSocket } from "openai/beta/realtime/websocket";
+import { OpenAIRealtimeWS as BetaOpenAIRealtimeWS } from "openai/beta/realtime/ws";
+import { OpenAIRealtimeTranslationWS } from "openai/realtime/translations/ws";
+import { OpenAIRealtimeWebSocket } from "openai/realtime/websocket";
+import { OpenAIRealtimeWS } from "openai/realtime/ws";
+import { ResponsesWS as BetaResponsesWS } from "openai/resources/beta/responses/ws";
+import { ForksWS } from "openai/resources/live/forks/ws";
+import { SidebandWS } from "openai/resources/live/sideband/ws";
 import { LiveWS } from "openai/resources/live/ws";
 import { ResponsesWS } from "openai/resources/responses/ws";
 import { type ClientOptions as WsClientOptions, WebSocket as WsWebSocket, WebSocketServer } from "ws";
@@ -22,7 +30,7 @@ import { PeerLacksKeyError } from "../src/internal/transport/transport.js";
 import { isCertificateError } from "../src/internal/transport/pin-errors.js";
 import { checkWebSocketCapability, webSocketURL } from "../src/internal/websocket.js";
 import { checkedWsOptions } from "../src/internal/ws-options.js";
-import type { OpenAIClient, OpenAIClientOptions } from "../src/openai-client.js";
+import { OPENAI_WEBSOCKETS_REFUSED, OpenAIClient, UNSUPPORTED_OPENAI_RELEASE, type OpenAIClientOptions } from "../src/openai-client.js";
 import type { Fetch, PinnedWebSocket } from "../src/options.js";
 import { createRealtimeWebSocket } from "../src/realtime.js";
 import { createWebSocket, pinnedWebSocketOptions } from "../src/websocket.js";
@@ -363,7 +371,7 @@ describe("pinnedWebSocketOptions", () => {
     expect(docs.calls).toBe(2);
   });
 
-  describe("given to the OpenAI WebSocket clients that take ws settings", () => {
+  describe("given to the OpenAI WebSocket clients that take ws settings, with a plain OpenAI client for the enclave", () => {
     /** What the tests use of an OpenAI WebSocket client. */
     interface Session {
       on(event: "error", listener: (err: Error) => void): unknown;
@@ -372,9 +380,14 @@ describe("pinnedWebSocketOptions", () => {
 
     /** The OpenAI WebSocket clients that build their own `ws` WebSocket to the client's base URL with the client's key. */
     const libraries = [
-      { name: "ResponsesWS", path: "/v1/responses", open: (ai: OpenAIClient<EnclaveHTTPClient>, options: WsClientOptions): Session => new ResponsesWS(ai, options) },
-      { name: "LiveWS", path: "/v1/live/sessions", open: (ai: OpenAIClient<EnclaveHTTPClient>, options: WsClientOptions): Session => new LiveWS(ai, options) },
+      { name: "ResponsesWS", path: "/v1/responses", open: (ai: OpenAI, options: WsClientOptions): Session => new ResponsesWS(ai, options) },
+      { name: "LiveWS", path: "/v1/live/sessions", open: (ai: OpenAI, options: WsClientOptions): Session => new LiveWS(ai, options) },
     ];
+
+    /** A plain OpenAI client whose base URL is the enclave that `http` is verified against, as a caller builds one for these classes. */
+    function plainClient(http: EnclaveHTTPClient): OpenAI {
+      return new OpenAI({ apiKey: "k", baseURL: `https://${http.enclave}/v1/` });
+    }
 
     /** Resolves with the next connection that the server accepts after `before`, or rejects with the session's error. */
     function nextConnection(session: Session, before: number): Promise<Connection> {
@@ -393,10 +406,10 @@ describe("pinnedWebSocketOptions", () => {
     }
 
     for (const library of libraries) {
-      it(`pins ${library.name} to the attested key, authenticated with the client's key`, async () => {
-        const ai = await openAIClient({ apiKey: "k" });
+      it(`pins ${library.name} to the attested key, authenticated with the plain client's key`, async () => {
+        const http = await client(() => TEST_PIN);
         const before = connections.length;
-        const session = library.open(ai, await pinnedWebSocketOptions(ai.httpClient));
+        const session = library.open(plainClient(http), await pinnedWebSocketOptions(http));
         const connection = await nextConnection(session, before);
         expect(connection.path).toBe(library.path);
         expect(connection.headers.authorization).toBe("Bearer k");
@@ -405,19 +418,145 @@ describe("pinnedWebSocketOptions", () => {
 
       it(`fails ${library.name}'s handshake when the certificate carries another key, and reaches the server with nothing`, async () => {
         const docs = documents();
-        const ai = await openAIClient({ apiKey: "k" }, () => OTHER_PIN, docs);
+        const http = await client(() => OTHER_PIN, docs);
         const before = connections.length;
-        const session = library.open(ai, await pinnedWebSocketOptions(ai.httpClient));
+        const session = library.open(plainClient(http), await pinnedWebSocketOptions(http));
         const err = await nextConnection(session, before).catch((e: unknown) => e);
         expect(String((err as Error).message)).toMatch(/does not match the attested key/);
         expect(connections.length).toBe(before);
         session.close();
         expect(docs.calls).toBe(1);
         // The pin failure retired the verification the settings were pinned to.
-        await pinnedWebSocketOptions(ai.httpClient);
+        await pinnedWebSocketOptions(http);
         expect(docs.calls).toBe(2);
       });
     }
+  });
+});
+
+describe("the openai package's WebSocket classes given a Tinfoil OpenAI client", () => {
+  /** A TCP server that counts every connection made to it: any connection at all fails the tests. */
+  let tripwire: TCPServer;
+  let tripwireHost: string;
+  let tripped = 0;
+
+  beforeAll(async () => {
+    tripwire = createTCPServer((socket) => {
+      tripped++;
+      socket.destroy();
+    });
+    await new Promise<void>((resolve) => tripwire.listen(0, "127.0.0.1", resolve));
+    tripwireHost = `localhost:${(tripwire.address() as AddressInfo).port}`;
+  });
+
+  afterAll(async () => {
+    await new Promise<void>((resolve) => tripwire.close(() => resolve()));
+  });
+
+  /** An OpenAI client over an enclave client in TLS mode whose enclave is the tripwire; creating it sends nothing there. */
+  function tinfoilClient(openaiOptions: OpenAIClientOptions, docs = documents()): Promise<OpenAIClient<EnclaveHTTPClient>> {
+    return openAIOver(createEnclaveHTTPClient(tripwireHost, { kind: "repoPin", repo: "tinfoilsh/repo" }, { transport: { kind: "tls" } }, { verifier: verifier(() => TEST_PIN), documentFetch: docs.fetch, tls: { ca: TEST_CERT } }), openaiOptions);
+  }
+
+  /** Each way of building one of the package's WebSocket classes from a client, with `ws` settings where the class takes them. */
+  const classes: { readonly name: string; readonly open: (ai: OpenAI, options: WsClientOptions) => unknown }[] = [
+    { name: "ResponsesWS", open: (ai, options) => new ResponsesWS(ai, options) },
+    { name: "the beta ResponsesWS", open: (ai, options) => new BetaResponsesWS(ai, options) },
+    { name: "LiveWS", open: (ai, options) => new LiveWS(ai, options) },
+    { name: "LiveWS's SidebandWS", open: (ai, options) => new SidebandWS(ai, { session_id: "s" }, options) },
+    { name: "LiveWS's ForksWS", open: (ai, options) => new ForksWS(ai, { session_id: "s" }, options) },
+    { name: "OpenAIRealtimeWS", open: (ai, options) => new OpenAIRealtimeWS({ model: "m", options }, ai) },
+    { name: "OpenAIRealtimeWS.create", open: (ai, options) => OpenAIRealtimeWS.create(ai, { model: "m", options }) },
+    { name: "the beta OpenAIRealtimeWS", open: (ai, options) => new BetaOpenAIRealtimeWS({ model: "m", options }, ai) },
+    { name: "the beta OpenAIRealtimeWS.create", open: (ai, options) => BetaOpenAIRealtimeWS.create(ai, { model: "m", options }) },
+    { name: "OpenAIRealtimeWebSocket", open: (ai) => new OpenAIRealtimeWebSocket({ model: "m" }, ai) },
+    { name: "OpenAIRealtimeWebSocket.create", open: (ai) => OpenAIRealtimeWebSocket.create(ai, { model: "m" }) },
+    { name: "the beta OpenAIRealtimeWebSocket", open: (ai) => new BetaOpenAIRealtimeWebSocket({ model: "m" }, ai) },
+    { name: "the beta OpenAIRealtimeWebSocket.create", open: (ai) => BetaOpenAIRealtimeWebSocket.create(ai, { model: "m" }) },
+    { name: "OpenAIRealtimeTranslationWS.create", open: (ai, options) => OpenAIRealtimeTranslationWS.create(ai, { model: "m", options }) },
+  ];
+
+  /** Builds the class, synchronously or through its factory, and returns what it was refused with. */
+  async function refusal(open: () => unknown): Promise<unknown> {
+    try {
+      await open();
+    } catch (err) {
+      return err;
+    }
+    throw new Error("the class was built");
+  }
+
+  /** Lets a connection that a class started reach the tripwire, then checks that none did. */
+  async function expectNothingOpened(): Promise<void> {
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(tripped).toBe(0);
+  }
+
+  for (const { name, open } of classes) {
+    it(`refuses ${name} with a ConfigurationError before any connection, whatever the credential and settings`, async () => {
+      const docs = documents();
+      const keyed = await tinfoilClient({ apiKey: "k" }, docs);
+      const clients = [keyed, keyed.withOptions({ bearerToken: "jwt" }), await tinfoilClient({ apiKey: async () => "token" }, docs)];
+      for (const ai of clients) {
+        // The pinned settings don't help: the class never shows them to the client.
+        for (const options of [{}, await pinnedWebSocketOptions(ai.httpClient)]) {
+          const err = await refusal(() => open(ai, options));
+          expect(err).toBeInstanceOf(ConfigurationError);
+          expect((err as Error).message).toContain(OPENAI_WEBSOCKETS_REFUSED);
+        }
+      }
+      await expectNothingOpened();
+      // Nothing was verified again either.
+      expect(docs.calls).toBe(2);
+    });
+  }
+
+  it("names the supported ways in the refusal", () => {
+    expect(OPENAI_WEBSOCKETS_REFUSED).toMatch(/createRealtimeWebSocket/);
+    expect(OPENAI_WEBSOCKETS_REFUSED).toMatch(/createWebSocket/);
+    expect(OPENAI_WEBSOCKETS_REFUSED).toMatch(/pinnedWebSocketOptions\(client\.httpClient\)/);
+  });
+
+  it("keeps the refusal in place: the hook can't be reassigned, nor the options replaced", async () => {
+    const ai = await tinfoilClient({ apiKey: "k" });
+    const unlocked = (OpenAI.prototype as unknown as { _buildWebSocketHeaders: unknown })._buildWebSocketHeaders;
+    expect(() => ((ai as unknown as { _buildWebSocketHeaders: unknown })._buildWebSocketHeaders = unlocked)).toThrow(TypeError);
+    expect(() => ((ai as unknown as { _options: unknown })._options = { apiKey: "k" })).toThrow(TypeError);
+    const options = (ai as unknown as { _options: object })._options;
+    expect(() => Object.defineProperty(options, "apiKey", { value: "k" })).toThrow(TypeError);
+    expect(() => (options as { apiKey?: unknown }).apiKey).toThrow(ConfigurationError);
+    await expect(refusal(() => new ResponsesWS(ai))).resolves.toBeInstanceOf(ConfigurationError);
+    await expectNothingOpened();
+  });
+
+  it("refuses to create a client over an openai release that lacks the members through which it refuses the classes", async () => {
+    const http = (await tinfoilClient({ apiKey: "k" })).httpClient;
+    const prototype = OpenAI.prototype as unknown as Record<string, unknown>;
+    for (const member of ["_buildWebSocketHeaders", "_callApiKey", "_hasApiKeyProvider"]) {
+      const saved = prototype[member];
+      delete prototype[member];
+      try {
+        expect(() => new OpenAIClient(http, {}, { apiKey: "k" })).toThrow(UNSUPPORTED_OPENAI_RELEASE);
+      } finally {
+        prototype[member] = saved;
+      }
+    }
+    expect(() => new OpenAIClient(http, {}, { apiKey: "k" })).not.toThrow();
+  });
+
+  it("leaves the client's own credential handling in place", async () => {
+    const keyed = await tinfoilClient({ apiKey: "k" });
+    expect(keyed.apiKey).toBe("k");
+    expect(keyed._hasApiKeyProvider()).toBe(false);
+    let calls = 0;
+    const provided = await tinfoilClient({ apiKey: async () => `token-${++calls}` });
+    expect(provided._hasApiKeyProvider()).toBe(true);
+    let captured: string | null = null;
+    expect(await provided._callApiKey((key) => (captured = key))).toBe(true);
+    expect(captured).toBe("token-1");
+    expect(provided.apiKey).toBe("token-1");
+    // The one read that the client's own path makes is allowed, and no other.
+    expect(() => (provided as unknown as { _options: { apiKey?: unknown } })._options.apiKey).toThrow(ConfigurationError);
   });
 });
 

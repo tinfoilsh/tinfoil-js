@@ -305,6 +305,16 @@ describe("EnclaveHTTPClient over TLS", () => {
     expect(() => new OpenAIClient(Symbol("x") as never)).toThrow(ConfigurationError);
   });
 
+  it("sends the credential that an apiKey function returns, which the client's requests still read while the openai package's WebSocket classes are refused", async () => {
+    let calls = 0;
+    const ai = await openAIOver(createEnclaveHTTPClient(tls.host, { kind: "repoPin", repo: "tinfoilsh/repo" }, { transport: { kind: "tls" } }, { verifier: verifier(() => ({ tls: TEST_PIN })), documentFetch: docs.fetch, tls: { ca: TEST_CERT } }), { apiKey: async () => `token-${++calls}` });
+    for (const expected of ["Bearer token-1", "Bearer token-2"]) {
+      const completion = await ai.chat.completions.create({ model: "test", messages: [{ role: "user", content: "hi" }] });
+      expect(completion.choices[0]!.message.content).toBe("pinned");
+      expect(tls.seen[tls.seen.length - 1]!.headers.authorization).toBe(expected);
+    }
+  });
+
   it("sets the base URL itself, after the caller's options, so that a base URL from the options or the environment has no effect", async () => {
     const saved = process.env.OPENAI_BASE_URL;
     process.env.OPENAI_BASE_URL = "https://evil.example/v1/";

@@ -7,6 +7,8 @@
  */
 import { KEY_SPKI_FP_SHA256_V1_FORMAT, KEY_X25519_HPKE_V1_FORMAT, UsageError, type VerificationReport, type Verifier } from "@tinfoilsh/verifier";
 import { Identity, PROTOCOL } from "ehbp";
+import { OpenAIRealtimeWebSocket as BetaOpenAIRealtimeWebSocket } from "openai/beta/realtime/websocket";
+import { OpenAIRealtimeWebSocket } from "openai/realtime/websocket";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { createEnclaveHTTPClient, EnclaveHTTPClient, resolveTransport, type EnclaveClientSeams } from "../src/enclave-client.js";
 import { ConfigurationError } from "../src/errors.js";
@@ -17,7 +19,7 @@ import { tlsMode } from "../src/internal/transport/tls.js";
 import { WS_PLATFORM } from "../src/internal/transport/ws.js";
 import { checkWebSocketCapability } from "../src/internal/websocket.js";
 import { createGatewayHTTPClient, GatewayHTTPClient } from "../src/gateway-client.js";
-import { createTinfoilClient, OpenAIClient } from "../src/openai-client.js";
+import { createTinfoilClient, OPENAI_WEBSOCKETS_REFUSED_IN_BROWSERS, OpenAIClient } from "../src/openai-client.js";
 import type { Fetch } from "../src/options.js";
 import { RouterHTTPClient, type RouterClientSeams } from "../src/router-client.js";
 import * as browserEntry from "../src/index.browser.js";
@@ -325,5 +327,42 @@ describe("WebSockets in a browser", () => {
     await expect(createRealtimeWebSocket(ai, { model: "m" })).rejects.toBeInstanceOf(ConfigurationError);
     expect(calls.documents).toBe(beforeRealtime);
     expect(typeof browserEntry.createWebSocket).toBe("function");
+  });
+
+  it("refuses the openai package's browser WebSocket classes a Tinfoil client, naming the browser limitation, before any socket is opened", async () => {
+    // Any socket that a class opens fails the test.
+    const opened: string[] = [];
+    vi.stubGlobal(
+      "WebSocket",
+      class {
+        constructor(url: string) {
+          opened.push(url);
+          throw new Error(`a WebSocket was opened to ${url}`);
+        }
+      },
+    );
+    try {
+      const ai = await openAIOver(createEnclaveHTTPClient(ENCLAVE, { kind: "repoPin", repo: "tinfoilsh/repo" }, {}, { ...seams(), verifier: verifier(peer.publicKeyHex) }), { bearerToken: "jwt" });
+      const before = peer.seen.length;
+      const opens = [
+        () => new OpenAIRealtimeWebSocket({ model: "m" }, ai),
+        () => OpenAIRealtimeWebSocket.create(ai, { model: "m" }),
+        () => new OpenAIRealtimeWebSocket({ model: "m", dangerouslyAllowBrowser: true }, ai),
+        () => new BetaOpenAIRealtimeWebSocket({ model: "m" }, ai),
+        () => BetaOpenAIRealtimeWebSocket.create(ai, { model: "m" }),
+      ];
+      for (const open of opens) {
+        const err = await (async () => open())().then(
+          () => undefined,
+          (e: unknown) => e,
+        );
+        expect(err).toBeInstanceOf(ConfigurationError);
+        expect((err as Error).message).toContain(OPENAI_WEBSOCKETS_REFUSED_IN_BROWSERS);
+      }
+      expect(opened).toEqual([]);
+      expect(peer.seen.length).toBe(before);
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 });

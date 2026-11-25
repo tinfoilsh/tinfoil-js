@@ -1,14 +1,21 @@
 /**
  * Pinned WebSockets under Bun, against a local TLS WebSocket server: a
  * matching key connects and echoes, a mismatch fails closed without the
- * server seeing a connection, plaintext is refused.
+ * server seeing a connection, plaintext is refused. The openai package's
+ * own WebSocket classes are refused a Tinfoil OpenAI client.
  * Run with: bun test test/ws.bun.ts
  */
 import { afterAll, beforeAll, describe, expect, it } from "bun:test";
 import { createHash, X509Certificate } from "node:crypto";
 import { readFileSync } from "node:fs";
+import { createServer as createTCPServer, type AddressInfo } from "node:net";
+import { OpenAIRealtimeWebSocket } from "openai/realtime/websocket";
+import { OpenAIRealtimeWS } from "openai/realtime/ws";
+import { LiveWS } from "openai/resources/live/ws";
+import { ResponsesWS } from "openai/resources/responses/ws";
 import { createEnclaveHTTPClient, type EnclaveHTTPClient } from "../src/enclave-client.js";
 import { AttestationError, ConfigurationError } from "../src/errors.js";
+import { OPENAI_WEBSOCKETS_REFUSED, OpenAIClient } from "../src/openai-client.js";
 import type { Fetch, PinnedWebSocket } from "../src/options.js";
 import { createWebSocket } from "../src/websocket.js";
 import type { Verifier } from "@tinfoilsh/verifier";
@@ -105,5 +112,35 @@ describe("createWebSocket under Bun", () => {
 
     it("refuses plaintext", async () => {
     await expect(createWebSocket(await client(PIN), `ws://${host}/x`)).rejects.toBeInstanceOf(ConfigurationError);
+  });
+});
+
+describe("the openai package's WebSocket classes under Bun", () => {
+  it("are refused a Tinfoil OpenAI client before any connection", async () => {
+    // A TCP server that counts every connection made to it, as the enclave the client is bound to.
+    let tripped = 0;
+    const tripwire = createTCPServer((socket) => {
+      tripped++;
+      socket.destroy();
+    });
+    await new Promise<void>((resolve) => tripwire.listen(0, "127.0.0.1", resolve));
+    try {
+      const http = await createEnclaveHTTPClient(`localhost:${(tripwire.address() as AddressInfo).port}`, { kind: "repoPin", repo: "tinfoilsh/repo" }, { transport: { kind: "tls" } }, { verifier: verifier(PIN), documentFetch, tls: { ca: cert } });
+      const ai = new OpenAIClient(http, {}, { apiKey: "k" });
+      for (const open of [() => new ResponsesWS(ai), () => new LiveWS(ai), () => new OpenAIRealtimeWS({ model: "m" }, ai), () => new OpenAIRealtimeWebSocket({ model: "m" }, ai)]) {
+        let refusal: unknown;
+        try {
+          open();
+        } catch (err) {
+          refusal = err;
+        }
+        expect(refusal).toBeInstanceOf(ConfigurationError);
+        expect((refusal as Error).message).toContain(OPENAI_WEBSOCKETS_REFUSED);
+      }
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      expect(tripped).toBe(0);
+    } finally {
+      tripwire.close();
+    }
   });
 });
