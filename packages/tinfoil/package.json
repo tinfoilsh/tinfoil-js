@@ -1,6 +1,6 @@
 {
   "name": "tinfoil",
-  "version": "2.0.0-rc.5",
+  "version": "2.0.0-rc.6",
   "description": "Tinfoil secure OpenAI client wrapper",
   "type": "module",
   "main": "dist/index.js",
@@ -72,7 +72,7 @@
     "node": "^22.23.4 || ^24.22.1 || >=26.12.1"
   },
   "dependencies": {
-    "@tinfoilsh/verifier": "2.0.0-rc.5",
+    "@tinfoilsh/verifier": "2.0.0-rc.6",
     "@types/ws": "^8.18.1",
     "ehbp": "^0.6.0",
     "ws": "^8.21.0"
