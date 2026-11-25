@@ -48,6 +48,7 @@ export interface SigningIdentity {
   readonly subjectAlternativeName: string;
   readonly issuer: string;
   readonly runnerEnvironment: string;
+  readonly sourceRepositoryURI: string;
   readonly sourceRepositoryIdentifier: string;
   readonly sourceRepositoryOwnerIdentifier: string;
   readonly sourceRepositoryRef: string;
@@ -183,6 +184,7 @@ class WorkflowIdentityPolicy implements VerificationPolicy {
       subjectAlternativeName: san,
       issuer,
       runnerEnvironment: runner,
+      sourceRepositoryURI: cert.extSourceRepositoryURI?.sourceRepositoryURI ?? "",
       sourceRepositoryIdentifier: cert.extSourceRepositoryIdentifier?.sourceRepositoryIdentifier ?? "",
       sourceRepositoryOwnerIdentifier: cert.extSourceRepositoryOwnerIdentifier?.sourceRepositoryOwnerIdentifier ?? "",
       sourceRepositoryRef: cert.extSourceRepositoryRef?.sourceRepositoryRef ?? "",

@@ -33,6 +33,7 @@ import {
   type ArtifactKind,
   type ConfigPolicy,
 } from "./internal/endorsement/approval.js";
+import { authenticateContainers } from "./internal/endorsement/container.js";
 import { authenticateFreshness, MAX_FRESHNESS_AGE_MS } from "./internal/endorsement/freshness.js";
 import { ProvenanceClient } from "./internal/endorsement/provenance.js";
 import { parseReference, type AuthenticatedArtifact } from "./internal/endorsement/reference.js";
@@ -42,6 +43,7 @@ import { ARTIFACT_FORMAT, ARTIFACT_FORMAT_V2, parse as parseArtifact, type Artif
 import * as quote from "./internal/quote/quote.js";
 import { configRuntime, MAX_CONFIG_SIZE } from "./internal/runtime/config.js";
 import { decodeManifest, parseManifest, type Manifest, type Measurements } from "./internal/runtime/manifest.js";
+import { configContainerProvenance } from "./internal/runtime/provenance.js";
 import * as semver from "./internal/semver.js";
 import { pinnedKeys, type PinnedKey } from "./internal/sigstore/keyed.js";
 import { cloneExpected, REGISTER_SIZE, type Expected } from "./measurement.js";
@@ -97,7 +99,8 @@ export interface ConfigAuthorizer {
  * registry endorsement; the digest and the runtime that the config pins are
  * taken from the bytes. `name`, an /org/project/revision identity, optionally
  * names them, and a `project` pin must then match it. The bytes must come
- * from trusted client configuration and be a JSON config.
+ * from trusted client configuration and be a JSON config. The document must
+ * still prove every container build that the config requires.
  */
 export interface EmbeddedConfig {
   readonly kind: "embeddedConfig";
@@ -110,7 +113,8 @@ export interface EmbeddedConfig {
  * Trusts an exact config that the caller identifies without disclosing its
  * bytes: the hex SHA-256 `digest` of its bytes and the `runtime` release that
  * it pins. The quote must still bind the digest. Otherwise it is
- * {@link EmbeddedConfig}.
+ * {@link EmbeddedConfig}, except that the container builds that the config
+ * requires are checked only when the document carries the config bytes.
  */
 export interface EmbeddedConfigReference {
   readonly kind: "embeddedConfigReference";
@@ -214,6 +218,8 @@ interface ConfigReference {
   readonly name: string;
   readonly digest: string;
   readonly runtime: RuntimeReference;
+  /** The bytes of a config that the caller embedded in full. A config embedded by reference has none. */
+  readonly bytes?: Uint8Array;
 }
 
 interface Embedded {
@@ -560,6 +566,7 @@ export class Verifier {
     if (pins.identity !== "") usage(() => validateConfigPins({ ...pins, now, maxAgeMs: 0, futureSkewMs: 0 }));
     const { expected, config } = await this.#resolveConfig(doc, pins, now);
     const digest = decodeLowerHex("config digest", config.digest, 32);
+    await this.#authenticateContainers(doc, config.digest);
     const { manifest, artifact } = await this.#resolveRuntime(doc, expected, now);
     const { platform, platformArtifact } = await this.#resolvePlatform(doc, now);
     const runtime: Measurements = manifest.measurements ?? { formatVersion: 0n };
@@ -639,6 +646,25 @@ export class Verifier {
         ...(approved.signatureTime === undefined ? {} : { signatureTime: approved.signatureTime }),
       },
     };
+  }
+
+  /**
+   * Authenticates the container builds that the config with the verified
+   * `digest` requires. It reads them from config bytes that have that digest:
+   * the caller's, or else the document's. Without such bytes there is nothing
+   * to check.
+   */
+  async #authenticateContainers(doc: Document, digest: string): Promise<void> {
+    let config = this.#policy.embedded.configReference?.bytes;
+    if (config === undefined) {
+      try {
+        config = doc.configEndorsement().config ?? new Uint8Array();
+      } catch {
+        return;
+      }
+      if (toHex(await sha256(config)) !== digest) return;
+    }
+    await authenticateContainers(this.#prov, config, (imageDigest) => doc.containerProvenance(imageDigest));
   }
 
   async #resolveRuntime(doc: Document, expected: RuntimeReference, now: Date): Promise<{ manifest: Manifest; artifact: ArtifactVerification }> {
@@ -971,7 +997,9 @@ async function configReferenceOf(config: EmbeddedConfig | EmbeddedConfigReferenc
     if (name !== undefined && typeof name !== "string") throw new UsageError("embedded config name must be a string");
     // Copied once so the digest and the runtime pin come from the same bytes, whatever the caller does to its buffer meanwhile.
     const copy = bytes.slice();
-    return { name: name ?? "", digest: toHex(await sha256(copy)), runtime: usage(() => configRuntime(copy)) };
+    const runtime = usage(() => configRuntime(copy));
+    usage(() => configContainerProvenance(copy));
+    return { name: name ?? "", digest: toHex(await sha256(copy)), runtime, bytes: copy };
   }
   return usage(() => referenceCopyOf(config));
 }
