@@ -170,7 +170,7 @@ describe("the container stage", () => {
   const digest = "85306e3ab312a2d80466e901081e855cc53f21c4802c638f861e6ef31ba4f5d1";
   const bundle = readFileSync(new URL("./fixtures/sigstore/container-provenance-bundle.json", import.meta.url), "utf8");
   const requiring = (workflow: string): string =>
-    `,"provenance":{"github":{"repository":"tinfoilsh/measure-image-action","repository_id":"924941172","workflow":"${workflow}","ref":"refs/tags/build-v*"}}`;
+    `,"provenance":{"github":{"repository":"tinfoilsh/measure-image-action","repository_id":"924941172","workflow":"${workflow}","ref":"refs/tags/build-v0.14.2","commit":"01a05df207140a8e8e1d2cd26028ab7c51dad9d1"}}`;
   const proof: WireEntry = { id: `container:sha256:${digest}`, role: ROLE_REFERENCE_VALUES, format: CONTAINER_PROVENANCE_V1_FORMAT, data: `{"digest":"${digest}","sigstore_bundle":${bundle}}` };
   /** An entry that carries a config whose container runs the recorded image and has the given members besides. */
   const config = (members: string): WireEntry => ({

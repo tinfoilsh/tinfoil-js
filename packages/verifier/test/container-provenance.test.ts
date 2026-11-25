@@ -11,7 +11,7 @@ import { CONTAINER_PROVENANCE_V1_FORMAT } from "../src/document/collateral/conta
 import { RUNTIME_REPO } from "../src/document/collateral/runtime.js";
 import { NONCE_SIZE, SEV_SNP_REPORT_V1_FORMAT } from "../src/document/document.js";
 import { VerificationError, type Layer } from "../src/errors.js";
-import { authenticateContainer, refMatches } from "../src/internal/endorsement/container.js";
+import { authenticateContainer } from "../src/internal/endorsement/container.js";
 import { ProvenanceClient } from "../src/internal/endorsement/provenance.js";
 import { strictParse } from "../src/internal/json/index.js";
 import { ARTIFACT_FORMAT_V2 } from "../src/internal/policy/artifact.js";
@@ -23,15 +23,15 @@ const enc = (s: string): Uint8Array => new TextEncoder().encode(s);
 const sha256Hex = (b: Uint8Array): string => createHash("sha256").update(b).digest("hex");
 
 // The recorded bundle is the published build attestation of the image with
-// this digest. Its certificate names the workflow identity
-// https://github.com/tinfoilsh/measure-image-action/.github/workflows/build.yml@refs/tags/build-v0.14.2.
+// this digest, and its certificate states these values.
 const RECORDED_BUNDLE = readFileSync(new URL("./fixtures/sigstore/container-provenance-bundle.json", import.meta.url), "utf8");
 const RECORDED: ContainerProvenance = {
   digest: "85306e3ab312a2d80466e901081e855cc53f21c4802c638f861e6ef31ba4f5d1",
   repository: "tinfoilsh/measure-image-action",
   repositoryID: "924941172",
   workflow: "build.yml",
-  ref: "refs/tags/build-v*",
+  ref: "refs/tags/build-v0.14.2",
+  commit: "01a05df207140a8e8e1d2cd26028ab7c51dad9d1",
 };
 
 describe("configContainerProvenance", () => {
@@ -39,8 +39,9 @@ describe("configContainerProvenance", () => {
   const other = "cd".repeat(32);
   const imageName = "ghcr.io/tinfoilsh/inference-vllm";
   const image = `"${imageName}@sha256:${digest}"`;
+  const commit = "0123456789".repeat(4);
   /** The JSON text of each member of the github requirement. */
-  const members = { repository: `"tinfoilsh/inference"`, repository_id: `"902195777"`, workflow: `"containers.yml"`, ref: `"refs/tags/vllm-v*"` };
+  const members = { repository: `"tinfoilsh/inference"`, repository_id: `"902195777"`, workflow: `"containers.yml"`, ref: `"refs/tags/vllm-v1.2.3"`, commit: `"${commit}"` };
   const githubOf = (members: Record<string, string>): string =>
     `{${Object.entries(members)
       .map(([name, value]) => `"${name}":${value}`)
@@ -54,7 +55,7 @@ describe("configContainerProvenance", () => {
   /** A config whose github requirement has the given members changed or added. */
   const edited = (change: Record<string, string>): Uint8Array => requiring(image, `{"github":${githubOf({ ...members, ...change })}}`);
   const lacking = (member: string): Uint8Array => requiring(image, `{"github":${githubOf(Object.fromEntries(Object.entries(members).filter(([name]) => name !== member)))}}`);
-  const required = (digest: string): ContainerProvenance => ({ digest, repository: "tinfoilsh/inference", repositoryID: "902195777", workflow: "containers.yml", ref: "refs/tags/vllm-v*" });
+  const required = (digest: string): ContainerProvenance => ({ digest, repository: "tinfoilsh/inference", repositoryID: "902195777", workflow: "containers.yml", ref: "refs/tags/vllm-v1.2.3", commit });
 
   it.each<[string, Uint8Array, ContainerProvenance[]]>([
     ["no containers", enc(`{"cvm-version":"0.15.5"}`), []],
@@ -68,7 +69,7 @@ describe("configContainerProvenance", () => {
 
   const UNPARSED = "parsing config containers: ";
   const NOT_OBJECTS = "config containers must be an array of objects";
-  const NOT_GITHUB = "containers[0].provenance must hold only github, with only the strings repository, repository_id, workflow and ref";
+  const NOT_GITHUB = "containers[0].provenance must hold only github, with only the strings repository, repository_id, workflow, ref and commit";
   const NOT_PINNED = "containers[0].image must end with @sha256: and a lowercase hex digest";
   it.each<[string, Uint8Array, string]>([
     ["not JSON", enc("containers: []\n"), UNPARSED],
@@ -91,10 +92,12 @@ describe("configContainerProvenance", () => {
     ["github without repository_id", lacking("repository_id"), NOT_GITHUB],
     ["github without workflow", lacking("workflow"), NOT_GITHUB],
     ["github without ref", lacking("ref"), NOT_GITHUB],
+    ["github without commit", lacking("commit"), NOT_GITHUB],
     ["github unknown member", edited({ environment: `"release"` }), NOT_GITHUB],
     ["github repeated member", requiring(image, `{"github":{"ref":"refs/heads/main",${github.slice(1)}}`), UNPARSED],
     ["github number member", edited({ repository_id: "902195777" }), NOT_GITHUB],
     ["github null member", edited({ ref: "null" }), NOT_GITHUB],
+    ["github commit not a string", edited({ commit: "7" }), NOT_GITHUB],
     ["image absent", config(`[{"provenance":${provenance}}]`), NOT_PINNED],
     ["image null", requiring("null", provenance), NOT_PINNED],
     ["image not a string", requiring("7", provenance), "cannot unmarshal JSON number into string"],
@@ -122,42 +125,11 @@ describe("authenticateContainer", () => {
     ["another repository", { repository: "tinfoilsh/measure-image" }, `source repository "`],
     ["another repository ID", { repositoryID: "92494117" }, "source repository ID"],
     ["another workflow", { workflow: "release.yml" }, "workflow identity"],
-    ["another ref", { ref: "refs/tags/v*" }, "source ref"],
+    // The identity is built from the required ref, so it differs first.
+    ["a ref written with *, which is taken literally", { ref: "refs/tags/build-v*" }, "workflow identity"],
+    ["another commit", { commit: `00${RECORDED.commit.slice(2)}` }, "source commit"],
   ])("rejects it for %s", async (_name, change, wantErr) => {
     await expect(authenticate(change)).rejects.toThrow(wantErr);
-  });
-});
-
-describe("refMatches", () => {
-  it.each<[string, string, string, boolean]>([
-    ["literal", "refs/heads/main", "refs/heads/main", true],
-    ["literal prefix", "refs/heads/main", "refs/heads/maintenance", false],
-    ["literal is not a pattern", "refs/tags/v1.2", "refs/tags/v1x2", false],
-    ["fewer segments", "refs/tags/*", "refs/tags", false],
-    ["more segments", "refs/tags/*", "refs/tags/v1/extra", false],
-    ["alone", "refs/tags/*", "refs/tags/v1.2.3", true],
-    ["alone, empty match", "refs/tags/*", "refs/tags/", true],
-    ["at the end", "refs/tags/build-v*", "refs/tags/build-v0.14.2", true],
-    ["at the end, empty match", "refs/tags/build-v*", "refs/tags/build-v", true],
-    ["at the end, another start", "refs/tags/build-v*", "refs/tags/rebuild-v1", false],
-    ["at the end, across a separator", "refs/tags/build-v*", "refs/tags/build-v1/2", false],
-    ["at the start", "refs/tags/*-rc", "refs/tags/v1-rc", true],
-    ["at the start, another end", "refs/tags/*-rc", "refs/tags/v1-rc1", false],
-    ["in the middle", "refs/tags/v*-rc", "refs/tags/v1.2-rc", true],
-    ["in the middle, empty match", "refs/tags/v*-rc", "refs/tags/v-rc", true],
-    ["in the middle, ends overlap", "refs/tags/ab*ba", "refs/tags/aba", false],
-    ["several", "refs/tags/v*.*.*", "refs/tags/v1.2.3", true],
-    ["several, piece missing", "refs/tags/v*.*.*", "refs/tags/v1.2", false],
-    ["several, earliest occurrence", "refs/tags/*ab*ab*", "refs/tags/abab", true],
-    ["several, out of order", "refs/tags/*a*b*", "refs/tags/ba", false],
-    ["several, adjacent", "refs/tags/v**", "refs/tags/v1", true],
-    ["in several segments", "refs/*/v*", "refs/tags/v1", true],
-    ["in several segments, across a separator", "refs/*/v*", "refs/remotes/origin/v1", false],
-    // A matcher that backtracks does not finish the near miss.
-    ["many, near miss", `refs/tags/${"*a".repeat(2000)}*b*`, `refs/tags/${"a".repeat(4000)}`, false],
-    ["many, match", `refs/tags/${"*a".repeat(2000)}*b*`, `refs/tags/${"a".repeat(4000)}b`, true],
-  ])("%s", (_name, pattern, ref, want) => {
-    expect(refMatches(pattern, ref)).toBe(want);
   });
 });
 
@@ -177,7 +149,8 @@ describe("a verifier whose config requires a container build", () => {
   /** A config that pins the embedded runtime and runs the recorded image under the given provenance member. */
   const configOf = (provenance: string): Uint8Array =>
     enc(`{"cvm-version":"v1.2.3@sha256:${runtime.digest}","containers":[{"name":"app","image":"ghcr.io/tinfoilsh/measure-image-action@sha256:${RECORDED.digest}","provenance":${provenance}}]}`);
-  const builtBy = (workflow: string): string => `{"github":{"repository":"${RECORDED.repository}","repository_id":"${RECORDED.repositoryID}","workflow":"${workflow}","ref":"${RECORDED.ref}"}}`;
+  const builtBy = (workflow: string): string =>
+    `{"github":{"repository":"${RECORDED.repository}","repository_id":"${RECORDED.repositoryID}","workflow":"${workflow}","ref":"${RECORDED.ref}","commit":"${RECORDED.commit}"}}`;
   const requiring = configOf(builtBy(RECORDED.workflow));
   const unreadable = configOf(`{"gitlab":{}}`);
   const notJSON = enc("containers: []\n");

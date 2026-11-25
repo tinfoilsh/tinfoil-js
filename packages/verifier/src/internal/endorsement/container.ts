@@ -15,9 +15,6 @@ const GITHUB_URL_PREFIX = "https://github.com/";
 const GITHUB_WORKFLOWS_PATH = "/.github/workflows/";
 const WORKFLOW_REF_SEPARATOR = "@";
 
-const REF_SEGMENT_SEPARATOR = "/";
-const REF_WILDCARD = "*";
-
 /**
  * Verifies the build of every container image for which `config` requires
  * one. `attestation` returns the Sigstore bundle that a document carries for
@@ -37,7 +34,7 @@ export async function authenticateContainers(client: ProvenanceClient, config: U
 /**
  * Verifies that `bundle` is a SLSA build attestation of the image with
  * `required.digest`, signed on a GitHub-hosted runner by the required
- * workflow of the required repository, at a ref that `required.ref` matches.
+ * workflow of the required repository, at the required ref and source commit.
  */
 export async function authenticateContainer(client: ProvenanceClient, bundle: JsonValue, required: ContainerProvenance): Promise<void> {
   let verified: VerifiedRelease;
@@ -55,7 +52,7 @@ export async function authenticateContainer(client: ProvenanceClient, bundle: Js
   // repository's own file at that ref and not one called from elsewhere.
   const certificate = verified.identity;
   const repository = GITHUB_URL_PREFIX + required.repository;
-  const identity = repository + GITHUB_WORKFLOWS_PATH + required.workflow + WORKFLOW_REF_SEPARATOR + certificate.sourceRepositoryRef;
+  const identity = repository + GITHUB_WORKFLOWS_PATH + required.workflow + WORKFLOW_REF_SEPARATOR + required.ref;
   if (certificate.sourceRepositoryURI !== repository) {
     throw new Error(`container provenance source repository ${JSON.stringify(certificate.sourceRepositoryURI)} is not ${JSON.stringify(repository)}`);
   }
@@ -65,39 +62,12 @@ export async function authenticateContainer(client: ProvenanceClient, bundle: Js
   if (certificate.subjectAlternativeName !== identity) {
     throw new Error(`container provenance workflow identity ${JSON.stringify(certificate.subjectAlternativeName)} is not ${JSON.stringify(identity)}`);
   }
-  if (!refMatches(required.ref, certificate.sourceRepositoryRef)) {
-    throw new Error(`container provenance source ref ${JSON.stringify(certificate.sourceRepositoryRef)} does not match ${JSON.stringify(required.ref)}`);
+  if (certificate.sourceRepositoryRef !== required.ref) {
+    throw new Error(`container provenance source ref ${JSON.stringify(certificate.sourceRepositoryRef)} is not ${JSON.stringify(required.ref)}`);
   }
-}
-
-/**
- * Reports whether the whole of `ref` matches `pattern`, in which "*" stands
- * for any run of characters, possibly empty, other than "/", and every other
- * character stands for itself. It takes time bounded by the product of the
- * two lengths.
- */
-export function refMatches(pattern: string, ref: string): boolean {
-  const patterns = pattern.split(REF_SEGMENT_SEPARATOR);
-  const segments = ref.split(REF_SEGMENT_SEPARATOR);
-  return patterns.length === segments.length && patterns.every((segmentPattern, i) => refSegmentMatches(segmentPattern, segments[i]!));
-}
-
-/** {@link refMatches} for one segment of each. */
-function refSegmentMatches(pattern: string, segment: string): boolean {
-  const pieces = pattern.split(REF_WILDCARD);
-  const first = pieces[0]!;
-  const last = pieces[pieces.length - 1]!;
-  if (pieces.length === 1) return segment === first;
-  if (segment.length < first.length + last.length || !segment.startsWith(first) || !segment.endsWith(last)) return false;
-  // Each piece between the first and the last is taken at its earliest
-  // occurrence, which leaves the most room for those after it.
-  let rest = segment.slice(first.length, segment.length - last.length);
-  for (const piece of pieces.slice(1, -1)) {
-    const at = rest.indexOf(piece);
-    if (at < 0) return false;
-    rest = rest.slice(at + piece.length);
+  if (certificate.sourceRepositoryDigest !== required.commit) {
+    throw new Error(`container provenance source commit ${JSON.stringify(certificate.sourceRepositoryDigest)} is not ${JSON.stringify(required.commit)}`);
   }
-  return true;
 }
 
 function message(err: unknown): string {
