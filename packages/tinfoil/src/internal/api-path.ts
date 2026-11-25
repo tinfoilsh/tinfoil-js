@@ -67,11 +67,13 @@ export function validateAPIPath(apiPath: string): void {
 /**
  * `apiPath`, or {@link DEFAULT_API_PATH} when it is undefined, joined under
  * `root`, a proxy URL, an origin or a gateway URL, whether or not `root`
- * ends with a slash. An empty `apiPath` is a {@link ConfigurationError}.
+ * ends with a slash. Any other value that isn't a valid API path, `null`
+ * and the empty string included, is a {@link ConfigurationError}.
  * The result ends with a slash, so that request paths join under it.
  */
 export function joinAPIPath(root: string, apiPath: string | undefined): string {
-  const path = apiPath ?? DEFAULT_API_PATH;
+  // Only undefined is unset, as the factories check it, so that untyped code that passes null is refused.
+  const path = apiPath === undefined ? DEFAULT_API_PATH : apiPath;
   validateAPIPath(path);
   const joined = (root.endsWith("/") ? root.slice(0, -1) : root) + path;
   return joined.endsWith("/") ? joined : `${joined}/`;

@@ -18,12 +18,13 @@ export const MAX_CATALOG_BYTES = 2 << 20;
 export const TRUSTED_REPO_OWNER = "tinfoilsh/";
 
 /**
- * Reads the catalog of the gateway at `gatewayURL`, a validated base URL
- * ending with `/` (its origin, or the URL that it is mounted under), from
- * `catalog` joined under it, with `fetchImpl`, keeping only models with
- * replicas of a bare `tinfoilsh/` repository, without a tag or digest. Anything but a 200 response, or a body over the size cap or not
- * a JSON object of entries, is a {@link NetworkError}; a call `signal`
- * aborts rejects with the signal's own reason.
+ * Reads the catalog of the gateway at `gatewayURL`, a validated HTTPS URL
+ * (its origin, or the URL that it is mounted under, with or without a
+ * trailing `/`), from `catalog` joined under it, with `fetchImpl`, keeping
+ * only models with replicas of a bare `tinfoilsh/` repository, without a
+ * tag or digest. Anything but a 200 response, or a body over the size cap
+ * or not a JSON object of entries, is a {@link NetworkError}; a call
+ * `signal` aborts rejects with the signal's own reason.
  *
  * @experimental The gateway route is new; this API may change without a major version.
  */

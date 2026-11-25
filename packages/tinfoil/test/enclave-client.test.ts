@@ -334,6 +334,7 @@ describe("EnclaveHTTPClient over TLS", () => {
       expect(() => new OpenAIClient(client, { apiKey: "k", apiPath }), String(apiPath)).toThrow(ConfigurationError);
     }
     expect(() => new OpenAIClient(client, { apiKey: "k", apiPath: "" })).toThrow(/it is empty; leave apiPath out for the default/);
+    expect(() => new OpenAIClient(client, { apiKey: "k", apiPath: null as unknown as string })).toThrow(/it must be a string/);
     // The API path was a separate argument before the OpenAI options; untyped code that still passes three is refused.
     expect(() => new (OpenAIClient as unknown as new (...args: unknown[]) => unknown)(client, { apiPath: "/v1/" }, { apiKey: "k" })).toThrow(/pass apiPath among the OpenAI options/);
     expect(tls.seen.length).toBe(before);
