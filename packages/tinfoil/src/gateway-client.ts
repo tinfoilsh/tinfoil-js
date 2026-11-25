@@ -12,6 +12,7 @@ import { ConfigurationError } from "./errors.js";
 import { resolveUserCacheSecret } from "./internal/cachesecret.js";
 import { registerRoute } from "./internal/api-path.js";
 import { asyncDispose } from "./internal/dispose.js";
+import { isAuthority } from "./internal/fetch.js";
 import { fetchCatalogWith } from "./internal/gateway/catalog.js";
 import { GatewayPolicy } from "./internal/gateway/policy.js";
 import { GatewayTransport } from "./internal/gateway/transport.js";
@@ -20,11 +21,12 @@ import { withOriginRestriction } from "./internal/transport/origin.js";
 import type { CallOptions, Catalog, Fetch, GatewayOptions, ReplicaVerification } from "./options.js";
 
 /**
- * Tinfoil's gateway, used when no `url` option is given.
+ * Tinfoil's gateway, used when no `url` option is given: its origin, under
+ * which an `OpenAIClient` joins its API path.
  *
  * @experimental The gateway route is new; this API may change without a major version.
  */
-export const DEFAULT_GATEWAY_URL = "https://inference-gateway.tinfoil.sh/v1/";
+export const DEFAULT_GATEWAY_URL = "https://inference-gateway.tinfoil.sh/";
 
 /** @internal Seams for tests: the enclave client's, the catalog fetch, and the secret resolution. */
 export interface GatewayClientSeams extends Omit<EnclaveClientSeams, "tls"> {
@@ -61,11 +63,10 @@ export async function createGatewayHTTPClient(options: GatewayOptions, seams: Ga
   const secret = (seams.resolveSecret ?? resolveUserCacheSecret)(options.userCacheSecret);
   const transport = new GatewayTransport({
     baseURL,
-    relay: base.host,
     catalog: options.catalog,
     policy,
     verificationCheck: options.verificationCheck,
-    onVerification: options.onVerification,
+    onVerificationAttempt: options.onVerificationAttempt,
     secret,
     catalogFetch: seams.catalogFetch,
     documentFetch: seams.documentFetch,
@@ -92,7 +93,14 @@ export async function createGatewayHTTPClient(options: GatewayOptions, seams: Ga
 export class GatewayHTTPClient {
   /** As {@link EnclaveHTTPClient.fetch}. */
   readonly fetch: Fetch;
-  /** The gateway's base URL, which requests are sent to. Always ends with `/`, so a relative path resolves against it with `new URL(path, client.baseURL)`. */
+  /**
+   * The gateway's URL, the `url` option or Tinfoil's gateway by default:
+   * its origin, or the URL that it is mounted under, never the API path.
+   * Requests are sent under it, and an `OpenAIClient` joins its API path
+   * under it, as under an enclave client's EHBP proxy. Always ends with `/`,
+   * so a relative path resolves against it with
+   * `new URL(path, client.baseURL)`.
+   */
   readonly baseURL: string;
   readonly #transport: GatewayTransport;
 
@@ -141,21 +149,45 @@ export class GatewayHTTPClient {
   }
 
   /**
-   * The last attempt to verify each replica that the client has tried to
-   * verify, failed replicas included, without network I/O, sorted by host:
-   * its `report` if it passed, or its `error` if it failed, as
-   * {@link ReplicaVerification} describes. A report is not checked again: it
-   * may have expired or been rejected since. A new array of copies on each
-   * call.
+   * Verifies again the replica that {@link ensureVerified} would return for
+   * `model`, even if its cached verification is still valid, and returns the
+   * new report. It tries the model's replicas in the order that
+   * `ensureVerified` tries them, verifying each again, and stops at the first
+   * that passes, or that fails but keeps a valid verification, which requests
+   * for `model` still use; it then rejects with that failure. Each failure
+   * follows the rule that {@link EnclaveHTTPClient.reverify} describes, for
+   * its replica: an {@link AttestationError} discards the replica's cached
+   * verification, so that `reverify` moves on to the next replica, as
+   * `ensureVerified` then does, and a failure of any other category keeps it
+   * while it is still valid. When no replica passes or keeps a valid
+   * verification, it rejects with the last failure. A model without a pin is
+   * a {@link ConfigurationError}, and nothing is verified.
    */
-  lastVerification(): ReplicaVerification[] {
-    return this.#transport.lastVerification();
+  reverify(model: string, options?: CallOptions): Promise<VerificationReport> {
+    return this.#transport.reverify(model, options?.signal);
   }
 
   /**
-   * Refuses further use: `fetch`, `models` and `ensureVerified` reject with
-   * a {@link ConfigurationError} afterwards, and no replica is verified
-   * again; `lastVerification` still reports the replicas' last attempts.
+   * One entry for each replica that the client has tried to verify, failed
+   * replicas included, without network I/O, sorted by host. An entry's
+   * `current` follows the rule of {@link EnclaveHTTPClient.currentVerification}
+   * for its replica: the report of the replica's verification while it is
+   * fresh and has not been discarded, and undefined otherwise. Its
+   * `lastAttempt` holds the replica's most recent attempt, as
+   * {@link EnclaveHTTPClient.lastVerificationAttempt} describes: a failed
+   * attempt replaces an earlier success there, though `current` keeps that
+   * success while the failure leaves it valid. A new array of copies on each
+   * call.
+   */
+  replicas(): ReplicaVerification[] {
+    return this.#transport.replicas();
+  }
+
+  /**
+   * Refuses further use: `fetch`, `models`, `ensureVerified` and `reverify`
+   * reject with a {@link ConfigurationError} afterwards, and no replica is
+   * verified again; `replicas` still reports the replicas' last attempts,
+   * with no current verification.
    * Requests are sealed and sent through the runtime's fetch, or the `fetch`
    * option, so the client holds no connections of its own to release; a sealed exchange already
    * under way completes, while a request still preparing, verifying or
@@ -172,12 +204,14 @@ export class GatewayHTTPClient {
 }
 
 /**
- * Reads the catalog of the gateway at `host`, keeping only models with
+ * Reads the catalog of the gateway at the root of `host`, a host with an
+ * optional port, from `https://{host}/catalog`, keeping only models with
  * replicas of a bare `tinfoilsh/` repository, without a tag or digest. The
  * catalog is untrusted: replicas are verified when they are used.
  *
  * @experimental The gateway route is new; this API may change without a major version.
  */
-export function fetchCatalog(host: string, options?: CallOptions): Promise<Catalog> {
-  return fetchCatalogWith(host, (input, init) => fetch(input, init), options?.signal);
+export async function fetchCatalog(host: string, options?: CallOptions): Promise<Catalog> {
+  if (!isAuthority(host)) throw new ConfigurationError(`invalid gateway host ${JSON.stringify(host)}: want a host with an optional port`);
+  return fetchCatalogWith(`https://${host}/`, (input, init) => fetch(input, init), options?.signal);
 }

@@ -46,7 +46,7 @@ import { OpenAIClient } from "tinfoil/openai";
 
 // One enclave, verified against a GitHub repository.
 const enclave = await EnclaveHTTPClient.create("enclave.example.com", { kind: "repoPin", repo: "owner/name" });
-const client = new OpenAIClient(enclave, {}, { apiKey: "<YOUR_API_KEY>" });
+const client = new OpenAIClient(enclave, { apiKey: "<YOUR_API_KEY>" });
 
 // The discovered router, with a verification policy of your own.
 const router = await RouterHTTPClient.create({ policy: { freshnessMaxAgeMs: 24 * 60 * 60 * 1000 } });
@@ -57,7 +57,7 @@ const gateway = await GatewayHTTPClient.create({
 });
 ```
 
-`new OpenAIClient(httpClient, options?, openaiOptions?)` takes an `EnclaveHTTPClient`, `RouterHTTPClient` or `GatewayHTTPClient` and does no network I/O. It sets the OpenAI base URL itself, after your OpenAI options, so a `baseURL`, `OPENAI_BASE_URL` in the environment and `dataResidency` have no effect: the base URL is `options.apiPath` (`/v1/` by default) under the HTTP client's EHBP proxy or the enclave's origin, or the gateway's URL for a gateway client, which takes no `apiPath`. An HTTP client's `close()` releases its pooled connections and refuses further use, and both kinds of client support `await using` (an OpenAI client closes the HTTP client under it).
+`new OpenAIClient(httpClient, options?)` takes an `EnclaveHTTPClient`, `RouterHTTPClient` or `GatewayHTTPClient` and does no network I/O. `options` are the OpenAI client's own options, with `bearerToken` and `apiPath` beside them, as in `new OpenAIClient(httpClient, { apiKey, apiPath: "/openai/v1/" })`; the client takes `apiPath` out before the rest reach the OpenAI client. It sets the OpenAI base URL itself, after your OpenAI options, so a `baseURL`, `OPENAI_BASE_URL` in the environment and `dataResidency` have no effect: the base URL is `apiPath` (`/v1/` when you leave it out; an empty `apiPath` is a `ConfigurationError`) joined under the HTTP client's `baseURL`: the EHBP proxy or the enclave's origin, or the gateway's `url`, which is the gateway's origin (`https://inference-gateway.tinfoil.sh/` by default) or the URL that it is mounted under, never the API path. A gateway mounted under a path serves its catalog and its attestation relay under that path too. An HTTP client's `close()` releases its pooled connections and refuses further use, and both kinds of client support `await using` (an OpenAI client closes the HTTP client under it).
 
 ### Trust, policy and transport
 
@@ -88,7 +88,7 @@ import { RouterHTTPClient } from "tinfoil";
 import { OpenAIClient } from "tinfoil/openai";
 
 const router = await RouterHTTPClient.create({ transport: { kind: "ehbp", proxyURL: "https://proxy.example.com/" } });
-const client = new OpenAIClient(router, {}, { bearerToken: "<SESSION_TOKEN>" });
+const client = new OpenAIClient(router, { bearerToken: "<SESSION_TOKEN>" });
 ```
 
 ### A page that contacts only your own origin
@@ -107,7 +107,7 @@ const router = await RouterHTTPClient.create({
   // GET /tinfoil/routers
   fetchRouterList: routerListRelay("https://app.example/tinfoil"),
 });
-const client = new OpenAIClient(router, {}, { bearerToken: "<SESSION_TOKEN>" });
+const client = new OpenAIClient(router, { bearerToken: "<SESSION_TOKEN>" });
 ```
 
 Your server implements three endpoints:
@@ -191,26 +191,42 @@ try {
 
 ## Verification reports
 
-A router or enclave client's `ensureVerified()` returns the report of a verification that admits requests now, verifying first if needed, and `reverify()` verifies again and returns the new report: a `VerificationReport`, whose `steps` show each layer's outcome (`passed`, or `skipped` for a layer that had nothing to check) and whose `verifiedFacts` hold what the enclave proved, such as `codeDigest`, `enclaveMeasurement` and `tlsPublicKeyFP`. `lastVerification()` returns the most recent attempt without network I/O: `{ report }` if it passed, or `{ error }` with the error that the client reported if it failed, so that a later failure replaces an earlier success. When the verifier rejected the document, that error is an `AttestationError` whose `cause` is the verifier's `VerificationError`, and its `report` shows the step that failed and the partial facts, such as the expected and measured registers side by side; a failed fetch is a `NetworkError` with no report. The `onVerification(host, attempt)` option is called once for every attempt, including the retry, a re-verification after an expiry or a key rotation, each router that discovery tries (though a probe that discovery abandons when its time budget or the caller's signal runs out, and that then passes, has no outcome and isn't reported), and each gateway replica. `attempt` is the same `{ report }` or `{ error }` that `lastVerification()` returns, so that checking one narrows the other, and a callback can store or forward the attempt as it is:
+A router or enclave client's `ensureVerified()` returns the report of a verification that admits requests now, verifying first if needed, and `reverify()` verifies again and returns the new report: a `VerificationReport`, whose `steps` show each layer's outcome (`passed`, or `skipped` for a layer that had nothing to check) and whose `verifiedFacts` hold what the enclave proved, such as `codeDigest`, `enclaveMeasurement` and `tlsPublicKeyFP`. Without network I/O, `currentVerification()` returns the report of the verification that the client's requests are bound to now, or `undefined`, and `lastVerificationAttempt()` returns the most recent attempt: `{ report }` if it passed, or `{ error }` with the error that the client reported if it failed, so that a later failure replaces an earlier success. When the verifier rejected the document, that error is an `AttestationError` whose `cause` is the verifier's `VerificationError`, and its `report` shows the step that failed and the partial facts, such as the expected and measured registers side by side; a failed fetch is a `NetworkError` with no report. The `onVerificationAttempt(host, attempt)` option is called once for every attempt, including the retry, a re-verification after an expiry or a key rotation, each router that discovery tries (though a probe that discovery abandons when its time budget or the caller's signal runs out, and that then passes, has no outcome and isn't reported), and each gateway replica. `attempt` is the same `{ report }` or `{ error }` that `lastVerificationAttempt()` returns, so that checking one narrows the other, and a callback can store or forward the attempt as it is:
 
 ```typescript
 import { RouterHTTPClient, VerificationError } from "tinfoil";
 
 const client = await RouterHTTPClient.create({
-  onVerification: (host, attempt) => {
+  onVerificationAttempt: (host, attempt) => {
     if (attempt.report !== undefined) console.log(host, attempt.report.steps);
     else if (attempt.error.cause instanceof VerificationError) console.log(host, attempt.error.cause.report.failedStep());
     else console.log(host, attempt.error);
   },
 });
-const last = client.lastVerification();
+const last = client.lastVerificationAttempt();
 ```
+
+The clients separate the verification in use from the attempts that produced it:
+
+| Call | Network I/O | Returns |
+|---|---|---|
+| `ensureVerified()` | Only if needed | The report of a verification that is valid now, verifying first if the cached one has expired or been discarded |
+| `reverify()` | Always | The report of a new verification, or rejects with its error |
+| `currentVerification()` | None | The report of the verification that requests are bound to now: fresh and not discarded. `undefined` before the first success, after an `AttestationError` or a key rejection discarded it, and once it has expired |
+| `lastVerificationAttempt()` | None | The most recent attempt: `{ report }` if it passed, `{ error }` if it failed |
+| `onVerificationAttempt` option | Push | Each attempt as it is decided, failed attempts included |
+
+The two getters differ after a `reverify()` that fails for a reason other than attestation, such as a `NetworkError`: `lastVerificationAttempt()` returns the error, while `currentVerification()` still returns the cached report, under which requests still go through until it expires. A `reverify()` that fails with an `AttestationError` discards the cached verification, so `currentVerification()` returns `undefined` and the next request verifies again.
+
+- Health and readiness checks call `ensureVerified()`. It returns at once while the cached verification is valid, and verifies when it isn't. Clients don't verify again in the background, so `currentVerification()` is `undefined` between the expiry of a verification and the next request; don't treat that as a failure.
+- Status displays show `currentVerification()` for the verification in use, and `lastVerificationAttempt()` for the outcome of the latest attempt, which may be a failure.
+- Live status and logging use `onVerificationAttempt`, which sees every attempt, including retries that `lastVerificationAttempt()` has already moved past.
 
 `tinfoil` exports the verifier's `VerificationError` and `REPORT_SCHEMA_VERSION`, and the types that a report holds: `VerificationReport`, `VerifiedFacts`, `PartialFacts`, `ExpectedFacts`, `MeasuredFacts`, `CPUEvidence`, `Step`, `StepStatus`, `Layer`, `VerificationMetadata`, the measurement and reference types that they name, and the JSON form's `VerificationReportJSON` and the `*JSON` types within it. Import them from `tinfoil` rather than from `@tinfoilsh/verifier`, so that an app needs no direct dependency on the verifier to show a verification. `tinfoil` pins an exact verifier version, and a direct dependency on any other version installs a second copy: `instanceof VerificationError` is then false for the errors that a client throws, and that copy's `VerificationReport` isn't the type that a client returns.
 
-A gateway client's `lastVerification()` returns one entry for each replica that it has tried to verify, with that replica's last attempt. A gateway client's `policy` applies to the pins that set none; a pin's own `policy` replaces it entirely. A `verificationCheck` receives only the verified facts of a verification that passed.
+The gateway client verifies each model's replicas separately. Its `ensureVerified(model)` and `reverify(model)` take the model, and `reverify(model)` verifies again the replica that `ensureVerified(model)` would return. When that replica fails with an `AttestationError`, its verification is discarded and `reverify` moves on to the next replica, as `ensureVerified` then does; when no replica passes or keeps a valid verification, it rejects with the last failure. `replicas()` returns an entry for each replica that the client has tried to verify, with its `host`, the `models` requested through it, its `reference` and `pinnedModel`, `current`, which follows `currentVerification()`'s rule for that replica, and `lastAttempt`, the replica's last attempt as `{ report }` or `{ error }`. A gateway client's `policy` applies to the pins that set none; a pin's own `policy` replaces it entirely. A `verificationCheck` receives only the verified facts of a verification that passed.
 
-`JSON.stringify(report)` writes a report in the JSON form that every Tinfoil SDK exports, to show it or to pass it on, for example to a browser; the [verifier's README](packages/verifier/README.md#the-json-form) describes the form. The JSON authorizes nothing: nothing reads it back into a report, and a client never binds a channel to a key read from it.
+`JSON.stringify(report)` writes a report in the JSON form that every Tinfoil SDK exports, to show it or to pass it on, for example to a browser; the [verifier's README](packages/verifier/README.md#the-json-form) describes the form. A report that a client hands out names the host that the client contacted in `metadata.host`: the enclave, even when requests go through an EHBP proxy, the router that the client chose, or the gateway replica, so that a proxy that passes a report on needn't add the host itself. The host is what the client connected to, not an attested fact. A report from the verifier itself has no host; `report.withHost(host)` returns a copy with one. The JSON authorizes nothing: nothing reads it back into a report, and a client never binds a channel to a key read from it.
 
 ## Documentation
 

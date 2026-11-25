@@ -86,13 +86,14 @@ const ROUTER_CLIENT_MEMBERS: Members<surface.RouterHTTPClient> = {
   fetch: "property",
   baseURL: "property",
   enclave: "property",
-  lastVerification: "method",
+  currentVerification: "method",
+  lastVerificationAttempt: "method",
   ensureVerified: "method",
   reverify: "method",
   close: "method",
 };
 const ENCLAVE_CLIENT_MEMBERS: Members<surface.EnclaveHTTPClient> = { ...ROUTER_CLIENT_MEMBERS, trust: "getter" };
-const GATEWAY_CLIENT_MEMBERS: Members<surface.GatewayHTTPClient> = { fetch: "property", baseURL: "property", lastVerification: "method", models: "method", ensureVerified: "method", close: "method" };
+const GATEWAY_CLIENT_MEMBERS: Members<surface.GatewayHTTPClient> = { fetch: "property", baseURL: "property", replicas: "method", models: "method", ensureVerified: "method", reverify: "method", close: "method" };
 const UNVERIFIED_CLIENT_MEMBERS: Members<unsafeEntry.UnverifiedClient> = { fetch: "property", baseURL: "property", keyOrigin: "property" };
 /** What the OpenAI subclass adds to the OpenAI client. */
 const OPENAI_CLIENT_MEMBERS = { httpClient: "property", withOptions: "method" } as const satisfies Pick<Members<openaiEntry.OpenAIClient>, "httpClient" | "withOptions">;
@@ -108,7 +109,7 @@ type TypeExports = [
   surface.EHBP,
   surface.VerificationCheck,
   surface.VerificationAttempt,
-  surface.OnVerification,
+  surface.OnVerificationAttempt,
   surface.CallOptions,
   surface.EnclaveOptions,
   surface.RouterOptions,
@@ -164,7 +165,6 @@ type TypeExports = [
   surface.ConfigVerificationJSON,
   surface.MeasurementJSON,
   openaiEntry.RealtimeOptions,
-  openaiEntry.OpenAIOptions,
   openaiEntry.OpenAIClientOptions,
   openaiEntry.AttestedHTTPClient,
   openaiEntry.Uploadable,
@@ -359,13 +359,13 @@ describe("public surface", () => {
       // @ts-expect-error `dataResidency` would pick a regional base URL over the client's.
       void openaiEntry.createClient({ apiKey: "k", dataResidency: "eu" });
       // @ts-expect-error `provider` would pick a third-party base URL over the client's.
-      void new openaiEntry.OpenAIClient(http, {}, { apiKey: "k", provider: {} as never });
+      void new openaiEntry.OpenAIClient(http, { apiKey: "k", provider: {} as never });
       // @ts-expect-error `workloadIdentity` authenticates through OpenAI's own token exchange.
-      void new openaiEntry.OpenAIClient(http, {}, { workloadIdentity: {} as never });
+      void new openaiEntry.OpenAIClient(http, { workloadIdentity: {} as never });
       // @ts-expect-error `credential` would use OpenAI's own certificate transport.
-      void new openaiEntry.OpenAIClient(http, {}, { credential: {} as never });
+      void new openaiEntry.OpenAIClient(http, { credential: {} as never });
       // @ts-expect-error `baseURL` is set by the client; `apiPath` chooses the API path.
-      void new openaiEntry.OpenAIClient(http, {}, { baseURL: "https://evil.example/" });
+      void new openaiEntry.OpenAIClient(http, { baseURL: "https://evil.example/" });
       // @ts-expect-error `x509Transport` would use OpenAI's own certificate transport.
       tinfoil.withOptions({ x509Transport: {} as never });
       // @ts-expect-error The HTTP client must be one of the SDK's.

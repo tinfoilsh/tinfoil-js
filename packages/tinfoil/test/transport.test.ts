@@ -233,10 +233,10 @@ describe("KeyedTransport", () => {
       () => "k1",
       () => "k1",
     );
-    expect(t.lastVerification()).toBeUndefined();
+    expect(t.lastVerificationAttempt()).toBeUndefined();
     expect(t.mode()).toBe("tls");
     await expect(t.fetch(`http://${HOST}/`)).rejects.toThrow(ConfigurationError);
-    expect(t.lastVerification()).toBeUndefined();
+    expect(t.lastVerificationAttempt()).toBeUndefined();
     expect(await (await t.fetch(`https://${HOST}/v1/models`)).text()).toBe("k1");
     expect(lastFacts(t)?.tlsPublicKeyFP).toBe("k1");
     expect((await t.ensureVerified()).verifiedFacts?.tlsPublicKeyFP).toBe("k1");
@@ -379,7 +379,7 @@ describe("KeyedTransport", () => {
       },
       clock: () => now,
       sleep: async () => {},
-      onVerification: (host) => void reported.push(host),
+      onVerificationAttempt: (host) => void reported.push(host),
     });
     const reported: string[] = [];
     const t = new KeyedTransport(enclave, fakeMode(() => "k1", closed), () => now);
@@ -389,7 +389,7 @@ describe("KeyedTransport", () => {
     await expect(waiting).rejects.toThrow(/client is closed/);
     expect(closed).toEqual(["k1"]);
     // The close abandoned the attempt before its outcome was decided, so it has none.
-    expect(t.lastVerification()).toBeUndefined();
+    expect(t.lastVerificationAttempt()).toBeUndefined();
     expect(reported).toEqual([]);
   });
 
@@ -456,7 +456,7 @@ describe("KeyedTransport", () => {
       // The binding's idle connections are released at once, not when a newer verification replaces it.
       expect(released).toEqual(["retired k1"]);
       // The last attempt is the failure, not the earlier success, and no request goes out under that success.
-      expect(t.lastVerification()?.error).toBeInstanceOf(AttestationError);
+      expect(t.lastVerificationAttempt()?.error).toBeInstanceOf(AttestationError);
       await expect(t.fetch(`https://${HOST}/v1/chat`)).rejects.toThrow(AttestationError);
       await expect(t.ensureVerified()).rejects.toThrow(AttestationError);
       expect(sent).toEqual(["k1"]);
@@ -499,7 +499,7 @@ describe("KeyedTransport", () => {
       controller.abort(reason);
       await expect(aborted).rejects.toBe(reason);
       // The abandoned verification has no outcome yet, so the last attempt is still the earlier network failure.
-      expect(t.lastVerification()?.error).toBeInstanceOf(NetworkError);
+      expect(t.lastVerificationAttempt()?.error).toBeInstanceOf(NetworkError);
       // Another call joins the verification still under way and sees its failure.
       const joined = t.reverify();
       open();

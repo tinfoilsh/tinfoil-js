@@ -154,10 +154,15 @@ describe.skipIf(!conformanceAvailable())(vectorsTitle("Enclave"), () => {
     expect(enclave.verifier()).toBe(golden.verifier);
   });
 
-  it("fetches through a relay when one is configured", async () => {
-    const { fetch, urls } = serving([() => new Response(golden.document)]);
-    await (await Enclave.create(config({ fetch, relay: "relay.example" }))).verify();
-    expect(urls[0]).toBe(`https://relay.example/.well-known/tinfoil-attestation?nonce=${golden.fixture.input.nonce_hex}&enclave=${HOST}`);
+  it("fetches through a relay when one is configured, under the relay's path", async () => {
+    for (const [relayURL, want] of [
+      ["https://relay.example/", "https://relay.example/.well-known/tinfoil-attestation"],
+      ["https://relay.example/mount/", "https://relay.example/mount/.well-known/tinfoil-attestation"],
+    ] as const) {
+      const { fetch, urls } = serving([() => new Response(golden.document)]);
+      await (await Enclave.create(config({ fetch, relayURL }))).verify();
+      expect(urls[0]).toBe(`${want}?nonce=${golden.fixture.input.nonce_hex}&enclave=${HOST}`);
+    }
   });
 
   it("rejects a document bound to another nonce as an attestation error, after one retry", async () => {
@@ -302,14 +307,14 @@ describe.skipIf(!conformanceAvailable())(vectorsTitle("Enclave"), () => {
         },
         () => now,
       );
-      expect(cache.lastVerification()).toBeUndefined();
+      expect(cache.lastVerificationAttempt()).toBeUndefined();
       expect(urls).toHaveLength(0);
 
       const first = await cache.ensureVerified();
       expect(first.report.verifiedFacts.tlsPublicKeyFP).toBe(golden.expected.tls);
       expect(first.bound).toBe(1);
       expect(bound[0]).toBe(first.report.verifiedFacts);
-      expect(cache.lastVerification()?.report?.toJSON()).toEqual(first.report.toJSON());
+      expect(cache.lastVerificationAttempt()?.report?.toJSON()).toEqual(first.report.toJSON());
       expect(await cache.ensureVerified()).toBe(first);
       expect(urls).toHaveLength(1);
 
@@ -324,7 +329,7 @@ describe.skipIf(!conformanceAvailable())(vectorsTitle("Enclave"), () => {
       const failure = await cache.ensureVerified().catch((e: unknown) => e);
       expect(failure).toBeInstanceOf(AttestationError);
       expect(urls).toHaveLength(4);
-      expect(cache.lastVerification()).toEqual({ error: failure });
+      expect(cache.lastVerificationAttempt()).toEqual({ error: failure });
     });
 
     it("verifies again after a state is invalidated, and ignores invalidation of a replaced state", async () => {
@@ -378,7 +383,7 @@ describe.skipIf(!conformanceAvailable())(vectorsTitle("Enclave"), () => {
       await expect(probe).rejects.toThrow(/budget spent/);
       release();
       expect((await request).report.verifiedFacts.tlsPublicKeyFP).toBe(golden.expected.tls);
-      expect(cache.lastVerification()?.report).toBeDefined();
+      expect(cache.lastVerificationAttempt()?.report).toBeDefined();
       expect(urls).toHaveLength(1);
     });
   });
@@ -393,6 +398,6 @@ describe("Enclave against a live enclave", () => {
     expect(v.freshnessExpiresAt!.getTime()).toBeGreaterThan(Date.now());
     const cache = new VerifiedEnclave(enclave, noBinding);
     const state = await cache.ensureVerified();
-    expect(cache.lastVerification()?.report?.verifiedFacts?.tlsPublicKeyFP).toBe(state.report.verifiedFacts.tlsPublicKeyFP);
+    expect(cache.lastVerificationAttempt()?.report?.verifiedFacts?.tlsPublicKeyFP).toBe(state.report.verifiedFacts.tlsPublicKeyFP);
   }, 120_000);
 });

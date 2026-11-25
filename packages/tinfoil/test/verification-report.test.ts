@@ -1,6 +1,7 @@
 /**
- * The verification reports that the clients expose: `lastVerification()`,
- * the `onVerification` option, the reports that `ensureVerified` and
+ * The verification reports that the clients expose: `currentVerification()`,
+ * `lastVerificationAttempt()`,
+ * the `onVerificationAttempt` option, the reports that `ensureVerified` and
  * `reverify` return, and the verifier's report on a rejection, through the
  * conformance cases of the client specification. The gateway's per-replica
  * case is in the gateway transport's tests.
@@ -12,7 +13,7 @@ import * as tinfoil from "../src/index.js";
 import { AttestationError, ConfigurationError, findTinfoilError, NetworkError, type TinfoilError } from "../src/errors.js";
 import { Enclave } from "../src/internal/enclave.js";
 import { KeyedTransport, KeyRejectionError, PeerLacksKeyError, type Mode } from "../src/internal/transport/transport.js";
-import type { Fetch, OnVerification, VerificationAttempt } from "../src/options.js";
+import type { Fetch, OnVerificationAttempt, VerificationAttempt } from "../src/options.js";
 import { createRouterHTTPClient } from "../src/router-client.js";
 import type { Trust } from "../src/trust.js";
 import { KEY_SPKI_FP_SHA256_V1_FORMAT, VerificationError, type SevSnpMeasurement, type VerificationReport, type VerifiedFacts, type Verifier } from "../../verifier/src/index.js";
@@ -25,8 +26,8 @@ const AUTHORIZED: Trust = { kind: "authorizedBy", authorize: () => undefined };
 const METADATA = { verifier: { name: "test", version: "0" }, verifiedAt: new Date("2026-01-01T00:00:00Z") };
 const LAYERS = ["envelope", "provenance", "quote", "policy"];
 
-/** A real report of a verification that passed, endorsing `tls` and valid for a minute. */
-function passed(tls: string = TEST_PIN): VerificationReport {
+/** A real report of a verification that passed, endorsing `tls` and valid for `validMs`, a minute by default. */
+function passed(tls: string = TEST_PIN, validMs: number = 60_000): VerificationReport {
   const b = new ReportBuilder();
   for (const layer of LAYERS) b.passed(layer);
   const facts = verifiedFactsOf({
@@ -36,7 +37,7 @@ function passed(tls: string = TEST_PIN): VerificationReport {
     codeMeasurement: { platform: "sev-snp", launch: new Uint8Array(48).fill(1) },
     enclaveMeasurement: { platform: "sev-snp", launch: new Uint8Array(48).fill(1) },
     cryptoMaterial: [{ id: "tls", format: KEY_SPKI_FP_SHA256_V1_FORMAT, data: tls }],
-    freshnessExpiresAt: new Date(Date.now() + 60_000),
+    freshnessExpiresAt: new Date(Date.now() + validMs),
   });
   return b.passedAll(facts, METADATA);
 }
@@ -66,10 +67,10 @@ function scripted(outcomes: ("pass" | "reject" | VerificationReport)[]): Verifie
   return v as unknown as Verifier & { calls: number };
 }
 
-/** Records every call of the `onVerification` option. */
-function recorder(): { calls: { host: string; report?: VerificationReport; error?: TinfoilError }[]; onVerification: OnVerification } {
+/** Records every call of the `onVerificationAttempt` option. */
+function recorder(): { calls: { host: string; report?: VerificationReport; error?: TinfoilError }[]; onVerificationAttempt: OnVerificationAttempt } {
   const calls: { host: string; report?: VerificationReport; error?: TinfoilError }[] = [];
-  return { calls, onVerification: (host, attempt) => void calls.push({ host, ...attempt }) };
+  return { calls, onVerificationAttempt: (host, attempt) => void calls.push({ host, ...attempt }) };
 }
 
 /** A document fetch that serves a placeholder document, or fails with 503 while `down` is set. */
@@ -98,8 +99,8 @@ function verificationErrorIn(err: unknown): VerificationError | undefined {
 describe("verification reports from the clients", () => {
   it("reports an initial verification that succeeds, once, with the enclave's host and the same report", async () => {
     const r = recorder();
-    const client = await createEnclaveHTTPClient(HOST, AUTHORIZED, { onVerification: r.onVerification }, seams(scripted(["pass"]), documents().fetch));
-    const last = client.lastVerification();
+    const client = await createEnclaveHTTPClient(HOST, AUTHORIZED, { onVerificationAttempt: r.onVerificationAttempt }, seams(scripted(["pass"]), documents().fetch));
+    const last = client.lastVerificationAttempt();
     expect(last?.error).toBeUndefined();
     expect(last?.report?.verifiedFacts?.tlsPublicKeyFP).toBe(TEST_PIN);
     expect(last?.report?.steps.map((s) => s.status)).toEqual(["passed", "passed", "passed", "passed"]);
@@ -113,7 +114,7 @@ describe("verification reports from the clients", () => {
 
   it("reports a rejected document as an attestation error from which the verifier's error and its report are reachable", async () => {
     const r = recorder();
-    const client = await createEnclaveHTTPClient(HOST, AUTHORIZED, { onVerification: r.onVerification }, seams(scripted(["pass", "reject"]), documents().fetch));
+    const client = await createEnclaveHTTPClient(HOST, AUTHORIZED, { onVerificationAttempt: r.onVerificationAttempt }, seams(scripted(["pass", "reject"]), documents().fetch));
     const err = await client.reverify().catch((e: unknown) => e);
     expect(err).toBeInstanceOf(AttestationError);
     expect(findTinfoilError(err)).toBe(err);
@@ -123,8 +124,8 @@ describe("verification reports from the clients", () => {
     expect(rejected?.report.verifiedFacts).toBeUndefined();
     expect(rejected?.report.partialFacts?.measured?.cpu).toBeDefined();
     // The same error, and no report, from both.
-    expect(client.lastVerification()?.error).toBe(err);
-    expect(client.lastVerification()?.report).toBeUndefined();
+    expect(client.lastVerificationAttempt()?.error).toBe(err);
+    expect(client.lastVerificationAttempt()?.report).toBeUndefined();
     expect(lastOf(r.calls)).toEqual({ host: HOST, error: err });
     await client.close();
   });
@@ -147,36 +148,36 @@ describe("verification reports from the clients", () => {
   it("reports a failed attestation fetch as a network error with no report", async () => {
     const r = recorder();
     const docs = documents();
-    const client = await createEnclaveHTTPClient(HOST, AUTHORIZED, { onVerification: r.onVerification }, seams(scripted(["pass"]), docs.fetch));
+    const client = await createEnclaveHTTPClient(HOST, AUTHORIZED, { onVerificationAttempt: r.onVerificationAttempt }, seams(scripted(["pass"]), docs.fetch));
     docs.down = true;
     const err = await client.reverify().catch((e: unknown) => e);
     expect(err).toBeInstanceOf(NetworkError);
     expect(verificationErrorIn(err)).toBeUndefined();
-    expect(client.lastVerification()?.error).toBe(err);
+    expect(client.lastVerificationAttempt()?.error).toBe(err);
     expect(lastOf(r.calls)).toEqual({ host: HOST, error: err });
     await client.close();
   });
 
   it("returns the failure of a re-verification, not the earlier success", async () => {
     const client = await createEnclaveHTTPClient(HOST, AUTHORIZED, {}, seams(scripted(["pass", "reject"]), documents().fetch));
-    expect(client.lastVerification()?.report).toBeDefined();
+    expect(client.lastVerificationAttempt()?.report).toBeDefined();
     await expect(client.reverify()).rejects.toBeInstanceOf(AttestationError);
-    expect(client.lastVerification()?.report).toBeUndefined();
-    expect(client.lastVerification()?.error).toBeInstanceOf(AttestationError);
+    expect(client.lastVerificationAttempt()?.report).toBeUndefined();
+    expect(client.lastVerificationAttempt()?.error).toBeInstanceOf(AttestationError);
     await client.close();
   });
 
   it("reports both attempts when a verification fails and its retry succeeds, and returns the second", async () => {
     const r = recorder();
     const verifier = scripted(["reject", "pass"]);
-    const client = await createEnclaveHTTPClient(HOST, AUTHORIZED, { onVerification: r.onVerification }, seams(verifier, documents().fetch));
+    const client = await createEnclaveHTTPClient(HOST, AUTHORIZED, { onVerificationAttempt: r.onVerificationAttempt }, seams(verifier, documents().fetch));
     expect(verifier.calls).toBe(2);
     expect(r.calls.map((c) => [c.host, c.report !== undefined, c.error !== undefined])).toEqual([
       [HOST, false, true],
       [HOST, true, false],
     ]);
     expect(verificationErrorIn(r.calls[0]!.error)?.report.failedStep()?.layer).toBe("policy");
-    expect(client.lastVerification()?.report?.verifiedFacts?.tlsPublicKeyFP).toBe(TEST_PIN);
+    expect(client.lastVerificationAttempt()?.report?.verifiedFacts?.tlsPublicKeyFP).toBe(TEST_PIN);
     await client.close();
   });
 
@@ -184,7 +185,7 @@ describe("verification reports from the clients", () => {
     const r = recorder();
     let key = "k1";
     const verifier = scripted([passed("k1"), passed("k2")]);
-    const enclave = await Enclave.create({ host: HOST, pin: {}, verifier, fetch: documents().fetch, sleep: async () => {}, onVerification: r.onVerification });
+    const enclave = await Enclave.create({ host: HOST, pin: {}, verifier, fetch: documents().fetch, sleep: async () => {}, onVerificationAttempt: r.onVerificationAttempt });
     const mode: Mode = {
       name: "tls",
       validateRequest: () => {},
@@ -217,7 +218,7 @@ describe("verification reports from the clients", () => {
       await gate;
       return new Response(new Uint8Array([1]));
     };
-    const enclave = await Enclave.create({ host: HOST, pin: {}, verifier: scripted(["pass"]), fetch, onVerification: r.onVerification });
+    const enclave = await Enclave.create({ host: HOST, pin: {}, verifier: scripted(["pass"]), fetch, onVerificationAttempt: r.onVerificationAttempt });
     const t = new KeyedTransport(enclave, { name: "tls", validateRequest: () => {}, bind: () => ({ fetch: async () => new Response("ok") }) });
     const waiters = [t.ensureVerified(), t.ensureVerified(), t.reverify(), t.fetch(`https://${HOST}/`)];
     release();
@@ -238,7 +239,7 @@ describe("verification reports from the clients", () => {
       return new Response(new Uint8Array([1]));
     };
     const client = await createRouterHTTPClient(
-      { transport: { kind: "tls" }, onVerification: r.onVerification },
+      { transport: { kind: "tls" }, onVerificationAttempt: r.onVerificationAttempt },
       { verifier, documentFetch, routersFetch: async () => new Response(JSON.stringify(["bad.example", "good.example"])), shuffle: (items) => [...items], sleep: async () => {}, tls: { ca: TEST_CERT }, resolveSecret: () => "secret" },
     );
     expect(client.enclave).toBe("good.example");
@@ -247,7 +248,7 @@ describe("verification reports from the clients", () => {
       ["good.example", true],
     ]);
     expect(verificationErrorIn(r.calls[0]!.error)?.layer).toBe("policy");
-    expect(client.lastVerification()?.report?.toJSON()).toEqual(r.calls[1]!.report!.toJSON());
+    expect(client.lastVerificationAttempt()?.report?.toJSON()).toEqual(r.calls[1]!.report!.toJSON());
     await client.close();
   });
 
@@ -264,14 +265,14 @@ describe("verification reports from the clients", () => {
     let client: Awaited<ReturnType<typeof createEnclaveHTTPClient>> | undefined;
     const calls: { given: VerificationAttempt; seen: VerificationAttempt | undefined }[] = [];
     const ensured: Promise<VerificationReport>[] = [];
-    const onVerification: OnVerification = (_host, attempt) => {
+    const onVerificationAttempt: OnVerificationAttempt = (_host, attempt) => {
       if (client === undefined) return;
-      calls.push({ given: attempt, seen: client.lastVerification() });
+      calls.push({ given: attempt, seen: client.lastVerificationAttempt() });
       // A call that would wait for a refresh in flight doesn't wait for the one that is reporting.
       if (attempt.report !== undefined) ensured.push(client.ensureVerified());
     };
     // The re-verification fails, and so does its retry; the next one passes.
-    client = await createEnclaveHTTPClient(HOST, AUTHORIZED, { onVerification }, seams(scripted(["pass", "reject", "reject", "pass"]), documents().fetch));
+    client = await createEnclaveHTTPClient(HOST, AUTHORIZED, { onVerificationAttempt }, seams(scripted(["pass", "reject", "reject", "pass"]), documents().fetch));
     const failure = await client.reverify().catch((e: unknown) => e);
     expect(failure).toBeInstanceOf(AttestationError);
     expect(calls).toHaveLength(2);
@@ -292,12 +293,12 @@ describe("verification reports from the clients", () => {
 
   it("keeps its state and later reports when a caller mutates a report it was given", async () => {
     let givenAttempt: VerificationAttempt | undefined;
-    const client = await createEnclaveHTTPClient(HOST, AUTHORIZED, { onVerification: (_h, attempt) => void (givenAttempt = attempt) }, seams(scripted(["pass"]), documents().fetch));
+    const client = await createEnclaveHTTPClient(HOST, AUTHORIZED, { onVerificationAttempt: (_h, attempt) => void (givenAttempt = attempt) }, seams(scripted(["pass"]), documents().fetch));
     // The attempt itself is frozen too, so that a callback can store it as it is.
     expect(Object.isFrozen(givenAttempt)).toBe(true);
     const given = givenAttempt?.report;
-    const original = client.lastVerification()!.report!.toJSON();
-    for (const report of [client.lastVerification()!.report!, await client.ensureVerified(), given!]) {
+    const original = client.lastVerificationAttempt()!.report!.toJSON();
+    for (const report of [client.lastVerificationAttempt()!.report!, await client.ensureVerified(), given!]) {
       expect(Object.isFrozen(report)).toBe(true);
       expect(() => {
         (report.steps[0] as { status: string }).status = "failed";
@@ -310,11 +311,11 @@ describe("verification reports from the clients", () => {
       report.metadata.verifiedAt.setFullYear(1999);
       report.verifiedFacts!.freshnessExpiresAt!.setFullYear(1999);
     }
-    expect(client.lastVerification()!.report!.toJSON()).toEqual(original);
+    expect(client.lastVerificationAttempt()!.report!.toJSON()).toEqual(original);
     expect((await client.ensureVerified()).toJSON()).toEqual(original);
     // The attempt itself is a new frozen object on each call.
-    expect(client.lastVerification()).not.toBe(client.lastVerification());
-    expect(Object.isFrozen(client.lastVerification())).toBe(true);
+    expect(client.lastVerificationAttempt()).not.toBe(client.lastVerificationAttempt());
+    expect(Object.isFrozen(client.lastVerificationAttempt())).toBe(true);
     await client.close();
   });
 
@@ -331,8 +332,8 @@ describe("verification reports from the clients", () => {
       }
       return new Response(new Uint8Array([1]));
     };
-    const client = await createEnclaveHTTPClient(HOST, AUTHORIZED, { onVerification: r.onVerification }, seams(scripted(["pass"]), fetch));
-    const before = client.lastVerification()!.report!.toJSON();
+    const client = await createEnclaveHTTPClient(HOST, AUTHORIZED, { onVerificationAttempt: r.onVerificationAttempt }, seams(scripted(["pass"]), fetch));
+    const before = client.lastVerificationAttempt()!.report!.toJSON();
     gate = new Promise<void>((resolve) => (release = resolve));
     const reverified = client.reverify();
     await started;
@@ -340,7 +341,7 @@ describe("verification reports from the clients", () => {
     release();
     await expect(reverified).rejects.toBeInstanceOf(ConfigurationError);
     expect(r.calls).toHaveLength(1);
-    expect(client.lastVerification()?.report?.toJSON()).toEqual(before);
+    expect(client.lastVerificationAttempt()?.report?.toJSON()).toEqual(before);
   });
 
   it("records and reports a failure that a verification reaches on its own after a close", async () => {
@@ -356,7 +357,7 @@ describe("verification reports from the clients", () => {
       }
       return new Response(new Uint8Array([1]));
     };
-    const client = await createEnclaveHTTPClient(HOST, AUTHORIZED, { onVerification: r.onVerification }, seams(scripted(["pass", "reject"]), fetch));
+    const client = await createEnclaveHTTPClient(HOST, AUTHORIZED, { onVerificationAttempt: r.onVerificationAttempt }, seams(scripted(["pass", "reject"]), fetch));
     gate = new Promise<void>((resolve) => (release = resolve));
     const reverified = client.reverify().catch((e: unknown) => e);
     await started;
@@ -364,7 +365,7 @@ describe("verification reports from the clients", () => {
     release();
     const err = await reverified;
     expect(err).toBeInstanceOf(AttestationError);
-    expect(client.lastVerification()?.error).toBe(err);
+    expect(client.lastVerificationAttempt()?.error).toBe(err);
     expect(r.calls[r.calls.length - 1]).toEqual({ host: HOST, error: err });
   });
 
@@ -388,7 +389,7 @@ describe("verification reports from the clients", () => {
       );
       const thrown: Error[] = [];
       const hosts: string[] = [];
-      const onVerification: OnVerification = (host) => {
+      const onVerificationAttempt: OnVerificationAttempt = (host) => {
         hosts.push(host);
         const err = new Error(`callback bug ${hosts.length}`);
         thrown.push(err);
@@ -401,8 +402,8 @@ describe("verification reports from the clients", () => {
         return new Response(new Uint8Array([1]));
       };
       // The factory's own verification passes although the callback throws.
-      const client = await createEnclaveHTTPClient(HOST, AUTHORIZED, { onVerification }, seams(scripted(["pass", "pass", "reject"]), fetch));
-      expect(client.lastVerification()?.report).toBeDefined();
+      const client = await createEnclaveHTTPClient(HOST, AUTHORIZED, { onVerificationAttempt }, seams(scripted(["pass", "pass", "reject"]), fetch));
+      expect(client.lastVerificationAttempt()?.report).toBeDefined();
 
       // Two callers waiting on the same verification both get its report.
       gate = new Promise<void>((resolve) => (release = resolve));
@@ -410,14 +411,14 @@ describe("verification reports from the clients", () => {
       const second = client.reverify();
       release();
       const reports = await Promise.all([first, second]);
-      for (const report of reports) expect(report.toJSON()).toEqual(client.lastVerification()!.report!.toJSON());
+      for (const report of reports) expect(report.toJSON()).toEqual(client.lastVerificationAttempt()!.report!.toJSON());
       expect(hosts).toHaveLength(2);
 
       // A later attempt is still reported, and its failure reaches its callers unchanged.
       const failures = await Promise.all([client.reverify().catch((e: unknown) => e), client.reverify().catch((e: unknown) => e)]);
       expect(failures[0]).toBeInstanceOf(AttestationError);
       expect(failures[1]).toBe(failures[0]);
-      expect(client.lastVerification()?.error).toBe(failures[0]);
+      expect(client.lastVerificationAttempt()?.error).toBe(failures[0]);
       // The rejection is retried once, so two more attempts are reported.
       expect(hosts).toEqual([HOST, HOST, HOST, HOST]);
       await new Promise((resolve) => setTimeout(resolve, 0));
@@ -428,37 +429,224 @@ describe("verification reports from the clients", () => {
 
   it("records no attempt for a request that fails before verifying, and keeps reporting after a close", async () => {
     const r = recorder();
-    const client = await createEnclaveHTTPClient(HOST, AUTHORIZED, { onVerification: r.onVerification }, seams(scripted(["pass"]), documents().fetch));
+    const client = await createEnclaveHTTPClient(HOST, AUTHORIZED, { onVerificationAttempt: r.onVerificationAttempt }, seams(scripted(["pass"]), documents().fetch));
     await expect(client.fetch("https://other.example/")).rejects.toBeInstanceOf(ConfigurationError);
     expect(r.calls).toHaveLength(1);
     await client.close();
-    expect(client.lastVerification()?.report).toBeDefined();
+    expect(client.lastVerificationAttempt()?.report).toBeDefined();
   });
 });
 
-describe("the onVerification type", () => {
+/** A mode whose requests answer "ok" under any verified key, and count them. */
+function okMode(): Mode & { sent: number } {
+  const mode = {
+    sent: 0,
+    name: "tls",
+    validateRequest: () => {},
+    bind: () => ({
+      fetch: async () => {
+        mode.sent++;
+        return new Response("ok");
+      },
+    }),
+  };
+  return mode as unknown as Mode & { sent: number };
+}
+
+describe("the current verification", () => {
+  it("is the fresh verification's report, equal to the one that ensureVerified returned, without I/O", async () => {
+    const verifier = scripted(["pass"]);
+    const client = await createEnclaveHTTPClient(HOST, AUTHORIZED, {}, seams(verifier, documents().fetch));
+    const ensured = await client.ensureVerified();
+    const current = client.currentVerification();
+    expect(current?.toJSON()).toEqual(ensured.toJSON());
+    expect(current?.toJSON()).toEqual(client.lastVerificationAttempt()?.report?.toJSON());
+    expect(verifier.calls).toBe(1);
+    // Each call returns a new frozen copy.
+    expect(client.currentVerification()).not.toBe(current);
+    expect(Object.isFrozen(current)).toBe(true);
+    (current!.verifiedFacts!.enclaveMeasurement as SevSnpMeasurement).launch.fill(0xff);
+    expect(client.currentVerification()?.toJSON()).toEqual(ensured.toJSON());
+    await client.close();
+    expect(client.currentVerification()).toBeUndefined();
+    expect(client.lastVerificationAttempt()?.report).toBeDefined();
+  });
+
+  it("is undefined before the first success and after a rejected first verification", async () => {
+    const enclave = await Enclave.create({ host: HOST, pin: {}, verifier: scripted(["reject"]), fetch: documents().fetch, sleep: async () => {} });
+    const t = new KeyedTransport(enclave, okMode());
+    expect(t.currentVerification()).toBeUndefined();
+    await expect(t.ensureVerified()).rejects.toBeInstanceOf(AttestationError);
+    expect(t.currentVerification()).toBeUndefined();
+    t.close();
+  });
+
+  it("is the retry's report when a verification fails and its retry succeeds", async () => {
+    const client = await createEnclaveHTTPClient(HOST, AUTHORIZED, {}, seams(scripted(["reject", "pass"]), documents().fetch));
+    expect(client.currentVerification()?.toJSON()).toEqual(client.lastVerificationAttempt()?.report?.toJSON());
+    expect(client.currentVerification()?.verifiedFacts?.tlsPublicKeyFP).toBe(TEST_PIN);
+    await client.close();
+  });
+
+  it("keeps the report while it is fresh after a re-verification that fails with a network error, and requests go through under it", async () => {
+    const docs = documents();
+    const mode = okMode();
+    const enclave = await Enclave.create({ host: HOST, pin: {}, verifier: scripted(["pass"]), fetch: docs.fetch, sleep: async () => {} });
+    const t = new KeyedTransport(enclave, mode);
+    const ensured = await t.ensureVerified();
+    docs.down = true;
+    const err = await t.reverify().catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(NetworkError);
+    expect(t.currentVerification()?.toJSON()).toEqual(ensured.toJSON());
+    expect(t.lastVerificationAttempt()).toEqual({ error: err });
+    expect(await (await t.fetch(`https://${HOST}/`)).text()).toBe("ok");
+    expect(mode.sent).toBe(1);
+    t.close();
+  });
+
+  it("is undefined after a re-verification that fails with an attestation error, until the next verification succeeds", async () => {
+    // The re-verification fails, and so does its retry; the next one passes.
+    const verifier = scripted([passed("k1"), "reject", "reject", passed("k2")]);
+    const client = await createEnclaveHTTPClient(HOST, AUTHORIZED, {}, seams(verifier, documents().fetch));
+    expect(client.currentVerification()).toBeDefined();
+    await expect(client.reverify()).rejects.toBeInstanceOf(AttestationError);
+    expect(client.currentVerification()).toBeUndefined();
+    const next = await client.ensureVerified();
+    expect(next.verifiedFacts?.tlsPublicKeyFP).toBe("k2");
+    expect(client.currentVerification()?.toJSON()).toEqual(next.toJSON());
+    await client.close();
+  });
+
+  it("is undefined after a key rejection marks the verification stale", async () => {
+    let key = "k1";
+    const enclave = await Enclave.create({ host: HOST, pin: {}, verifier: scripted([passed("k1"), passed("k2")]), fetch: documents().fetch, sleep: async () => {} });
+    const t = new KeyedTransport(enclave, {
+      name: "tls",
+      validateRequest: () => {},
+      bind: (v: VerifiedFacts) => ({
+        fetch: async () => {
+          if (v.tlsPublicKeyFP !== key) throw new PeerLacksKeyError("peer changed key");
+          return new Response(key);
+        },
+      }),
+    });
+    await t.fetch(`https://${HOST}/`);
+    key = "k2";
+    await expect(t.fetch(`https://${HOST}/`)).rejects.toBeInstanceOf(KeyRejectionError);
+    expect(t.currentVerification()).toBeUndefined();
+    await t.fetch(`https://${HOST}/`);
+    expect(t.currentVerification()?.verifiedFacts?.tlsPublicKeyFP).toBe("k2");
+    t.close();
+  });
+
+  it("is undefined from the freshness deadline, without starting a verification, until the next request or ensureVerified", async () => {
+    let now = Date.now();
+    const verifier = scripted([passed(TEST_PIN, 60_000), passed(TEST_PIN, 3_600_000)]);
+    const client = await createEnclaveHTTPClient(HOST, AUTHORIZED, {}, { ...seams(verifier, documents().fetch), clock: () => new Date(now) });
+    const first = client.currentVerification()!;
+    now = first.verifiedFacts!.freshnessExpiresAt!.getTime();
+    expect(client.currentVerification()).toBeUndefined();
+    expect(verifier.calls).toBe(1);
+    expect(client.lastVerificationAttempt()?.report?.toJSON()).toEqual(first.toJSON());
+    const next = await client.ensureVerified();
+    expect(verifier.calls).toBe(2);
+    expect(client.currentVerification()?.toJSON()).toEqual(next.toJSON());
+    await client.close();
+  });
+
+  it("describes the router that discovery chose", async () => {
+    const seen: string[] = [];
+    const verifier = {
+      checkPinVerifiability: () => {},
+      verifyV3At: async () => (lastOf(seen) === "bad.example" ? Promise.reject(rejection()) : passed()),
+    } as unknown as Verifier;
+    const documentFetch: Fetch = async (input) => {
+      seen.push(new URL(String(input)).host);
+      return new Response(new Uint8Array([1]));
+    };
+    const client = await createRouterHTTPClient(
+      { transport: { kind: "tls" } },
+      { verifier, documentFetch, routersFetch: async () => new Response(JSON.stringify(["bad.example", "good.example"])), shuffle: (items) => [...items], sleep: async () => {}, tls: { ca: TEST_CERT }, resolveSecret: () => "secret" },
+    );
+    expect(client.currentVerification()?.toJSON()).toEqual(client.lastVerificationAttempt()?.report?.toJSON());
+    await client.close();
+  });
+});
+
+describe("the report's host", () => {
+  const hostIn = (report: VerificationReport | undefined): unknown => (report === undefined ? undefined : (JSON.parse(JSON.stringify(report)) as { metadata: { host?: string } }).metadata.host);
+
+  it("names the enclave on every report that an enclave client hands out, a rejection's included", async () => {
+    const r = recorder();
+    const client = await createEnclaveHTTPClient(HOST, AUTHORIZED, { onVerificationAttempt: r.onVerificationAttempt }, seams(scripted(["pass", "pass", "reject"]), documents().fetch));
+    expect(hostIn(await client.ensureVerified())).toBe(HOST);
+    expect(hostIn(await client.reverify())).toBe(HOST);
+    expect(hostIn(client.currentVerification())).toBe(HOST);
+    expect(hostIn(client.lastVerificationAttempt()?.report)).toBe(HOST);
+    expect(r.calls.map((c) => hostIn(c.report))).toEqual([HOST, HOST]);
+    const err = await client.reverify().catch((e: unknown) => e);
+    const rejected = verificationErrorIn(err);
+    expect(rejected?.layer).toBe("policy");
+    expect(rejected?.message).toBe("verification error: policy: launch measurement mismatch");
+    expect(hostIn(rejected?.report)).toBe(HOST);
+    expect(rejected?.report.failedStep()?.layer).toBe("policy");
+    expect(hostIn(verificationErrorIn(client.lastVerificationAttempt()?.error)?.report)).toBe(HOST);
+    expect(hostIn(verificationErrorIn(lastOf(r.calls)?.error)?.report)).toBe(HOST);
+    await client.close();
+  });
+
+  it("names each router that discovery tries, and the chosen one", async () => {
+    const r = recorder();
+    const seen: string[] = [];
+    const verifier = {
+      checkPinVerifiability: () => {},
+      verifyV3At: async () => (lastOf(seen) === "bad.example" ? Promise.reject(rejection()) : passed()),
+    } as unknown as Verifier;
+    const documentFetch: Fetch = async (input) => {
+      seen.push(new URL(String(input)).host);
+      return new Response(new Uint8Array([1]));
+    };
+    const client = await createRouterHTTPClient(
+      { transport: { kind: "tls" }, onVerificationAttempt: r.onVerificationAttempt },
+      { verifier, documentFetch, routersFetch: async () => new Response(JSON.stringify(["bad.example", "good.example"])), shuffle: (items) => [...items], sleep: async () => {}, tls: { ca: TEST_CERT }, resolveSecret: () => "secret" },
+    );
+    expect(hostIn(verificationErrorIn(r.calls[0]!.error)?.report)).toBe("bad.example");
+    expect(hostIn(r.calls[1]!.report)).toBe("good.example");
+    expect(hostIn(client.currentVerification())).toBe("good.example");
+    expect(hostIn(client.lastVerificationAttempt()?.report)).toBe("good.example");
+    expect(hostIn(await client.ensureVerified())).toBe("good.example");
+    await client.close();
+  });
+
+  it("is not set by the verifier itself", async () => {
+    expect(hostIn(passed())).toBeUndefined();
+    expect(hostIn(rejection().report)).toBeUndefined();
+  });
+});
+
+describe("the onVerificationAttempt type", () => {
   it("passes one attempt, which narrows on its report or its error, and accepts the usual callback forms", () => {
     // Checked by the test typecheck: each declaration below must compile, except where a directive pins the error.
-    const narrowsOnReport: OnVerification = (host, attempt) => {
+    const narrowsOnReport: OnVerificationAttempt = (host, attempt) => {
       if (attempt.report) void [host, attempt.report.steps];
       else void attempt.error.category;
     };
-    const narrowsOnError: OnVerification = (_host, attempt) => {
+    const narrowsOnError: OnVerificationAttempt = (_host, attempt) => {
       if (attempt.error !== undefined) void attempt.error.category;
       else void attempt.report.verifiedFacts;
     };
     const stored: VerificationAttempt[] = [];
-    const stores: OnVerification = (_host, attempt) => void stored.push(attempt);
-    const hostOnly: OnVerification = (host) => void host;
-    const ignores: OnVerification = () => {};
+    const stores: OnVerificationAttempt = (_host, attempt) => void stored.push(attempt);
+    const hostOnly: OnVerificationAttempt = (host) => void host;
+    const ignores: OnVerificationAttempt = () => {};
     // @ts-expect-error The callback takes the host and one attempt, not a report and an error.
-    const separate: OnVerification = (host, report, error) => void [host, report, error];
+    const separate: OnVerificationAttempt = (host, report, error) => void [host, report, error];
 
     const passedAttempt: VerificationAttempt = { report: passed() };
     const failedAttempt: VerificationAttempt = { error: new AttestationError("rejected") };
-    for (const onVerification of [narrowsOnReport, narrowsOnError, stores, hostOnly, ignores]) {
-      onVerification(HOST, passedAttempt);
-      onVerification(HOST, failedAttempt);
+    for (const onVerificationAttempt of [narrowsOnReport, narrowsOnError, stores, hostOnly, ignores]) {
+      onVerificationAttempt(HOST, passedAttempt);
+      onVerificationAttempt(HOST, failedAttempt);
     }
     expect(stored).toEqual([passedAttempt, failedAttempt]);
     void separate;

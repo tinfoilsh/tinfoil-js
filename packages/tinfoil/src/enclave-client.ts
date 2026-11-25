@@ -146,7 +146,7 @@ export async function createEnclaveHTTPClient(host: string, trust: Trust, option
     pin,
     verifier,
     verificationCheck: options.verificationCheck,
-    onVerification: options.onVerification,
+    onVerificationAttempt: options.onVerificationAttempt,
     fetchAttestation: options.fetchAttestation,
     fetch: seams.documentFetch,
     clock: seams.clock,
@@ -228,6 +228,28 @@ export class EnclaveHTTPClient {
   }
 
   /**
+   * The report of the verification that the client's requests are bound to
+   * now, without network I/O: the latest successful verification while it
+   * is fresh, before its verified facts' freshness deadline, and has not been
+   * discarded. It is undefined before the first successful verification,
+   * after a failure discarded the verification (a `reverify` or a
+   * re-verification that failed with an {@link AttestationError}, or a key
+   * rejection), once the verification has expired, and after `close`. A
+   * re-verification that fails in any other way, such as with a
+   * {@link NetworkError}, leaves it unchanged while it is fresh, though
+   * {@link lastVerificationAttempt} then returns the failure.
+   *
+   * The client doesn't verify again in the background, so after expiry it is
+   * undefined until the next request or `ensureVerified` verifies again; a
+   * readiness check calls {@link ensureVerified} instead. Its answer holds at
+   * the time of the call: the verification can expire right after. Each call
+   * returns a new copy.
+   */
+  currentVerification(): VerificationReport | undefined {
+    return this.#transport.currentVerification();
+  }
+
+  /**
    * The outcome of the most recent attempt to verify the enclave, without
    * network I/O, or undefined before the first: `{ report }` if it passed,
    * or `{ error }` with the error that the client reported if it failed,
@@ -236,11 +258,12 @@ export class EnclaveHTTPClient {
    * attempt counts: the first verification, its retry, a re-verification
    * after an expiry or a key rotation, and `reverify`. A later failure
    * replaces an earlier success. A report is not checked again: it may have
-   * expired or been rejected since, so use {@link ensureVerified} for one
-   * that admits requests now. Each call returns a new copy.
+   * expired or been discarded since; {@link currentVerification} returns the
+   * verification that requests are bound to now. Each call returns a new
+   * copy.
    */
-  lastVerification(): VerificationAttempt | undefined {
-    return this.#transport.lastVerification();
+  lastVerificationAttempt(): VerificationAttempt | undefined {
+    return this.#transport.lastVerificationAttempt();
   }
 
   /**
@@ -275,8 +298,8 @@ export class EnclaveHTTPClient {
    * transport sends through the runtime's fetch, or its own `fetch`, and
    * holds no connections of its own, so a request in flight completes. No verification runs again. Afterwards `fetch`, `ensureVerified`,
    * `reverify` and the WebSocket functions reject with a
-   * {@link ConfigurationError}; `lastVerification` still reports the last
-   * attempt. Closing again does nothing.
+   * {@link ConfigurationError}; `lastVerificationAttempt` still reports the last
+   * attempt, and `currentVerification` returns undefined. Closing again does nothing.
    */
   async close(): Promise<void> {
     this.#transport.close();

@@ -77,7 +77,7 @@ describe("GatewayHTTPClient on the live gateway", () => {
       expect(models).toEqual([...catalog.keys()].sort());
       const verification = await http.ensureVerified(models[0]!);
       expect(verification.verifiedFacts?.hpkePublicKey).toMatch(SHA256_HEX);
-      expect(http.lastVerification().map((r) => r.reference)).toEqual([catalog.get(models[0]!)!.repo]);
+      expect(http.replicas().map((r) => r.reference)).toEqual([catalog.get(models[0]!)!.repo]);
     },
     180_000,
   );
@@ -87,7 +87,7 @@ describe("GatewayHTTPClient on the live gateway", () => {
     async () => {
       await using ai = await openAIOver(GatewayHTTPClient.create({ modelPins: pinsOf(await fetchCatalog(GATEWAY_HOST)) }), { apiKey });
       await completeChat(ai, (await ai.httpClient.models())[0]!);
-      expect(ai.httpClient.lastVerification().length).toBeGreaterThan(0);
+      expect(ai.httpClient.replicas().length).toBeGreaterThan(0);
     },
     180_000,
   );

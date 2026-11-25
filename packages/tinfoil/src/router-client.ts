@@ -41,7 +41,7 @@ export async function createRouterHTTPClient(options: RouterOptions, seams: Rout
   const transport = await discoverRouter({
     verifier,
     verificationCheck: options.verificationCheck,
-    onVerification: options.onVerification,
+    onVerificationAttempt: options.onVerificationAttempt,
     mode: modeFor(resolved, seams),
     signal: options.signal,
     fetchAttestation: options.fetchAttestation,
@@ -121,13 +121,22 @@ export class RouterHTTPClient {
   }
 
   /**
-   * The outcome of the most recent attempt to verify the router that the
-   * client chose, as {@link EnclaveHTTPClient.lastVerification} describes.
-   * The routers that discovery tried and skipped are reported only to the
-   * `onVerification` option.
+   * The report of the verification of the router that the client chose that
+   * its requests are bound to now, without network I/O, or undefined, as
+   * {@link EnclaveHTTPClient.currentVerification} describes.
    */
-  lastVerification(): VerificationAttempt | undefined {
-    return this.#transport.lastVerification();
+  currentVerification(): VerificationReport | undefined {
+    return this.#transport.currentVerification();
+  }
+
+  /**
+   * The outcome of the most recent attempt to verify the router that the
+   * client chose, as {@link EnclaveHTTPClient.lastVerificationAttempt}
+   * describes. The routers that discovery tried and skipped are reported
+   * only to the `onVerificationAttempt` option.
+   */
+  lastVerificationAttempt(): VerificationAttempt | undefined {
+    return this.#transport.lastVerificationAttempt();
   }
 
   /** The report of a verification valid now, verifying first only if the cached one has expired or been rejected. */

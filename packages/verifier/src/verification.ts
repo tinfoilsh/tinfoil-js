@@ -39,9 +39,27 @@ export interface ArtifactVerification {
   readonly approvalTime?: Date;
 }
 
+/**
+ * How a verification was performed. The verifier and the client that called
+ * it fill it in from their own state; none of it is attested by or checked
+ * against the document.
+ */
 export interface VerificationMetadata {
+  /** The name and version of the SDK that verified the document. */
   readonly verifier: { readonly name: string; readonly version: string };
+  /** The instant that the document was appraised at. It is not a freshness guarantee. */
   readonly verifiedAt: Date;
+  /**
+   * The host, with an optional port, that the client contacted for the
+   * document: for an enclave client its enclave, even through an EHBP proxy,
+   * for a router client the router that it chose, and for a gateway client
+   * the replica. It is what the client connected to, not an attested fact,
+   * so it proves nothing about the enclave. The verifier doesn't know the
+   * host and leaves it undefined; a client sets it on every report that it
+   * hands out, and a caller that runs the verifier itself can set it with
+   * {@link VerificationReport.withHost}.
+   */
+  readonly host?: string;
 }
 
 /** @internal The facts the verifier proved; only the verifier builds one. */
@@ -123,6 +141,8 @@ export interface VerificationMetadataJSON {
   readonly verified_at: string;
   /** The name and version of the SDK that verified the document. */
   readonly verifier?: { readonly name: string; readonly version: string };
+  /** The host that the client contacted for the document, present only in a report that a client produced. Not attested. */
+  readonly host?: string;
 }
 
 /** Only this module holds the token the constructor requires, so untyped code that calls it is refused. */

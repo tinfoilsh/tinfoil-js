@@ -252,7 +252,7 @@ describe("OpenAI clients in a browser", () => {
     const http = await createEnclaveHTTPClient(ENCLAVE, { kind: "repoPin", repo: "tinfoilsh/repo" }, {}, { ...seams(), verifier: verifier(peer.publicKeyHex) });
     const verified = peer.seen.length;
     for (const options of [{ apiKey: "k" }, { apiKey: "k", dangerouslyAllowBrowser: true }]) {
-      expect(() => new OpenAIClient(http, {}, options)).toThrow(/belongs on a server; in a browser, give a bearerToken/);
+      expect(() => new OpenAIClient(http, options)).toThrow(/belongs on a server; in a browser, give a bearerToken/);
     }
     expect(peer.seen.length).toBe(verified);
   });
@@ -293,10 +293,10 @@ describe("the gateway in a browser", () => {
     const peerFetch = fetchOf(peer);
     const gatewaySeams = { ...seams(), catalogFetch: peerFetch, documentFetch: peerFetch };
     const modelPins = new Map([["test-model", { repo: "tinfoilsh/test" }]]);
-    const http = await createGatewayHTTPClient({ modelPins, url: "https://gateway.example/v1/" }, { ...gatewaySeams, verifier: verifier(peer.publicKeyHex) });
+    const http = await createGatewayHTTPClient({ modelPins, url: "https://gateway.example/" }, { ...gatewaySeams, verifier: verifier(peer.publicKeyHex) });
     expect(http).toBeInstanceOf(GatewayHTTPClient);
     expect(await http.models()).toEqual(["test-model"]);
-    const ai = await openAIOver(createGatewayHTTPClient({ modelPins, url: "https://gateway.example/v1/" }, { ...gatewaySeams, verifier: verifier(peer.publicKeyHex) }), { bearerToken: "jwt" });
+    const ai = await openAIOver(createGatewayHTTPClient({ modelPins, url: "https://gateway.example/" }, { ...gatewaySeams, verifier: verifier(peer.publicKeyHex) }), { bearerToken: "jwt" });
     const reply = await ai.chat.completions.create({ model: "test-model", messages: [{ role: "user", content: "hi" }] });
     expect(reply.choices[0]!.message.content).toBe("sealed");
     const last = peer.seen[peer.seen.length - 1]!;
@@ -304,7 +304,7 @@ describe("the gateway in a browser", () => {
     expect(last.headers["x-tinfoil-model"]).toBe("test-model");
     const sent = JSON.parse(new TextDecoder().decode(last.body)) as Record<string, unknown>;
     expect(sent.cache_salt).toMatch(/^[A-Za-z0-9_-]{43}$/);
-    expect(ai.httpClient.lastVerification().map((r) => r.host)).toEqual(["replica.example"]);
+    expect(ai.httpClient.replicas().map((r) => r.host)).toEqual(["replica.example"]);
   });
 });
 

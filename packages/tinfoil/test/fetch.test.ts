@@ -30,21 +30,17 @@ function routed(routes: Record<string, () => Response>): { fetch: Fetch; calls: 
 }
 
 describe("attestationURL", () => {
-  it("names the enclave's endpoint with the nonce, or a relay with the enclave as a query", () => {
-    expect(attestationURL("enclave.example", undefined, nonce)).toBe(`https://enclave.example/.well-known/tinfoil-attestation?nonce=${nonceHex}`);
-    expect(attestationURL("enclave.example:8443", "", nonce)).toBe(`https://enclave.example:8443/.well-known/tinfoil-attestation?nonce=${nonceHex}`);
-    expect(attestationURL("enclave.example", "relay.example", nonce)).toBe(
-      `https://relay.example/.well-known/tinfoil-attestation?nonce=${nonceHex}&enclave=enclave.example`,
-    );
+  it("names the enclave's endpoint with the nonce", () => {
+    expect(attestationURL("enclave.example", nonce)).toBe(`https://enclave.example/.well-known/tinfoil-attestation?nonce=${nonceHex}`);
+    expect(attestationURL("enclave.example:8443", nonce)).toBe(`https://enclave.example:8443/.well-known/tinfoil-attestation?nonce=${nonceHex}`);
   });
 
   it("rejects a missing host, a host that is not a bare authority, and a nonce of the wrong size", () => {
-    expect(() => attestationURL("", undefined, nonce)).toThrow(ConfigurationError);
+    expect(() => attestationURL("", nonce)).toThrow(ConfigurationError);
     for (const bad of ["https://enclave.example", "enclave.example/path", "user@enclave.example", "enclave.example?x=1", "a b"]) {
-      expect(() => attestationURL(bad, undefined, nonce), bad).toThrow(ConfigurationError);
-      expect(() => attestationURL("enclave.example", bad, nonce), bad).toThrow(ConfigurationError);
+      expect(() => attestationURL(bad, nonce), bad).toThrow(ConfigurationError);
     }
-    expect(() => attestationURL("enclave.example", undefined, new Uint8Array(16))).toThrow(/nonce must be 32 bytes/);
+    expect(() => attestationURL("enclave.example", new Uint8Array(16))).toThrow(/nonce must be 32 bytes/);
   });
 });
 
@@ -62,7 +58,7 @@ describe("fetchDocument", () => {
 
   it("sends a GET with the SDK headers and manual redirects, and returns the body", async () => {
     const { fetch, calls } = routed({ [endpoint]: () => new Response(new Uint8Array([1, 2, 3])) });
-    expect(await fetchDocument("enclave.example", undefined, nonce, fetch)).toEqual(new Uint8Array([1, 2, 3]));
+    expect(await fetchDocument("enclave.example", nonce, fetch)).toEqual(new Uint8Array([1, 2, 3]));
     expect(calls).toHaveLength(1);
     expect(calls[0]!.init?.method).toBe("GET");
     expect(calls[0]!.init?.redirect).toBe("manual");
@@ -76,25 +72,25 @@ describe("fetchDocument", () => {
       [endpoint]: () => new Response(null, { status: 302, headers: { location: moved } }),
       [moved]: () => new Response(new Uint8Array([9])),
     });
-    expect(await fetchDocument("enclave.example", undefined, nonce, fetch)).toEqual(new Uint8Array([9]));
+    expect(await fetchDocument("enclave.example", nonce, fetch)).toEqual(new Uint8Array([9]));
     expect(calls.map((c) => c.url)).toEqual([endpoint, moved]);
 
     const insecure = routed({ [endpoint]: () => new Response(null, { status: 302, headers: { location: "http://other.example/doc" } }) });
-    await expect(fetchDocument("enclave.example", undefined, nonce, insecure.fetch)).rejects.toThrow(/refusing redirect to non-HTTPS URL/);
-    await expect(fetchDocument("enclave.example", undefined, nonce, insecure.fetch)).rejects.toBeInstanceOf(NetworkError);
+    await expect(fetchDocument("enclave.example", nonce, insecure.fetch)).rejects.toThrow(/refusing redirect to non-HTTPS URL/);
+    await expect(fetchDocument("enclave.example", nonce, insecure.fetch)).rejects.toBeInstanceOf(NetworkError);
 
     const silent = routed({ [endpoint]: () => new Response(null, { status: 302 }) });
-    await expect(fetchDocument("enclave.example", undefined, nonce, silent.fetch)).rejects.toThrow(/without a Location header/);
+    await expect(fetchDocument("enclave.example", nonce, silent.fetch)).rejects.toThrow(/without a Location header/);
   });
 
   it("stops after ten redirects", async () => {
     const loop: Fetch = async () => new Response(null, { status: 307, headers: { location: endpoint } });
-    await expect(fetchDocument("enclave.example", undefined, nonce, loop)).rejects.toThrow(/stopped after 10 redirects/);
+    await expect(fetchDocument("enclave.example", nonce, loop)).rejects.toThrow(/stopped after 10 redirects/);
   });
 
   it("reports an error status as a network error", async () => {
     const { fetch } = routed({ [endpoint]: () => new Response("busy", { status: 503, statusText: "Service Unavailable" }) });
-    const err = await fetchDocument("enclave.example", undefined, nonce, fetch).catch((e: unknown) => e);
+    const err = await fetchDocument("enclave.example", nonce, fetch).catch((e: unknown) => e);
     expect(err).toBeInstanceOf(NetworkError);
     expect((err as Error).message).toBe(`network error: HTTP GET ${endpoint}: 503 Service Unavailable`);
   });
@@ -109,7 +105,7 @@ describe("fetchDocument", () => {
       },
     });
     const { fetch } = routed({ [endpoint]: () => new Response(body) });
-    await expect(fetchDocument("enclave.example", undefined, nonce, fetch)).rejects.toThrow(/attestation document exceeds/);
+    await expect(fetchDocument("enclave.example", nonce, fetch)).rejects.toThrow(/attestation document exceeds/);
     expect(served).toBeLessThan(MAX_ATTESTATION_BYTES + 4 * chunk.length);
   });
 
@@ -117,12 +113,12 @@ describe("fetchDocument", () => {
     const down: Fetch = async () => {
       throw new TypeError("fetch failed");
     };
-    const err = await fetchDocument("enclave.example", undefined, nonce, down).catch((e: unknown) => e);
+    const err = await fetchDocument("enclave.example", nonce, down).catch((e: unknown) => e);
     expect(err).toBeInstanceOf(NetworkError);
     expect((err as Error).cause).toBeInstanceOf(TypeError);
 
     const opaque: Fetch = async () => Object.defineProperty(new Response(null, { status: 200 }), "type", { value: "opaqueredirect" });
-    await expect(fetchDocument("enclave.example", undefined, nonce, opaque)).rejects.toThrow(/redirected, which this runtime does not follow/);
+    await expect(fetchDocument("enclave.example", nonce, opaque)).rejects.toThrow(/redirected, which this runtime does not follow/);
   });
 
   it("passes a caller's signal through and rejects once it aborts", async () => {
@@ -134,7 +130,7 @@ describe("fetchDocument", () => {
       init?.signal?.throwIfAborted();
       return fetch(input, init);
     };
-    await expect(fetchDocument("enclave.example", undefined, nonce, guarded, early.signal)).rejects.toThrow(/caller gave up/);
+    await expect(fetchDocument("enclave.example", nonce, guarded, early.signal)).rejects.toThrow(/caller gave up/);
     expect(calls).toHaveLength(0);
 
     // A signal aborted while the request is pending ends it: the fetch
@@ -148,7 +144,7 @@ describe("fetchDocument", () => {
         given.push(signal);
         signal.addEventListener("abort", () => reject(signal.reason), { once: true });
       });
-    const pending = fetchDocument("enclave.example", undefined, nonce, waiting, controller.signal);
+    const pending = fetchDocument("enclave.example", nonce, waiting, controller.signal);
     expect(given).toHaveLength(1);
     expect(given[0]!.aborted).toBe(false);
     const reason = new Error("caller gave up");

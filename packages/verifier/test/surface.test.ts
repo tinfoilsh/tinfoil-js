@@ -71,7 +71,7 @@ const VERIFICATION_PROPERTIES = [
 /** What a report carries as own properties, in declaration order: verified facts on success, partial facts on failure. */
 const REPORT_PROPERTIES = ["steps", "verifiedFacts", "metadata"];
 const FAILED_REPORT_PROPERTIES = ["steps", "partialFacts", "metadata"];
-const REPORT_METHODS = ["clone", "failedStep", "toJSON"].sort();
+const REPORT_METHODS = ["clone", "failedStep", "toJSON", "withHost"].sort();
 const VERIFICATION_GETTERS = ["tlsPublicKeyFP", "hpkePublicKey"].sort();
 const VERIFICATION_METHODS = ["cryptoMaterialData", "toJSON"].sort();
 

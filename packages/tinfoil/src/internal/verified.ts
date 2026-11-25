@@ -12,12 +12,12 @@
  *
  * Every attempt to verify, whether it passes or fails, becomes the last
  * verification as soon as its outcome is decided, and is reported to the
- * enclave's `onVerification` callback once the refresh that made it is
+ * enclave's `onVerificationAttempt` callback once the refresh that made it is
  * over, so that the callback can call the cache again without waiting for
  * that refresh. An attempt that a close cuts short has no outcome: it is
  * neither recorded nor reported, and only its callers see the close.
  */
-import type { VerifiedFacts } from "@tinfoilsh/verifier";
+import type { VerificationReport, VerifiedFacts } from "@tinfoilsh/verifier";
 import { AttestationError, wrapAttestation, type TinfoilError } from "../errors.js";
 import type { VerificationAttempt } from "../options.js";
 import { closedError } from "./dispose.js";
@@ -83,11 +83,23 @@ export class VerifiedEnclave<T = void> {
   }
 
   /**
+   * A copy of the report of the verification that requests are bound to now,
+   * without I/O: the current verification while it is fresh and has not
+   * been discarded or rejected, and undefined otherwise, including before the
+   * first success and after a close.
+   */
+  currentVerification(): VerificationReport | undefined {
+    const current = this.#current;
+    if (this.#closed || current === undefined || !this.#valid(current)) return undefined;
+    return current.report.clone();
+  }
+
+  /**
    * The outcome of the most recent attempt, without I/O or a freshness
    * check, or undefined before the first: its report, a copy that the
    * caller may keep, or the error that the attempt failed with.
    */
-  lastVerification(): VerificationAttempt | undefined {
+  lastVerificationAttempt(): VerificationAttempt | undefined {
     return copyAttempt(this.#last);
   }
 

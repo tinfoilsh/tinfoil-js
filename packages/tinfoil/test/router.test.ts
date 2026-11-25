@@ -106,7 +106,7 @@ describe("discoverRouter", () => {
     const docs = documents(["r1.example", "r2.example"]);
     const transport = await discoverRouter(config({ routersFetch: routerList(["r1.example", "r2.example"]).fetch, documentFetch: docs.fetch }));
     expect(transport.enclave().host()).toBe(FALLBACK_ROUTER_HOST);
-    expect(transport.lastVerification()).toBeUndefined();
+    expect(transport.lastVerificationAttempt()).toBeUndefined();
     expect(docs.hosts).not.toContain(FALLBACK_ROUTER_HOST);
   });
 

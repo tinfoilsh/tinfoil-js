@@ -17,14 +17,15 @@ import {
   KEY_X25519_HPKE_V1_FORMAT,
   randomNonce,
   UsageError,
+  VerificationError,
   Verifier,
   type Pin,
   type VerificationReport,
   type VerifiedFacts,
 } from "@tinfoilsh/verifier";
 import { AttestationError, ConfigurationError, messageOf, NetworkError, stripCategory, TinfoilError, withMessage } from "../errors.js";
-import type { AttestationFetcher, Fetch, OnVerification, VerificationAttempt, VerificationCheck } from "../options.js";
-import { fetchDocument, fetchDocumentWith } from "./fetch.js";
+import type { AttestationFetcher, Fetch, OnVerificationAttempt, VerificationAttempt, VerificationCheck } from "../options.js";
+import { fetchDocument, fetchDocumentWith, fetchRelayedDocument } from "./fetch.js";
 
 export const VERIFICATION_RETRIES = 1;
 export const VERIFICATION_RETRY_DELAY_MS = 1_000;
@@ -39,8 +40,8 @@ export type VerifiedReport = VerificationReport & { readonly verifiedFacts: Veri
 export interface EnclaveConfig {
   /** The enclave, a host with an optional port. */
   readonly host: string;
-  /** When set, a host that fetches attestation from the enclave on the client's behalf. */
-  readonly relay?: string;
+  /** When set, the base URL, ending with `/`, of a relay that fetches attestation from the enclave on the client's behalf, such as the gateway's URL. */
+  readonly relayURL?: string;
   /** What the enclave is verified against. */
   readonly pin: Pin;
   /** The policy, which several enclaves can share; undefined selects the defaults. */
@@ -48,8 +49,8 @@ export interface EnclaveConfig {
   /** Called with each verification that passes the verifier; a throw rejects it without a retry. */
   readonly verificationCheck?: VerificationCheck;
   /** Called with the outcome of each attempt to verify the enclave, through {@link Enclave.notify}. */
-  readonly onVerification?: OnVerification;
-  /** How each attestation document is obtained; undefined fetches it directly, or through `relay`. */
+  readonly onVerificationAttempt?: OnVerificationAttempt;
+  /** How each attestation document is obtained; undefined fetches it directly, or through `relayURL`. */
   readonly fetchAttestation?: AttestationFetcher;
   /** Seams for tests: the fetch used for documents, the clock, the nonce source and the retry delay. */
   readonly fetch?: Fetch;
@@ -68,11 +69,11 @@ export class RejectedError extends AttestationError {
 
 export class Enclave {
   readonly #host: string;
-  readonly #relay: string | undefined;
+  readonly #relayURL: string | undefined;
   readonly #pin: Required<Pin>;
   readonly #verifier: Verifier;
   readonly #check: VerificationCheck | undefined;
-  readonly #onVerification: OnVerification | undefined;
+  readonly #onVerificationAttempt: OnVerificationAttempt | undefined;
   readonly #fetch: Fetch;
   readonly #fetchAttestation: AttestationFetcher | undefined;
   readonly #clock: () => Date;
@@ -81,11 +82,11 @@ export class Enclave {
 
   private constructor(config: EnclaveConfig, verifier: Verifier) {
     this.#host = config.host;
-    this.#relay = config.relay;
+    this.#relayURL = config.relayURL;
     this.#pin = Object.freeze({ repo: config.pin.repo ?? "", project: config.pin.project ?? "" });
     this.#verifier = verifier;
     this.#check = config.verificationCheck;
-    this.#onVerification = config.onVerification;
+    this.#onVerificationAttempt = config.onVerificationAttempt;
     this.#fetch = config.fetch ?? ((input, init) => fetch(input, init));
     this.#fetchAttestation = config.fetchAttestation;
     this.#clock = config.clock ?? (() => new Date());
@@ -136,15 +137,15 @@ export class Enclave {
 
   /**
    * Reports the outcome of an attempt to verify the enclave to the
-   * `onVerification` callback, if there is one. The caller passes a
+   * `onVerificationAttempt` callback, if there is one. The caller passes a
    * frozen attempt whose report no one else holds. A throw from the callback
    * doesn't change the outcome or reach the caller: it is rethrown
    * asynchronously, to the runtime's handler for uncaught errors.
    */
   notify(attempt: VerificationAttempt): void {
-    if (this.#onVerification === undefined) return;
+    if (this.#onVerificationAttempt === undefined) return;
     try {
-      this.#onVerification(this.#host, attempt);
+      this.#onVerificationAttempt(this.#host, attempt);
     } catch (err) {
       queueMicrotask(() => {
         throw err;
@@ -184,15 +185,20 @@ export class Enclave {
   async #fetchVerification(signal: AbortSignal | undefined): Promise<VerifiedReport> {
     const nonce = this.#nonce();
     const doc =
-      this.#fetchAttestation === undefined
-        ? await fetchDocument(this.#host, this.#relay, nonce, this.#fetch, signal)
-        : await fetchDocumentWith(this.#fetchAttestation, this.#host, nonce, signal);
+      this.#fetchAttestation !== undefined
+        ? await fetchDocumentWith(this.#fetchAttestation, this.#host, nonce, signal)
+        : this.#relayURL !== undefined
+          ? await fetchRelayedDocument(this.#relayURL, this.#host, nonce, this.#fetch, signal)
+          : await fetchDocument(this.#host, nonce, this.#fetch, signal);
     let report: VerificationReport;
     try {
       report = await this.#verifier.verifyV3At(doc, nonce, this.#pin, this.#clock());
     } catch (err) {
-      throw fromVerify(err);
+      throw fromVerify(withReportHost(err, this.#host));
     }
+    // The verifier doesn't know which host the document came from, so every
+    // report that a client hands out is named here, a rejection's included.
+    report = report.withHost(this.#host);
     if (report.verifiedFacts === undefined) throw new AttestationError("verification passed without verified facts");
     validateTransportKeys(report.verifiedFacts);
     return report as VerifiedReport;
@@ -235,6 +241,23 @@ export function fromVerify(err: unknown): TinfoilError {
   if (err instanceof TinfoilError) return err;
   if (err instanceof UsageError || isUsageErrorByName(err)) return new ConfigurationError(messageOf(err), { cause: err });
   return new AttestationError(messageOf(err), { cause: err });
+}
+
+/**
+ * `err` with its report naming `host` when it is the verifier's rejection: a
+ * copy of the error whose report is a copy with the host, since both come
+ * from the verifier and the report is frozen. Anything else, and a rejection
+ * from a copy of the verifier package whose reports can't name a host, is
+ * returned as it is.
+ */
+function withReportHost(err: unknown, host: string): unknown {
+  if (!(err instanceof VerificationError) || typeof err.report?.withHost !== "function") return err;
+  // The constructor prefixes the layer again, so the copy takes the message without it.
+  const prefix = `verification error: ${err.layer}: `;
+  const message = err.message.startsWith(prefix) ? err.message.slice(prefix.length) : err.message;
+  const named = new VerificationError(message, { layer: err.layer, report: err.report.withHost(host), cause: err.cause });
+  if (err.stack !== undefined) named.stack = err.stack;
+  return named;
 }
 
 /** Whether `err` presents as the verifier's usage error without sharing its class. */

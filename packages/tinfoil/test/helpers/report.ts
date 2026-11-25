@@ -8,22 +8,23 @@ import type { VerificationReport, VerifiedFacts } from "@tinfoilsh/verifier";
 
 const LAYERS = ["envelope", "provenance", "quote", "policy"];
 
-/** A report whose verified facts are `facts`, as a verifier returns it for a document that it accepted. */
-export function verifiedReport(facts: VerifiedFacts | object): VerificationReport {
+/** A report whose verified facts are `facts`, as a verifier returns it for a document that it accepted, or as a client names its `host`. */
+export function verifiedReport(facts: VerifiedFacts | object, host?: string): VerificationReport {
   const steps = LAYERS.map((layer) => ({ layer, status: "passed", message: "" }));
-  const metadata = { verifier: { name: "test", version: "0" }, verifiedAt: new Date(0) };
+  const metadata = { verifier: { name: "test", version: "0" }, verifiedAt: new Date(0), ...(host === undefined || host === "" ? {} : { host }) };
   const report = {
     steps,
     verifiedFacts: facts,
     metadata,
     failedStep: () => undefined,
     clone: () => ({ ...report }),
+    withHost: (named: string) => verifiedReport(facts, named),
     // The report's JSON form, with the facts as they serialize themselves.
     toJSON: () => ({
       schema_version: 1,
       steps: steps.map(({ layer, status }) => ({ layer, status })),
       verified_facts: factsJSON(facts),
-      metadata: { verified_at: metadata.verifiedAt.toISOString().replace(/\.000Z$/, "Z"), verifier: metadata.verifier },
+      metadata: { verified_at: metadata.verifiedAt.toISOString().replace(/\.000Z$/, "Z"), verifier: metadata.verifier, ...(host === undefined || host === "" ? {} : { host }) },
     }),
   };
   return report as unknown as VerificationReport;
@@ -50,6 +51,6 @@ function factsJSON(facts: VerifiedFacts | object): unknown {
 }
 
 /** The verified facts of the last attempt of `client`, if it passed: what the removed `current` getter returned. */
-export function lastFacts(client: { lastVerification(): { readonly report?: VerificationReport } | undefined }): VerifiedFacts | undefined {
-  return client.lastVerification()?.report?.verifiedFacts;
+export function lastFacts(client: { lastVerificationAttempt(): { readonly report?: VerificationReport } | undefined }): VerifiedFacts | undefined {
+  return client.lastVerificationAttempt()?.report?.verifiedFacts;
 }

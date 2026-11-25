@@ -429,8 +429,20 @@ describe("createClient", () => {
     const reply = await ai.chat.completions.create({ model: "test", messages: [{ role: "user", content: "hi" }] });
     expect(reply.choices[0]!.message.content).toBe("pinned");
     expect(JSON.parse(new TextDecoder().decode(tls.seen[tls.seen.length - 1]!.body)).user_cache_secret).toBe("resolved-secret");
-    expect(() => new (OpenAIClient as any)(Symbol("x"), ai.httpClient, {})).toThrow(ConfigurationError);
+    expect(() => new (OpenAIClient as any)(Symbol("x"), {})).toThrow(ConfigurationError);
     expectWithOptionsRefusesTransportOptions(ai);
+  });
+
+  it("takes the API path among the options, and refuses an invalid one before fetching anything", async () => {
+    const custom = await createTinfoilClient({ apiKey: "k", apiPath: "/openai/v1" }, { ...seams([tls.host]), verifier: verifier({ tls: TEST_PIN }) }, {});
+    expect(custom.baseURL).toBe(`https://${tls.host}/openai/v1/`);
+    await custom.httpClient.close();
+    const s = seams([tls.host]);
+    for (const apiPath of ["", "v1/", "/v1/../admin"]) {
+      await expect(createTinfoilClient({ apiKey: "k", apiPath }, { ...s, verifier: verifier({ tls: TEST_PIN }) }, {}), JSON.stringify(apiPath)).rejects.toThrow(/invalid API path/);
+    }
+    expect(s.listCalls).toBe(0);
+    expect(s.documentHosts).toEqual([]);
   });
 
   it("accepts an API key on a server and refuses one anywhere else before fetching anything", async () => {

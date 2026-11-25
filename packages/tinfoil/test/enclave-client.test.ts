@@ -310,15 +310,18 @@ describe("EnclaveHTTPClient over TLS", () => {
     process.env.OPENAI_BASE_URL = "https://evil.example/v1/";
     try {
       const options = { apiKey: "k", baseURL: "https://evil.example/v1/", dataResidency: "eu" } as unknown as OpenAIClientOptions;
-      for (const ai of [new OpenAIClient(client, undefined, options), new OpenAIClient(client, undefined, { apiKey: "k" })]) {
+      for (const ai of [new OpenAIClient(client, options), new OpenAIClient(client, { apiKey: "k" })]) {
         expect(ai.baseURL).toBe(`https://${tls.host}/v1/`);
         const completion = await ai.chat.completions.create({ model: "test", messages: [{ role: "user", content: "hi" }] });
         expect(completion.choices[0]!.message.content).toBe("pinned");
         expect(tls.seen[tls.seen.length - 1]!.path).toBe("/v1/chat/completions");
       }
-      const custom = new OpenAIClient(client, { apiPath: "/openai/v1" }, { apiKey: "k" });
+      const custom = new OpenAIClient(client, { apiKey: "k", apiPath: "/openai/v1" });
       expect(custom.baseURL).toBe(`https://${tls.host}/openai/v1/`);
+      // The API path configures this client; the OpenAI client never sees it.
+      expect((custom as unknown as { _options: Record<string, unknown> })._options).not.toHaveProperty("apiPath");
       expect(custom.withOptions({ timeout: 1 }).baseURL).toBe(`https://${tls.host}/openai/v1/`);
+      expect(custom.withOptions({ apiPath: "/v2/" }).baseURL).toBe(`https://${tls.host}/v2/`);
     } finally {
       if (saved === undefined) delete process.env.OPENAI_BASE_URL;
       else process.env.OPENAI_BASE_URL = saved;
@@ -327,9 +330,13 @@ describe("EnclaveHTTPClient over TLS", () => {
 
   it("refuses an invalid API path without any network I/O", () => {
     const before = tls.seen.length;
-    for (const apiPath of ["v1/", "//evil.example/v1", "https://evil.example/v1", "/v1?x=1", "/v1#f", "/v1/../admin", "/v1/./x", "/v1/%2e%2e/x", "/v1/.%2E/x", "/v1%2fadmin", "/v1\\..\\x", "/v1/ x", "/v1/%zz", 7 as unknown as string]) {
-      expect(() => new OpenAIClient(client, { apiPath }, { apiKey: "k" }), String(apiPath)).toThrow(ConfigurationError);
+    for (const apiPath of ["", "v1/", "//evil.example/v1", "https://evil.example/v1", "/v1?x=1", "/v1#f", "/v1/../admin", "/v1/./x", "/v1/%2e%2e/x", "/v1/.%2E/x", "/v1%2fadmin", "/v1\\..\\x", "/v1/ x", "/v1/%zz", 7 as unknown as string]) {
+      expect(() => new OpenAIClient(client, { apiKey: "k", apiPath }), String(apiPath)).toThrow(ConfigurationError);
     }
+    expect(() => new OpenAIClient(client, { apiKey: "k", apiPath: "" })).toThrow(/it is empty; leave apiPath out for the default/);
+    expect(() => new OpenAIClient(client, { apiKey: "k", apiPath: null as unknown as string })).toThrow(/it must be a string/);
+    // The API path was a separate argument before the OpenAI options; untyped code that still passes three is refused.
+    expect(() => new (OpenAIClient as unknown as new (...args: unknown[]) => unknown)(client, { apiPath: "/v1/" }, { apiKey: "k" })).toThrow(/pass apiPath among the OpenAI options/);
     expect(tls.seen.length).toBe(before);
   });
 
@@ -443,7 +450,7 @@ describe("EnclaveHTTPClient.close over TLS", () => {
     const client = await createEnclaveHTTPClient(own.host, { kind: "repoPin", repo: "tinfoilsh/repo" }, options, { documentFetch: documents().fetch, tls: { ca: TEST_CERT }, verifier: pinned });
     {
       await using scoped = client;
-      expect(scoped.lastVerification()).toBeDefined();
+      expect(scoped.lastVerificationAttempt()).toBeDefined();
     }
     await expect(client.ensureVerified()).rejects.toThrow(/client is closed/);
 
@@ -605,6 +612,8 @@ describe("EnclaveHTTPClient over EHBP", () => {
     const sealing = verifier(() => ({ tls: "ab".repeat(32), hpke: ehbp.publicKeyHex }));
     const bare = await createEnclaveHTTPClient("enclave.example", AUTHORIZED, options(ehbp.origin), { documentFetch: documents().fetch, verifier: sealing });
     expect(bare.baseURL).toBe(`${ehbp.origin}/`);
+    // The report names the enclave that the client verified, not the proxy that requests go through.
+    expect(bare.currentVerification()?.toJSON().metadata.host).toBe("enclave.example");
     expect((await (await bare.fetch(new URL("echo", bare.baseURL), { method: "POST", body: "under" })).json()).text).toBe("under");
     await expect(bare.fetch("https://other.example/echo")).rejects.toThrow(/client is bound to enclave/);
     const slashed = await createEnclaveHTTPClient("enclave.example", AUTHORIZED, options(`${ehbp.origin}/`), { documentFetch: documents().fetch, verifier: sealing });
@@ -620,7 +629,7 @@ describe("EnclaveHTTPClient over EHBP", () => {
       [`${ehbp.origin}/relay`, "/openai/v1", `${ehbp.origin}/relay/openai/v1/`],
       [`${ehbp.origin}/relay/`, "/openai/v1/", `${ehbp.origin}/relay/openai/v1/`],
     ] as const) {
-      const ai = await openAIOver(createEnclaveHTTPClient("enclave.example", AUTHORIZED, options(base), { documentFetch: documents().fetch, verifier: sealing }), { apiKey: "k" }, { apiPath });
+      const ai = await openAIOver(createEnclaveHTTPClient("enclave.example", AUTHORIZED, options(base), { documentFetch: documents().fetch, verifier: sealing }), { apiKey: "k", ...(apiPath === undefined ? {} : { apiPath }) });
       expect(ai.baseURL).toBe(want);
       const completion = await ai.chat.completions.create({ model: "test", messages: [{ role: "user", content: "hi" }] });
       expect(completion.choices[0]!.message.content).toBe("sealed");

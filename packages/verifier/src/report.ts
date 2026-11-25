@@ -216,7 +216,11 @@ export class VerificationReport {
   readonly verifiedFacts?: VerifiedFacts;
   /** Set if and only if a step failed: what the steps before the failure established. */
   readonly partialFacts?: PartialFacts;
-  /** The verifier's name and version, and the instant that the document was appraised at. The document does not attest them. */
+  /**
+   * The verifier's name and version, the instant that the document was
+   * appraised at, and, in a report that a client handed out, the host that
+   * the client contacted. The document does not attest them.
+   */
   readonly metadata: VerificationMetadata;
 
   private constructor(token: typeof BUILT_HERE, fields: ReportFields) {
@@ -227,7 +231,8 @@ export class VerificationReport {
     this.steps = freezeDeep(fields.steps.map((s) => ({ layer: s.layer, status: s.status, message: s.message })));
     if (fields.verifiedFacts !== undefined) this.verifiedFacts = fields.verifiedFacts;
     if (fields.partialFacts !== undefined) this.partialFacts = freezeDeep(copyPartial(fields.partialFacts));
-    this.metadata = freezeDeep({ verifier: { ...fields.metadata.verifier }, verifiedAt: new Date(fields.metadata.verifiedAt.getTime()) });
+    const host = fields.metadata.host;
+    this.metadata = freezeDeep({ verifier: { ...fields.metadata.verifier }, verifiedAt: new Date(fields.metadata.verifiedAt.getTime()), ...(host === undefined || host === "" ? {} : { host }) });
     Object.freeze(this);
   }
 
@@ -242,12 +247,21 @@ export class VerificationReport {
 
   /** A copy of the report that shares nothing with it, register bytes and dates included. */
   clone(): VerificationReport {
-    return construct({
-      steps: this.steps,
-      ...(this.verifiedFacts === undefined ? {} : { verifiedFacts: copyVerifiedFacts(this.verifiedFacts) }),
-      ...(this.partialFacts === undefined ? {} : { partialFacts: this.partialFacts }),
-      metadata: this.metadata,
-    });
+    return copyReport(this, this.metadata);
+  }
+
+  /**
+   * A copy of the report, as {@link clone} makes it, whose
+   * `metadata.host` is `host`, the host with an optional port that the
+   * document was fetched from; "" leaves the host out. The verifier doesn't
+   * know where a document came from, so its reports have no host, and the
+   * clients set it on every report that they hand out. The host is not
+   * attested: it proves nothing about the enclave.
+   */
+  withHost(host: string): VerificationReport {
+    if (typeof host !== "string") throw new UsageError("a report's host must be a string");
+    const { verifier, verifiedAt } = this.metadata;
+    return copyReport(this, { verifier, verifiedAt, ...(host === "" ? {} : { host }) });
   }
 
   /**
@@ -270,6 +284,7 @@ export class VerificationReport {
       metadata: {
         verified_at: rfc3339(this.metadata.verifiedAt),
         ...(this.metadata.verifier.name === "" || this.metadata.verifier.version === "" ? {} : { verifier: { name: this.metadata.verifier.name, version: this.metadata.verifier.version } }),
+        ...stringJSON("host", this.metadata.host),
       },
     };
   }
@@ -290,6 +305,16 @@ export async function hpkePublicKeyFP(key: string): Promise<string | undefined> 
   }
   if (raw.length === 0) return undefined;
   return toHex(await sha256(raw));
+}
+
+/** A copy of `report` that shares nothing with it, with `metadata` in place of its own. */
+function copyReport(report: VerificationReport, metadata: VerificationMetadata): VerificationReport {
+  return construct({
+    steps: report.steps,
+    ...(report.verifiedFacts === undefined ? {} : { verifiedFacts: copyVerifiedFacts(report.verifiedFacts) }),
+    ...(report.partialFacts === undefined ? {} : { partialFacts: report.partialFacts }),
+    metadata,
+  });
 }
 
 function copyPartial(p: PartialFacts): PartialFacts {

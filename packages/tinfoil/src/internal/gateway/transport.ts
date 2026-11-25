@@ -12,7 +12,7 @@
  */
 import type { VerificationReport } from "@tinfoilsh/verifier";
 import { AttestationError, ConfigurationError, messageOf, NetworkError, type TinfoilError } from "../../errors.js";
-import type { Catalog, Fetch, OnVerification, ReplicaVerification, VerificationCheck } from "../../options.js";
+import type { Catalog, Fetch, OnVerificationAttempt, ReplicaVerification, VerificationCheck } from "../../options.js";
 import { closedError } from "../dispose.js";
 import { Enclave, type EnclaveConfig } from "../enclave.js";
 import { checkEHBP, ehbpMode, type EHBPOptions } from "../transport/ehbp.js";
@@ -29,15 +29,17 @@ export const MAX_REROUTED = 1024;
 
 /** @experimental The gateway route is new; this API may change without a major version. */
 export interface GatewayTransportConfig {
-  /** Where requests are sent, and the gateway host that attestation is fetched through. */
+  /**
+   * The gateway's URL, ending with `/`: requests are sent under it, and the
+   * catalog and the attestation relay join under it.
+   */
   readonly baseURL: string;
-  readonly relay: string;
-  /** Read on every request; undefined fetches it from the relay on first use and refreshes it. */
+  /** Read on every request; undefined fetches it from the gateway on first use and refreshes it. */
   readonly catalog?: () => Catalog;
   readonly policy: GatewayPolicy;
   readonly verificationCheck?: VerificationCheck;
   /** Called with the outcome of each attempt to verify a replica. */
-  readonly onVerification?: OnVerification;
+  readonly onVerificationAttempt?: OnVerificationAttempt;
   /** The resolved client-level cache secret; "" scopes nothing. */
   readonly secret: string;
   /** Seams for tests. */
@@ -75,7 +77,7 @@ export class GatewayTransport {
       const read = config.catalog;
       this.#catalog = () => Promise.resolve(read());
     } else {
-      const cache = new CatalogCache((signal) => fetchCatalogWith(config.relay, config.catalogFetch ?? ((input, init) => fetch(input, init)), signal), config.clock);
+      const cache = new CatalogCache((signal) => fetchCatalogWith(config.baseURL, config.catalogFetch ?? ((input, init) => fetch(input, init)), signal), config.clock);
       this.#catalog = (signal) => cache.get(signal);
     }
     this.fetch = (input, init) => this.#send(input, init);
@@ -97,6 +99,40 @@ export class GatewayTransport {
    * same replica while it stays valid. Stops once `signal` aborts.
    */
   async ensureVerified(model: string, signal?: AbortSignal): Promise<VerificationReport> {
+    return this.#verifyModel(model, signal, false);
+  }
+
+  /**
+   * Verifies again the replica that {@link ensureVerified} would return for
+   * `model`. It tries the replicas in the same order, verifying each again,
+   * and stops at the first that passes, or that fails but keeps a valid
+   * verification, which requests for `model` still use; it then throws that
+   * failure. A replica whose verification the failure discarded, or that
+   * had none, is passed over, as `ensureVerified` passes it over.
+   */
+  async reverify(model: string, signal?: AbortSignal): Promise<VerificationReport> {
+    return this.#verifyModel(model, signal, true);
+  }
+
+  /**
+   * An entry for each replica that the transport has tried to verify,
+   * failed replicas included, without verifying anything, in host order.
+   */
+  replicas(): ReplicaVerification[] {
+    const results: ReplicaVerification[] = [];
+    for (const [key, rt] of this.#replicas) {
+      // Read the current verification first: an attempt that completes in
+      // between then shows as the last attempt, which can only be newer.
+      const current = rt.keyed.currentVerification();
+      const lastAttempt = rt.keyed.lastVerificationAttempt();
+      if (lastAttempt === undefined) continue;
+      const [host, reference, pinnedModel] = key.split("\0") as [string, string, string];
+      results.push(Object.freeze({ host, models: Object.freeze([...rt.models].sort()), reference, pinnedModel, current, lastAttempt }));
+    }
+    return results.sort((a, b) => compare(a.host, b.host) || compare(a.reference, b.reference) || compare(a.pinnedModel, b.pinnedModel));
+  }
+
+  async #verifyModel(model: string, signal: AbortSignal | undefined, force: boolean): Promise<VerificationReport> {
     if (this.#closed) throw closedError();
     // An unpinned model is refused before the catalog is read, so it starts no fetch.
     this.#config.policy.requirePin(model);
@@ -104,39 +140,34 @@ export class GatewayTransport {
     const { hosts, replica } = this.#config.policy.resolve(model, catalog);
     let failure: unknown;
     for (const host of await rank(hosts, model, undefined)) {
+      if (this.#closed) throw closedError();
       signal?.throwIfAborted();
+      let rt: ReplicaTransport;
+      try {
+        rt = await this.#replica({ ...replica, host });
+      } catch (err) {
+        failure = err;
+        continue;
+      }
       try {
         // The verification that was checked valid, not the replica's current
         // one, which a concurrent refresh can have replaced since.
-        const rt = await this.#replica({ ...replica, host });
-        return await rt.keyed.ensureVerified(signal);
+        return force ? await rt.keyed.reverify(signal) : await rt.keyed.ensureVerified(signal);
       } catch (err) {
         failure = err;
+        // A failure that keeps a valid verification leaves requests for the
+        // model on this replica, so it is the outcome to report.
+        if (force && rt.keyed.currentVerification() !== undefined) throw err;
       }
     }
     throw failure;
   }
 
   /**
-   * The last attempt to verify each replica that the transport has tried to
-   * verify, failed replicas included, unchecked, in host order.
-   */
-  lastVerification(): ReplicaVerification[] {
-    const results: ReplicaVerification[] = [];
-    for (const [key, rt] of this.#replicas) {
-      const attempt = rt.keyed.lastVerification();
-      if (attempt === undefined) continue;
-      const [host, reference, pinnedModel] = key.split("\0") as [string, string, string];
-      results.push(Object.freeze({ host, models: Object.freeze([...rt.models].sort()), reference, pinnedModel, ...attempt }));
-    }
-    return results.sort((a, b) => compare(a.host, b.host) || compare(a.reference, b.reference) || compare(a.pinnedModel, b.pinnedModel));
-  }
-
-  /**
    * Closes every replica's transport, including one still being built, and
    * refuses further use: requests, the model listing and verification calls
-   * reject as closed, while {@link lastVerification} still reports the
-   * last attempts. Closing again does nothing.
+   * reject as closed, while {@link replicas} still reports the replicas.
+   * Closing again does nothing.
    */
   close(): void {
     if (this.#closed) return;
@@ -230,12 +261,13 @@ export class GatewayTransport {
     const c = this.#config;
     const enclave = await Enclave.create({
       host: r.host,
-      relay: c.relay,
+      // The gateway relays attestation under its own URL.
+      relayURL: c.baseURL,
       // Tinfoil owns model names in both namespaces.
       pin: { repo: r.ref, project: r.ref },
       verifier: c.policy.verifierFor(r),
       verificationCheck: c.verificationCheck,
-      onVerification: c.onVerification,
+      onVerificationAttempt: c.onVerificationAttempt,
       fetch: c.documentFetch,
       clock: c.clock,
       nonce: c.nonce,
