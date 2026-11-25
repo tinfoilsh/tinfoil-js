@@ -23,7 +23,7 @@ export const TRUSTED_REPO_OWNER = "tinfoilsh/";
  * trailing `/`), from `catalog` joined under it, with `fetchImpl`, keeping
  * only models with replicas of a bare `tinfoilsh/` repository, without a
  * tag or digest. Anything but a 200 response, or a body over the size cap
- * or not a JSON object of entries, is a {@link NetworkError}; a call
+ * or not a JSON object of entries, is a {@link NetworkError}; a call that
  * `signal` aborts rejects with the signal's own reason.
  *
  * @experimental The gateway route is new; this API may change without a major version.
